@@ -10,6 +10,8 @@ Ethernet. You don't need a Raspberry Pi, USB dongles or Wi-Fi, and it can be pow
 [![release](https://img.shields.io/github/v/release/t3hk0d3/esp32-p4-otbr)](https://github.com/t3hk0d3/esp32-p4-otbr/releases)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 
+![Device page: mode, firmware versions, radio and network status](docs/images/device.png)
+
 ## Why
 
 - **Works with Home Assistant.** It speaks the Thread REST API that Home Assistant's OpenThread Border Router
@@ -25,6 +27,19 @@ Ethernet. You don't need a Raspberry Pi, USB dongles or Wi-Fi, and it can be pow
   console.
 - **Shows what it is doing.** A device page and `/device/diag` report CPU load per core and task, memory and
   OpenThread lock timings.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/topology.png" alt="Topology page: the Thread mesh with its leader and routers"></td>
+    <td width="50%"><img src="docs/images/diagnostics.png" alt="Diagnostics: CPU load per core, memory, OpenThread lock timings and tasks"></td>
+  </tr>
+  <tr>
+    <td align="center">Thread mesh topology</td>
+    <td align="center">Live diagnostics</td>
+  </tr>
+</table>
 
 ## Get started
 
