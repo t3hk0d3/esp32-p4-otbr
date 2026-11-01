@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Collect the release artifacts of a finished release build (tools/build_all.sh, never --test) into one directory.
-# Usage: tools/package_release.sh <out dir>
+# Collect the release artifacts of a finished release build (make build, never make build-test) into one directory.
+# Usage: tools/package_release.sh <out dir> (or make package)
 # Requires an activated ESP-IDF environment (IDF_PATH, for the third-party license texts).
 # Writes:
 #   otbr.bundle                  P4 OTA bundle (web UI and P4 app), POST /device/ota
 #   c6_rcp.bin                   C6 radio firmware, POST /device/radio/firmware
 #   p4-flash.zip                 full P4 USB flash: images and flash_args (esptool --chip esp32p4 write-flash @flash_args)
-#   c6-updater-flash.zip         C6 base images for the no-jumper first install (docs/first-install.md)
+#   c6-updater-flash.zip         C6 base images for the no-jumper first install (docs/first-install.md, Path 2)
 #   third-party-licenses.zip     license texts of the code linked into the images
 #   versions.txt, SHA256SUMS
 set -euo pipefail
@@ -30,7 +30,7 @@ project_version() {
 # A test build must never be released (build_all.sh records the choice as the OTBR_TEST_BUILD cache entry).
 for project in p4 c6_rcp c6_updater; do
     if grep -q '^OTBR_TEST_BUILD:[A-Z]*=1$' "$root/$project/build/CMakeCache.txt"; then
-        echo "$project/build is a --test build; rebuild with tools/build_all.sh" >&2
+        echo "$project/build is a --test build; rebuild with make build" >&2
         exit 1
     fi
 done
@@ -50,11 +50,29 @@ flash_zip() {
     (cd "$dir" && zip -q -r "$out/$zip_name.zip" .)
 }
 
+# The C6 base images for the no-jumper install, laid out as the P4's ROM recovery writes them: the updater goes into the
+# test partition. (The flash_args of the c6_updater build would put it into ota_0, the first RCP slot.)
+c6_base_zip() {
+    local dir="$tmp/c6-updater-flash" build="$root/c6_updater/build" test_offset
+    test_offset="$(awk -F', *' '$1 == "test" {print $4}' "$root/common/c6_board/partitions_c6.csv")"
+    [[ -n "$test_offset" ]] || { echo "no test partition in partitions_c6.csv" >&2; exit 1; }
+    mkdir -p "$dir"
+    cp "$build/bootloader/bootloader.bin" "$build/partition_table/partition-table.bin" "$build/c6_updater.bin" \
+        "$root/LICENSE" "$root/NOTICE" "$dir/"
+    {
+        head -n 1 "$build/flash_args"
+        echo "0x0 bootloader.bin"
+        echo "0x8000 partition-table.bin"
+        echo "$test_offset c6_updater.bin"
+    } >"$dir/flash_args"
+    (cd "$dir" && zip -q -r "$out/c6-updater-flash.zip" .)
+}
+
 python3 "$root/tools/make_bundle.py" --web "$root/p4/build/web_0.bin" --app "$root/p4/build/p4.bin" \
     --out "$out/otbr.bundle"
 cp "$root/c6_rcp/build/c6_rcp.bin" "$out/"
 flash_zip p4 p4-flash
-flash_zip c6_updater c6-updater-flash
+c6_base_zip
 
 licenses="$tmp/third-party-licenses"
 mkdir -p "$licenses"
