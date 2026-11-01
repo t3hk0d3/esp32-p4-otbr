@@ -141,6 +141,7 @@ var pages = [
     ]
   },
   {href : '/topology.html', label : 'Topology'},
+  {href : '/device.html', label : 'Device'},
   {href : '/about.html', label : 'About'}
 ];
 var nav = document.getElementById('nav');
