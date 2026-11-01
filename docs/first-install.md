@@ -1,0 +1,161 @@
+# First install
+
+How to bring a new Waveshare ESP32-P4-WIFI6-POE-ETH to a working border router. The C6 radio module ships with
+Espressif's ESP-Hosted firmware, which this project overwrites. Two paths:
+
+- **With the maintenance jumper** (three wires, recommended): only the P4 USB-C port is needed.
+- **Without the jumper**: a 3.3 V USB-UART adapter on the C6 header H7 writes the first C6 images.
+
+Either way the border router needs an antenna and the RCP firmware upload at the end.
+
+## Before you start
+
+- Attach a **2.4 GHz antenna to the C6 IPEX connector**. Without it the radio range is a few centimetres and the Thread
+  network will not form reliably.
+- Connect Ethernet (a DHCPv4 network; IPv6 router advertisements are used when present).
+- Build everything (`README.md`, Build): `tools/build_all.sh`. You need `p4/build/` (P4 firmware),
+  `c6_rcp/build/c6_rcp.bin` (radio firmware) and, for the no-jumper path, `c6_updater/build/`.
+- Tools: ESP-IDF environment (`. ~/esp/esp-idf-v6.1/export.sh`), `esptool.py`, `curl`.
+- The board's USB-C port shows up as a serial port (`/dev/ttyACM0` below).
+
+## Maintenance jumper wiring
+
+Optional. Solder or clip three or four wires between the C6 header H7 (SH1.0, 1 mm pitch) and the P4 40-pin header:
+
+| H7 pin | Signal | P4 header pin | P4 GPIO | Name in the firmware |
+| --- | --- | --- | --- | --- |
+| 1 | `C6_U0TXD` (C6 transmits, P4 receives) | 18 | GPIO4 | `JUMPER_RX` |
+| 2 | `C6_U0RXD` (P4 transmits, C6 receives) | 16 | GPIO5 | `JUMPER_TX` |
+| 3 | GND | 14 | GND | |
+| 4 | `C6_IO9` (C6 boot strap, low at reset = ROM download) | 12 | GPIO22 | `JUMPER_BOOT` |
+
+Leave header pins 15 (GPIO6) and 32 (GPIO54) alone: they are already wired to the C6 on the board (update select and reset).
+The pins are fixed in `p4/main/board.h`. The firmware detects the jumper by itself at boot.
+
+## Path 1: with the jumper (P4 USB-C only)
+
+1. Connect the USB-C cable to the P4 port and flash the P4. The `erase-flash` line is only for a board that ran something
+   else before (see the note in `README.md`, Flash); it also deletes the stored Thread dataset and network configuration, so
+   skip it on a board in service:
+
+   ```
+   . ~/esp/esp-idf-v6.1/export.sh
+   # idf.py -C p4 -p /dev/ttyACM0 erase-flash
+   idf.py -C p4 -p /dev/ttyACM0 flash
+   idf.py -C p4 -p /dev/ttyACM0 monitor
+   ```
+
+2. The board boots and gets its Ethernet address (log: `eth: got ip`). The P4 probes the C6 (three attempts, about 10 s,
+   `rcp_sync: attempt N: no HELLO reply`); the factory ESP-Hosted firmware does not speak the updater protocol, so
+   the updater is silent, and the P4 starts the automatic ROM recovery over the jumper (`ROM recovery of the C6 base image
+   (updater not responding)`): it puts the C6 into ROM download mode, writes the C6 bootloader, partition table and
+   the updater, and resets the C6. The recovery takes a few seconds and runs at most once per boot. The log shows
+   `writing bootloader`, `writing partition table`, `erasing otadata`, `writing updater`, then `c6:` lines from the C6 console.
+   If the ROM link has a transmission error (`Error: INVALID_CRC` in the log) the recovery fails and the board reports
+   `RADIO_FAULT` `rom recovery failed`: reboot it, or run `curl -X POST http://<board>/device/radio/recover` (see step 3).
+3. After the recovery the updater answers but there is no RCP firmware yet, so the board reports `RADIO_FAULT`, about 20 s after power-on:
+
+   ```
+   curl http://<board>/device/status
+   ```
+
+   shows `"mode":"RADIO_FAULT"`, `"fault_reason":"no rcp firmware"` and `"rcp":{"installed":"", ...}`, and
+   `jumper.base_installed` equal to `jumper.base_expected`. The board's address is in the log and in `eth.ipv4`;
+   `http://esp-otbr-<last three MAC bytes>.local` works where mDNS does. If `fault_reason` is `rom recovery failed`
+   instead, run `curl -X POST http://<board>/device/radio/recover` and look at `/device/status` again. On a C6 that has no RCP
+   firmware this request answers 200 `{"recovered":true,"rcp":"no rcp firmware",...}` (OpenThread cannot start without
+   firmware: the status shows `no rcp firmware`); `recovery_failed` (502) means the recovery itself failed.
+4. Upload the radio firmware, with the device page (`http://<board>/device.html`, "Radio firmware") or:
+
+   ```
+   curl --data-binary @c6_rcp/build/c6_rcp.bin http://<board>/device/radio/firmware
+   ```
+
+   The upload takes about 3 seconds. The reply is `{"installed": "<version>"}`; the border router starts and the mode becomes `BR_RUNNING`.
+5. Create a Thread network (see below). The board never forms or joins a network by itself.
+
+## Path 2: without the jumper (3.3 V USB-UART on H7)
+
+> **NOTE: untested on hardware.** This path was derived from the code and the ROM loader documentation but never run on the
+> board: neither the esptool sequence below, nor recovery of a truly blank C6 (bootloader, partition table and otadata
+> erased), nor overwriting the factory ESP-Hosted firmware. Expect to adjust it; if you have the jumper, use Path 1.
+> esptool 5.x prefers the command `esptool` and hyphenated sub-command names (`erase-flash`, `write-flash`); the
+> `esptool.py` / `erase_flash` spellings below are the older ones and still work with a deprecation warning.
+
+Use this when the C6 has never been written, or when the updater, bootloader or partition table of the C6 is broken and no
+jumper is fitted. You write the three C6 images yourself with `esptool.py` over H7, once.
+
+1. Wire a 3.3 V USB-UART adapter to H7: adapter RX to H7 pin 1 (C6 TX), adapter TX to H7 pin 2 (C6 RX), adapter GND
+   to H7 pin 3. 3.3 V logic only. Tie H7 pin 4 (IO9) to GND.
+2. Put the C6 into ROM download mode: with IO9 grounded, reset the C6 by a power cycle of the whole board (unplug and replug USB-C; the P4 also
+   resets the C6 when it boots). To keep the P4 from interfering, erase it first: `esptool.py --chip esp32p4 -p /dev/ttyACM0 erase_flash`
+   (a P4 without firmware does not touch the C6).
+
+   **Warning:** this erases the whole P4 flash: its firmware, the stored Thread dataset and the network configuration. If the
+   board is in service, first save the dataset, e.g. `curl -H 'Accept: text/plain' http://<board>/node/dataset/active > dataset.tlv`
+   (the TLVs; `GET /node/dataset/active` also works with the default JSON), and reflash the P4 afterwards (step 4).
+3. Write the C6 images from the `c6_updater` build, offsets from `common/c6_board/c6_board.h` and `partitions_c6.csv`
+   (bootloader at 0x0, partition table at 0x8000, updater into the `test` partition at 0x20000). Replace `/dev/ttyUSB0` with your adapter:
+
+   ```
+   esptool.py --chip esp32c6 -p /dev/ttyUSB0 --before no-reset --after no-reset erase_flash
+   esptool.py --chip esp32c6 -p /dev/ttyUSB0 --before no-reset --after no-reset write_flash \
+       --flash-mode dio --flash-freq 80m --flash-size 4MB \
+       0x0 c6_updater/build/bootloader/bootloader.bin \
+       0x8000 c6_updater/build/partition_table/partition-table.bin \
+       0x20000 c6_updater/build/c6_updater.bin
+   ```
+
+   **Warning:** the C6 `erase_flash` wipes the whole C6 flash, including both RCP firmware slots. The RCP firmware is gone
+   afterwards and must be uploaded again (`c6_rcp.bin`, step 4 of Path 1).
+
+   (The layout is 4 MB-safe; the C6 has 8 MiB of flash and the rest stays unused.)
+4. Remove the IO9-to-GND wire and the adapter. Flash the P4 as in Path 1 step 1 and continue with step 3 there: the updater
+   answers, there is no RCP firmware, `RADIO_FAULT` `no rcp firmware`, and you upload `c6_rcp.bin`.
+
+## Creating a Thread network
+
+The board needs a dataset before it does anything. Either:
+
+- Web UI: `http://<board>/network.html`, "Form" a new network (or "Join" an existing one), then check the dashboard.
+- Home Assistant: add the OpenThread Border Router integration with the URL `http://<board>`; it creates or imports the dataset.
+- `python-otbr-api` (`pip install python-otbr-api aiohttp`):
+
+  ```
+  import asyncio, aiohttp, python_otbr_api as api
+
+  async def main():
+      async with aiohttp.ClientSession() as session:
+          otbr = api.OTBR("http://<board>", session)
+          await otbr.create_active_dataset(api.models.ActiveDataSet(network_name="MyThread", channel=15))
+          await otbr.set_enabled(True)
+
+  asyncio.run(main())
+  ```
+
+Within about half a minute `curl http://<board>/node/state` goes from `"detached"` to `"leader"` (alone on the network) and `/device/status` has
+`"mode":"BR_RUNNING"`. Other Thread devices join with the dataset (`curl -H 'Accept: text/plain' http://<board>/node/dataset/active` prints the TLVs). The dataset is stored on the board and survives reboots.
+
+## Troubleshooting the first install
+
+- `RADIO_FAULT` `rom recovery failed` (jumper path): check the four wires and their pin positions, then
+  `curl http://<board>/device/radio/log` for the C6 output and `curl -X POST http://<board>/device/radio/recover`.
+- `/device/status` shows `jumper.present: false` with wires fitted: IO9 wire loose, or the TX/RX pair swapped.
+- `rcp incompatible` after the upload: the `c6_rcp.bin` does not match the P4's OpenThread build; use the one built from
+  the same commit.
+- No address: check the Ethernet cable and DHCP, the log shows `eth:` lines; the console command `net show` prints
+  the interface state.
+- Upload returns 409 `busy`: another long operation is running or the border router is starting; wait and retry.
+
+## Recovery procedures
+
+- **Board unreachable after a network change** (VLANs, static IP): the change reverts on its own 5 minutes after the
+  reboot unless it was confirmed. Or use the P4 console (USB-C, 115200 baud): `net reset` restores `single`, untagged,
+  DHCPv4 and reboots; `net show` prints the config.
+- **C6 broken** (bootloader, partition table or updater damaged, RCP firmware missing): with the jumper the P4 repairs it at boot (once per boot), or
+  `curl -X POST http://<board>/device/radio/recover` / "Recover C6" on the device page; then upload `c6_rcp.bin` if
+  `fault_reason` says `no rcp firmware`. Without the jumper use Path 2.
+- **P4 broken** (bad OTA that cannot roll back, corrupt flash): reflash over USB-C, `idf.py -C p4 -p /dev/ttyACM0 erase-flash flash`
+  (this deletes the stored dataset and network settings). If the P4 will not enter download mode, hold BOOT while pressing reset.
+- **Factory state**: the original ESP-Hosted C6 firmware and the P4 factory image are not part of this repository; take them
+  from Waveshare / Espressif if you want to return to stock.
