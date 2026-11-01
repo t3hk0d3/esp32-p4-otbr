@@ -29,6 +29,8 @@
 #include <openthread/thread.h>
 #include <openthread/thread_ftd.h>
 #include <openthread/platform/radio.h>
+#include "br_core_mode.h"
+#include "esp_br_guard.h"
 
 #define ESP_OK 0
 #define ESP_FAIL -1
@@ -74,6 +76,13 @@ extern otError mock_dataset_error, mock_pending_error, mock_pending_result;
 extern int64_t mock_time;
 extern otOperationalDataset mock_dataset;
 extern unsigned mock_registered;
+extern br_core_mode_t mock_mode;
+extern bool mock_ot_ready;
+extern unsigned mock_ot_writes; /* calls that change OpenThread state */
+extern unsigned mock_lock_acquires; /* esp_openthread_lock_acquire() calls so far */
+extern void (*mock_on_lock)(void); /* runs once, right after the next lock acquire */
+br_core_mode_t br_core_get_mode(void);
+bool esp_br_web_openthread_ready(void);
 void mock_reset(void);
 void mock_deliver_diagnostic(uintptr_t token);
 otInstance *esp_openthread_get_instance(void);
@@ -88,6 +97,13 @@ int xSemaphoreTake(SemaphoreHandle_t semaphore, uint32_t timeout);
 int xSemaphoreGive(SemaphoreHandle_t semaphore);
 int xTaskCreate(void (*task)(void *), const char *name, unsigned stack, void *arg, unsigned priority,
                 TaskHandle_t *handle);
+int xTaskCreatePinnedToCore(void (*task)(void *), const char *name, unsigned stack, void *arg, unsigned priority,
+                            TaskHandle_t *handle, int core);
+/* netcfg (patch 12): the per-interface policy; the mock allows everything unless a test sets mock_netcfg_deny. */
+typedef enum { NETCFG_SVC_GUI, NETCFG_SVC_DEVICE_API, NETCFG_SVC_REST_READ, NETCFG_SVC_REST_WRITE } netcfg_service_t;
+extern bool mock_netcfg_deny;
+extern netcfg_service_t mock_netcfg_last_service;
+bool netcfg_request_allowed(httpd_req_t *req, netcfg_service_t svc);
 void vTaskDelay(uint32_t ticks);
 size_t strlcpy(char *dest, const char *source, size_t length);
 size_t httpd_req_get_hdr_value_len(httpd_req_t *req, const char *key);

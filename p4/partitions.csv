@@ -1,0 +1,9 @@
+# P4 flash layout, 32 MB (spec 5.1). Running ota_N uses web_N. The RCP firmware lives in the C6 only (R14); the free area at the end is unallocated.
+# Name,    Type, SubType,  Offset,    Size,  Flags
+nvs,       data, nvs,      0x9000,    64K,
+otadata,   data, ota,      ,          8K,
+coredump,  data, coredump, ,          128K,
+ota_0,     app,  ota_0,    0x100000,  8M,
+ota_1,     app,  ota_1,    ,          8M,
+web_0,     data, spiffs,   ,          2M,
+web_1,     data, spiffs,   ,          2M,

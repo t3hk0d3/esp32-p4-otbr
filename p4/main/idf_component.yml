@@ -1,0 +1,10 @@
+dependencies:
+  espressif/esp_ot_cli_extension: "~2.0.0"
+  # Exactly 1.14.1: patch 13 (--wrap=udp_recv) and the netcfg split-mode behaviour (R31) depend on its internals, see
+  # p4/components/PATCHES.md patch 13. Re-verify both before changing this pin.
+  espressif/mdns: "==1.14.1"
+  # 1.11.0 is the version proven in Phase 0.
+  espressif/esp-serial-flasher: "==1.11.0"
+  # esp_ot_br_server includes protocol_examples_common.h (Phase 0 took it from the IDF examples).
+  protocol_examples_common:
+    path: ${IDF_PATH}/examples/common_components/protocol_examples_common

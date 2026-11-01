@@ -1,0 +1,51 @@
+#include "unity.h"
+#include "unity_test_runner.h"
+#include "netcfg_policy.h"
+
+// Policy table (spec 5.13): one test per mode x side row, the four services checked in each.
+static void assert_row(netcfg_mode_t mode, netcfg_side_t side, bool gui, bool device_api, bool rest_read, bool rest_write)
+{
+    TEST_ASSERT_EQUAL_MESSAGE(gui, netcfg_policy_allows(mode, side, NETCFG_SVC_GUI), "GUI");
+    TEST_ASSERT_EQUAL_MESSAGE(device_api, netcfg_policy_allows(mode, side, NETCFG_SVC_DEVICE_API), "DEVICE_API");
+    TEST_ASSERT_EQUAL_MESSAGE(rest_read, netcfg_policy_allows(mode, side, NETCFG_SVC_REST_READ), "REST_READ");
+    TEST_ASSERT_EQUAL_MESSAGE(rest_write, netcfg_policy_allows(mode, side, NETCFG_SVC_REST_WRITE), "REST_WRITE");
+}
+
+TEST_CASE("On a request arriving on mgmt in split mode: GUI, DEVICE_API and REST_READ are allowed, REST_WRITE is not", "[netcfg]")
+{
+    assert_row(NETCFG_MODE_SPLIT, NETCFG_SIDE_MGMT, true, true, true, false);
+}
+
+TEST_CASE("On a request arriving on thread_bb in split mode: REST_READ and REST_WRITE are allowed, GUI and DEVICE_API are not", "[netcfg]")
+{
+    assert_row(NETCFG_MODE_SPLIT, NETCFG_SIDE_THREAD, false, false, true, true);
+}
+
+TEST_CASE("On any request in single mode on the management side: every service is allowed", "[netcfg]")
+{
+    assert_row(NETCFG_MODE_SINGLE, NETCFG_SIDE_MGMT, true, true, true, true);
+}
+
+TEST_CASE("On any request in single mode on the Thread side: every service is allowed", "[netcfg]")
+{
+    assert_row(NETCFG_MODE_SINGLE, NETCFG_SIDE_THREAD, true, true, true, true);
+}
+
+TEST_CASE("On a confirm: only the management side may confirm", "[netcfg]")
+{
+    TEST_ASSERT_TRUE(netcfg_confirm_allowed(NETCFG_SIDE_MGMT));
+    TEST_ASSERT_FALSE(netcfg_confirm_allowed(NETCFG_SIDE_THREAD));
+}
+
+TEST_CASE("On an IPv4-mapped IPv6 local address: the IPv4 address is extracted", "[netcfg]")
+{
+    const uint8_t mapped[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 192, 168, 7, 9};
+    const uint8_t native[16] = {0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 192, 168, 7, 9};
+    esp_ip4_addr_t out = {0};
+
+    TEST_ASSERT_TRUE(netcfg_v4_from_mapped(mapped, &out));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(((const uint8_t[]) {
+        192, 168, 7, 9
+    }), (const uint8_t *)&out.addr, 4);
+    TEST_ASSERT_FALSE(netcfg_v4_from_mapped(native, &out));
+}

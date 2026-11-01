@@ -18,9 +18,11 @@
 
 #include "sdkconfig.h"
 
+#include "br_core.h"
 #include "cJSON.h"
 #include "esp_br_web.h"
 #include "esp_br_web_api.h"
+#include "esp_br_guard.h"
 #include "esp_br_web_base.h"
 #if CONFIG_OPENTHREAD_BR_SOFTAP_SETUP
 #include "esp_br_wifi_config.h"
@@ -33,11 +35,13 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_openthread.h"
+#include "esp_openthread_lock.h"
 #include "esp_openthread_border_router.h"
 #include "esp_openthread_netif_glue.h"
 #include "esp_spiffs.h"
 #include "esp_vfs.h"
 #include "http_parser.h"
+#include "netcfg.h"
 #include "mdns.h"
 #include "protocol_examples_common.h"
 
@@ -78,6 +82,33 @@ typedef struct http_server {
 } http_server_t;
 
 static http_server_t s_server = {NULL, {"", ""}, 80}; /* the instance of server */
+
+httpd_handle_t esp_br_web_get_server(void)
+{
+    return s_server.handle;
+}
+
+/* Patch 10: extra handlers (device_api) must be registered before the catch-all wildcard GET handler, which would
+ * otherwise shadow every GET path registered after it. */
+#define REST_PATH_COUNT     4 /* esp_otbr_thread_rest_register: paths x methods, asserted there */
+#define REST_METHOD_COUNT   7
+#define REST_ROUTE_SLOTS    (REST_PATH_COUNT * REST_METHOD_COUNT)
+#define EXTRA_HANDLER_SLOTS 16      /* device_api and the catch-all */
+/* Patch 12: per-interface policy (spec 5.13). netcfg_request_allowed sends the 403 itself; failing the handler makes the
+ * server close the connection. Single mode (the default) allows everything. */
+#define NETCFG_GATE(req, svc)                       \
+    do {                                            \
+        if (!netcfg_request_allowed((req), (svc))) { \
+            return ESP_FAIL;                        \
+        }                                           \
+    } while (0)
+
+static esp_err_t (*s_extra_handlers_cb)(httpd_handle_t server);
+
+void esp_br_web_set_extra_handlers(esp_err_t (*cb)(httpd_handle_t server))
+{
+    s_extra_handlers_cb = cb;
+}
 
 /**
  * @brief The basic parameter definition for parsing url
@@ -292,6 +323,8 @@ static cJSON *thread_rest_discovery(void)
 
 static esp_err_t esp_otbr_thread_rest_handler(httpd_req_t *req)
 {
+    /* patch 12: per-interface policy (spec 5.13), before the request is looked at; GET/HEAD read, everything else writes */
+    NETCFG_GATE(req, (req->method == HTTP_GET || req->method == HTTP_HEAD) ? NETCFG_SVC_REST_READ : NETCFG_SVC_REST_WRITE);
     esp_br_thread_rest_response_t response = {.status = 200, .content_type = "application/json"};
     esp_br_thread_rest_request_t request = {.method = req->method};
     char *uri = strdup(req->uri), *body = NULL, *accept = NULL, *content_type = NULL, *condition = NULL;
@@ -405,8 +438,19 @@ static esp_err_t esp_otbr_thread_rest_handler(httpd_req_t *req)
     request.accept = accept;
     request.content_type = content_type;
     request.if_none_match = condition;
+    /* Patches 2 and 9: sniffer active (409) or OpenThread not (fully) initialised / mode forbids it (503). Pre-check
+     * without the OpenThread lock, which does not exist before OpenThread is up; esp_br_thread_rest_request asks
+     * again while holding the lock. */
+    const int refused = esp_br_guard_status(ESP_BR_GUARD_REST_CLASS(req->method), br_core_get_mode(),
+                                            esp_br_web_openthread_ready());
     if (!strcmp(uri, "/.well-known/thread/br-rest")) {
         response.json = thread_rest_discovery();
+    } else if (refused) {
+        response.status = refused;
+        response.detail = esp_br_guard_detail(refused);
+    } else if (esp_br_thread_rest_init() != ESP_OK) {
+        response.status = 503;
+        response.detail = "radio not available";
     } else {
         esp_br_thread_rest_request(&request, &response);
     }
@@ -432,14 +476,14 @@ exit:
 
 static esp_err_t esp_otbr_thread_rest_register(httpd_handle_t server)
 {
-    esp_err_t error = esp_br_thread_rest_init();
-    if (error != ESP_OK) {
-        return error;
-    }
+    esp_err_t error;
+    /* Patch 9: the REST worker is created on the first request after OpenThread is ready (see the dispatcher). */
     static const char *const paths[] = {"/node", "/node/*", "/api/*", "/.well-known/thread/br-rest"};
     const httpd_method_t methods[] = {HTTP_GET, HTTP_POST, HTTP_PUT, HTTP_DELETE, HTTP_OPTIONS, HTTP_HEAD, HTTP_PATCH};
-    for (unsigned p = 0; p < 4; p++) {
-        for (unsigned m = 0; m < 7; m++) {
+    _Static_assert(sizeof(paths) / sizeof(paths[0]) == REST_PATH_COUNT, "REST_PATH_COUNT sizes the httpd URI slots");
+    _Static_assert(sizeof(methods) / sizeof(methods[0]) == REST_METHOD_COUNT, "REST_METHOD_COUNT sizes the httpd URI slots");
+    for (unsigned p = 0; p < REST_PATH_COUNT; p++) {
+        for (unsigned m = 0; m < REST_METHOD_COUNT; m++) {
             httpd_uri_t route = {.uri = paths[p], .method = methods[m], .handler = esp_otbr_thread_rest_handler};
             error = httpd_register_uri_handler(server, &route);
             if (error != ESP_OK) {
@@ -642,6 +686,87 @@ exit:
 }
 
 /*-----------------------------------------------------
+Note: Patch 2, mode guard of the Web GUI and resource handlers
+-----------------------------------------------------*/
+/* Status the current mode and OpenThread state give a request of class `cls`; 0 = go ahead. No lock. */
+static int guard_now(esp_br_guard_class_t cls)
+{
+    return esp_br_guard_status(cls, br_core_get_mode(), esp_br_web_openthread_ready());
+}
+
+/* THREAD_OP: returns 0 with the OpenThread lock held, so that the check and the OpenThread call cannot be separated
+ * by a mode change (mode changes take the same lock), or a refusal status without the lock. The first look is
+ * lock-free because the lock does not exist while OpenThread is not up. The lock is recursive. */
+static int guard_lock(void)
+{
+    int status = guard_now(ESP_BR_GUARD_THREAD_OP);
+    if (status) {
+        return status;
+    }
+    esp_openthread_lock_acquire(portMAX_DELAY);
+    status = guard_now(ESP_BR_GUARD_THREAD_OP);
+    if (status) {
+        esp_openthread_lock_release();
+    }
+    return status;
+}
+
+/* For handlers that wait with the lock released (scan, join, ping, mesh diagnostics): check under the lock, then let
+ * go. The operation takes the lock again; esp_br_web_api.c re-checks wherever it changes state. */
+static int guard_check_thread_op(void)
+{
+    int status = guard_lock();
+    if (!status) {
+        esp_openthread_lock_release();
+    }
+    return status;
+}
+
+static esp_err_t guard_send_status(httpd_req_t *req, int status, cJSON *response)
+{
+    httpd_resp_set_status(req, status == 409 ? "409 Conflict" : "503 Service Unavailable");
+    esp_err_t ret = httpd_send_packet(req, response);
+    cJSON_Delete(response);
+    return ret;
+}
+
+/* Refusal in the Web GUI format {"error", "result", "message"}. */
+static esp_err_t guard_refuse_gui(httpd_req_t *req, int status)
+{
+    return guard_send_status(req, status,
+                             pack_response(cJSON_CreateNumber((double)OT_ERROR_INVALID_STATE),
+                                           cJSON_CreateString("failed"),
+                                           cJSON_CreateString(esp_br_guard_detail(status))));
+}
+
+/* Refusal in the resource format {"ErrorCode", "ErrorMessage"} (as NOT_FOUND_handler). */
+static esp_err_t guard_refuse_resource(httpd_req_t *req, int status)
+{
+    return guard_send_status(req, status,
+                             resource_status(status == 409 ? "409" : "503", status == 409 ? "sniffer active" : "radio not available"));
+}
+
+/* Refuse early, before the request body is read. */
+#define GUARD_PRECHECK(req, cls, refuse)       \
+    do {                                       \
+        int guard_pre_ = guard_now(cls);       \
+        if (guard_pre_) {                      \
+            return refuse(req, guard_pre_);    \
+        }                                      \
+    } while (0)
+
+/* Run `call` (the OpenThread access, a declaration or statement) under the OpenThread lock. On refusal `cleanup`
+ * runs, the refusal is sent and the handler returns; `call` does not run. */
+#define GUARD_LOCKED_CALL(req, refuse, cleanup, call) \
+    int guard_ = guard_lock();                        \
+    if (guard_) {                                     \
+        cleanup;                                      \
+        return refuse(req, guard_);                   \
+    }                                                 \
+    call;                                             \
+    esp_openthread_lock_release()
+
+/*-----------------------------------------------------
 Note: Openthread resource API implement
 -----------------------------------------------------*/
 /**
@@ -659,7 +784,13 @@ Note: Openthread resource API implement
 
 static esp_err_t esp_otbr_network_diagnostics_get_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
     ESP_RETURN_ON_FALSE(req, ESP_FAIL, WEB_TAG, "Failed to parse the diagnostics of http request");
+    GUARD_PRECHECK(req, ESP_BR_GUARD_THREAD_OP, guard_refuse_resource);
+    int guard = guard_check_thread_op();
+    if (guard) {
+        return guard_refuse_resource(req, guard);
+    }
     esp_err_t ret = ESP_OK;
     cJSON *response = handle_ot_resource_network_diagnostics_request();
     ESP_RETURN_ON_FALSE(response, ESP_FAIL, WEB_TAG, "Failed to handle openthread diagnostics request");
@@ -706,6 +837,7 @@ exit:
  */
 static esp_err_t esp_otbr_well_known_br_rest_get_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
     esp_err_t ret = ESP_OK;
     cJSON *response = cJSON_CreateObject();
     ESP_RETURN_ON_FALSE(response, ESP_FAIL, WEB_TAG, "Failed to allocate well-known response");
@@ -756,6 +888,8 @@ Note: Openthread WEB GUI API implement
  */
 static esp_err_t esp_otbr_network_properties_get_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
+    GUARD_PRECHECK(req, ESP_BR_GUARD_READ, guard_refuse_gui);
     esp_err_t ret = ESP_OK;
     cJSON *result = handle_openthread_network_properties_request(); /* encode json package */
     cJSON *error = result ? cJSON_CreateNumber((double)OT_ERROR_NONE) : cJSON_CreateNumber((double)OT_ERROR_FAILED);
@@ -785,6 +919,12 @@ exit:
  */
 static esp_err_t esp_otbr_available_networks_get_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
+    GUARD_PRECHECK(req, ESP_BR_GUARD_THREAD_OP, guard_refuse_gui);
+    int guard = guard_check_thread_op();
+    if (guard) {
+        return guard_refuse_gui(req, guard);
+    }
     esp_err_t ret = ESP_OK;
     cJSON *result = handle_openthread_available_network_request();
     cJSON *error = result ? cJSON_CreateNumber((double)OT_ERROR_NONE) : cJSON_CreateNumber((double)OT_ERROR_FAILED);
@@ -813,10 +953,19 @@ exit:
  */
 static esp_err_t esp_otbr_network_join_post_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
+    GUARD_PRECHECK(req, ESP_BR_GUARD_THREAD_OP, guard_refuse_gui);
     esp_err_t ret = ESP_OK;
     cJSON *request = httpd_request_convert2_json(req, cJSON_Object);
     ESP_RETURN_ON_FALSE(request, ESP_FAIL, WEB_TAG, "Failed to parse the JOIN package");
 
+    /* The join waits with the lock released; handle_openthread_join_network_request re-checks the mode every time it
+     * takes the lock. This check only produces the 409/503 reply. */
+    int guard = guard_check_thread_op();
+    if (guard) {
+        cJSON_Delete(request);
+        return guard_refuse_gui(req, guard);
+    }
     cJSON *join_log = cJSON_CreateString("Known");
     otError err = handle_openthread_join_network_request(request, join_log);
     cJSON *error = cJSON_CreateNumber((double)err);
@@ -847,12 +996,15 @@ exit:
  */
 static esp_err_t esp_otbr_network_form_post_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
+    GUARD_PRECHECK(req, ESP_BR_GUARD_THREAD_OP, guard_refuse_gui);
     esp_err_t ret = ESP_OK;
     cJSON *request = httpd_request_convert2_json(req, cJSON_Object);
     ESP_RETURN_ON_FALSE(request, ESP_FAIL, WEB_TAG, "Failed to parse the FORM package");
 
     cJSON *form_log = cJSON_CreateString("Known");
-    otError err = handle_openthread_form_network_request(request, form_log);
+    GUARD_LOCKED_CALL(req, guard_refuse_gui, (cJSON_Delete(request), cJSON_Delete(form_log)),
+                      otError err = handle_openthread_form_network_request(request, form_log));
     cJSON *error = cJSON_CreateNumber((double)err);
     cJSON *result = err ? cJSON_CreateString("failed") : cJSON_CreateString("successful");
     cJSON *message = form_log;
@@ -881,10 +1033,13 @@ exit:
  */
 static esp_err_t esp_otbr_add_network_prefix_post_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
+    GUARD_PRECHECK(req, ESP_BR_GUARD_THREAD_OP, guard_refuse_gui);
     esp_err_t ret = ESP_OK;
     cJSON *request = httpd_request_convert2_json(req, cJSON_Object);
     ESP_RETURN_ON_FALSE(request, ESP_FAIL, WEB_TAG, "Failed to parse the add prefix package");
-    otError err = handle_openthread_add_network_prefix_request(request);
+    GUARD_LOCKED_CALL(req, guard_refuse_gui, cJSON_Delete(request),
+                      otError err = handle_openthread_add_network_prefix_request(request));
     cJSON *error = cJSON_CreateNumber((double)err);
     cJSON *result = err ? cJSON_CreateString("failed") : cJSON_CreateString("successful");
     cJSON *message = err ? cJSON_CreateString("Add Prefix: Failure") : cJSON_CreateString("Add Prefix: Success");
@@ -914,11 +1069,14 @@ exit:
  */
 static esp_err_t esp_otbr_delete_network_prefix_post_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
+    GUARD_PRECHECK(req, ESP_BR_GUARD_THREAD_OP, guard_refuse_gui);
     esp_err_t ret = ESP_OK;
     cJSON *request = httpd_request_convert2_json(req, cJSON_Object);
     ESP_RETURN_ON_FALSE(request, ESP_FAIL, WEB_TAG, "Failed to parse the delete prefix package");
 
-    otError err = handle_openthread_delete_network_prefix_request(request);
+    GUARD_LOCKED_CALL(req, guard_refuse_gui, cJSON_Delete(request),
+                      otError err = handle_openthread_delete_network_prefix_request(request));
     cJSON *error = cJSON_CreateNumber((double)err);
     cJSON *result = err ? cJSON_CreateString("failed") : cJSON_CreateString("successful");
     cJSON *message = err ? cJSON_CreateString("Delete Prefix: Failure") : cJSON_CreateString("Delete Prefix: Success");
@@ -937,11 +1095,14 @@ exit:
 
 static esp_err_t esp_otbr_network_commission_post_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
+    GUARD_PRECHECK(req, ESP_BR_GUARD_THREAD_OP, guard_refuse_gui);
     esp_err_t ret = ESP_OK;
     cJSON *request = httpd_request_convert2_json(req, cJSON_Object);
     ESP_RETURN_ON_FALSE(request, ESP_FAIL, WEB_TAG, "Failed to parse the add prefix package");
 
-    otError err = handle_openthread_network_commission_request(request);
+    GUARD_LOCKED_CALL(req, guard_refuse_gui, cJSON_Delete(request),
+                      otError err = handle_openthread_network_commission_request(request));
     cJSON *error = err ? cJSON_CreateNumber((double)err) : cJSON_CreateNumber((double)err);
     cJSON *result = err ? cJSON_CreateString("failed") : cJSON_CreateString("successful");
     cJSON *message = err ? cJSON_CreateString("Commissioner: Failure") : cJSON_CreateString("Commissioner: Process");
@@ -967,9 +1128,17 @@ exit:
  */
 static esp_err_t esp_otbr_ping_post_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
+    GUARD_PRECHECK(req, ESP_BR_GUARD_THREAD_OP, guard_refuse_gui);
     esp_err_t ret = ESP_OK;
     cJSON *request = httpd_request_convert2_json(req, cJSON_Object);
     ESP_RETURN_ON_FALSE(request, ESP_FAIL, WEB_TAG, "Failed to parse the ping request");
+
+    int guard = guard_check_thread_op(); /* the ping waits with the lock released, see guard_check_thread_op */
+    if (guard) {
+        cJSON_Delete(request);
+        return guard_refuse_gui(req, guard);
+    }
 
     cJSON *result = handle_openthread_ping_request(request);
     cJSON *error = result ? cJSON_CreateNumber((double)OT_ERROR_NONE) : cJSON_CreateNumber((double)OT_ERROR_FAILED);
@@ -988,6 +1157,8 @@ exit:
 
 static esp_err_t esp_otbr_ipaddr_get_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
+    GUARD_PRECHECK(req, ESP_BR_GUARD_READ, guard_refuse_gui);
     esp_err_t ret = ESP_OK;
     cJSON *result = handle_openthread_ipaddr_list_request();
     cJSON *error = result ? cJSON_CreateNumber((double)OT_ERROR_NONE) : cJSON_CreateNumber((double)OT_ERROR_FAILED);
@@ -1001,11 +1172,14 @@ exit:
 
 static esp_err_t esp_otbr_add_ipaddr_post_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
+    GUARD_PRECHECK(req, ESP_BR_GUARD_THREAD_OP, guard_refuse_gui);
     esp_err_t ret = ESP_OK;
     cJSON *request = httpd_request_convert2_json(req, cJSON_Object);
     ESP_RETURN_ON_FALSE(request, ESP_FAIL, WEB_TAG, "Failed to parse ipaddr add request");
 
-    cJSON *result = handle_openthread_add_ipaddr_request(request);
+    GUARD_LOCKED_CALL(req, guard_refuse_gui, cJSON_Delete(request),
+                      cJSON *result = handle_openthread_add_ipaddr_request(request));
     cJSON *status = cJSON_GetObjectItem(result, "status");
     bool ok = status && status->valuestring && strcmp(status->valuestring, "ok") == 0;
     cJSON *error = cJSON_CreateNumber(ok ? (double)OT_ERROR_NONE : (double)OT_ERROR_FAILED);
@@ -1020,11 +1194,14 @@ exit:
 
 static esp_err_t esp_otbr_delete_ipaddr_post_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
+    GUARD_PRECHECK(req, ESP_BR_GUARD_THREAD_OP, guard_refuse_gui);
     esp_err_t ret = ESP_OK;
     cJSON *request = httpd_request_convert2_json(req, cJSON_Object);
     ESP_RETURN_ON_FALSE(request, ESP_FAIL, WEB_TAG, "Failed to parse ipaddr delete request");
 
-    cJSON *result = handle_openthread_delete_ipaddr_request(request);
+    GUARD_LOCKED_CALL(req, guard_refuse_gui, cJSON_Delete(request),
+                      cJSON *result = handle_openthread_delete_ipaddr_request(request));
     cJSON *status = cJSON_GetObjectItem(result, "status");
     bool ok = status && status->valuestring && strcmp(status->valuestring, "ok") == 0;
     cJSON *error = cJSON_CreateNumber(ok ? (double)OT_ERROR_NONE : (double)OT_ERROR_FAILED);
@@ -1050,7 +1227,13 @@ exit:
  */
 static esp_err_t esp_otbr_network_topology_get_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
     ESP_RETURN_ON_FALSE(req, ESP_FAIL, WEB_TAG, "Failed to parse the diagnostics of http request");
+    GUARD_PRECHECK(req, ESP_BR_GUARD_THREAD_OP, guard_refuse_gui);
+    int guard = guard_check_thread_op();
+    if (guard) {
+        return guard_refuse_gui(req, guard);
+    }
     esp_err_t ret = ESP_OK;
     cJSON *result = handle_ot_resource_network_diagnostics_request();
     ESP_RETURN_ON_FALSE(result, ESP_FAIL, WEB_TAG, "Failed to get Thread Network Topology");
@@ -1102,7 +1285,9 @@ exit:
  */
 static esp_err_t esp_otbr_current_node_get_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
     ESP_RETURN_ON_FALSE(req, ESP_FAIL, WEB_TAG, "Failed to parse the node information of http request");
+    GUARD_PRECHECK(req, ESP_BR_GUARD_READ, guard_refuse_gui);
     esp_err_t ret = ESP_OK;
     cJSON *result = handle_ot_resource_node_information_request();
     cJSON *error = result ? cJSON_CreateNumber((double)OT_ERROR_NONE) : cJSON_CreateNumber((double)OT_ERROR_FAILED);
@@ -1280,6 +1465,7 @@ static bool str_ends_with(const char *str, const char *suffix)
  */
 static esp_err_t default_urls_get_handler(httpd_req_t *req)
 {
+    NETCFG_GATE(req, NETCFG_SVC_GUI); /* patch 12 */
 #if CONFIG_OPENTHREAD_BR_SOFTAP_SETUP
     // Check if this is a WiFi config request (when WiFi config mode is active)
     if (esp_br_wifi_config_is_active()) {
@@ -1367,10 +1553,14 @@ static httpd_handle_t *start_esp_br_http_server(const char *base_path)
     strlcpy(s_server.data.base_path, base_path, ESP_VFS_PATH_MAX + 1);
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = (sizeof(s_resource_handlers) + sizeof(s_web_gui_handlers)) / sizeof(httpd_uri_t) + 30;
-    config.max_resp_headers = (sizeof(s_resource_handlers) + sizeof(s_web_gui_handlers)) / sizeof(httpd_uri_t) + 30;
+    /* Slots: the GUI tables, the Thread REST routes (4 paths x 7 methods, patch 9), the device_api handlers (patch 10) and
+     * the catch-all, plus headroom. Running out silently drops the later registrations (the catch-all and the device API). */
+    const size_t gui_handlers = (sizeof(s_resource_handlers) + sizeof(s_web_gui_handlers)) / sizeof(httpd_uri_t);
+    config.max_uri_handlers = gui_handlers + REST_ROUTE_SLOTS + EXTRA_HANDLER_SLOTS + 30;
+    config.max_resp_headers = gui_handlers + 30;
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.stack_size = 8 * 1024;
+    config.core_id = 1; /* patch 1: management core (core 0 runs the network path) */
     config.max_open_sockets = 7;
     config.lru_purge_enable = true;
     s_server.port = config.server_port;
@@ -1393,6 +1583,13 @@ static httpd_handle_t *start_esp_br_http_server(const char *base_path)
     }
     httpd_server_register_http_uri(&s_server, s_resource_handlers, sizeof(s_resource_handlers) / sizeof(httpd_uri_t));
     httpd_server_register_http_uri(&s_server, s_web_gui_handlers, sizeof(s_web_gui_handlers) / sizeof(httpd_uri_t));
+    if (s_extra_handlers_cb) { /* patch 10 */
+        esp_err_t extra_err = s_extra_handlers_cb(s_server.handle);
+        if (extra_err != ESP_OK) {
+            ESP_LOGE(WEB_TAG, "Registering the extra handlers failed (%s): the /device/* API is NOT available",
+                     esp_err_to_name(extra_err));
+        }
+    }
     httpd_register_uri_handler(s_server.handle, &default_uris_get);
 
     return s_server.handle;
@@ -1429,6 +1626,18 @@ void disconnect_handler(void *arg, esp_event_base_t event_base, int32_t event_id
 }
 
 static atomic_bool is_br_web_server_started = ATOMIC_VAR_INIT(false);
+
+static atomic_bool is_openthread_ready = ATOMIC_VAR_INIT(false);
+
+void esp_br_web_set_openthread_ready(bool ready)
+{
+    atomic_store(&is_openthread_ready, ready);
+}
+
+bool esp_br_web_openthread_ready(void)
+{
+    return atomic_load(&is_openthread_ready);
+}
 
 bool esp_br_web_is_server_started(void)
 {
@@ -1511,12 +1720,17 @@ static void handler_got_ip6_event(void *arg, esp_event_base_t event_base, int32_
 
 void esp_br_web_start(char *base_path)
 {
-    ESP_ERROR_CHECK(mdns_register_hostname_changed_callback(mdns_hostname_changed_callback, NULL));
+    /* Patch 8: a missing mDNS must not keep the server from starting. */
+    if (mdns_register_hostname_changed_callback(mdns_hostname_changed_callback, NULL) != ESP_OK) {
+        ESP_LOGW(WEB_TAG, "mDNS is not available, the hostname will not be logged");
+    }
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &handler_got_ip_event, base_path));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &handler_got_ip_event, base_path));
 #if CONFIG_LWIP_IPV6
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_GOT_IP6, &handler_got_ip6_event, base_path));
 #endif
+    /* Patch 8: listen right away; the server must not depend on an IP event (no Ethernet link at boot). */
+    start_web_server(base_path);
 }
 
 /* 9-digit TAPs only span [0, 999999999], so this is safe to use as an invalid/sentinel value. */

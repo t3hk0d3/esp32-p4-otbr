@@ -10,6 +10,7 @@
 #include <stddef.h>
 
 #include "esp_event.h"
+#include "esp_http_server.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,6 +28,29 @@ typedef enum {
  * @return true when the web server is ready to accept connections
  */
 bool esp_br_web_is_server_started(void);
+
+/**
+ * @brief Tell the server whether OpenThread is fully initialised (patch 9). Until it is, the Thread REST API
+ * (/node, /api, ...) answers 503. Set by br_core.
+ */
+void esp_br_web_set_openthread_ready(bool ready);
+
+/** @brief True once esp_br_web_set_openthread_ready(true) was called. */
+bool esp_br_web_openthread_ready(void);
+
+/**
+ * @brief Handle of the running HTTP server (patch 1), for registering more URI handlers.
+ *
+ * @return the handle, or NULL until the server has started
+ */
+httpd_handle_t esp_br_web_get_server(void);
+
+/**
+ * @brief Set the callback that registers more URI handlers (patch 10). It runs while the server starts, before the
+ * catch-all wildcard GET handler is registered (a handler registered after it would never see a GET). Call it before
+ * esp_br_web_start. Used by device_api.
+ */
+void esp_br_web_set_extra_handlers(esp_err_t (*cb)(httpd_handle_t server));
 
 /**
  * @brief Start border router web server, which provides REST APIs and GUI

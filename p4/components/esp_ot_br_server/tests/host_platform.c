@@ -2,6 +2,19 @@
  * SPDX-License-Identifier: Apache-2.0 */
 #include "host_platform.h"
 unsigned mock_registered;
+br_core_mode_t mock_mode = BR_MODE_BR_RUNNING;
+bool mock_ot_ready = true;
+unsigned mock_ot_writes;
+void (*mock_on_lock)(void);
+unsigned mock_lock_acquires;
+br_core_mode_t br_core_get_mode(void)
+{
+    return mock_mode;
+}
+bool esp_br_web_openthread_ready(void)
+{
+    return mock_ot_ready;
+}
 static unsigned random_counter;
 static struct {
     bool ready;
@@ -25,6 +38,12 @@ otInstance *esp_openthread_get_instance(void)
 bool esp_openthread_lock_acquire(uint32_t timeout)
 {
     (void)timeout;
+    mock_lock_acquires++;
+    if (mock_on_lock) {
+        void (*hook)(void) = mock_on_lock;
+        mock_on_lock = NULL;
+        hook();
+    }
     return true;
 }
 void esp_openthread_lock_release(void)
@@ -56,6 +75,20 @@ int xSemaphoreGive(SemaphoreHandle_t sem)
 {
     sem->ready = true;
     return 1;
+}
+bool mock_netcfg_deny;
+netcfg_service_t mock_netcfg_last_service;
+bool netcfg_request_allowed(httpd_req_t *req, netcfg_service_t svc)
+{
+    (void)req;
+    mock_netcfg_last_service = svc;
+    return !mock_netcfg_deny;
+}
+int xTaskCreatePinnedToCore(void (*task)(void *), const char *name, unsigned stack, void *arg, unsigned priority,
+                            TaskHandle_t *handle, int core)
+{
+    (void)core;
+    return xTaskCreate(task, name, stack, arg, priority, handle);
 }
 int xTaskCreate(void (*task)(void *), const char *name, unsigned stack, void *arg, unsigned priority,
                 TaskHandle_t *handle)

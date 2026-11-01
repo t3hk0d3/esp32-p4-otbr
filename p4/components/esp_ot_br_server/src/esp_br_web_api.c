@@ -6,7 +6,9 @@
 
 #include "sdkconfig.h"
 
+#include "br_core.h"
 #include "cJSON.h"
+#include "esp_br_guard.h"
 #include "esp_br_web.h"
 #include "esp_br_web_api.h"
 #include "esp_br_web_base.h"
@@ -684,6 +686,16 @@ static esp_err_t network_prefix_add(otBorderRouterConfig *config)
     return ESP_OK;
 }
 
+/* Patch 2: the join takes the OpenThread lock more than once; every time it holds the lock again it must still be
+ * allowed to change Thread state (no dataset write or Thread start once the sniffer is on). */
+#define GUARD_RECHECK_EXIT()                                                                                      \
+    do {                                                                                                          \
+        if (esp_br_guard_status(ESP_BR_GUARD_THREAD_OP, br_core_get_mode(), esp_br_web_openthread_ready())) {     \
+            ret = OT_ERROR_INVALID_STATE;                                                                         \
+            goto exit;                                                                                            \
+        }                                                                                                         \
+    } while (0)
+
 otError handle_openthread_join_network_request(const cJSON *request, cJSON *log)
 {
     otError ret = OT_ERROR_NONE;
@@ -715,6 +727,7 @@ otError handle_openthread_join_network_request(const cJSON *request, cJSON *log)
         ESP_RETURN_ON_FALSE(list, OT_ERROR_INVALID_STATE, API_TAG, "Cannot find network, try against");
 
         esp_openthread_lock_acquire(portMAX_DELAY);
+        GUARD_RECHECK_EXIT();
 
         ERROR_EXIT(otThreadSetEnabled(ins, false), exit, API_TAG, "Failed to stop Thread");
         ERROR_EXIT(otIp6SetEnabled(ins, false), exit, API_TAG, "Failed to set ifconfig down");
@@ -731,6 +744,7 @@ otError handle_openthread_join_network_request(const cJSON *request, cJSON *log)
         ERROR_EXIT(otIp6SetEnabled(ins, true), exit, API_TAG, "Failed to set ifconfig up");
     } else if ((!memcmp(param.credentialType, CREDENTIAL_TYPE_PSKD, sizeof(CREDENTIAL_TYPE_PSKD)))) {
         esp_openthread_lock_acquire(portMAX_DELAY);
+        GUARD_RECHECK_EXIT();
 
         ERROR_EXIT(otIp6SetEnabled(ins, false), exit, API_TAG, "Failed to set ifconfig down");
         ERROR_EXIT(otIp6SetEnabled(ins, true), exit, API_TAG, "Failed to set ifconfig up");
@@ -748,6 +762,7 @@ otError handle_openthread_join_network_request(const cJSON *request, cJSON *log)
             goto exit_no_unlock;
         }
         esp_openthread_lock_acquire(portMAX_DELAY);
+        GUARD_RECHECK_EXIT();
         ERROR_EXIT(s_join_state, exit, API_TAG, "Failed to join network");
     } else {
         ret = OT_ERROR_PARSE;
@@ -3268,13 +3283,36 @@ static void rest_poll(otInstance *instance)
     }
 }
 
+/* Patch 2: the poll starts queued actions and cancels expired ones (OpenThread state changes, radio use). It runs
+ * only where THREAD_OP is allowed, checked with the lock held. Outside BR_RUNNING the queue is left untouched: no
+ * action starts or is cancelled in SNIFFER or after a radio fault, and polling resumes on return to BR_RUNNING
+ * (actions that expired meanwhile are then cancelled and fail by their deadline). Caller holds the lock. */
+static void rest_poll_guarded(void)
+{
+    if (esp_br_guard_status(ESP_BR_GUARD_THREAD_OP, br_core_get_mode(), esp_br_web_openthread_ready())) {
+        return;
+    }
+    rest_poll(esp_openthread_get_instance());
+}
+
+/* Patch 2: while OpenThread is not ready (stopped, being torn down for a radio push or recovery) the OpenThread
+ * lock may be deleted at any moment, so the worker must not touch it. The readiness flag is cleared before the
+ * lock is destroyed; the guard is checked again under the lock in rest_poll_guarded(). */
+static void rest_process_once(void)
+{
+    if (!esp_br_web_openthread_ready()) {
+        return;
+    }
+    esp_openthread_lock_acquire(portMAX_DELAY);
+    rest_poll_guarded();
+    esp_openthread_lock_release();
+}
+
 static void rest_process_task(void *argument)
 {
     (void)argument;
     while (true) {
-        esp_openthread_lock_acquire(portMAX_DELAY);
-        rest_poll(esp_openthread_get_instance());
-        esp_openthread_lock_release();
+        rest_process_once();
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
@@ -3293,8 +3331,10 @@ esp_err_t esp_br_thread_rest_init(void)
     esp_openthread_lock_acquire(portMAX_DELAY);
     rest_self(esp_openthread_get_instance());
     esp_openthread_lock_release();
-    return xTaskCreate(rest_process_task, "thread_rest", 8192, NULL, 4, &s_rest_task) == pdPASS ? ESP_OK
-                                                                                                : ESP_ERR_NO_MEM;
+    /* patch 11: management core (core 0 runs the network path, spec 5.11) */
+    return xTaskCreatePinnedToCore(rest_process_task, "thread_rest", 8192, NULL, 4, &s_rest_task, 1) == pdPASS
+               ? ESP_OK
+               : ESP_ERR_NO_MEM;
 }
 
 static bool rest_field_selected(const char *fields, const char *key, bool *nested)
@@ -3637,6 +3677,15 @@ void esp_br_thread_rest_request(const esp_br_thread_rest_request_t *request, esp
     response->status = 200;
     response->content_type = "application/json";
     esp_openthread_lock_acquire(portMAX_DELAY);
+    /* Patch 2: the mode is checked with the lock held; mode changes take the same lock, so a write either runs
+     * completely before the sniffer starts or is refused here. */
+    const int refused =
+        esp_br_guard_status(ESP_BR_GUARD_REST_CLASS(request->method), br_core_get_mode(), esp_br_web_openthread_ready());
+    if (refused) {
+        response->status = refused;
+        response->detail = esp_br_guard_detail(refused);
+        goto exit;
+    }
     otInstance *instance = esp_openthread_get_instance();
     const char *path = request->path;
     if (!strncmp(path, "/api/", 5)) {

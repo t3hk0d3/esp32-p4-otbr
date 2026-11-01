@@ -20,6 +20,10 @@ void mock_reset(void) {
     pending_callback=NULL;
     diagnostic_callback=NULL;
     mock_time=0;
+    mock_mode=BR_MODE_BR_RUNNING;
+    mock_ot_ready=true;
+    mock_ot_writes=0;
+    mock_on_lock=NULL;
 }
 void mock_complete_pending(void) {
     if(pending_callback) {otDatasetMgmtSetCallback callback=pending_callback;pending_callback=NULL;callback(mock_pending_result,pending_context);}

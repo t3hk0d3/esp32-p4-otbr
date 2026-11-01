@@ -265,6 +265,163 @@ static void test_actions(void)
     mock_deliver_diagnostic(0);
     assert(s_rest_actions->complete);
 }
+/* Patches 2 and 9: the mode guard of the Thread REST API. */
+#define GUARD_DATASET                                                                                     \
+    "{\"networkName\":\"mesh\",\"networkKey\":\"00112233445566778899aabbccddeeff\",\"channel\":15," \
+    "\"activeTimestamp\":{\"seconds\":42}}"
+static cJSON *guard_request(httpd_req_t *req, httpd_method_t method, const char *uri, const char *body, int status,
+                            const char *detail)
+{
+    *req = request(method, uri, body, NULL, body ? "application/json" : NULL);
+    cJSON *json = run_request(req, status);
+    if (detail) {
+        assert(rest_get(json, "status")->valueint == status);
+        assert(!strcmp(rest_string(json, "detail"), detail));
+        assert(!strcmp(rest_string(json, "title"), status == 409 ? "Conflict" : "Service Unavailable"));
+    }
+    return json;
+}
+static void guard_enter_mode(br_core_mode_t mode, bool ready)
+{
+    mock_mode = mode;
+    mock_ot_ready = ready;
+    mock_ot_writes = 0;
+}
+static void guard_flip_to_sniffer(void)
+{
+    mock_ot_ready = false;
+    mock_mode = BR_MODE_SNIFFER;
+}
+static void test_guard_sniffer(void)
+{
+    static const struct {
+        httpd_method_t method;
+        const char *uri;
+        const char *body;
+    } writes[] = {
+        {HTTP_PUT, "/node/dataset/active", GUARD_DATASET},
+        {HTTP_PUT, "/node/dataset/pending", "{\"activeDataset\":{},\"delay\":30000}"},
+        {HTTP_PUT, "/node/state", "\"enable\""},
+        {HTTP_PUT, "/node/commissioner/state", "\"enable\""},
+        {HTTP_PUT, "/node/ba-epskc/state", "\"enable\""},
+        {HTTP_POST, "/node/ba-epskc/key", ""},
+        {HTTP_POST, "/api/actions", ""},
+        {HTTP_DELETE, "/node", NULL},
+    };
+    guard_enter_mode(BR_MODE_SNIFFER, false);
+    for (unsigned i = 0; i < sizeof(writes) / sizeof(writes[0]); i++) {
+        httpd_req_t req;
+        cJSON *json = guard_request(&req, writes[i].method, writes[i].uri, writes[i].body, 409, "sniffer active");
+        release(&req, json);
+    }
+    assert(mock_ot_writes == 0);
+    httpd_req_t req = request(HTTP_GET, "/node/state", NULL, NULL, NULL);
+    cJSON *json = run_request(&req, 503); /* Thread REST reads are off in the sniffer (OpenThread switched off) */
+    release(&req, json);
+    req = request(HTTP_GET, "/.well-known/thread/br-rest", NULL, NULL, NULL);
+    json = run_request(&req, 200);
+    release(&req, json);
+    guard_enter_mode(BR_MODE_BR_RUNNING, true);
+}
+static void test_guard_radio_fault(void)
+{
+    guard_enter_mode(BR_MODE_RADIO_FAULT, false);
+    httpd_req_t req;
+    cJSON *json = guard_request(&req, HTTP_PUT, "/node/dataset/active", GUARD_DATASET, 503, "radio not available");
+    release(&req, json);
+    json = guard_request(&req, HTTP_GET, "/node/state", NULL, 503, "radio not available");
+    release(&req, json);
+    assert(mock_ot_writes == 0);
+    req = request(HTTP_GET, "/.well-known/thread/br-rest", NULL, NULL, NULL);
+    json = run_request(&req, 200);
+    release(&req, json);
+    guard_enter_mode(BR_MODE_BR_RUNNING, true);
+}
+static void test_guard_br_running(void)
+{
+    guard_enter_mode(BR_MODE_BR_RUNNING, true);
+    httpd_req_t req = request(HTTP_PUT, "/node/state", "\"enable\"", NULL, "application/json");
+    cJSON *json = run_request(&req, 200);
+    assert(mock_ot_writes > 0);
+    release(&req, json);
+    req = request(HTTP_PUT, "/node/state", "\"disable\"", NULL, "application/json");
+    json = run_request(&req, 200);
+    release(&req, json);
+    req = request(HTTP_GET, "/node/state", NULL, NULL, NULL);
+    json = run_request(&req, 200);
+    release(&req, json);
+}
+static void test_guard_mode_change_while_waiting_for_the_lock(void)
+{
+    /* The sniffer starts after the pre-check and before the handler holds the OpenThread lock. */
+    guard_enter_mode(BR_MODE_BR_RUNNING, true);
+    mock_on_lock = guard_flip_to_sniffer;
+    httpd_req_t req;
+    cJSON *json = guard_request(&req, HTTP_PUT, "/node/dataset/active", GUARD_DATASET, 409, "sniffer active");
+    release(&req, json);
+    assert(mock_mode == BR_MODE_SNIFFER && mock_ot_writes == 0);
+    guard_enter_mode(BR_MODE_BR_RUNNING, true);
+}
+static void test_guard_background_poll(void)
+{
+    /* The background poll starts queued actions only where Thread changes are allowed. */
+    guard_enter_mode(BR_MODE_BR_RUNNING, true);
+    httpd_req_t req = request(HTTP_PUT, "/node/commissioner/state", "\"enable\"", NULL, "application/json");
+    cJSON *json = run_request(&req, 200);
+    release(&req, json);
+    const char *body =
+        "{\"data\":[{\"type\":\"addThreadDeviceTask\",\"attributes\":{\"pskd\":\"ABC123\",\"joinerId\":\"*\"}}]}";
+    req = request(HTTP_POST, "/api/actions", body, NULL, THREAD_REST_JSON_API);
+    json = run_request(&req, 200);
+    release(&req, json);
+    thread_rest_item_t *action = s_rest_actions;
+    guard_enter_mode(BR_MODE_SNIFFER, false);
+    rest_poll_guarded();
+    assert(!action->active && !action->joiner_registered && mock_ot_writes == 0);
+    guard_enter_mode(BR_MODE_RADIO_FAULT, false);
+    rest_poll_guarded();
+    assert(!action->active && !action->joiner_registered && mock_ot_writes == 0);
+    guard_enter_mode(BR_MODE_BR_RUNNING, true);
+    rest_poll_guarded();
+    assert(action->joiner_registered);
+    rest_collection_delete(&s_rest_actions, NULL, esp_openthread_get_instance());
+}
+/* Patch 2: the worker never touches the OpenThread lock (it may be deleted during a radio push) while not ready. */
+static void test_worker_does_not_touch_the_lock_when_not_ready(void)
+{
+    guard_enter_mode(BR_MODE_BR_RUNNING, false);
+    unsigned before = mock_lock_acquires;
+    rest_process_once();
+    assert(mock_lock_acquires == before);
+    guard_enter_mode(BR_MODE_RADIO_FAULT, false);
+    rest_process_once();
+    assert(mock_lock_acquires == before);
+}
+static void test_worker_polls_under_the_lock_when_ready(void)
+{
+    guard_enter_mode(BR_MODE_BR_RUNNING, true);
+    unsigned before = mock_lock_acquires;
+    rest_process_once();
+    assert(mock_lock_acquires == before + 1);
+}
+/* Patch 12: a request the per-interface policy refuses never reaches the dispatcher; GET/HEAD read, the rest writes. */
+static void test_netcfg_gate(void)
+{
+    const struct {
+        httpd_method_t method;
+        netcfg_service_t service;
+    } rows[] = {{HTTP_GET, NETCFG_SVC_REST_READ}, {HTTP_HEAD, NETCFG_SVC_REST_READ}, {HTTP_PUT, NETCFG_SVC_REST_WRITE},
+                {HTTP_POST, NETCFG_SVC_REST_WRITE}, {HTTP_DELETE, NETCFG_SVC_REST_WRITE}};
+    for (unsigned i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
+        httpd_req_t req = request(rows[i].method, "/node/state", "", NULL, NULL);
+        mock_netcfg_deny = true;
+        assert(esp_otbr_thread_rest_handler(&req) == ESP_FAIL);
+        assert(mock_netcfg_last_service == rows[i].service && req.status == NULL);
+        cJSON_Delete(req.headers);
+        mock_netcfg_deny = false;
+    }
+}
+
 int main(void)
 {
     mock_reset();
@@ -275,6 +432,14 @@ int main(void)
     test_dataset();
     test_actions();
     test_commissioner_and_energy();
+    test_guard_br_running();
+    test_guard_sniffer();
+    test_guard_radio_fault();
+    test_guard_mode_change_while_waiting_for_the_lock();
+    test_guard_background_poll();
+    test_worker_does_not_touch_the_lock_when_not_ready();
+    test_worker_polls_under_the_lock_when_ready();
+    test_netcfg_gate();
     rest_collection_delete(&s_rest_actions, NULL, esp_openthread_get_instance());
     rest_collection_delete(&s_rest_devices, NULL, esp_openthread_get_instance());
     rest_collection_delete(&s_rest_diagnostics, NULL, esp_openthread_get_instance());

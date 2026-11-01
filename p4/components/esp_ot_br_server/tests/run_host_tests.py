@@ -28,6 +28,7 @@ def functions(node, result):
 def main():
     api = (ROOT / 'src/esp_br_web_api.c').read_text()
     web = (ROOT / 'src/esp_br_web.c').read_text()
+    web_full = web
     base = (ROOT / 'src/esp_br_web_base.c').read_text()
     header = (ROOT / 'private_include/esp_br_web_api.h').read_text()
     state = api[api.index('static const char s_ot_state'):api.index('/*------', api.index('static const char s_ot_state'))]
@@ -73,12 +74,16 @@ def main():
             mocks += f'{result} {name}({signature}) {{ {body} }}\n'
         (directory / 'openthread_mock.c').write_text(mocks)
         (directory / 'rest_api.inc').write_text(header + '\n' + base + '\n' + api)
-        (directory / 'rest_web.inc').write_text(web)
+        # Definitions the slice needs from before it (route slot counts, the patch 12 gate macro) are taken from the source.
+        slot_defines = re.findall(r'^#define REST_(?:PATH_COUNT|METHOD_COUNT|ROUTE_SLOTS)\b.*$', web_full, re.M)
+        gate = re.search(r'#define NETCFG_GATE\(.*?while \(0\)', web_full, re.S).group(0)
+        (directory / 'rest_web.inc').write_text('\n'.join(slot_defines) + '\n' + gate + '\n' + web)
         flags = ['-std=gnu11', '-O1', '-g', '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
-                 '-I', ROOT / 'tests', '-I', directory, '-I', OT, '-I', cjson]
+                 '-I', ROOT / 'tests', '-I', directory, '-I', OT, '-I', cjson,
+                 '-I', ROOT / 'private_include', '-I', ROOT.parent / 'br_core/include']
         binary = directory / 'test_rest'
         run(['gcc', *flags, ROOT / 'tests/test_rest.c', ROOT / 'tests/host_platform.c',
-             directory / 'openthread_mock.c', cjson / 'cJSON.c', '-lm', '-o', binary])
+             directory / 'openthread_mock.c', ROOT / 'src/esp_br_guard.c', cjson / 'cJSON.c', '-lm', '-o', binary])
         run([binary])
 
 
