@@ -1,111 +1,161 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 480" width="1200" height="480" role="img"
-     aria-label="Thread devices talk over an 802.15.4 mesh to the ESP32-C6 radio on the board; the ESP32-P4 border router bridges them over Ethernet and PoE to Home Assistant, the web UI and the internet">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 440" width="1200" height="440" role="img"
+     aria-label="Matter and Thread devices reach the ESP32-C6 radio over 802.15.4; the ESP32-P4 border router on the same board bridges them over Ethernet and PoE to Home Assistant, Matter controllers, Wireshark captures and the web UI">
+  <!-- Teal is radio (air), copper is wire. The board looks the same in both colour schemes. -->
   <style>
     :root {
-      --bg: #f7f8fa; --card: #ffffff; --line: #d9dde3; --text: #1f2328; --muted: #656d76;
-      --thread: #12a594; --thread-soft: #d7f2ee; --accent: #f08c00; --accent-soft: #fff1dc;
-      --net: #3b6fd8; --net-soft: #e2ebfb; --pcb: #1d4a3a; --pcb-edge: #143528; --chip: #2b2f36; --chip-text: #f2f4f7; --antenna: #2b2f36;
+      --bg: #eef2f4; --ink: #17222c; --quiet: #5d6b77; --air: #12968f; --air-fill: #ffffff;
+      --cable: #2b3742; --antenna: #2b3742; --wireshark: #1679a7;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #0d1117; --card: #161b22; --line: #30363d; --text: #e6edf3; --muted: #8d96a0;
-        --thread: #2fc9b4; --thread-soft: #10302c; --accent: #ffa733; --accent-soft: #3a2a12;
-        --net: #6b9bff; --net-soft: #152544; --pcb: #1f5240; --pcb-edge: #3b7a63; --chip: #0d1117; --chip-text: #e6edf3; --antenna: #8d96a0;
+        --bg: #0f1a24; --ink: #e7ecef; --quiet: #91a0ab; --air: #3cc7bb; --air-fill: #0f1a24;
+        --cable: #4a5b69; --antenna: #8fa0ad; --wireshark: #4ba3d6;
       }
     }
-    text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--text); }
-    .muted { fill: var(--muted); }
-    .zone { font-size: 13px; font-weight: 700; letter-spacing: 0.12em; fill: var(--muted); }
-    .title { font-size: 16px; font-weight: 700; }
-    .sub { font-size: 13px; fill: var(--muted); }
-    .chip-name { font-size: 15px; font-weight: 700; fill: var(--chip-text); }
-    .chip-sub { font-size: 12px; fill: var(--chip-text); opacity: 0.75; }
-    .pill { font-size: 13px; font-weight: 600; }
-    .mesh { stroke: var(--thread); stroke-width: 2; stroke-dasharray: 5 5; fill: none; opacity: 0.7; }
-    .node { fill: var(--card); stroke: var(--thread); stroke-width: 2.5; }
-    .glyph { fill: none; stroke: var(--thread); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-    .wave { fill: none; stroke: var(--thread); stroke-width: 2.5; stroke-linecap: round; }
-    .cable { fill: none; stroke: var(--net); stroke-width: 4; stroke-linecap: round; }
-    .card { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
-    .icon { fill: none; stroke: var(--net); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    text { font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif; fill: var(--ink); }
+    .name { font-size: 17px; font-weight: 650; }
+    .note { font-size: 13.5px; fill: var(--quiet); }
+    .silk { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; fill: #e9e4d4; letter-spacing: 0.04em; }
+    .mark { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 10.5px; fill: #8e979f; }
+    .ring { fill: none; stroke: var(--air); stroke-width: 1.5; }
+    .link { stroke: var(--air); stroke-width: 1.6; opacity: 0.7; }
+    .child { stroke: var(--air); stroke-width: 1.3; stroke-dasharray: 3 4; opacity: 0.7; }
+    .router { fill: var(--air); }
+    .halo { fill: var(--air); opacity: 0.14; }
+    .end { fill: var(--air-fill); stroke: var(--air); stroke-width: 2; }
+    .copper { stroke: #d39a52; stroke-width: 2; stroke-linecap: round; fill: none; }
+    .pin { stroke: #c9a46a; stroke-width: 2; }
+    .icon { fill: none; stroke: var(--ink); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   </style>
 
-  <rect width="1200" height="480" rx="24" fill="var(--bg)"/>
+  <rect width="1200" height="440" rx="20" fill="var(--bg)"/>
 
-  <!-- Thread mesh -->
-  <text class="zone" x="200" y="56" text-anchor="middle">THREAD MESH</text>
-  <path class="mesh" d="M110 150 L230 120 L320 205 L200 255 L110 150 M200 255 L95 330 L215 370 L320 205 M230 120 L200 255 M215 370 L200 255"/>
-  <g transform="translate(110 150)"><circle class="node" r="26"/>
-    <path class="glyph" d="M0 -11 a8 8 0 0 1 5 14 v4 h-10 v-4 a8 8 0 0 1 5 -14 M-4 11 h8"/></g>
-  <g transform="translate(230 120)"><circle class="node" r="26"/>
-    <path class="glyph" d="M-2 -12 a3 3 0 0 1 4 0 v13 a6 6 0 1 1 -4 0 z M0 4 v-8"/></g>
-  <g transform="translate(320 205)"><circle class="node" r="26"/>
-    <path class="glyph" d="M-8 -1 h16 v12 h-16 z M-5 -1 v-5 a5 5 0 0 1 10 0 v5 M0 4 v3"/></g>
-  <g transform="translate(200 255)"><circle class="node" r="26"/>
-    <path class="glyph" d="M-9 -9 h18 v18 h-18 z M-9 -3 h18 M-9 3 h18"/></g>
-  <g transform="translate(95 330)"><circle class="node" r="26"/>
-    <path class="glyph" d="M-4 -11 v6 M4 -11 v6 M-8 -5 h16 v5 a8 8 0 0 1 -16 0 z M0 8 v4"/></g>
-  <g transform="translate(215 370)"><circle class="node" r="26"/>
-    <path class="glyph" d="M-10 2 a12 12 0 0 1 20 0 M-6 6 a7 7 0 0 1 12 0 M0 10 v0.5"/></g>
-  <text class="title" x="200" y="425" text-anchor="middle">Lights, sensors, locks, plugs</text>
-  <text class="sub" x="200" y="447" text-anchor="middle">IEEE 802.15.4 · Matter over Thread</text>
+  <!-- radio field: rings from the antenna tip across the mesh -->
+  <g>
+    <path class="ring" opacity="0.42" d="M392.7 61.7 A70 70 0 0 0 447.4 120.5"/>
+    <path class="ring" opacity="0.3" d="M323.4 71.5 A140 140 0 0 0 432.9 188.9"/>
+    <path class="ring" opacity="0.2" d="M249.1 81.9 A215 215 0 0 0 417.3 262.3"/>
+    <path class="ring" opacity="0.13" d="M174.8 92.4 A290 290 0 0 0 401.7 335.7"/>
+    <path class="ring" opacity="0.08" d="M100.6 102.8 A365 365 0 0 0 386.1 409.0"/>
+  </g>
 
-  <!-- radio waves from the antenna toward the mesh -->
-  <path class="wave" d="M452 78 a22 22 0 0 0 0 34" opacity="0.9"/>
-  <path class="wave" d="M438 66 a40 40 0 0 0 0 58" opacity="0.6"/>
-  <path class="wave" d="M424 54 a58 58 0 0 0 0 82" opacity="0.35"/>
+  <!-- Thread mesh: filled routers, hollow end devices on dashed links to their parent -->
+  <g>
+    <line class="link" x1="196" y1="118" x2="318" y2="168"/>
+    <line class="link" x1="196" y1="118" x2="150" y2="252"/>
+    <line class="link" x1="318" y1="168" x2="268" y2="296"/>
+    <line class="link" x1="150" y1="252" x2="268" y2="296"/>
+    <line class="link" x1="318" y1="168" x2="150" y2="252"/>
+    <line class="child" x1="196" y1="118" x2="98" y2="150"/>
+    <line class="child" x1="196" y1="118" x2="262" y2="72"/>
+    <line class="child" x1="318" y1="168" x2="372" y2="236"/>
+    <line class="child" x1="150" y1="252" x2="74" y2="276"/>
+    <line class="child" x1="268" y1="296" x2="214" y2="352"/>
+    <line class="child" x1="268" y1="296" x2="338" y2="336"/>
+    <line class="child" x1="150" y1="252" x2="122" y2="338"/>
+    <circle class="halo" cx="196" cy="118" r="17"/><circle class="router" cx="196" cy="118" r="9"/>
+    <circle class="halo" cx="318" cy="168" r="17"/><circle class="router" cx="318" cy="168" r="9"/>
+    <circle class="halo" cx="150" cy="252" r="17"/><circle class="router" cx="150" cy="252" r="9"/>
+    <circle class="halo" cx="268" cy="296" r="17"/><circle class="router" cx="268" cy="296" r="9"/>
+    <circle class="end" cx="98" cy="150" r="6"/><circle class="end" cx="262" cy="72" r="6"/>
+    <circle class="end" cx="372" cy="236" r="6"/><circle class="end" cx="74" cy="276" r="6"/>
+    <circle class="end" cx="214" cy="352" r="6"/><circle class="end" cx="338" cy="336" r="6"/>
+    <circle class="end" cx="122" cy="338" r="6"/>
+  </g>
+  <text class="name" x="60" y="398">Matter and Thread devices</text>
+  <text class="note" x="60" y="420">Lights, sensors, locks and plugs on an 802.15.4 mesh</text>
+
+  <!-- antenna -->
+  <rect x="456" y="44" width="12" height="96" rx="6" fill="var(--antenna)"/>
 
   <!-- the board -->
-  <text class="zone" x="625" y="56" text-anchor="middle">ONE POE BOARD</text>
-  <rect x="470" y="70" width="12" height="70" rx="3" fill="var(--antenna)"/>
-  <circle cx="476" cy="70" r="7" fill="var(--antenna)"/>
-  <rect x="440" y="130" width="370" height="230" rx="18" fill="var(--pcb)" stroke="var(--pcb-edge)" stroke-width="2"/>
-  <g fill="var(--pcb-edge)">
-    <circle cx="460" cy="150" r="7"/><circle cx="790" cy="150" r="7"/><circle cx="460" cy="340" r="7"/><circle cx="790" cy="340" r="7"/>
+  <rect x="430" y="122" width="372" height="214" rx="14" fill="#0e3b43" stroke="#0a2c32" stroke-width="2"/>
+  <rect x="440" y="132" width="352" height="194" rx="8" fill="none" stroke="#e9e4d4" stroke-width="1" opacity="0.18"/>
+  <g fill="#c9a46a">
+    <circle cx="452" cy="144" r="8"/><circle cx="780" cy="144" r="8"/><circle cx="452" cy="314" r="8"/><circle cx="780" cy="314" r="8"/>
   </g>
-  <g fill="#c9a227" opacity="0.8">
-    <circle cx="560" cy="342" r="3"/><circle cx="574" cy="342" r="3"/><circle cx="588" cy="342" r="3"/><circle cx="602" cy="342" r="3"/>
-    <circle cx="616" cy="342" r="3"/><circle cx="630" cy="342" r="3"/><circle cx="644" cy="342" r="3"/><circle cx="658" cy="342" r="3"/>
-    <circle cx="672" cy="342" r="3"/><circle cx="686" cy="342" r="3"/>
+  <g fill="var(--bg)">
+    <circle cx="452" cy="144" r="4"/><circle cx="780" cy="144" r="4"/><circle cx="452" cy="314" r="4"/><circle cx="780" cy="314" r="4"/>
   </g>
-  <!-- C6 -->
-  <rect x="468" y="190" width="120" height="108" rx="10" fill="var(--chip)" stroke="var(--thread)" stroke-width="2.5"/>
-  <text class="chip-name" x="528" y="236" text-anchor="middle">ESP32-C6</text>
-  <text class="chip-sub" x="528" y="256" text-anchor="middle">802.15.4 radio</text>
-  <text class="chip-sub" x="528" y="273" text-anchor="middle">(RCP)</text>
-  <path d="M476 140 v50" stroke="var(--antenna)" stroke-width="4"/>
-  <!-- SPI link -->
-  <path d="M588 244 h46" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/>
-  <text x="611" y="234" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent)">SPI</text>
-  <!-- P4 -->
-  <rect x="634" y="176" width="138" height="136" rx="12" fill="var(--chip)" stroke="var(--accent)" stroke-width="2.5"/>
-  <text class="chip-name" x="703" y="234" text-anchor="middle">ESP32-P4</text>
-  <text class="chip-sub" x="703" y="254" text-anchor="middle">OpenThread</text>
-  <text class="chip-sub" x="703" y="271" text-anchor="middle">border router</text>
-  <!-- RJ45 -->
-  <rect x="796" y="218" width="34" height="52" rx="4" fill="#b8c0c8" stroke="#8a939c" stroke-width="2"/>
-  <rect x="804" y="232" width="18" height="24" rx="2" fill="#5b636b"/>
-  <text class="title" x="625" y="398" text-anchor="middle">Waveshare ESP32-P4-WIFI6-POE-ETH</text>
-  <text class="sub" x="625" y="420" text-anchor="middle">no Raspberry Pi, no USB dongle, no Wi-Fi</text>
+  <!-- pin header -->
+  <g fill="#c9a46a">
+    <circle cx="596" cy="146" r="3"/><circle cx="608" cy="146" r="3"/><circle cx="620" cy="146" r="3"/><circle cx="632" cy="146" r="3"/>
+    <circle cx="644" cy="146" r="3"/><circle cx="656" cy="146" r="3"/><circle cx="668" cy="146" r="3"/><circle cx="680" cy="146" r="3"/>
+    <circle cx="692" cy="146" r="3"/><circle cx="704" cy="146" r="3"/><circle cx="716" cy="146" r="3"/><circle cx="728" cy="146" r="3"/>
+  </g>
+  <!-- antenna connector and its trace to the C6 -->
+  <circle cx="462" cy="176" r="6" fill="#c9a46a"/><circle cx="462" cy="176" r="2.5" fill="#0e3b43"/>
+  <path class="copper" d="M462 182 V226 H484"/>
 
-  <!-- Ethernet to the network -->
-  <text class="zone" x="1045" y="56" text-anchor="middle">YOUR NETWORK</text>
-  <path class="cable" d="M830 244 H880 C895 244 900 238 900 225 V150 C900 140 905 135 915 135 H930 M900 244 H930 M900 225 V340 C900 350 905 355 915 355 H930"/>
-  <text x="866" y="270" text-anchor="middle" font-size="12" font-weight="700" fill="var(--net)">Ethernet</text>
-  <text x="866" y="286" text-anchor="middle" font-size="12" font-weight="700" fill="var(--net)">+ PoE</text>
+  <!-- C6: radio -->
+  <g class="pin">
+    <path d="M498 182 v-6 M510 182 v-6 M522 182 v-6 M534 182 v-6 M546 182 v-6 M558 182 v-6 M570 182 v-6"/>
+    <path d="M498 268 v6 M510 268 v6 M522 268 v6 M534 268 v6 M546 268 v6 M558 268 v6 M570 268 v6"/>
+    <path d="M490 192 h-6 M490 204 h-6 M490 216 h-6 M490 228 h-6 M490 240 h-6 M490 252 h-6"/>
+    <path d="M578 192 h6 M578 204 h6 M578 216 h6 M578 228 h6 M578 240 h6 M578 252 h6"/>
+  </g>
+  <rect x="490" y="182" width="88" height="86" rx="5" fill="#15191e"/>
+  <circle cx="499" cy="191" r="2.5" fill="#3a4148"/>
+  <text class="mark" x="534" y="222" text-anchor="middle">ESP32-C6</text>
+  <text class="mark" x="534" y="238" text-anchor="middle">802.15.4</text>
 
-  <rect class="card" x="930" y="100" width="248" height="70" rx="14"/>
-  <path class="icon" d="M954 141 l14 -12 l14 12 M958 138 v14 h20 v-14"/>
-  <text class="title" x="996" y="131">Home Assistant</text>
-  <text class="sub" x="996" y="151">Thread REST API</text>
+  <!-- SPI: clock, MOSI, MISO, chip select -->
+  <path class="copper" d="M584 213 H636 M584 221 H636 M584 229 H636 M584 237 H636"/>
+  <text class="silk" x="610" y="204" text-anchor="middle">SPI</text>
 
-  <rect class="card" x="930" y="209" width="248" height="70" rx="14"/>
-  <path class="icon" d="M952 232 h32 v24 h-32 z M952 239 h32 M956 235.5 h0.5 M960 235.5 h0.5"/>
-  <text class="title" x="996" y="240">Web UI</text>
-  <text class="sub" x="996" y="260">status · updates · sniffer</text>
+  <!-- P4: border router -->
+  <g class="pin">
+    <path d="M652 170 v-6 M664 170 v-6 M676 170 v-6 M688 170 v-6 M700 170 v-6 M712 170 v-6 M724 170 v-6 M736 170 v-6"/>
+    <path d="M652 280 v6 M664 280 v6 M676 280 v6 M688 280 v6 M700 280 v6 M712 280 v6 M724 280 v6 M736 280 v6"/>
+    <path d="M642 182 h-6 M642 194 h-6 M642 206 h-6 M642 218 h-6 M642 230 h-6 M642 242 h-6 M642 254 h-6 M642 266 h-6"/>
+    <path d="M746 182 h6 M746 194 h6 M746 206 h6 M746 218 h6 M746 230 h6 M746 242 h6 M746 254 h6 M746 266 h6"/>
+  </g>
+  <rect x="642" y="170" width="104" height="110" rx="5" fill="#15191e"/>
+  <circle cx="651" cy="179" r="2.5" fill="#3a4148"/>
+  <text class="mark" x="694" y="222" text-anchor="middle">ESP32-P4</text>
+  <text class="mark" x="694" y="238" text-anchor="middle">OpenThread</text>
 
-  <rect class="card" x="930" y="320" width="248" height="70" rx="14"/>
-  <path class="icon" d="M968 343 a12 12 0 1 0 0.01 0 M956 355 h24 M968 343 c-6 6 -6 18 0 24 c6 -6 6 -18 0 -24"/>
-  <text class="title" x="996" y="351">Internet</text>
-  <text class="sub" x="996" y="371">IPv6 · NAT64 · DHCPv6-PD</text>
+  <!-- Ethernet: two pairs to the jack -->
+  <path class="copper" d="M752 213 H772 M752 221 H772 M752 229 H772 M752 237 H772"/>
+  <rect x="772" y="194" width="46" height="62" rx="4" fill="#b9c2c9" stroke="#8e99a2" stroke-width="2"/>
+  <rect x="783" y="207" width="26" height="34" rx="2" fill="#4e575f"/>
+  <path d="M789 241 v-6 M794 241 v-6 M799 241 v-6 M804 241 v-6" stroke="#c9a46a" stroke-width="1.5"/>
+  <text class="silk" x="790" y="278" text-anchor="end">PoE</text>
+  <text class="silk" x="470" y="300">ESP32-P4-WIFI6-POE-ETH</text>
+
+  <text class="name" x="616" y="376" text-anchor="middle">One PoE board</text>
+  <text class="note" x="616" y="398" text-anchor="middle">ESP32-P4 border router with an ESP32-C6 radio</text>
+
+  <!-- the cable, with its copper core, branching to the network -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M818 225 H870 M870 225 C896 225 898 112 920 112 H936 M870 225 C896 225 898 187 920 187 H936 M870 225 C896 225 898 262 920 262 H936 M870 225 C896 225 898 337 920 337 H936" stroke="var(--cable)" stroke-width="9"/>
+    <path d="M818 225 H870 M870 225 C896 225 898 112 920 112 H936 M870 225 C896 225 898 187 920 187 H936 M870 225 C896 225 898 262 920 262 H936 M870 225 C896 225 898 337 920 337 H936" stroke="#d39a52" stroke-width="2.2"/>
+  </g>
+  <g fill="#d39a52"><circle cx="938" cy="112" r="5"/><circle cx="938" cy="187" r="5"/><circle cx="938" cy="262" r="5"/><circle cx="938" cy="337" r="5"/></g>
+
+  <!-- Home Assistant and Wireshark marks: Simple Icons 13.21.0 (CC0-1.0); the trademarks belong to their owners.
+       The Matter controller gets a generic QR code (Matter's own mark is for certified products only). -->
+  <path transform="translate(962 98) scale(1.1667)" fill="#18bcf2" d="M22.939 10.627 13.061.749a1.505 1.505 0 0 0-2.121 0l-9.879 9.878C.478 11.21 0 12.363 0 13.187v9c0 .826.675 1.5 1.5 1.5h9.227l-4.063-4.062a2.034 2.034 0 0 1-.664.113c-1.13 0-2.05-.92-2.05-2.05s.92-2.05 2.05-2.05 2.05.92 2.05 2.05c0 .233-.041.456-.113.665l3.163 3.163V9.928a2.05 2.05 0 0 1-1.15-1.84c0-1.13.92-2.05 2.05-2.05s2.05.92 2.05 2.05a2.05 2.05 0 0 1-1.15 1.84v8.127l3.146-3.146A2.051 2.051 0 0 1 18 12.239c1.13 0 2.05.92 2.05 2.05s-.92 2.05-2.05 2.05c-.25 0-.488-.047-.709-.13L12.9 20.602v3.088h9.6c.825 0 1.5-.675 1.5-1.5v-9c0-.825-.477-1.977-1.061-2.561z"/>
+  <text class="name" x="1006" y="109">Home Assistant</text>
+  <text class="note" x="1006" y="129">Sets up the Thread network</text>
+
+  <g transform="translate(962 173)" fill="var(--ink)">
+    <path d="M0 0 h10 v10 h-10 z M3 3 v4 h4 v-4 z M18 0 h10 v10 h-10 z M21 3 v4 h4 v-4 z M0 18 h10 v10 h-10 z M3 21 v4 h4 v-4 z" fill-rule="evenodd"/>
+    <rect x="13" y="1" width="3" height="3"/><rect x="13" y="7" width="3" height="5"/><rect x="1" y="13" width="5" height="3"/>
+    <rect x="9" y="13" width="4" height="3"/><rect x="16" y="13" width="3" height="5"/><rect x="22" y="13" width="5" height="3"/>
+    <rect x="13" y="19" width="3" height="3"/><rect x="19" y="21" width="3" height="3"/><rect x="25" y="19" width="3" height="5"/>
+    <rect x="13" y="25" width="5" height="3"/><rect x="21" y="25" width="3" height="3"/>
+  </g>
+  <text class="name" x="1006" y="184">Matter controller</text>
+  <text class="note" x="1006" y="204">Pairs and controls devices</text>
+
+  <path transform="translate(962 248) scale(1.1667)" fill="var(--wireshark)" d="m2.95 0c-1.62 0-2.95 1.32-2.95 2.95v18.1c0 1.63 1.32 2.95 2.95 2.95h18.1c1.62 0 2.95-1.32 2.95-2.95v-18.1c-.00024-1.63-1.32-2.95-2.95-2.95zm0 1.09h18.1c1.04 0 1.85.818 1.85 1.86v14h-5.27c-.335-.796-2.57-6.47.283-10.9a.516.517 0 0 0-.443-.794c-5.24.0827-8.2 3.19-9.74 6.21-1.35 2.64-1.63 4.91-1.69 5.53h-4.95v-14c0-1.04.817-1.86 1.85-1.86zm13.6 5.24c-2.62 5.24.248 11.4.248 11.4a.516.517 0 0 0 .469.301h5.62v3.05c0 1.04-.817 1.86-1.85 1.86h-18.1c-1.04 0-1.85-.818-1.85-1.86v-3.05h5.39a.516.517 0 0 0 .514-.477s.226-2.8 1.66-5.62c1.34-2.62 3.67-5.17 7.91-5.57z"/>
+  <text class="name" x="1006" y="259">Wireshark</text>
+  <text class="note" x="1006" y="279">Live 802.15.4 capture</text>
+
+  <path class="icon" d="M965 324 h22 a3 3 0 0 1 3 3 v20 a3 3 0 0 1 -3 3 h-22 a3 3 0 0 1 -3 -3 v-20 a3 3 0 0 1 3 -3 z M962 330 h28 M968 337 h16 M968 343 h16"/>
+  <circle cx="979" cy="337" r="2.4" fill="var(--bg)" stroke="var(--ink)" stroke-width="1.8"/>
+  <circle cx="972" cy="343" r="2.4" fill="var(--bg)" stroke="var(--ink)" stroke-width="1.8"/>
+  <text class="name" x="1006" y="334">Web UI</text>
+  <text class="note" x="1006" y="354">Status, updates, network</text>
 </svg>
