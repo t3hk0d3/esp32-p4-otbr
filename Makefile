@@ -1,0 +1,106 @@
+# Entry point for building, flashing, updating and testing. `make help` lists the targets.
+# The ESP-IDF environment is activated per command when idf.py is not on PATH already (IDF_EXPORT).
+
+SHELL := bash
+.SHELLFLAGS := -euo pipefail -c
+.DEFAULT_GOAL := help
+
+IDF_VERSION := $(shell cat IDF_VERSION)
+IDF_EXPORT ?= $(HOME)/esp/esp-idf-$(IDF_VERSION)/export.sh
+PORT ?= /dev/ttyACM0
+C6_PORT ?= /dev/ttyUSB0
+BOARD ?=
+DIST ?= dist
+PYTEST ?= uvx --with requests pytest
+TARGET_PYTEST ?= .venv/bin/pytest
+TEST ?=
+MARK ?=
+TIMEOUT ?= 900
+
+IDF := $(if $(shell command -v idf.py),,. "$(IDF_EXPORT)" >/dev/null &&)
+board_url = $(if $(BOARD),http://$(BOARD),$(error set BOARD=<board address>, e.g. make $@ BOARD=192.168.1.50))
+
+.PHONY: help build build-test reconfigure clean flash monitor erase c6-flash-base bundle package ota radio recover \
+	status test test-host test-vendored test-tools test-target lint
+
+help: ## List the targets
+	@awk -F':.*## ' '/^[a-z0-9-]+:.*## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo
+	@echo "Variables: PORT=$(PORT) C6_PORT=$(C6_PORT) BOARD=<address> DIST=$(DIST) TEST=<test file> MARK=<marker>"
+
+# --- build ---
+
+build: ## Release build of c6_updater, c6_rcp and p4
+	$(IDF) tools/build_all.sh
+
+build-test: ## Test build (adds the test-only console commands; never ship it)
+	$(IDF) tools/build_all.sh --test
+
+reconfigure: ## Refresh the P4 version stamp (the -dirty flag is as of the last configure)
+	$(IDF) idf.py -C p4 reconfigure
+
+clean: ## Remove all build directories and dist/
+	rm -rf c6_updater/build c6_rcp/build p4/build $(DIST)
+	find . -path ./.venv -prune -o -type d -name build -path '*/test_host/build' -print0 | xargs -0 rm -rf
+
+# --- flash over USB ---
+
+flash: ## Flash the P4 over USB (bootloader, partition table, app, web UI); the C6 is not touched
+	$(IDF) idf.py -C p4 -p $(PORT) flash
+
+monitor: ## Open the P4 console (115200 baud)
+	$(IDF) idf.py -C p4 -p $(PORT) monitor
+
+erase: ## Erase the whole P4 flash, including the Thread dataset and network config
+	$(IDF) idf.py -C p4 -p $(PORT) erase-flash
+
+c6-flash-base: ## No-jumper install: erase the C6 and write its base images over a USB-UART on H7 (C6_PORT)
+	cd c6_updater/build && $(IDF) esptool --chip esp32c6 -p $(C6_PORT) --before no-reset --after no-reset erase-flash
+	cd c6_updater/build && $(IDF) esptool --chip esp32c6 -p $(C6_PORT) --before no-reset --after no-reset write-flash \
+		$$(head -n 1 flash_args) 0x0 bootloader/bootloader.bin 0x8000 partition_table/partition-table.bin \
+		$$(awk -F', *' '$$1 == "test" {print $$4}' ../../common/c6_board/partitions_c6.csv) c6_updater.bin
+
+# --- release files and updates over the network ---
+
+bundle: ## Build the P4 OTA bundle dist/otbr.bundle from the current build
+	mkdir -p $(DIST)
+	tools/make_bundle.py --web p4/build/web_0.bin --app p4/build/p4.bin --out $(DIST)/otbr.bundle
+
+package: ## Collect all release files into dist/ (what CI publishes)
+	$(IDF) tools/package_release.sh $(DIST)
+
+ota: bundle ## Update the P4 app and web UI over the network (BOARD)
+	curl --fail-with-body --data-binary @$(DIST)/otbr.bundle $(board_url)/device/ota
+	@echo
+
+radio: ## Upload the C6 radio firmware c6_rcp/build/c6_rcp.bin (BOARD)
+	curl --fail-with-body --data-binary @c6_rcp/build/c6_rcp.bin $(board_url)/device/radio/firmware
+	@echo
+
+recover: ## Maintenance jumper: rewrite the C6 base image (BOARD)
+	curl --fail-with-body -X POST $(board_url)/device/radio/recover
+	@echo
+
+status: ## Show /device/status (BOARD)
+	curl --fail-with-body -s $(board_url)/device/status
+	@echo
+
+# --- tests ---
+
+test: test-host test-tools test-vendored ## All host-side tests (no board)
+
+test-host: ## Component host tests on the ESP-IDF linux target
+	$(IDF) tools/run_host_tests.sh
+
+test-tools: ## Tests of the tools and the device page script (needs node)
+	$(IDF) $(PYTEST) tools/tests -q
+
+test-vendored: ## Upstream esp_ot_br_server REST tests (needs clang++ and a p4 build for its managed components)
+	$(IDF) tools/run_vendored_rest_tests.sh
+
+test-target: ## On-board tests against a build-test image: TEST=<file or node id>, MARK=<marker> (slow)
+	$(if $(TEST),,$(error set TEST=<test file or node id>, e.g. make test-target TEST=p4/pytest/test_br_boot.py))
+	$(IDF) timeout $(TIMEOUT) $(TARGET_PYTEST) $(TEST) --port $(PORT) -p no:cacheprovider $(if $(MARK),-m $(MARK))
+
+lint: ## Format and lint checks (pre-commit)
+	uvx pre-commit run --all-files

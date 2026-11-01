@@ -27,7 +27,7 @@ foreach(input IN LISTS c6_inputs)
         # Also make CMake re-check once the file appears.
         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${input}")
         message(FATAL_ERROR "Missing C6 build output: ${input}\n"
-                            "Build the C6 projects first: run tools/build_all.sh")
+                            "Build the C6 projects first: run make build (tools/build_all.sh)")
     endif()
 endforeach()
 
