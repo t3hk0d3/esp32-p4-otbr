@@ -1,0 +1,102 @@
+# Host tests and release build on every push and pull request; a v* tag also publishes a GitHub release.
+# No board is involved: target tests (p4/pytest) run on the bench only.
+name: build
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.1 # keep in step with IDF_VERSION
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4 # the device page tests run device.js under node
+        with:
+          node-version: 22
+      - name: Component host tests
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          . "$IDF_PATH/export.sh"
+          tools/run_host_tests.sh
+      - name: Tooling tests
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          . "$IDF_PATH/export.sh"
+          python3 -m pip install -q pytest requests # into the IDF Python environment
+          python3 -m pytest tools/tests -q
+
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.1 # keep in step with IDF_VERSION
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packaging tools
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq zip >/dev/null
+      - name: Build c6_updater, c6_rcp, p4
+        run: |
+          # version.cmake reads the git hash; the checkout belongs to another user than the container's root
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          . "$IDF_PATH/export.sh"
+          tools/build_all.sh
+      - name: Vendored REST host tests
+        run: |
+          . "$IDF_PATH/export.sh"
+          tools/run_vendored_rest_tests.sh
+      - name: Package
+        run: |
+          . "$IDF_PATH/export.sh"
+          tools/package_release.sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [host-tests, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: dist
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          {
+            echo "## Versions"
+            echo
+            echo '```'
+            cat dist/versions.txt
+            echo '```'
+            echo
+            echo "## Files"
+            echo
+            echo "- \`otbr.bundle\`: P4 app and web UI, for an OTA update (device page \"Firmware update\" or \`POST /device/ota\`)."
+            echo "- \`c6_rcp.bin\`: C6 radio firmware from the same build (device page \"Radio firmware\" or \`POST /device/radio/firmware\`)."
+            echo "- \`p4-flash.zip\`: full P4 flash over USB: \`esptool --chip esp32p4 write-flash @flash_args\` inside the unpacked directory."
+            echo "- \`c6-updater-flash.zip\`: C6 base images for the no-jumper first install (see docs/first-install.md)."
+            echo "- \`third-party-licenses.zip\`: license texts of the code linked into the images."
+            echo "- \`SHA256SUMS\`: checksums of the files above."
+          } >notes.md
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes-file notes.md --verify-tag

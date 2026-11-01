@@ -316,6 +316,31 @@ change to them (patches 1 to 12) and the link-time mDNS filter for `espressif/md
   RTS reset.
 - Test builds add console commands (`p4/main/test_cmds.c`) that the target tests use; never ship them.
 
+## CI and releases
+
+`.github/workflows/build.yml` runs on every push to `master` and every pull request: the host tests
+(`tools/run_host_tests.sh`, `tools/run_vendored_rest_tests.sh`, `tools/tests`) and a release build of all three projects
+in the `espressif/idf` container of `IDF_VERSION`. `tools/package_release.sh` collects the images; the workflow keeps them
+as the `firmware` artifact of the run. No board is involved, the target tests stay on the bench.
+
+Pushing a `v*` tag also publishes a GitHub release with those files:
+
+```
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+| File | What |
+| --- | --- |
+| `otbr.bundle` | P4 app and web UI, for an OTA update |
+| `c6_rcp.bin` | C6 radio firmware from the same build |
+| `p4-flash.zip` | full P4 flash over USB: `esptool --chip esp32p4 write-flash @flash_args` in the unpacked directory |
+| `c6-updater-flash.zip` | C6 base images for the no-jumper first install |
+| `third-party-licenses.zip` | license texts of the code linked into the images |
+| `versions.txt`, `SHA256SUMS` | build versions and checksums |
+
+The firmware versions stay `<build timestamp>-<git hash>`; the tag only names the release.
+
 ## Known limitations and non-goals
 
 - No authentication or TLS anywhere: anybody on the network can reconfigure the board, read the Thread dataset with
