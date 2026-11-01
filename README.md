@@ -42,6 +42,7 @@ down, the others keep the network reachable.
 | --- | --- | --- | --- |
 | Border routers on one Thread network | ✅ as many as you like: add a board for each spot that needs coverage | ❌ one, since the add-on runs once per Home Assistant host | ❌ one, since the add-on runs once per Home Assistant host |
 | Border router keeps running when the Home Assistant host reboots or the add-on updates | ✅ yes | ❌ no | ❌ no |
+| Network setup | ✅ its own, on any VLAN; split mode keeps management and the Thread backbone on separate VLANs | ❌ the Home Assistant host's; another VLAN means reconfiguring the host | ❌ the Home Assistant host's; another VLAN means reconfiguring the host |
 | Radio placement | ✅ anywhere with Ethernet | ❌ at the Home Assistant host, on a USB extension cable | ✅ anywhere with Ethernet |
 | Link between border router and radio | ✅ on-board SPI | ✅ USB serial (passthrough needed in a VM) | ❌ spinel over TCP, sensitive to network delay |
 | Packet capture, radio recovery, diagnostics | ✅ built in | ❌ separate tools | ❌ separate tools |
