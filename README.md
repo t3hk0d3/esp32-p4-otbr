@@ -359,3 +359,12 @@ Other problems:
 - The board boots in `RADIO_FAULT` after a test: see Testing (`c6_hold 0`).
 - Recovery from a bad P4 flash: reflash over USB (`idf.py -C p4 -p /dev/ttyACM0 erase-flash flash`). See `docs/first-install.md`
   for C6 recovery.
+
+## License
+
+Copyright (C) 2026 Igor Yamolov. Licensed under the [GNU Affero General Public License v3.0 or later](LICENSE), with an
+additional permission to link Espressif's binary-only radio libraries (see [`NOTICE`](NOTICE)). If you run a modified
+version that other people use over the network (the web UI or the REST API), you must offer them its source code.
+
+The vendored esp-thread-br components stay under Apache-2.0 (`p4/components/esp_ot_br_server/LICENSE`,
+`p4/components/esp_br_http_ota/LICENSE`). Files derived from ESP-IDF examples keep their CC0-1.0 / Unlicense headers.

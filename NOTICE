@@ -1,0 +1,42 @@
+ESP32-P4 OpenThread Border Router
+Copyright (C) 2026 Igor Yamolov
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General
+Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any
+later version. See LICENSE.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+details.
+
+
+Additional permission under GNU AGPL version 3 section 7
+--------------------------------------------------------
+
+If you modify this Program, or any covered work, by linking or combining it with the precompiled, binary-only
+libraries and the ROM code that Espressif Systems supplies for its chips (for example libphy, libbtbb, libcoexist,
+libpp and the other precompiled libraries distributed with ESP-IDF and its components), or with modified versions of
+those libraries, containing parts covered by the terms of their licenses, the licensors of this Program grant you
+additional permission to convey the resulting work. Corresponding Source for a non-source form of such a combination
+shall include the source code for the parts of this Program used as well as that of the covered work, but need not
+include the source code of those Espressif binary-only libraries.
+
+
+Third-party code in this repository
+-----------------------------------
+
+p4/components/esp_ot_br_server, p4/components/esp_br_http_ota
+    From esp-thread-br (https://github.com/espressif/esp-thread-br), commit 1f5af46d0ccb22fe01465ba6d16a33b276c20c1b.
+    Copyright Espressif Systems (Shanghai) CO LTD. Licensed under the Apache License 2.0 (see the LICENSE file in
+    each directory). Modified; every change is listed in p4/components/PATCHES.md.
+
+c6_rcp/main/esp_ot_rcp.c, c6_rcp/main/esp_ot_config.h and other files marked CC0-1.0 or Unlicense
+    Derived from ESP-IDF examples, released into the public domain by Espressif Systems.
+
+
+Third-party code in firmware images
+-----------------------------------
+
+Built images also contain ESP-IDF (Apache-2.0), OpenThread (BSD-3-Clause), lwIP (BSD-3-Clause), Mbed TLS
+(Apache-2.0), espressif/mdns (Apache-2.0) and Espressif's binary-only libraries (Espressif license). Their license
+texts ship with the respective source trees; a binary release must include their notices.
