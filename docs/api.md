@@ -57,3 +57,18 @@ asyncio.run(main())
 
 The dataset is stored on the board and used again at every boot. `GET /node/state` returns `leader` (alone) or
 `router`/`child`/`detached`.
+
+### Adding more border routers
+
+Several boards can serve the same Thread network: each one adds coverage, and the others keep the network reachable when
+one goes down. Form the network on the first board, then give every other board the same active dataset, either with the
+Web UI (Network page: join) or by copying it over the REST API:
+
+```
+curl -H 'Accept: text/plain' http://<first-board>/node/dataset/active > dataset.tlv
+curl -X PUT -H 'Content-Type: text/plain' --data-binary @dataset.tlv http://<new-board>/node/dataset/active
+curl -X PUT -H 'Content-Type: application/json' -d '"enable"' http://<new-board>/node/state
+```
+
+In Home Assistant, add each board as its own OpenThread Border Router integration entry. Running several of these boards
+on one network has not been tested on hardware yet.

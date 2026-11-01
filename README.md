@@ -31,6 +31,25 @@ Get the board from [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.
 - **Shows what it is doing.** A device page and `/device/diag` report CPU load per core and task, memory and
   OpenThread lock timings.
 
+## Compared with the usual setups
+
+Most Home Assistant installs run Thread with the OpenThread Border Router add-on and a radio in RCP mode: either a USB
+dongle on the Home Assistant host, or a network-attached radio the add-on reaches over TCP. This board runs the whole
+border router itself, so you can put several on the same Thread network for coverage and redundancy: if one goes
+down, the others keep the network reachable.
+
+| | This board | Add-on with a USB radio | Add-on with a network radio |
+| --- | --- | --- | --- |
+| Border routers on one Thread network | ✅ as many as you like: add a board for each spot that needs coverage | ❌ one, since the add-on runs once per Home Assistant host | ❌ one, since the add-on runs once per Home Assistant host |
+| Border router keeps running when the Home Assistant host reboots or the add-on updates | ✅ yes | ❌ no | ❌ no |
+| Radio placement | ✅ anywhere with Ethernet | ❌ at the Home Assistant host, on a USB extension cable | ✅ anywhere with Ethernet |
+| Link between border router and radio | ✅ on-board SPI | ✅ USB serial (passthrough needed in a VM) | ❌ spinel over TCP, sensitive to network delay |
+| Packet capture, radio recovery, diagnostics | ✅ built in | ❌ separate tools | ❌ separate tools |
+| Runs without a Home Assistant host | ✅ yes | ❌ no | ❌ no |
+
+The add-on follows upstream ot-br-posix more closely and gets new OpenThread features first. If your Home Assistant host
+is always on and close to your devices, a USB radio is the simpler setup.
+
 ## Screenshots
 
 <table>
