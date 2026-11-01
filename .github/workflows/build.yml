@@ -43,10 +43,11 @@ jobs:
     container: espressif/idf:v6.1 # keep in step with IDF_VERSION
     steps:
       - uses: actions/checkout@v4
-      - name: Install packaging tools
+      - name: Install packaging and test tools
         run: |
           apt-get update -qq
-          apt-get install -y -qq zip >/dev/null
+          # clang++: the vendored REST tests read the OpenThread declarations from a clang AST dump
+          apt-get install -y -qq zip clang >/dev/null
       - name: Build c6_updater, c6_rcp, p4
         run: |
           # version.cmake reads the git hash; the checkout belongs to another user than the container's root

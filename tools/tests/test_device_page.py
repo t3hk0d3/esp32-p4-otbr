@@ -80,9 +80,10 @@ class TestPageFiles:
         assert "textContent" in source
 
     def test_script_loads_no_library_and_no_remote_resource(self):
-        # On both files: no script/link/src/href to a remote host, no import.
+        # On both files: no script/link/src/href to a remote host, no import. A plain <a> link (the source code link in
+        # the footer) is navigation, not a resource the page loads.
         for path in (HTML, JS):
-            text = path.read_text()
+            text = re.sub(r"<a\s[^>]*>", "", path.read_text())
             assert not re.search(r"(?:src|href)=[\"']?(?:https?:)?//", text)
             assert "import " not in text
 
