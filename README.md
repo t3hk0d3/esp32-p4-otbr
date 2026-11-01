@@ -10,7 +10,7 @@ Ethernet. You don't need a Raspberry Pi, USB dongles or Wi-Fi, and it can be pow
 [![release](https://img.shields.io/github/v/release/t3hk0d3/esp32-p4-otbr)](https://github.com/t3hk0d3/esp32-p4-otbr/releases)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 
-![Device page: mode, firmware versions, radio and network status](docs/images/device.png)
+![Thread devices reach the ESP32-C6 radio over 802.15.4; the ESP32-P4 border router on the same board bridges them over Ethernet and PoE to Home Assistant, the web UI and the internet](docs/images/hero.svg)
 
 ## Why
 
@@ -32,10 +32,12 @@ Ethernet. You don't need a Raspberry Pi, USB dongles or Wi-Fi, and it can be pow
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/topology.png" alt="Topology page: the Thread mesh with its leader and routers"></td>
-    <td width="50%"><img src="docs/images/diagnostics.png" alt="Diagnostics: CPU load per core, memory, OpenThread lock timings and tasks"></td>
+    <td width="33%"><img src="docs/images/device.png" alt="Device page: mode, firmware versions, radio and network status"></td>
+    <td width="33%"><img src="docs/images/topology.png" alt="Topology page: the Thread mesh with its leader and routers"></td>
+    <td width="33%"><img src="docs/images/diagnostics.png" alt="Diagnostics: CPU load per core, memory, OpenThread lock timings and tasks"></td>
   </tr>
   <tr>
+    <td align="center">Device status</td>
     <td align="center">Thread mesh topology</td>
     <td align="center">Live diagnostics</td>
   </tr>
