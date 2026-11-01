@@ -47,9 +47,6 @@ down, the others keep the network reachable.
 | Packet capture, radio recovery, diagnostics | ✅ built in | ❌ separate tools | ❌ separate tools |
 | Runs without a Home Assistant host | ✅ yes | ❌ no | ❌ no |
 
-The add-on follows upstream ot-br-posix more closely and gets new OpenThread features first. If your Home Assistant host
-is always on and close to your devices, a USB radio is the simpler setup.
-
 ## Screenshots
 
 <table>
