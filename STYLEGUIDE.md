@@ -1,7 +1,7 @@
 # Styleguide
 
-Applies to all code in this repository. Enforced by `uvx pre-commit run --all-files`
-(see `.pre-commit-config.yaml`).
+Applies to all code in this repository. Enforced by `make lint` (`uvx pre-commit run --all-files`,
+see `.pre-commit-config.yaml`).
 
 ## Formatting
 
@@ -42,9 +42,16 @@ Applies to all code in this repository. Enforced by `uvx pre-commit run --all-fi
   `tools/version.cmake`, `tools/test_build.cmake`, then calls `project()`.
 - `tools/version.cmake` sets `PROJECT_VER`. The stamp is taken at CMake configure time, not at
   every build; the git HEAD files are configure dependencies, so a new commit reconfigures by itself. `-dirty` is as of
-  the last configure (`idf.py reconfigure` refreshes it).
+  the last configure (`make reconfigure` refreshes it).
 - `c6_updater` includes `tools/base_version.cmake` instead of `tools/version.cmake`: its version is content-addressed
   (`base-<8 hex>`, a hash of the sources that define the base image), so it does not change with the build time or git.
 - `tools/test_build.cmake` turns the CMake variable `OTBR_TEST_BUILD` into the C macro
   `OTBR_TEST_BUILD=1` for all components. `tools/build_all.sh` passes `-DOTBR_TEST_BUILD=0|1` on
   every run, so the cached value never sticks. Test-only code is guarded by `#ifdef OTBR_TEST_BUILD`.
+
+## Commands and docs
+
+- The `Makefile` is the entry point for every routine task (build, flash, updates, packaging, tests, lint); its targets
+  call the scripts in `tools/`. Documentation and CI use the make targets, not the scripts or `idf.py` directly. A new
+  routine task gets a target with a `## ` help comment.
+- `README.md` is a short overview; the documentation lives in `docs/`, one file per topic, indexed in `docs/README.md`.

@@ -188,7 +188,7 @@ target tests: `p4/pytest/test_rest_guard.py`, `test_br_boot.py::test_radio_fault
   `CONFIG_AUTO_UPDATE_RCP=n`), no `rcp_N` partitions and no bundled RCP image. `CONFIG_OPENTHREAD_RCP_COMMAND=n`
   in `p4/sdkconfig.defaults` keeps `esp_ot_cli_extension` from optionally requiring `esp_rcp_update`.
   The one-time effect on existing boards: `partitions.csv` changed, so flash the P4 once over USB
-  (`idf.py -C p4 -p $P4_PORT erase-flash`, then flash); an OTA cannot move the partition table.
+  (`make erase flash`); an OTA cannot move the partition table.
 
 - `CONFIG_OPENTHREAD_BR_START_WEB` is not set: it is an esp-thread-br example Kconfig option we do
   not vendor; `app_main` calls `esp_br_web_start` itself.

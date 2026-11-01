@@ -7,6 +7,22 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+### Added
+
+- `Makefile` as the single entry point for building, flashing, network updates, packaging and tests (`make help`); CI
+  uses the same targets.
+
+### Changed
+
+- The README is a short overview; the documentation moved to `docs/` (building, updates, API, networking, sniffer,
+  maintenance jumper, diagnostics, development, troubleshooting).
+
+### Fixed
+
+- `c6-updater-flash.zip` put the C6 updater into the first RCP slot (`ota_0`, 0xa0000) and wrote `otadata`; it now
+  writes bootloader, partition table and the updater into the `test` partition (0x20000), as the ROM recovery does. The
+  v0.1.0 release asset was replaced.
+
 ## [0.1.0] - 2026-11-01
 
 First release: an OpenThread Border Router on the Waveshare ESP32-P4-WIFI6-POE-ETH, with the ESP32-P4 as host and the
@@ -39,7 +55,7 @@ on-board ESP32-C6 as the radio co-processor over SPI.
 - Not verified on hardware: the no-jumper first install, recovery of a blank C6, overwriting the factory ESP-Hosted
   firmware, the give-up path after repeated radio failures and the fall-back to the default network config.
 
-See the README for the full list.
+See `docs/troubleshooting.md` for the full list.
 
 [Unreleased]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/t3hk0d3/esp32-p4-otbr/releases/tag/v0.1.0

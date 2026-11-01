@@ -10,12 +10,17 @@ Either way the border router needs an antenna and the RCP firmware upload at the
 
 ## Before you start
 
+- Hardware: the Waveshare ESP32-P4-WIFI6-POE-ETH (ESP32-P4 chip revision v1.3, 32 MB flash, 32 MB PSRAM, IP101 Ethernet
+  PHY, ESP32-C6 module with 8 MiB flash), a USB-C cable to the P4 port (flashing and console; a CH343 serial port,
+  `/dev/ttyACM0` on Linux) and Ethernet (PoE or a separate USB supply). Optional: the maintenance jumper wires, or a 3.3 V
+  USB-UART adapter for the no-jumper path.
 - Attach a **2.4 GHz antenna to the C6 IPEX connector**. Without it the radio range is a few centimetres and the Thread
   network will not form reliably.
 - Connect Ethernet (a DHCPv4 network; IPv6 router advertisements are used when present).
-- Build everything (`README.md`, Build): `tools/build_all.sh`. You need `p4/build/` (P4 firmware),
-  `c6_rcp/build/c6_rcp.bin` (radio firmware) and, for the no-jumper path, `c6_updater/build/`.
-- Tools: ESP-IDF environment (`. ~/esp/esp-idf-v6.1/export.sh`), `esptool.py`, `curl`.
+- Build everything with `make build` ([Building](building.md)): you need `p4/build/` (P4 firmware),
+  `c6_rcp/build/c6_rcp.bin` (radio firmware) and, for the no-jumper path, `c6_updater/build/`. Without a checkout, take
+  `p4-flash.zip`, `c6_rcp.bin` and, for the no-jumper path, `c6-updater-flash.zip` from a GitHub release.
+- Tools: ESP-IDF (the Makefile activates it; it also provides `esptool`), `curl`.
 - The board's USB-C port shows up as a serial port (`/dev/ttyACM0` below).
 
 ## Maintenance jumper wiring
@@ -34,16 +39,18 @@ The pins are fixed in `p4/main/board.h`. The firmware detects the jumper by itse
 
 ## Path 1: with the jumper (P4 USB-C only)
 
-1. Connect the USB-C cable to the P4 port and flash the P4. The `erase-flash` line is only for a board that ran something
-   else before (see the note in `README.md`, Flash); it also deletes the stored Thread dataset and network configuration, so
-   skip it on a board in service:
+1. Connect the USB-C cable to the P4 port and flash the P4 (`PORT=/dev/ttyACM0` by default). The `make erase` line is only
+   for a board that ran something else before (see [Building](building.md#flash)); it also deletes the stored Thread dataset
+   and network configuration, so skip it on a board in service:
 
    ```
-   . ~/esp/esp-idf-v6.1/export.sh
-   # idf.py -C p4 -p /dev/ttyACM0 erase-flash
-   idf.py -C p4 -p /dev/ttyACM0 flash
-   idf.py -C p4 -p /dev/ttyACM0 monitor
+   # make erase
+   make flash
+   make monitor
    ```
+
+   With a release instead: unpack `p4-flash.zip` and run `esptool --chip esp32p4 -p /dev/ttyACM0 write-flash @flash_args`
+   in it.
 
 2. The board boots and gets its Ethernet address (log: `eth: got ip`). The P4 probes the C6 (three attempts, about 10 s,
    `rcp_sync: attempt N: no HELLO reply`); the factory ESP-Hosted firmware does not speak the updater protocol, so
@@ -68,8 +75,10 @@ The pins are fixed in `p4/main/board.h`. The firmware detects the jumper by itse
 4. Upload the radio firmware, with the device page (`http://<board>/device.html`, "Radio firmware") or:
 
    ```
-   curl --data-binary @c6_rcp/build/c6_rcp.bin http://<board>/device/radio/firmware
+   make radio BOARD=<board>
    ```
+
+   (with a release file: `curl --data-binary @c6_rcp.bin http://<board>/device/radio/firmware`)
 
    The upload takes about 3 seconds. The reply is `{"installed": "<version>"}`; the border router starts and the mode becomes `BR_RUNNING`.
 5. Create a Thread network (see below). The board never forms or joins a network by itself.
@@ -79,34 +88,34 @@ The pins are fixed in `p4/main/board.h`. The firmware detects the jumper by itse
 > **NOTE: untested on hardware.** This path was derived from the code and the ROM loader documentation but never run on the
 > board: neither the esptool sequence below, nor recovery of a truly blank C6 (bootloader, partition table and otadata
 > erased), nor overwriting the factory ESP-Hosted firmware. Expect to adjust it; if you have the jumper, use Path 1.
-> esptool 5.x prefers the command `esptool` and hyphenated sub-command names (`erase-flash`, `write-flash`); the
-> `esptool.py` / `erase_flash` spellings below are the older ones and still work with a deprecation warning.
 
 Use this when the C6 has never been written, or when the updater, bootloader or partition table of the C6 is broken and no
-jumper is fitted. You write the three C6 images yourself with `esptool.py` over H7, once.
+jumper is fitted. You write the three C6 images yourself with `esptool` over H7, once.
 
 1. Wire a 3.3 V USB-UART adapter to H7: adapter RX to H7 pin 1 (C6 TX), adapter TX to H7 pin 2 (C6 RX), adapter GND
    to H7 pin 3. 3.3 V logic only. Tie H7 pin 4 (IO9) to GND.
 2. Put the C6 into ROM download mode: with IO9 grounded, reset the C6 by a power cycle of the whole board (unplug and replug USB-C; the P4 also
-   resets the C6 when it boots). To keep the P4 from interfering, erase it first: `esptool.py --chip esp32p4 -p /dev/ttyACM0 erase_flash`
-   (a P4 without firmware does not touch the C6).
+   resets the C6 when it boots). To keep the P4 from interfering, erase it first: `make erase` (a P4 without firmware does
+   not touch the C6).
 
    **Warning:** this erases the whole P4 flash: its firmware, the stored Thread dataset and the network configuration. If the
    board is in service, first save the dataset, e.g. `curl -H 'Accept: text/plain' http://<board>/node/dataset/active > dataset.tlv`
    (the TLVs; `GET /node/dataset/active` also works with the default JSON), and reflash the P4 afterwards (step 4).
 3. Write the C6 images from the `c6_updater` build, offsets from `common/c6_board/c6_board.h` and `partitions_c6.csv`
-   (bootloader at 0x0, partition table at 0x8000, updater into the `test` partition at 0x20000). Replace `/dev/ttyUSB0` with your adapter:
+   (bootloader at 0x0, partition table at 0x8000, updater into the `test` partition at 0x20000). `C6_PORT` is your adapter:
 
    ```
-   esptool.py --chip esp32c6 -p /dev/ttyUSB0 --before no-reset --after no-reset erase_flash
-   esptool.py --chip esp32c6 -p /dev/ttyUSB0 --before no-reset --after no-reset write_flash \
-       --flash-mode dio --flash-freq 80m --flash-size 4MB \
-       0x0 c6_updater/build/bootloader/bootloader.bin \
-       0x8000 c6_updater/build/partition_table/partition-table.bin \
-       0x20000 c6_updater/build/c6_updater.bin
+   make c6-flash-base C6_PORT=/dev/ttyUSB0
    ```
 
-   **Warning:** the C6 `erase_flash` wipes the whole C6 flash, including both RCP firmware slots. The RCP firmware is gone
+   With a release instead: unpack `c6-updater-flash.zip` and run, in it,
+
+   ```
+   esptool --chip esp32c6 -p /dev/ttyUSB0 --before no-reset --after no-reset erase-flash
+   esptool --chip esp32c6 -p /dev/ttyUSB0 --before no-reset --after no-reset write-flash @flash_args
+   ```
+
+   **Warning:** the C6 erase wipes the whole C6 flash, including both RCP firmware slots. The RCP firmware is gone
    afterwards and must be uploaded again (`c6_rcp.bin`, step 4 of Path 1).
 
    (The layout is 4 MB-safe; the C6 has 8 MiB of flash and the rest stays unused.)
@@ -150,12 +159,12 @@ Within about half a minute `curl http://<board>/node/state` goes from `"detached
 ## Recovery procedures
 
 - **Board unreachable after a network change** (VLANs, static IP): the change reverts on its own 5 minutes after the
-  reboot unless it was confirmed. Or use the P4 console (USB-C, 115200 baud): `net reset` restores `single`, untagged,
+  reboot unless it was confirmed. Or use the P4 console (`make monitor`, USB-C, 115200 baud): `net reset` restores `single`, untagged,
   DHCPv4 and reboots; `net show` prints the config.
 - **C6 broken** (bootloader, partition table or updater damaged, RCP firmware missing): with the jumper the P4 repairs it at boot (once per boot), or
   `curl -X POST http://<board>/device/radio/recover` / "Recover C6" on the device page; then upload `c6_rcp.bin` if
   `fault_reason` says `no rcp firmware`. Without the jumper use Path 2.
-- **P4 broken** (bad OTA that cannot roll back, corrupt flash): reflash over USB-C, `idf.py -C p4 -p /dev/ttyACM0 erase-flash flash`
+- **P4 broken** (bad OTA that cannot roll back, corrupt flash): reflash over USB-C, `make erase flash`
   (this deletes the stored dataset and network settings). If the P4 will not enter download mode, hold BOOT while pressing reset.
 - **Factory state**: the original ESP-Hosted C6 firmware and the P4 factory image are not part of this repository; take them
   from Waveshare / Espressif if you want to return to stock.
