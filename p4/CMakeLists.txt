@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.22)
 
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../common/rcp_sync_proto" "${CMAKE_CURRENT_LIST_DIR}/../common/c6_board"
-                         "${CMAKE_CURRENT_LIST_DIR}/../common/board_cores")
+                         "${CMAKE_CURRENT_LIST_DIR}/../common/board_cores"
+                         # esp_ot_br_server includes protocol_examples_common.h. Taken from the IDF tree here, not as a
+                         # manifest path dependency: dependencies.lock would record that path relative to this machine.
+                         "$ENV{IDF_PATH}/examples/common_components/protocol_examples_common")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/../tools/version.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/../tools/test_build.cmake)

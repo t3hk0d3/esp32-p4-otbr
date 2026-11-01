@@ -5,6 +5,3 @@ dependencies:
   espressif/mdns: "==1.14.1"
   # 1.11.0 is the version proven in Phase 0.
   espressif/esp-serial-flasher: "==1.11.0"
-  # esp_ot_br_server includes protocol_examples_common.h (Phase 0 took it from the IDF examples).
-  protocol_examples_common:
-    path: ${IDF_PATH}/examples/common_components/protocol_examples_common

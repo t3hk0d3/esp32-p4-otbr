@@ -1,4 +1,7 @@
 #include "rom_plan.h"
+
+#include <stdbool.h>
+
 #include "c6_board.h"
 
 #define FLASH_SECTOR 0x1000u
