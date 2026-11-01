@@ -1,16 +1,19 @@
 # ESP32-P4 OpenThread Border Router
 
-**A standalone Thread border router for Home Assistant, on a single PoE board.**
+**A full-featured Thread border router on one PoE board, for under $30.**
 
 This firmware turns the Waveshare ESP32-P4-WIFI6-POE-ETH into an OpenThread Border Router. The ESP32-P4 runs the
 border router, the ESP32-C6 on the same board is the 802.15.4 radio, and the board sits on your network over wired
 Ethernet. You don't need a Raspberry Pi, USB dongles or Wi-Fi, and it can be powered over PoE.
 
+Get the board from [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.htm),
+[AliExpress](https://a.aliexpress.com/_Ev2qYJC) or [Amazon](https://a.co/d/0hmmgSAF).
+
 [![build](https://github.com/t3hk0d3/esp32-p4-otbr/actions/workflows/build.yml/badge.svg)](https://github.com/t3hk0d3/esp32-p4-otbr/actions/workflows/build.yml)
 [![release](https://img.shields.io/github/v/release/t3hk0d3/esp32-p4-otbr)](https://github.com/t3hk0d3/esp32-p4-otbr/releases)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 
-![Thread devices reach the ESP32-C6 radio over 802.15.4; the ESP32-P4 border router on the same board bridges them over Ethernet and PoE to Home Assistant, the web UI and the internet](docs/images/hero.svg)
+![Matter and Thread devices reach the ESP32-C6 radio over 802.15.4; the ESP32-P4 border router on the same board bridges them over Ethernet and PoE to Home Assistant, Matter controllers, Wireshark and the web UI](docs/images/hero.svg)
 
 ## Why
 
@@ -45,7 +48,7 @@ Ethernet. You don't need a Raspberry Pi, USB dongles or Wi-Fi, and it can be pow
 
 ## Get started
 
-You need the board, a 2.4 GHz antenna on the C6 antenna connector, a USB-C cable for the first flash, and Ethernet.
+You need [the board](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.htm), a 2.4 GHz antenna on the C6 antenna connector, a USB-C cable for the first flash, and Ethernet.
 
 1. Download `p4-flash.zip` and `c6_rcp.bin` from the [latest release](https://github.com/t3hk0d3/esp32-p4-otbr/releases),
    or build them yourself with `make build`.
