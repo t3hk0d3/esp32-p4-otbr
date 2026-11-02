@@ -3,7 +3,6 @@
 import re
 
 import pytest
-
 from device_js import REPO, kit, logic, needs_node, scenario
 
 C6_BOARD = REPO / "common" / "c6_board" / "c6_board.h"
@@ -20,12 +19,20 @@ class TestCommonLogic:
 
     def test_error_message_shows_the_detail_from_the_body(self):
         # On a JSON error body: the detail text is part of the message.
-        msg = common("L.errorMessage(400, {error: 'invalid_bundle', detail: 'bad sha'})")
+        msg = common(
+            "L.errorMessage(400, {error: 'invalid_bundle', detail: 'bad sha'})"
+        )
         assert "bad sha" in msg
 
     @pytest.mark.parametrize(
         ("status", "word"),
-        [(409, "busy"), (412, "jumper"), (413, "large"), (502, "transfer"), (503, "available")],
+        [
+            (409, "busy"),
+            (412, "jumper"),
+            (413, "large"),
+            (502, "transfer"),
+            (503, "available"),
+        ],
     )
     def test_error_message_explains_the_status(self, status, word):
         # On 409/412/413/502/503: a human-readable explanation beside the detail.
@@ -53,14 +60,36 @@ class TestCommonLogic:
     def test_whole_number_accepts_only_digits_in_range(self):
         # On "7" in 1..9: 7; on "0", "10", "1.5", "": null.
         assert common("L.wholeNumber('7', 1, 9)") == 7
-        assert common("['0','10','1.5',''].map(v => L.wholeNumber(v, 1, 9))") == [None] * 4
+        assert (
+            common("['0','10','1.5',''].map(v => L.wholeNumber(v, 1, 9))") == [None] * 4
+        )
 
     def test_polling_runs_only_while_visible_and_not_in_flight(self):
         # On hidden tab / section out of view / request in flight: no poll; otherwise poll.
-        assert common("L.shouldPoll({hidden: false, sectionVisible: true, inFlight: false})") is True
-        assert common("L.shouldPoll({hidden: true, sectionVisible: true, inFlight: false})") is False
-        assert common("L.shouldPoll({hidden: false, sectionVisible: false, inFlight: false})") is False
-        assert common("L.shouldPoll({hidden: false, sectionVisible: true, inFlight: true})") is False
+        assert (
+            common(
+                "L.shouldPoll({hidden: false, sectionVisible: true, inFlight: false})"
+            )
+            is True
+        )
+        assert (
+            common(
+                "L.shouldPoll({hidden: true, sectionVisible: true, inFlight: false})"
+            )
+            is False
+        )
+        assert (
+            common(
+                "L.shouldPoll({hidden: false, sectionVisible: false, inFlight: false})"
+            )
+            is False
+        )
+        assert (
+            common(
+                "L.shouldPoll({hidden: false, sectionVisible: true, inFlight: true})"
+            )
+            is False
+        )
 
     def test_core_label_names_a_number_or_any(self):
         # On task core 1 / "any": "1" / "any".
@@ -69,7 +98,10 @@ class TestCommonLogic:
 
     def test_load_text_has_one_decimal_and_percent(self):
         # On a load object: "1s / 10s / 60s" values joined.
-        assert common("L.loadText({'1s': 12.5, '10s': 3, '60s': 0.04})") == "12.5% / 3.0% / 0.0%"
+        assert (
+            common("L.loadText({'1s': 12.5, '10s': 3, '60s': 0.04})")
+            == "12.5% / 3.0% / 0.0%"
+        )
 
     def test_bytes_text_is_kilobytes_or_megabytes_with_one_decimal(self):
         # On 1536 bytes: "1.5 KB"; on 3 MB: "3.0 MB".
@@ -84,7 +116,9 @@ class TestLimits:
     def test_firmware_limit_equals_the_c6_slot_size(self):
         # On C6_OTA_SLOT_SIZE in c6_board.h: same number as RCP_MAX_BYTES.
         slot = int(
-            re.search(r"define C6_OTA_SLOT_SIZE\s+(0x[0-9a-fA-F]+)", C6_BOARD.read_text()).group(1),
+            re.search(
+                r"define C6_OTA_SLOT_SIZE\s+(0x[0-9a-fA-F]+)", C6_BOARD.read_text()
+            ).group(1),
             16,
         )
         assert common("L.RCP_MAX_BYTES") == slot
@@ -92,8 +126,13 @@ class TestLimits:
     def test_bundle_limit_is_header_plus_web_plus_app_partition(self):
         # On partitions.csv: 44 + web_0 size + ota_0 size.
         def size(name):
-            row = re.search(rf"^{name},.*,\s*(\d+)([KMG]),", PARTITIONS.read_text(), re.MULTILINE)
-            return int(row.group(1)) * {"K": 1 << 10, "M": 1 << 20, "G": 1 << 30}[row.group(2)]
+            row = re.search(
+                rf"^{name},.*,\s*(\d+)([KMG]),", PARTITIONS.read_text(), re.MULTILINE
+            )
+            return (
+                int(row.group(1))
+                * {"K": 1 << 10, "M": 1 << 20, "G": 1 << 30}[row.group(2)]
+            )
 
         assert common("L.BUNDLE_MAX_BYTES") == 44 + size("web_0") + size("ota_0")
 
@@ -111,7 +150,14 @@ class TestBackoffAndWait:
 
     def test_delay_doubles_per_failure_up_to_30_seconds(self):
         # On period 3000 and failures 0..5: 3000, 6000, 12000, 24000, 30000, 30000.
-        assert common("[0,1,2,3,4,5].map(f => L.nextDelay(3000, f))") == [3000, 6000, 12000, 24000, 30000, 30000]
+        assert common("[0,1,2,3,4,5].map(f => L.nextDelay(3000, f))") == [
+            3000,
+            6000,
+            12000,
+            24000,
+            30000,
+            30000,
+        ]
 
     def test_last_seen_text_names_the_seconds(self):
         # On a last success 12 s ago: "(last seen 12 s ago)"; never seen: no number.
@@ -126,11 +172,17 @@ class TestBackoffAndWait:
 
     def test_boot_is_observed_when_uptime_goes_backwards_without_outage(self):
         # On a baseline of 100 s and a probe with 5 s: true.
-        assert common("L.bootObserved({outage:false,baseline:100},{ok:true,uptime:5})") is True
+        assert (
+            common("L.bootObserved({outage:false,baseline:100},{ok:true,uptime:5})")
+            is True
+        )
 
     def test_boot_is_not_observed_while_the_old_board_keeps_answering(self):
         # On a baseline of 100 s and a probe with 103 s: false.
-        assert common("L.bootObserved({outage:false,baseline:100},{ok:true,uptime:103})") is False
+        assert (
+            common("L.bootObserved({outage:false,baseline:100},{ok:true,uptime:103})")
+            is False
+        )
 
     def test_first_probe_without_baseline_only_sets_the_baseline(self):
         # On no baseline: the first success is not accepted.
@@ -174,7 +226,10 @@ class TestKit:
 
     def test_handoff_keeps_the_lock(self):
         # On an operation resolving to {handoff: true}: still busy (the wait for the reboot took over).
-        r = scenario(kit() + "await t.kit.runOp(() => Promise.resolve({handoff: true})); return t.kit.isBusy();")
+        r = scenario(
+            kit()
+            + "await t.kit.runOp(() => Promise.resolve({handoff: true})); return t.kit.isBusy();"
+        )
         assert r is True
 
     def test_dropped_upload_connection_says_the_board_closed_it(self):
@@ -317,7 +372,9 @@ class TestKit:
     def test_page_that_renders_the_banner_itself_gets_no_banner_polling(self):
         # On trial: false: start() sends no request.
         r = scenario(
-            kit(options="{actionIds: [], trial: false, refreshNetwork: () => Promise.resolve(true)}")
+            kit(
+                options="{actionIds: [], trial: false, refreshNetwork: () => Promise.resolve(true)}"
+            )
             + "t.kit.start(); await t.advance(30000); return t.calls.length;"
         )
         assert r == 0

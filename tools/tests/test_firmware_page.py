@@ -1,7 +1,6 @@
 """Firmware page (BDD: FirmwareLogic, FirmwarePage). Runs static/firmware.js under node."""
 
 import pytest
-
 from device_js import logic, needs_node, page, scenario
 
 
@@ -58,7 +57,9 @@ class TestFirmwareLogic:
 
     def test_recovery_follows_the_jumper(self):
         # On jumper present true/false/missing: true only for true.
-        assert fw("[L.jumperPresent({jumper: {present: true}}), L.jumperPresent({jumper: {present: false}}), L.jumperPresent({})]") == [True, False, False]
+        assert fw(
+            "[L.jumperPresent({jumper: {present: true}}), L.jumperPresent({jumper: {present: false}}), L.jumperPresent({})]"
+        ) == [True, False, False]
 
     def test_rcp_installed_text_tells_none_unknown_and_version(self):
         # On rcp.installed "" / null / "1.4": no firmware / unknown / the version.
@@ -84,7 +85,11 @@ class TestFirmwarePage:
 
     @pytest.mark.parametrize(
         ("installed", "expected"),
-        [("null", "unknown (probe failed)"), ("''", "none (no valid RCP firmware)"), ("'2.1'", "2.1")],
+        [
+            ("null", "unknown (probe failed)"),
+            ("''", "none (no valid RCP firmware)"),
+            ("'2.1'", "2.1"),
+        ],
     )
     def test_rcp_installed_renders_through_the_radio_card(self, installed, expected):
         # On rcp.installed null / "" / string: the radio card shows unknown / none / the version.
@@ -170,7 +175,11 @@ class TestFirmwarePage:
             return [c.url, c.body === undefined, t.el('rcpMsg').textContent];
         """
         )
-        assert r == ["/device/radio/firmware?from_url=http%3A%2F%2Fh%2Fc6%20rcp.bin", True, "Radio firmware installed: 2.2."]
+        assert r == [
+            "/device/radio/firmware?from_url=http%3A%2F%2Fh%2Fc6%20rcp.bin",
+            True,
+            "Radio firmware installed: 2.2.",
+        ]
 
     def test_https_url_is_refused_without_a_request(self):
         # On an https source: a message and no request.
@@ -211,7 +220,9 @@ class TestFirmwarePage:
     def test_busy_disables_every_action_and_a_failure_enables_them_again(self):
         # On an upload in flight: all actions disabled and a second install sends nothing; after a 409 enabled again.
         r = scenario(
-            page("firmware", "(u) => ({status: 409, body: {error: 'busy', detail: 'x'}})")
+            page(
+                "firmware", "(u) => ({status: 409, body: {error: 'busy', detail: 'x'}})"
+            )
             + """
             const ids = ['otaInstall','rcpInstall','recoverBtn','logBtn','confirmBtn'];
             t.el('otaFile').files = [{name: 'b', size: 10}];
@@ -245,7 +256,12 @@ class TestFirmwarePage:
     def test_recover_posts_and_shows_the_result(self):
         # On Recover C6: POST /device/radio/recover and its detail in recoverMsg.
         r = scenario(
-            page("firmware", routes(other="{status: 200, body: {recovered: true, detail: 'base rewritten'}}"))
+            page(
+                "firmware",
+                routes(
+                    other="{status: 200, body: {recovered: true, detail: 'base rewritten'}}"
+                ),
+            )
             + """
             await t.page.recover();
             const c = t.calls.find((x) => x.url === '/device/radio/recover');

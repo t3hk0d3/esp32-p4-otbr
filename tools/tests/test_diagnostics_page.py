@@ -21,7 +21,12 @@ class TestDiagnosticsLogic:
 
     def test_sorting_leaves_the_input_unchanged(self):
         # On sortedTasks: the given array keeps its order.
-        assert diag("(() => { const a = [{name:'x',cpu_pct:{'10s':0}},{name:'y',cpu_pct:{'10s':9}}]; L.sortedTasks(a); return a[0].name; })()") == "x"
+        assert (
+            diag(
+                "(() => { const a = [{name:'x',cpu_pct:{'10s':0}},{name:'y',cpu_pct:{'10s':9}}]; L.sortedTasks(a); return a[0].name; })()"
+            )
+            == "x"
+        )
 
     def test_stack_below_one_kilobyte_is_low(self):
         # On 1023 bytes: low; on 1024: not.
@@ -29,7 +34,12 @@ class TestDiagnosticsLogic:
 
     def test_microseconds_read_as_the_largest_fitting_unit(self):
         # On 500 / 1758 / 263196 / 2500000 us: µs / ms with one decimal / s with one decimal.
-        assert diag("[500, 1758, 263196, 2500000].map(L.usText)") == ["500 µs", "1.8 ms", "263.2 ms", "2.5 s"]
+        assert diag("[500, 1758, 263196, 2500000].map(L.usText)") == [
+            "500 µs",
+            "1.8 ms",
+            "263.2 ms",
+            "2.5 s",
+        ]
 
 
 @needs_node
@@ -49,7 +59,12 @@ class TestDiagnosticsPage:
         assert r[0] == "7 h 35 min"
         assert r[1] == "software"
         assert "Core 0" in r[2] and "0.4% / 0.5% / 0.4%" in r[2] and "Core 1" in r[2]
-        assert "Internal RAM" in r[3] and "408.9 KB" in r[3] and "PSRAM" in r[3] and "30.2 MB" in r[3]
+        assert (
+            "Internal RAM" in r[3]
+            and "408.9 KB" in r[3]
+            and "PSRAM" in r[3]
+            and "30.2 MB" in r[3]
+        )
         assert r[4] == ""
 
     def test_cpu_bar_is_the_ten_second_load(self):
@@ -69,7 +84,12 @@ class TestDiagnosticsPage:
             + "await t.page.refresh(); return t.el('d-lock').children.map((tr) => tr.allText());"
         )
         assert len(r) == 2
-        assert "Since boot" in r[0] and "416546" in r[0] and "263.2 ms" in r[0] and "ot_main" in r[0]
+        assert (
+            "Since boot" in r[0]
+            and "416546" in r[0]
+            and "263.2 ms" in r[0]
+            and "ot_main" in r[0]
+        )
         assert "Last 60 s" in r[1] and "910" in r[1] and "1.8 ms" in r[1]
 
     def test_tasks_are_listed_busiest_first_with_low_stack_marked(self):
@@ -89,7 +109,10 @@ class TestDiagnosticsPage:
     def test_untracked_tasks_are_mentioned(self):
         # On tasks_untracked 3: the note says 3 more tasks are not listed.
         r = scenario(
-            page("diagnostics", "(u) => ({status: 200, body: Object.assign(H.fixture(H.DIAG), {tasks_untracked: 3})})")
+            page(
+                "diagnostics",
+                "(u) => ({status: 200, body: Object.assign(H.fixture(H.DIAG), {tasks_untracked: 3})})",
+            )
             + "await t.page.refresh(); return t.el('d-note').textContent;"
         )
         assert "3 more tasks" in r
@@ -97,7 +120,10 @@ class TestDiagnosticsPage:
     def test_failure_shows_a_note_and_keeps_the_last_figures(self):
         # On a good answer then a 503: the note names the problem, the uptime stays.
         r = scenario(
-            page("diagnostics", "(u) => t.fail ? ({status: 503, body: {error: 'busy', detail: 'x'}}) : ({status: 200, body: H.DIAG})")
+            page(
+                "diagnostics",
+                "(u) => t.fail ? ({status: 503, body: {error: 'busy', detail: 'x'}}) : ({status: 200, body: H.DIAG})",
+            )
             + """
             await t.page.refresh(); t.fail = true; const ok = await t.page.refresh();
             return [ok, t.el('d-note').textContent, t.el('d-uptime').textContent];

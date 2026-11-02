@@ -17,6 +17,11 @@ release's `versions.txt`.
 
 ### Changed
 
+- The device page is split into five pages under a "Device" menu: Status (`device.html`), Ethernet, Firmware, Packet
+  capture and Diagnostics. The Ethernet page replaces the network form with setup cards (single port or split), one card
+  per interface with its live state and an inline editor (addresses as `192.168.1.10/24`), live validation, and a
+  review of the changes before Apply and reboot; tagged VLANs need a tick that the switch port carries them. "Confirm" is
+  now "Keep new settings" and shows on every device page while settings are on trial.
 - The README is a short overview; the documentation moved to `docs/` (building, updates, API, networking, sniffer,
   maintenance jumper, diagnostics, development, troubleshooting).
 

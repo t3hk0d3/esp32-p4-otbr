@@ -54,6 +54,8 @@ KIT_HTML = (
 )
 
 
-def kit(routes_js="() => ({status: 200, body: {}})", options="{actionIds: ['actA', 'actB']}"):
+def kit(
+    routes_js="() => ({status: 200, body: {}})", options="{actionIds: ['actA', 'actB']}"
+):
     """Start of a scenario: `t` runs DeviceKit alone on a small page with the given options."""
     return f"const t = H.makeEnv({{html: {json.dumps(KIT_HTML)}, kit: {options}}}, {routes_js});"

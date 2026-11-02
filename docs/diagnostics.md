@@ -2,7 +2,7 @@
 
 `GET /device/diag` returns the precomputed snapshot of a sampler that runs once per second: per-core load over 1/10/60 s,
 per-task CPU share, core, priority, minimum free stack, internal RAM and PSRAM figures, OpenThread lock statistics (count,
-longest hold and wait, holder), uptime and last reset reason. The device page shows it refreshed every 2 s.
+longest hold and wait, holder), uptime and last reset reason. The Diagnostics page (`/diagnostics.html`) shows it refreshed every 2 s.
 
 - The lock statistics cover everything that takes the OpenThread lock through `esp_openthread_lock_acquire/release`
   (libopenthread, `br_core`, the Thread REST server). The border router internals in the prebuilt `libopenthread_br.a`

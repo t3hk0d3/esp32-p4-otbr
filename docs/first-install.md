@@ -72,7 +72,7 @@ The pins are fixed in `p4/main/board.h`. The firmware detects the jumper by itse
    instead, run `curl -X POST http://<board>/device/radio/recover` and look at `/device/status` again. On a C6 that has no RCP
    firmware this request answers 200 `{"recovered":true,"rcp":"no rcp firmware",...}` (OpenThread cannot start without
    firmware: the status shows `no rcp firmware`); `recovery_failed` (502) means the recovery itself failed.
-4. Upload the radio firmware, with the device page (`http://<board>/device.html`, "Radio firmware") or:
+4. Upload the radio firmware, with the Firmware page (`http://<board>/firmware.html`, "Radio") or:
 
    ```
    make radio BOARD=<board>
@@ -162,7 +162,7 @@ Within about half a minute `curl http://<board>/node/state` goes from `"detached
   reboot unless it was confirmed. Or use the P4 console (`make monitor`, USB-C, 115200 baud): `net reset` restores `single`, untagged,
   DHCPv4 and reboots; `net show` prints the config.
 - **C6 broken** (bootloader, partition table or updater damaged, RCP firmware missing): with the jumper the P4 repairs it at boot (once per boot), or
-  `curl -X POST http://<board>/device/radio/recover` / "Recover C6" on the device page; then upload `c6_rcp.bin` if
+  `curl -X POST http://<board>/device/radio/recover` / "Recover C6" on the Firmware page; then upload `c6_rcp.bin` if
   `fault_reason` says `no rcp firmware`. Without the jumper use Path 2.
 - **P4 broken** (bad OTA that cannot roll back, corrupt flash): reflash over USB-C, `make erase flash`
   (this deletes the stored dataset and network settings). If the P4 will not enter download mode, hold BOOT while pressing reset.

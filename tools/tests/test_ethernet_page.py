@@ -3,7 +3,6 @@
 import json
 
 import pytest
-
 from device_js import logic, needs_node, page, scenario
 
 
@@ -13,9 +12,30 @@ def eth(expression):
 
 def draft(mode="single", **ifaces):
     base = {
-        "single": {"tagged": False, "vlan": "", "dhcp": True, "cidr": "", "gw": "", "dns": ""},
-        "mgmt": {"tagged": True, "vlan": "10", "dhcp": True, "cidr": "", "gw": "", "dns": ""},
-        "thread_bb": {"tagged": True, "vlan": "20", "dhcp": True, "cidr": "", "gw": "", "dns": ""},
+        "single": {
+            "tagged": False,
+            "vlan": "",
+            "dhcp": True,
+            "cidr": "",
+            "gw": "",
+            "dns": "",
+        },
+        "mgmt": {
+            "tagged": True,
+            "vlan": "10",
+            "dhcp": True,
+            "cidr": "",
+            "gw": "",
+            "dns": "",
+        },
+        "thread_bb": {
+            "tagged": True,
+            "vlan": "20",
+            "dhcp": True,
+            "cidr": "",
+            "gw": "",
+            "dns": "",
+        },
     }
     for k, v in ifaces.items():
         base[k] = base[k] | v
@@ -25,7 +45,15 @@ def draft(mode="single", **ifaces):
 SPLIT_CFG = {
     "mode": "split",
     "mgmt": {"vlan": 10, "ipv4": {"dhcp": True}},
-    "thread_bb": {"vlan": 20, "ipv4": {"dhcp": False, "addr": "192.168.20.2", "mask": "255.255.255.0", "gw": "192.168.20.1"}},
+    "thread_bb": {
+        "vlan": 20,
+        "ipv4": {
+            "dhcp": False,
+            "addr": "192.168.20.2",
+            "mask": "255.255.255.0",
+            "gw": "192.168.20.1",
+        },
+    },
 }
 
 
@@ -33,10 +61,21 @@ SPLIT_CFG = {
 class TestPrefixes:
     """prefixToMask, maskToPrefix, parseCidr"""
 
-    @pytest.mark.parametrize(("prefix", "mask"), [(24, "255.255.255.0"), (1, "128.0.0.0"), (32, "255.255.255.255"), (30, "255.255.255.252")])
+    @pytest.mark.parametrize(
+        ("prefix", "mask"),
+        [
+            (24, "255.255.255.0"),
+            (1, "128.0.0.0"),
+            (32, "255.255.255.255"),
+            (30, "255.255.255.252"),
+        ],
+    )
     def test_prefix_and_mask_convert_both_ways(self, prefix, mask):
         # On a prefix length 1..32: the dotted mask, and back.
-        assert eth(f"[L.prefixToMask({prefix}), L.maskToPrefix('{mask}')]") == [mask, prefix]
+        assert eth(f"[L.prefixToMask({prefix}), L.maskToPrefix('{mask}')]") == [
+            mask,
+            prefix,
+        ]
 
     @pytest.mark.parametrize("prefix", [0, 33, -1])
     def test_prefix_outside_1_to_32_has_no_mask(self, prefix):
@@ -50,9 +89,15 @@ class TestPrefixes:
 
     def test_cidr_splits_into_address_and_mask(self):
         # On " 10.0.0.2/24 ": address and mask.
-        assert eth("L.parseCidr(' 10.0.0.2/24 ')") == {"addr": "10.0.0.2", "mask": "255.255.255.0"}
+        assert eth("L.parseCidr(' 10.0.0.2/24 ')") == {
+            "addr": "10.0.0.2",
+            "mask": "255.255.255.0",
+        }
 
-    @pytest.mark.parametrize("text", ["10.0.0.2", "10.0.0.2/", "10.0.0.2/0", "10.0.0.2/33", "10.0.0/24", "a/24", ""])
+    @pytest.mark.parametrize(
+        "text",
+        ["10.0.0.2", "10.0.0.2/", "10.0.0.2/0", "10.0.0.2/33", "10.0.0/24", "a/24", ""],
+    )
     def test_malformed_cidr_is_refused(self, text):
         # On a missing or bad prefix or address: null.
         assert eth(f"L.parseCidr({json.dumps(text)})") is None
@@ -66,9 +111,30 @@ class TestDraft:
         # On a split config: mode, tagged VLANs as text, the static address as CIDR, the single default kept.
         d = eth(f"L.draftFromConfig({json.dumps(SPLIT_CFG)})")
         assert d["mode"] == "split"
-        assert d["mgmt"] == {"tagged": True, "vlan": "10", "dhcp": True, "cidr": "", "gw": "", "dns": ""}
-        assert d["thread_bb"] == {"tagged": True, "vlan": "20", "dhcp": False, "cidr": "192.168.20.2/24", "gw": "192.168.20.1", "dns": ""}
-        assert d["single"] == {"tagged": False, "vlan": "", "dhcp": True, "cidr": "", "gw": "", "dns": ""}
+        assert d["mgmt"] == {
+            "tagged": True,
+            "vlan": "10",
+            "dhcp": True,
+            "cidr": "",
+            "gw": "",
+            "dns": "",
+        }
+        assert d["thread_bb"] == {
+            "tagged": True,
+            "vlan": "20",
+            "dhcp": False,
+            "cidr": "192.168.20.2/24",
+            "gw": "192.168.20.1",
+            "dns": "",
+        }
+        assert d["single"] == {
+            "tagged": False,
+            "vlan": "",
+            "dhcp": True,
+            "cidr": "",
+            "gw": "",
+            "dns": "",
+        }
 
     def test_draft_from_no_config_is_single_untagged_dhcp(self):
         # On null: single, untagged, DHCP.
@@ -78,7 +144,11 @@ class TestDraft:
 
     def test_valid_draft_has_no_errors(self):
         # On a valid split draft: no errors.
-        assert eth(f"L.validate({json.dumps(draft('split'))})") == {"ifaces": {"single": [], "mgmt": [], "thread_bb": []}, "global": [], "count": 0}
+        assert eth(f"L.validate({json.dumps(draft('split'))})") == {
+            "ifaces": {"single": [], "mgmt": [], "thread_bb": []},
+            "global": [],
+            "count": 0,
+        }
 
     @pytest.mark.parametrize("vlan", ["", "0", "4095", "1.5", "x"])
     def test_tagged_vlan_outside_1_to_4094_is_an_interface_error(self, vlan):
@@ -90,12 +160,17 @@ class TestDraft:
     @pytest.mark.parametrize("vlan", ["1", "4094"])
     def test_vlan_bounds_are_accepted(self, vlan):
         # On VLAN 1 and 4094: no error.
-        assert eth(f"L.validate({json.dumps(draft('split', mgmt={'vlan': vlan}))}).count") == 0
+        assert (
+            eth(f"L.validate({json.dumps(draft('split', mgmt={'vlan': vlan}))}).count")
+            == 0
+        )
 
     @pytest.mark.parametrize("cidr", ["", "10.0.0.2", "10.0.0.256/24", "10.0.0.2/40"])
     def test_static_without_a_valid_cidr_is_an_interface_error(self, cidr):
         # On static with a bad or missing address/prefix: the error names the 192.168.1.10/24 form.
-        v = eth(f"L.validate({json.dumps(draft(single={'dhcp': False, 'cidr': cidr}))})")
+        v = eth(
+            f"L.validate({json.dumps(draft(single={'dhcp': False, 'cidr': cidr}))})"
+        )
         assert "192.168.1.10/24" in v["ifaces"]["single"][0]
 
     @pytest.mark.parametrize("field", ["gw", "dns"])
@@ -108,11 +183,16 @@ class TestDraft:
 
     def test_errors_of_the_other_mode_are_ignored(self):
         # On single mode with a broken mgmt draft: no errors.
-        assert eth(f"L.validate({json.dumps(draft('single', mgmt={'vlan': 'x'}))}).count") == 0
+        assert (
+            eth(f"L.validate({json.dumps(draft('single', mgmt={'vlan': 'x'}))}).count")
+            == 0
+        )
 
     def test_split_with_two_untagged_interfaces_is_a_global_error(self):
         # On both untagged: one global error.
-        v = eth(f"L.validate({json.dumps(draft('split', mgmt={'tagged': False}, thread_bb={'tagged': False}))})")
+        v = eth(
+            f"L.validate({json.dumps(draft('split', mgmt={'tagged': False}, thread_bb={'tagged': False}))})"
+        )
         assert v["count"] == 1
         assert "untagged" in v["global"][0]
 
@@ -123,7 +203,12 @@ class TestDraft:
 
     def test_split_with_one_untagged_and_one_tagged_is_accepted(self):
         # On mgmt untagged and thread_bb VLAN 20: no error.
-        assert eth(f"L.validate({json.dumps(draft('split', mgmt={'tagged': False}))}).count") == 0
+        assert (
+            eth(
+                f"L.validate({json.dumps(draft('split', mgmt={'tagged': False}))}).count"
+            )
+            == 0
+        )
 
     def test_no_changes_against_the_same_draft(self):
         # On a draft equal to the running one: no rows.
@@ -132,32 +217,63 @@ class TestDraft:
 
     def test_switching_to_split_lists_setup_vlan_and_ipv4_rows(self):
         # On single -> split: the Setup row, then VLAN and IPv4 rows for both interfaces, "Not in use" before.
-        rows = eth(f"L.changes({json.dumps(draft())}, {json.dumps(draft('split', thread_bb={'dhcp': False, 'cidr': '192.168.20.2/24', 'gw': '192.168.20.1'}))})")
-        assert rows[0] == {"what": "Setup", "from": "Single port", "to": "Split management and Thread"}
+        rows = eth(
+            f"L.changes({json.dumps(draft())}, {json.dumps(draft('split', thread_bb={'dhcp': False, 'cidr': '192.168.20.2/24', 'gw': '192.168.20.1'}))})"
+        )
+        assert rows[0] == {
+            "what": "Setup",
+            "from": "Single port",
+            "to": "Split management and Thread",
+        }
         assert rows[1:] == [
             {"what": "Management VLAN", "from": "Not in use", "to": "VLAN 10"},
             {"what": "Management IPv4", "from": "Not in use", "to": "Automatic (DHCP)"},
             {"what": "Thread backbone VLAN", "from": "Not in use", "to": "VLAN 20"},
-            {"what": "Thread backbone IPv4", "from": "Not in use", "to": "Static 192.168.20.2/24, gateway 192.168.20.1"},
+            {
+                "what": "Thread backbone IPv4",
+                "from": "Not in use",
+                "to": "Static 192.168.20.2/24, gateway 192.168.20.1",
+            },
         ]
 
     def test_one_field_change_is_one_row(self):
         # On single DHCP -> single static: one IPv4 row.
-        rows = eth(f"L.changes({json.dumps(draft())}, {json.dumps(draft(single={'dhcp': False, 'cidr': '10.0.0.2/24'}))})")
-        assert rows == [{"what": "Ethernet port IPv4", "from": "Automatic (DHCP)", "to": "Static 10.0.0.2/24"}]
+        rows = eth(
+            f"L.changes({json.dumps(draft())}, {json.dumps(draft(single={'dhcp': False, 'cidr': '10.0.0.2/24'}))})"
+        )
+        assert rows == [
+            {
+                "what": "Ethernet port IPv4",
+                "from": "Automatic (DHCP)",
+                "to": "Static 10.0.0.2/24",
+            }
+        ]
 
     def test_request_body_has_the_api_shape_with_a_mask(self):
         # On a split draft with a static thread_bb: the PUT /device/network body of the API, mask not prefix.
-        body = eth(f"L.requestBody({json.dumps(draft('split', thread_bb={'dhcp': False, 'cidr': '10.0.0.2/24', 'dns': '10.0.0.1'}))})")
+        body = eth(
+            f"L.requestBody({json.dumps(draft('split', thread_bb={'dhcp': False, 'cidr': '10.0.0.2/24', 'dns': '10.0.0.1'}))})"
+        )
         assert body == {
             "mode": "split",
             "mgmt": {"vlan": 10, "ipv4": {"dhcp": True}},
-            "thread_bb": {"vlan": 20, "ipv4": {"dhcp": False, "addr": "10.0.0.2", "mask": "255.255.255.0", "dns": "10.0.0.1"}},
+            "thread_bb": {
+                "vlan": 20,
+                "ipv4": {
+                    "dhcp": False,
+                    "addr": "10.0.0.2",
+                    "mask": "255.255.255.0",
+                    "dns": "10.0.0.1",
+                },
+            },
         }
 
     def test_request_body_for_single_untagged_dhcp(self):
         # On the default draft: {"mode":"single","single":{"vlan":0,"ipv4":{"dhcp":true}}}.
-        assert eth(f"L.requestBody({json.dumps(draft())})") == {"mode": "single", "single": {"vlan": 0, "ipv4": {"dhcp": True}}}
+        assert eth(f"L.requestBody({json.dumps(draft())})") == {
+            "mode": "single",
+            "single": {"vlan": 0, "ipv4": {"dhcp": True}},
+        }
 
     def test_reach_text_names_where_to_open_the_page(self):
         # On static mgmt: its http address; DHCP single: the DHCP server; DHCP split: the management VLAN.
@@ -178,26 +294,46 @@ class TestNetworkConfig:
 
     @staticmethod
     def error_of(form):
-        return eth(f"(()=>{{try{{L.networkConfig({json.dumps(form)});return null}}catch(e){{return e.message}}}})()")
+        return eth(
+            f"(()=>{{try{{L.networkConfig({json.dumps(form)});return null}}catch(e){{return e.message}}}})()"
+        )
 
     @staticmethod
     def static(**kw):
-        return {"vlan": "0", "dhcp": False, "addr": "10.0.0.2", "mask": "255.255.255.0"} | kw
+        return {
+            "vlan": "0",
+            "dhcp": False,
+            "addr": "10.0.0.2",
+            "mask": "255.255.255.0",
+        } | kw
 
     def test_split_with_equal_vlan_ids_is_refused(self):
         # On mgmt and thread_bb both VLAN 20: a message about different VLAN IDs.
-        form = {"mode": "split", "mgmt": {"vlan": "20", "dhcp": True}, "thread_bb": {"vlan": "20", "dhcp": True}}
+        form = {
+            "mode": "split",
+            "mgmt": {"vlan": "20", "dhcp": True},
+            "thread_bb": {"vlan": "20", "dhcp": True},
+        }
         assert "different VLAN" in self.error_of(form)
 
-    @pytest.mark.parametrize("addr", ["10.0.0", "10.0.0.256", "a.b.c.d", "10.0.0.1.5", "10..0.1", "1e1.0.0.1"])
+    @pytest.mark.parametrize(
+        "addr",
+        ["10.0.0", "10.0.0.256", "a.b.c.d", "10.0.0.1.5", "10..0.1", "1e1.0.0.1"],
+    )
     def test_malformed_address_is_refused(self, addr):
         # On an address that is not a dotted quad: a message about the address.
-        assert "address" in self.error_of({"mode": "single", "single": self.static(addr=addr)})
+        assert "address" in self.error_of(
+            {"mode": "single", "single": self.static(addr=addr)}
+        )
 
-    @pytest.mark.parametrize("mask", ["255.0.255.0", "0.0.0.0", "255.255.255", "255.255.255.1", "256.0.0.0"])
+    @pytest.mark.parametrize(
+        "mask", ["255.0.255.0", "0.0.0.0", "255.255.255", "255.255.255.1", "256.0.0.0"]
+    )
     def test_invalid_netmask_is_refused(self, mask):
         # On a non-contiguous, zero or malformed mask: a message about the netmask.
-        assert "netmask" in self.error_of({"mode": "single", "single": self.static(mask=mask)})
+        assert "netmask" in self.error_of(
+            {"mode": "single", "single": self.static(mask=mask)}
+        )
 
     def test_unknown_mode_is_refused(self):
         # On a mode that is neither single nor split: a message.
@@ -205,7 +341,9 @@ class TestNetworkConfig:
 
 
 NET_SPLIT_TRIAL = (
-    "Object.assign(H.fixture(H.NETWORK), {mode: 'split', trial: Object.assign(" + json.dumps(SPLIT_CFG) + ", {remaining_s: 200}),"
+    "Object.assign(H.fixture(H.NETWORK), {mode: 'split', trial: Object.assign("
+    + json.dumps(SPLIT_CFG)
+    + ", {remaining_s: 200}),"
     " interfaces: [{name: 'mgmt', vlan: 10, link: true, ipv4: '192.168.10.5', ipv6: []},"
     " {name: 'thread_bb', vlan: 20, link: false, ipv4: null, ipv6: ['fe80::2']}]})"
 )
@@ -235,8 +373,20 @@ class TestEthernetPage:
                     t.el('if-single-ipv6').textContent, t.el('if-single-live').hidden(), t.el('actionBar').hidden()];
         """
         )
-        assert r == ["true", False, True, False, True, "Untagged", "Link up", "192.168.1.117", "from DHCP",
-                     "fe80::1\nfdaa:1::1", False, True]
+        assert r == [
+            "true",
+            False,
+            True,
+            False,
+            True,
+            "Untagged",
+            "Link up",
+            "192.168.1.117",
+            "from DHCP",
+            "fe80::1\nfdaa:1::1",
+            False,
+            True,
+        ]
 
     def test_the_trial_configuration_is_what_runs_and_what_is_edited(self):
         # On a split trial: Split pressed, both cards live, the static gateway shown, link down on thread_bb, banner up.
@@ -250,7 +400,17 @@ class TestEthernetPage:
                     t.el('trialBanner').hidden(), t.el('actionBar').hidden()];
         """
         )
-        assert r == ["true", False, False, "Link down", "static", False, "gateway 192.168.20.1", False, True]
+        assert r == [
+            "true",
+            False,
+            False,
+            "Link down",
+            "static",
+            False,
+            "gateway 192.168.20.1",
+            False,
+            True,
+        ]
 
     def test_later_polls_do_not_overwrite_the_draft(self):
         # On an edit followed by another poll: the edit stays.
@@ -364,14 +524,25 @@ class TestEthernetPage:
         """
         )
         assert r[0] == "/device/network"
-        assert r[1] == {"mode": "single", "single": {"vlan": 0, "ipv4": {"dhcp": False, "addr": "10.0.0.2", "mask": "255.255.255.0"}}}
+        assert r[1] == {
+            "mode": "single",
+            "single": {
+                "vlan": 0,
+                "ipv4": {"dhcp": False, "addr": "10.0.0.2", "mask": "255.255.255.0"},
+            },
+        }
         assert "http://10.0.0.2" in r[2]
         assert r[3:] == [True, True, 0]
 
     def test_apply_refused_by_the_board_shows_why_and_releases_the_buttons(self):
         # On a 400 invalid_config: the detail in netMsg, not busy, Apply enabled again.
         r = scenario(
-            page("ethernet", routes(put="{status: 400, body: {error: 'invalid_config', detail: 'thread_bb.vlan'}}"))
+            page(
+                "ethernet",
+                routes(
+                    put="{status: 400, body: {error: 'invalid_config', detail: 'thread_bb.vlan'}}"
+                ),
+            )
             + START
             + """
             t.el('if-single-edit').click(); t.el('if-single-staticbtn').click(); t.el('if-single-cidr').type('10.0.0.2/24');
@@ -385,7 +556,11 @@ class TestEthernetPage:
 
     def test_apply_without_review_or_with_errors_sends_nothing(self):
         # On apply() with no changes: no PUT.
-        r = scenario(page("ethernet", routes()) + START + "await t.page.apply(); return t.calls.filter((c) => c.method === 'PUT').length;")
+        r = scenario(
+            page("ethernet", routes())
+            + START
+            + "await t.page.apply(); return t.calls.filter((c) => c.method === 'PUT').length;"
+        )
         assert r == 0
 
     def test_poll_failure_shows_the_stale_line_and_keeps_the_action_message(self):
@@ -404,7 +579,12 @@ class TestEthernetPage:
     def test_fallback_is_announced_with_its_error(self):
         # On fallback with an error: the banner names it.
         r = scenario(
-            page("ethernet", routes("Object.assign(H.fixture(H.NETWORK), {fallback: true, error: 'ESP_ERR_INVALID_ARG'})"))
+            page(
+                "ethernet",
+                routes(
+                    "Object.assign(H.fixture(H.NETWORK), {fallback: true, error: 'ESP_ERR_INVALID_ARG'})"
+                ),
+            )
             + START
             + "return [t.el('n-fallback').hidden(), t.el('n-fallback').textContent];"
         )
@@ -414,7 +594,10 @@ class TestEthernetPage:
     def test_dropped_vlan_frames_are_counted(self):
         # On vlan_rx_dropped 7: the counter shows 7.
         r = scenario(
-            page("ethernet", routes("Object.assign(H.fixture(H.NETWORK), {vlan_rx_dropped: 7})"))
+            page(
+                "ethernet",
+                routes("Object.assign(H.fixture(H.NETWORK), {vlan_rx_dropped: 7})"),
+            )
             + START
             + "return t.el('n-dropped').textContent;"
         )
@@ -423,7 +606,12 @@ class TestEthernetPage:
     def test_server_text_is_rendered_as_text(self):
         # On an IPv4 string with markup: it lands in textContent unchanged.
         r = scenario(
-            page("ethernet", routes("(() => { const n = H.fixture(H.NETWORK); n.interfaces[0].ipv4 = '<b>x</b>'; return n; })()"))
+            page(
+                "ethernet",
+                routes(
+                    "(() => { const n = H.fixture(H.NETWORK); n.interfaces[0].ipv4 = '<b>x</b>'; return n; })()"
+                ),
+            )
             + START
             + "return t.el('if-single-ipv4').textContent;"
         )
@@ -431,5 +619,8 @@ class TestEthernetPage:
 
     def test_init_polls_only_the_network(self):
         # On init: GET /device/network once (the banner uses the same answer), nothing else.
-        r = scenario(page("ethernet", routes()) + "t.page.init(); await t.advance(100); return t.calls.map((c) => c.url);")
+        r = scenario(
+            page("ethernet", routes())
+            + "t.page.init(); await t.advance(100); return t.calls.map((c) => c.url);"
+        )
         assert r == ["/device/network"]

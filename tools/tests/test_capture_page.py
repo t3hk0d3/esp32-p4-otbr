@@ -3,7 +3,6 @@
 import json
 
 import pytest
-
 from device_js import logic, needs_node, page, scenario
 
 
@@ -24,12 +23,18 @@ class TestCaptureLogic:
 
     def test_capture_url_carries_channel_and_duration(self):
         # On a valid channel and duration: /device/sniffer.pcap with both query parameters.
-        assert cap("L.captureUrl('15', 60)") == "/device/sniffer.pcap?channel=15&duration=60"
+        assert (
+            cap("L.captureUrl('15', 60)")
+            == "/device/sniffer.pcap?channel=15&duration=60"
+        )
 
     @pytest.mark.parametrize("channel", ["", "  "])
     def test_empty_channel_leaves_the_channel_to_the_board(self, channel):
         # On an empty channel: no channel parameter, so the board uses its Thread channel.
-        assert cap(f"L.captureUrl({json.dumps(channel)}, 600)") == "/device/sniffer.pcap?duration=600"
+        assert (
+            cap(f"L.captureUrl({json.dumps(channel)}, 600)")
+            == "/device/sniffer.pcap?duration=600"
+        )
 
     @pytest.mark.parametrize("channel", ["10", "27", "abc"])
     def test_capture_url_refuses_a_channel_outside_11_to_26(self, channel):
@@ -50,8 +55,16 @@ class TestCaptureLogic:
 
     def test_active_view_has_time_left_and_progress(self):
         # On 42 of 60 s: 0:18 left, 70 % done.
-        v = cap("L.activeView({channel: 15, frames: 9, drops: 1, elapsed_s: 42, duration_s: 60})")
-        assert v == {"title": "Capturing on channel 15", "left": "0:18", "frames": "9", "drops": "1", "pct": 70}
+        v = cap(
+            "L.activeView({channel: 15, frames: 9, drops: 1, elapsed_s: 42, duration_s: 60})"
+        )
+        assert v == {
+            "title": "Capturing on channel 15",
+            "left": "0:18",
+            "frames": "9",
+            "drops": "1",
+            "pct": 70,
+        }
 
 
 @needs_node
@@ -70,7 +83,10 @@ class TestCapturePage:
         )
         assert r[:3] == [False, True, "true"]
         assert r[3] == "/device/sniffer.pcap?duration=60"
-        assert r[4] == "curl -N 'http://board.lan/device/sniffer.pcap?duration=60' | wireshark -k -i -"
+        assert (
+            r[4]
+            == "curl -N 'http://board.lan/device/sniffer.pcap?duration=60' | wireshark -k -i -"
+        )
 
     def test_active_capture_shows_the_running_card(self):
         # On an active capture: the running card with channel, time left, frames, drops and the bar; no form.
@@ -88,7 +104,12 @@ class TestCapturePage:
     def test_capture_ended_by_a_fault_is_reported(self):
         # On ended_by_fault: the fault line is shown; otherwise hidden.
         r = scenario(
-            page("capture", status_routes("(() => { const s = H.fixture(H.STATUS); s.sniffer.ended_by_fault = true; return s; })()"))
+            page(
+                "capture",
+                status_routes(
+                    "(() => { const s = H.fixture(H.STATUS); s.sniffer.ended_by_fault = true; return s; })()"
+                ),
+            )
             + "await t.page.refreshStatus(); return t.el('cap-fault').hidden();"
         )
         assert r is False

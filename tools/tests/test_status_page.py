@@ -3,7 +3,6 @@
 import json
 
 import pytest
-
 from device_js import logic, needs_node, page, scenario
 
 
@@ -24,23 +23,35 @@ class TestStatusLogic:
 
     def test_running_hero_is_green_without_a_link(self):
         # On BR_RUNNING: "Border router running", tone ok, no link.
-        h = st(f"L.heroFor({{mode: 'BR_RUNNING', fault_reason: null, sniffer: {{}}}})")
-        assert (h["title"], h["tone"], h["link"]) == ("Border router running", "ok", None)
+        h = st("L.heroFor({mode: 'BR_RUNNING', fault_reason: null, sniffer: {}})")
+        assert (h["title"], h["tone"], h["link"]) == (
+            "Border router running",
+            "ok",
+            None,
+        )
 
     def test_sniffer_hero_names_channel_and_frames_and_links_the_capture(self):
         # On SNIFFER: "Capturing packets", the text names channel 15 and 1284 frames, link capture.html.
-        h = st("L.heroFor({mode: 'SNIFFER', sniffer: {active: true, channel: 15, frames: 1284}})")
+        h = st(
+            "L.heroFor({mode: 'SNIFFER', sniffer: {active: true, channel: 15, frames: 1284}})"
+        )
         assert (h["title"], h["tone"]) == ("Capturing packets", "info")
         assert "15" in h["text"] and "1284" in h["text"]
         assert h["link"]["href"] == "/capture.html"
 
     @pytest.mark.parametrize(
         ("reason", "word"),
-        [("'no rcp firmware'", "no firmware"), ("'rcp incompatible'", "does not match"), ("'spinel timeout'", "spinel timeout")],
+        [
+            ("'no rcp firmware'", "no firmware"),
+            ("'rcp incompatible'", "does not match"),
+            ("'spinel timeout'", "spinel timeout"),
+        ],
     )
     def test_fault_hero_explains_the_reason_and_links_firmware(self, reason, word):
         # On RADIO_FAULT: "Radio fault", the text explains the reason, link firmware.html.
-        h = st(f"L.heroFor({{mode: 'RADIO_FAULT', fault_reason: {reason}, sniffer: {{}}}})")
+        h = st(
+            f"L.heroFor({{mode: 'RADIO_FAULT', fault_reason: {reason}, sniffer: {{}}}})"
+        )
         assert (h["title"], h["tone"]) == ("Radio fault", "fault")
         assert word in h["text"]
         assert h["link"]["href"] == "/firmware.html"
@@ -52,17 +63,34 @@ class TestStatusLogic:
 
     def test_sniffer_text_for_active_idle_and_fault(self):
         # On active / idle with a last capture / idle without / ended by a fault: state and detail.
-        assert st("L.snifferText({active: true, channel: 15, frames: 9, drops: 1})") == {
-            "state": "Capturing on channel 15", "detail": "9 frames, 1 dropped"}
+        assert st(
+            "L.snifferText({active: true, channel: 15, frames: 9, drops: 1})"
+        ) == {"state": "Capturing on channel 15", "detail": "9 frames, 1 dropped"}
         assert st("L.snifferText({active: false, frames: 3912, drops: 0})") == {
-            "state": "Idle", "detail": "Last capture: 3912 frames, 0 dropped"}
-        assert st("L.snifferText({active: false, frames: 0, drops: 0})") == {"state": "Idle", "detail": "No capture since boot"}
-        assert "radio fault" in st("L.snifferText({active: false, ended_by_fault: true, frames: 3, drops: 0})")["detail"]
+            "state": "Idle",
+            "detail": "Last capture: 3912 frames, 0 dropped",
+        }
+        assert st("L.snifferText({active: false, frames: 0, drops: 0})") == {
+            "state": "Idle",
+            "detail": "No capture since boot",
+        }
+        assert (
+            "radio fault"
+            in st(
+                "L.snifferText({active: false, ended_by_fault: true, frames: 3, drops: 0})"
+            )["detail"]
+        )
 
     def test_pd_text_names_the_prefix_or_none(self):
         # On a prefix / none / unreadable state: the prefix / "None received" / "unknown".
-        assert st("L.pdText({state: 'running', prefix: '2001:db8:1::/64'})") == {"state": "running", "prefix": "2001:db8:1::/64"}
-        assert st("L.pdText({state: 'running', prefix: null})")["prefix"] == "None received"
+        assert st("L.pdText({state: 'running', prefix: '2001:db8:1::/64'})") == {
+            "state": "running",
+            "prefix": "2001:db8:1::/64",
+        }
+        assert (
+            st("L.pdText({state: 'running', prefix: null})")["prefix"]
+            == "None received"
+        )
         assert "unknown" in st("L.pdText({state: null, prefix: null})")["state"]
 
 
@@ -83,9 +111,24 @@ class TestStatusPage:
         """
         )
         assert r == [
-            "Border router running", "BR_RUNNING", "1.0", "Slot 0", "OK", "2.1", "Yes", "b1, as expected", "Fitted",
-            "10.0.0.5", "fe80::1", "running", "None received", "Idle", "No capture since boot",
-            True, "card hero hero-ok", True,
+            "Border router running",
+            "BR_RUNNING",
+            "1.0",
+            "Slot 0",
+            "OK",
+            "2.1",
+            "Yes",
+            "b1, as expected",
+            "Fitted",
+            "10.0.0.5",
+            "fe80::1",
+            "running",
+            "None received",
+            "Idle",
+            "No capture since boot",
+            True,
+            "card hero hero-ok",
+            True,
         ]
 
     def test_fault_hero_links_the_firmware_page(self):
@@ -125,17 +168,29 @@ class TestStatusPage:
             page("device", ROUTES)
             + "await t.page.refreshDiag(); return ['h-uptime','h-reset','t-cpu','t-mem-int','t-mem-psram'].map((i) => t.el(i).textContent);"
         )
-        assert r == ["7 h 35 min", "software", "Core 0 0.5%, core 1 0.6%", "408.9 KB (lowest 350.7 KB)", "30.2 MB"]
+        assert r == [
+            "7 h 35 min",
+            "software",
+            "Core 0 0.5%, core 1 0.6%",
+            "408.9 KB (lowest 350.7 KB)",
+            "30.2 MB",
+        ]
 
     def test_diag_failure_leaves_dashes(self):
         # On a failing diag: the uptime stays a dash.
-        r = scenario(page("device", "() => { throw new Error('down'); }") + "t.el('h-uptime').textContent = '-'; await t.page.refreshDiag(); return t.el('h-uptime').textContent;")
+        r = scenario(
+            page("device", "() => { throw new Error('down'); }")
+            + "t.el('h-uptime').textContent = '-'; await t.page.refreshDiag(); return t.el('h-uptime').textContent;"
+        )
         assert r == "-"
 
     def test_unanswered_status_shows_the_offline_line_with_backoff(self):
         # On failing status polls: the offline line with last-seen seconds; requests back off.
         r = scenario(
-            page("device", "(u) => { if (t.fail) throw new Error('down'); return {status: 200, body: u === '/device/diag' ? H.DIAG : u === '/device/network' ? H.NETWORK : H.STATUS}; }")
+            page(
+                "device",
+                "(u) => { if (t.fail) throw new Error('down'); return {status: 200, body: u === '/device/diag' ? H.DIAG : u === '/device/network' ? H.NETWORK : H.STATUS}; }",
+            )
             + """
             t.fail = false; t.page.init(); await t.advance(100);
             t.fail = true; await t.advance(60000);
@@ -164,7 +219,10 @@ class TestStatusPage:
     def test_reboot_refused_shows_why(self):
         # On a 409 from reboot: the reason in rebootMsg, not busy.
         r = scenario(
-            page("device", "(u, o) => o.method === 'POST' ? ({status: 409, body: {error: 'busy', detail: 'update running'}}) : ({status: 200, body: H.STATUS})")
+            page(
+                "device",
+                "(u, o) => o.method === 'POST' ? ({status: 409, body: {error: 'busy', detail: 'update running'}}) : ({status: 200, body: H.STATUS})",
+            )
             + "await t.page.reboot(); return [t.el('rebootMsg').textContent, t.page.kit.isBusy()];"
         )
         assert "update running" in r[0]
@@ -172,5 +230,8 @@ class TestStatusPage:
 
     def test_init_polls_status_diag_and_the_trial_banner(self):
         # On init: GET /device/status, /device/diag and /device/network.
-        r = scenario(page("device", ROUTES) + "t.page.init(); await t.advance(100); return [...new Set(t.calls.map((c) => c.url))].sort();")
+        r = scenario(
+            page("device", ROUTES)
+            + "t.page.init(); await t.advance(100); return [...new Set(t.calls.map((c) => c.url))].sort();"
+        )
         assert r == ["/device/diag", "/device/network", "/device/status"]

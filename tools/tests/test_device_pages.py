@@ -5,12 +5,13 @@ import re
 import subprocess
 
 import pytest
-
 from device_js import FRONTEND, REPO, STATIC, needs_node
 
 API_JS = FRONTEND / "static" / "api.js"
 DEVICE_API = REPO / "p4" / "components" / "device_api" / "device_api.c"
-WEB_BUDGET_BYTES = 256 * 1024  # of the 2 MB web partition; the whole frontend is well below it
+WEB_BUDGET_BYTES = (
+    256 * 1024
+)  # of the 2 MB web partition; the whole frontend is well below it
 
 DEVICE_MENU = [
     ["/device.html", "Status"],
@@ -27,9 +28,19 @@ PAGES = {
     "ethernet": ("ethernet", ["/device/network"]),
     "firmware": (
         "firmware",
-        ["/device/status", "/device/ota", "/device/ota/url", "/device/radio/firmware", "/device/radio/recover", "/device/radio/log"],
+        [
+            "/device/status",
+            "/device/ota",
+            "/device/ota/url",
+            "/device/radio/firmware",
+            "/device/radio/recover",
+            "/device/radio/log",
+        ],
     ),
-    "capture": ("capture", ["/device/sniffer.pcap", "/device/sniffer", "/device/status"]),
+    "capture": (
+        "capture",
+        ["/device/sniffer.pcap", "/device/sniffer", "/device/status"],
+    ),
 }
 
 KIT_IDS = ["trialBanner", "trialRemaining", "confirmBtn", "confirmMsg"]
@@ -54,7 +65,9 @@ def nav_html(pathname):
         f"vm.runInNewContext(fs.readFileSync({json.dumps(str(API_JS))}, 'utf8'), ctx);"
         "process.stdout.write(JSON.stringify(nav.innerHTML));"
     )
-    out = subprocess.run(["node", "-e", source], capture_output=True, text=True, check=True, timeout=20)
+    out = subprocess.run(
+        ["node", "-e", source], capture_output=True, text=True, check=True, timeout=20
+    )
     return json.loads(out.stdout)
 
 
@@ -66,7 +79,9 @@ class TestNav:
         # On any page: the Device toggle is followed by its five entries in order.
         html = nav_html("/index.html")
         menu = html.split('nav-dropdown-toggle">Device</a>', 1)[1].split("</ul>", 1)[0]
-        assert [list(m) for m in re.findall(r'<a href="([^"]+)"[^>]*>([^<]+)</a>', menu)] == DEVICE_MENU
+        assert [
+            list(m) for m in re.findall(r'<a href="([^"]+)"[^>]*>([^<]+)</a>', menu)
+        ] == DEVICE_MENU
 
     @pytest.mark.parametrize("path", [p for p, _ in DEVICE_MENU])
     def test_device_toggle_is_active_on_each_device_page(self, path):
@@ -92,7 +107,11 @@ class TestPages:
         assert '<nav class="nav" id="nav"></nav>' in html
         assert '<body class="device-page">' in html
         tags = re.findall(r'<script src="([^"]+)"></script>', html)
-        assert tags == ["/static/api.js", "/static/device_common.js", f"/static/{script}.js"]
+        assert tags == [
+            "/static/api.js",
+            "/static/device_common.js",
+            f"/static/{script}.js",
+        ]
 
     def test_page_has_the_trial_banner_and_the_source_link(self, name):
         # On the page: the shared banner ids and the AGPL source link in the footer.
@@ -103,7 +122,10 @@ class TestPages:
 
     def test_script_never_inserts_markup(self, name):
         # On the script: no innerHTML/outerHTML/insertAdjacentHTML/document.write.
-        assert not re.search(r"innerHTML|outerHTML|insertAdjacentHTML|document\.write", js_of(PAGES[name][0]))
+        assert not re.search(
+            r"innerHTML|outerHTML|insertAdjacentHTML|document\.write",
+            js_of(PAGES[name][0]),
+        )
 
     def test_page_and_script_load_nothing_remote(self, name):
         # On both: no script/link/src/href to a remote host, no import (a plain <a> link is navigation).
@@ -115,7 +137,12 @@ class TestPages:
     def test_every_id_the_script_names_exists_in_the_page(self, name):
         # On the script: each id given to $, setText, show or note is an element of the page.
         # A whole quoted id only: an id built from a prefix ('len-' + s) is checked by the page's own tests.
-        used = set(re.findall(r"(?:\$|setText|show|note)\('([A-Za-z0-9_-]+)'\s*[,)]", js_of(PAGES[name][0])))
+        used = set(
+            re.findall(
+                r"(?:\$|setText|show|note)\('([A-Za-z0-9_-]+)'\s*[,)]",
+                js_of(PAGES[name][0]),
+            )
+        )
         present = set(re.findall(r'id="([^"]+)"', html_of(name)))
         assert used
         assert used <= present, used - present
@@ -150,7 +177,9 @@ class TestShared:
         # On device_common.js: text goes in through textContent, never as markup.
         source = js_of("device_common")
         assert "textContent" in source
-        assert not re.search(r"innerHTML|outerHTML|insertAdjacentHTML|document\.write", source)
+        assert not re.search(
+            r"innerHTML|outerHTML|insertAdjacentHTML|document\.write", source
+        )
 
     def test_frontend_stays_within_the_web_image_budget(self):
         # On the frontend directory: total size below the budget.
@@ -158,7 +187,9 @@ class TestShared:
         assert total < WEB_BUDGET_BYTES
 
 
-TOP_LEVEL_ROUTES = {"/metrics"}  # device_api routes outside /device/ (Prometheus scrapes /metrics by default)
+TOP_LEVEL_ROUTES = {
+    "/metrics"
+}  # device_api routes outside /device/ (Prometheus scrapes /metrics by default)
 
 
 class TestRouting:
