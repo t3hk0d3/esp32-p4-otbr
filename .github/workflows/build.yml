@@ -26,7 +26,7 @@ jobs:
     container: espressif/idf:v6.1 # keep in step with IDF_VERSION
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4 # the device page tests run device.js under node
+      - uses: actions/setup-node@v4 # the device page tests run the page scripts under node
         with:
           node-version: 22
       - name: Component host tests

@@ -22,6 +22,7 @@ DEVICE_MENU = [
 
 # page -> (script, endpoints its script names)
 PAGES = {
+    "device": ("status", ["/device/status", "/device/diag", "/device/reboot"]),
     "diagnostics": ("diagnostics", ["/device/diag"]),
     "ethernet": ("ethernet", ["/device/network"]),
     "firmware": (
@@ -155,3 +156,23 @@ class TestShared:
         # On the frontend directory: total size below the budget.
         total = sum(p.stat().st_size for p in FRONTEND.rglob("*") if p.is_file())
         assert total < WEB_BUDGET_BYTES
+
+
+TOP_LEVEL_ROUTES = {"/metrics"}  # device_api routes outside /device/ (Prometheus scrapes /metrics by default)
+
+
+class TestRouting:
+    """device_api URI table against the static file handler"""
+
+    def test_registered_device_routes_are_exact_paths_under_device_slash(self):
+        # On the route table: every URI is exact (no wildcard) and under /device/ or one of the allowed top-level
+        # paths, so the page files (/device.html, /ethernet.html, ...) reach the /* file handler.
+        uris = re.findall(r'\{"(/[^"]*)", HTTP_[A-Z]+, ', DEVICE_API.read_text())
+        assert uris
+        assert all("*" not in u for u in uris)
+        assert all(u.startswith("/device/") or u in TOP_LEVEL_ROUTES for u in uris)
+
+    @pytest.mark.parametrize("name", sorted(PAGES))
+    def test_no_page_file_is_shadowed_by_a_route(self, name):
+        # On each page path: no device_api route takes it.
+        assert f'"/{name}.html"' not in DEVICE_API.read_text()
