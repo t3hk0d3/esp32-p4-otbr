@@ -26,7 +26,7 @@ PCB_X1, PCB_Y1 = 55.0, 68.0
 INNER = (-GAP, PCB_X1 + GAP, -GAP, PCB_Y1 + GAP)  # x0, x1, y0, y1
 OUTER = (INNER[0] - WALL, INNER[1] + WALL, INNER[2] - WALL, INNER[3] + WALL)
 INNER_R = 2.0 + GAP  # board corner radius 2 + gap
-OUTER_R = INNER_R + WALL
+OUTER_R = 2.5  # outer vertical edges; concentric with the ribbon recess corners at the header end
 PLATE_T = 2.0  # case Z 0-2
 STANDOFF_TOP = 7.0  # case Z (board underside)
 LID_UNDERSIDE = 25.6  # case Z of the lid body's underside
@@ -69,6 +69,8 @@ RIBBON_PLUG = (55.9, 9.0, 9.0)
 HEADER_BODY_TOP = 2.5  # board Z where a plug seats (top of the header's plastic body)
 RIBBON_RECESS = 1.0  # depth into the walls around the header end
 RIBBON_RECESS_Y0 = 58.0
+# recess corners share the outer corners' centre, leaving a 1 mm wall (OUTER_R - this)
+RIBBON_RECESS_CORNER_R = 1.5
 RIBBON_RECESS_TOP = HEADER_BODY_TOP + RIBBON_PLUG[2] + 1.0  # board Z
 RECESS_CHAMFER_RISE = (
     1.2  # recess ceiling rises 1.2 per 1 of depth (about 40 degrees from vertical)
