@@ -165,8 +165,9 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
   - The connector faces end up 0.5–0.8 mm behind the outer face.
   - The tops of these openings print as bridges up to about 17 mm. That's accepted (see section 8).
 - **Header-end wall (Y = 68 edge):**
-  - A cable slot 54 mm wide (X 0.5–54.5) with 3.5 mm of clear height directly under the lid's underside (case Z
-    22.1–25.6), open upward into the rebate so the lid closes it and it needs no bridge.
+  - A cable slot 54 mm wide (X 0.5–54.5), cut from case Z 23.1 up through the top of the wall so it needs no bridge.
+    The lid's flange closes it from above, leaving 3.5 mm of clear height under the flange (case Z 23.1–26.6), the
+    narrowest point of the path into the case.
   - 3.5 mm keeps to the "nothing wider than 3.5 mm falls in" rule when this end faces up on the wall. Ribbon cable
     (about 1.3 mm) and Dupont housings (2.5 mm) pass.
   - A real 2×20 IDC ribbon plug (about 55.9 × 9 × 9 mm, seated on the header body) must fit with 0.5 mm clearance. The
