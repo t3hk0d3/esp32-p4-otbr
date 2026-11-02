@@ -275,7 +275,7 @@ class TestThreadLogic:
         v = st(
             "L.threadView({'Network:Name': 'MyHome', 'Thread:Role': 'leader', 'RCP:Channel': '15', 'RCP:TxPower': '20 dBm',"
             " 'Network:PANID': '0x1234', 'Network:XPANID': 'dead', 'Network:PartitionID': '7', 'OpenThread:Version': 'ot',"
-            " 'RCP:EUI64': 'e', 'Network:BorderAgentID': 'b'})"
+            " 'RCP:EUI64': 'e', 'Network:BorderAgentID': 'b', 'IPv6:RoutingLocalAddress': 'fd00::ff:fe00:7800'})"
         )
         assert v == {
             "name": "MyHome",
@@ -289,8 +289,27 @@ class TestThreadLogic:
             "eui64": "e",
             "baid": "b",
             "pskc": "-",
+            "rloc": "fd00::ff:fe00:7800",
+            "rloc16": "0x7800",
             "joined": True,
         }
+
+    @pytest.mark.parametrize(
+        ("address", "rloc16"),
+        [
+            ("fd00::ff:fe00:7800", "0x7800"),
+            ("fd00::ff:fe00:0", "0x0000"),
+            ("fd00::ff:fe00:c01", "0x0c01"),
+            ("::", "-"),
+            (None, "-"),
+        ],
+    )
+    def test_rloc16_is_the_last_16_bits_of_the_rloc(self, address, rloc16):
+        # On an RLOC address: its last group as 0x and four hex digits; on "::" or none: "-".
+        props = (
+            "{}" if address is None else f"{{'IPv6:RoutingLocalAddress': '{address}'}}"
+        )
+        assert st(f"L.threadView({props}).rloc16") == rloc16
 
     @pytest.mark.parametrize("role", ["disabled", "detached", ""])
     def test_no_network_when_disabled_detached_or_unknown(self, role):
@@ -336,7 +355,7 @@ class TestThreadCards:
             page("index", ROUTES)
             + """
             await t.page.refreshStatus(); await t.page.refreshThread();
-            return ['t-net-name','t-net-role','t-net-channel','t-net-txpower','t-net-panid','t-net-xpanid','t-net-partition',
+            return ['t-net-name','t-net-role','t-net-rloc16','t-id-rloc','t-net-channel','t-net-txpower','t-net-panid','t-net-xpanid','t-net-partition',
                     't-id-eui64','t-id-baid','t-id-otver','h-role'].map((i) => t.el(i).textContent)
                    .concat([t.el('t-id-pskc').textContent.includes('aabb'), t.el('t-net-off').hidden()]);
         """
@@ -344,6 +363,8 @@ class TestThreadCards:
         assert r == [
             "MyHome",
             "leader",
+            "0x7800",
+            "fdde:ad00:beef:0:0:ff:fe00:7800",
             "15",
             "20 dBm",
             "0x1234",

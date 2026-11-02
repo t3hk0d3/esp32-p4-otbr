@@ -220,7 +220,7 @@ const NETWORK = {
 
 /* GET /get_properties and /ipaddr of the Thread web GUI ({error, result, message}). */
 const PROPS = {error: 0, message: 'OK', result: {
-  'Network:Name': 'MyHome', 'Thread:Role': 'leader', 'RCP:Channel': '15', 'RCP:TxPower': '20 dBm',
+  'Network:Name': 'MyHome', 'Thread:Role': 'leader', 'IPv6:RoutingLocalAddress': 'fdde:ad00:beef:0:0:ff:fe00:7800', 'RCP:Channel': '15', 'RCP:TxPower': '20 dBm',
   'Network:PANID': '0x1234', 'Network:XPANID': 'dead00beef00cafe', 'Network:PartitionID': '1745592081',
   'OpenThread:Version': 'openthread/1.4.0; esp32p4', 'RCP:EUI64': '1122334455667788',
   'Network:BorderAgentID': '0123456789abcdef0123456789abcdef', 'OpenThread:PSKc': 'aabbccddeeff00112233445566778899'}};

@@ -75,6 +75,16 @@ function pdText(pd) {
 
 var NOT_JOINED = {disabled : true, detached : true, '' : true};
 
+/** RLOC16 of an RLOC address: its last 16 bits as "0x7800"; "-" without one ("::" while detached). */
+function rloc16Of(address) {
+  if (!address || address === '-' || address === '::')
+    return '-';
+  var last = String(address).split(':').pop();
+  if (!/^[0-9a-fA-F]{1,4}$/.test(last))
+    return '-';
+  return '0x' + ('000' + last.toLowerCase()).slice(-4);
+}
+
 /** The Thread cards from the result of /get_properties; "-" for a field the answer lacks. */
 function threadView(r) {
   function f(k) { return r[k] === undefined || r[k] === null || r[k] === '' ? '-' : String(r[k]); }
@@ -91,6 +101,8 @@ function threadView(r) {
     eui64 : f('RCP:EUI64'),
     baid : f('Network:BorderAgentID'),
     pskc : f('OpenThread:PSKc'),
+    rloc : f('IPv6:RoutingLocalAddress'),
+    rloc16 : rloc16Of(r['IPv6:RoutingLocalAddress']),
     joined : !NOT_JOINED[role]
   };
 }
@@ -243,6 +255,8 @@ function renderThread(r) {
   setText('h-role', L.roleLine(v));
   setText('t-net-name', v.name);
   setText('t-net-role', v.role);
+  setText('t-net-rloc16', v.rloc16);
+  setText('t-id-rloc', v.rloc);
   setText('t-net-channel', v.channel);
   setText('t-net-txpower', v.txpower);
   setText('t-net-panid', v.panid);

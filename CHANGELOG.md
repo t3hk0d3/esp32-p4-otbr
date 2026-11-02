@@ -18,7 +18,7 @@ release's `versions.txt`.
 ### Changed
 
 - The device page is split up: its status becomes the Dashboard (`/`, merged with the upstream Dashboard's Thread network,
-  identifiers and Thread addresses; the PSKc is hidden until "Show"), and a "Device" menu holds Ethernet, Firmware, Packet
+  identifiers and Thread addresses, plus the RLOC and RLOC16; the PSKc is hidden until "Show"), and a "Device" menu holds Ethernet, Firmware, Packet
   capture and Diagnostics. `/device.html` is gone. The Ethernet page replaces the network form with setup cards (single port or split), one card
   per interface with its live state and an inline editor (addresses as `192.168.1.10/24`), live validation, and a
   review of the changes before Apply and reboot; tagged VLANs need a tick that the switch port carries them. "Confirm" is
