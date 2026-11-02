@@ -89,7 +89,7 @@ the result.
 | Lid | flat honeycomb grille plate with four tabs; sits flush in a rebate on the wall tops |
 | Lid fixing | four corner tabs hang into the inner corners of the base and guide the lid into place; a bump on each, ramped 45° on both sides, clicks into a dent in the side wall: push to close, lever up to open |
 | Opening the lid | lever it up through the grille with a small flat screwdriver; no pry cut-outs in this revision |
-| Board fixing | four M2.5 self-tapping screws through the board's holes into Ø6 × 5 mm standoffs with printed Ø2.2 pilot holes |
+| Board fixing | four M2.5 countersunk (flat-head) screws from the back: through a countersunk hole in the back plate, up through a Ø6 × 5 mm standoff and the board's hole, held by an M2.5 nut on top of the board; the heads sit flush with the back, so the case still lies flat on the wall |
 | Board fitting | the board goes in from the open top, tilted, connectors first into the cable-wall holes, then the header end is lowered onto the standoffs |
 | SMA | D-hole in the right (X = 55) wall; fitted after the board: the pigtail clips onto the board, the bulkhead goes out through the wall from inside, nut tightened outside |
 | 40-pin header | wiring (jumpers or a ribbon cable) leaves through a slot along the top of the header-end wall; no opening in the lid over the header |
@@ -136,6 +136,18 @@ outer vertical edges are rounded.
 - If the K2 check fails, both keyholes may move together, keeping 32 mm spacing and the same Y. If that fails too, the
   spacing may shrink to 25 mm or more. Record the final positions in the docs.
 - Nothing else (standoff, rib) may sit inside the area each L sweeps plus the head radius.
+
+### 5.1a Base: board screw holes
+
+- Under each of the four standoffs, a through-hole runs from the outer back face up through the standoff, on the axis
+  of the board's mounting hole: Ø2.8 clearance for M2.5.
+- At the back face it has a 90° countersink for an ISO 10642 / DIN 7991 M2.5 head (about Ø5 at the surface), sunk
+  0.2 mm below flush so the head never stands proud against the wall.
+- Screw length: 2 mm plate + 5 mm standoff + 1.6 mm board + 2 mm nut + a thread or two, so M2.5 × 12. The docs give it.
+- On top of the board, each nut (5 mm across flats, 2 mm tall) needs a free circle of about Ø6.5 around the hole. The
+  builder checks this against the top of the board model; the nearest parts are the FPC socket near (3.5, 57.3) and the
+  large capacitor near (51.5, 24.3).
+- The standoffs' top faces stay flat rings that the board rests on.
 
 ### 5.2 Base: walls
 
@@ -215,8 +227,9 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 
 ## 6. Assembly (goes into the docs page)
 
-1. Tilt the board so the USB and RJ45 go into their cable-wall holes, lower the header end onto the standoffs, and fit
-   four M2.5 self-tapping screws.
+1. Tilt the board so the USB and RJ45 go into their cable-wall holes and lower the header end onto the standoffs. Push
+   four M2.5 × 12 countersunk screws in from the back, through the standoffs and the board, and tighten an M2.5 nut on
+   each from the top.
 2. Clip the pigtail onto the antenna socket, push the SMA bulkhead out through the right wall from inside, and tighten
    its nut on the outside.
 3. Optional: plug wiring onto the 40-pin header and lead it out through the header-end slot.
@@ -246,7 +259,7 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 These are automated checks, run against the vendor STEP:
 
 - With the board in its final position, the board model and either printed part don't intersect.
-- Clearance between them is at least 0.3 mm everywhere except the intended contacts: standoff tops and the hole bores.
+- Clearance between them is at least 0.3 mm everywhere except the intended contacts: standoff tops, the hole bores and the screws.
 - Every opening (USB-C, USB-A, RJ45, microSD, both buttons, header slot, SMA hole) has an unobstructed straight path from
   outside to the part it serves.
 - **Fitting motion:**
@@ -262,6 +275,7 @@ These are automated checks, run against the vendor STEP:
   ribbon.
 - Lid on: the tabs, bumps and grille don't touch the board, its parts, the SMA envelope, the ribbon-plug block or the
   ribbon path (X 2.1–52.9, from the top of the block up into the header slot).
+- Each board-screw nut circle (Ø6.5 on top of the board around the mounting hole, 2.5 mm tall) is free of board parts.
 - Both keyhole head volumes (the L sweep plus the head radius, 2.5 mm tall) are free of the board and its underside parts.
 - From straight above the lid, the LED's top face is visible through at least one grille cell.
 - No lid opening, and no gap in the header-end slot, is wider than 3.5 mm.
@@ -280,7 +294,7 @@ pencil, insert and eject a card, fit and remove the lid, and hang the case both 
 - The exact dent depth and position, within section 5.3.
 - Slicer hints for the lid in `docs/case.md` (perimeters and infill around the tabs).
 - The SMA hole's exact height, within the clearance rule.
-- The M2.5 pilot-hole size, as a named constant.
+- The exact clearance-hole and countersink sizes, as named constants.
 
 ## 10. Follow-ups (not now)
 
