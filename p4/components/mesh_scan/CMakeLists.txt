@@ -6,8 +6,7 @@ if(IDF_TARGET STREQUAL "linux")
     return()
 endif()
 
-# The OpenThread glue (ot_ops.c) joins the sources in the next task.
-idf_component_register(SRCS "render.c" "scan.c"
+idf_component_register(SRCS "render.c" "scan.c" "ot_ops.c"
                        INCLUDE_DIRS "include"
                        PRIV_INCLUDE_DIRS "."
-                       PRIV_REQUIRES freertos log)
+                       PRIV_REQUIRES openthread br_core esp_timer freertos log heap)
