@@ -192,6 +192,10 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
     - The tip is about 1.1 mm thick. The thick root makes the tabs stiff guides; the thinner lower part flexes for the
       snap.
     - The dents in the walls sit level with the bumps, about 2 mm below the rebate floor.
+    - **Faces toward the end walls:** the same flat-then-lead-in profile. That covers the cable-wall leg of each L tab and
+      the end of each straight header-end tab that faces the header-end wall (0.2 mm clearance there). Each tab therefore
+      narrows toward its tip in both directions and steers the lid along the case as well as across it. The tips' outer
+      corners are rounded.
   - **Cable-end corners:**
     - L-shaped: a 7 mm leg along the side wall and a 3.5 mm leg along the cable wall. They locate the lid in X and Y.
     - They reach 6.5 mm below the lid's underside, to about 10.5 mm above the board. That clears the buttons (3.3), the

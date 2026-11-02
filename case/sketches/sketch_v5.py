@@ -114,7 +114,23 @@ def side(svg, ox, oy, which):
             rx=2,
         )
     for ylo, yhi, drop, _ in CORNER_TABS:
-        s.rect(ylo, TOP - drop, yhi, TOP, "#111", dash="2,1.5", sw=1)
+        # the edge that faces the end wall gets the same flat + lead-in as the outer face
+        if ylo < 34:
+            pts = [
+                (ylo, TOP),
+                (yhi, TOP),
+                (yhi, TOP - drop),
+                (ylo + TAB_LEAD, TOP - drop),
+            ]
+            pts.append((ylo, TOP - min(TAB_FLAT, drop - 0.5)))
+        else:
+            pts = [(ylo, TOP), (yhi, TOP), (yhi, TOP - min(TAB_FLAT, drop - 0.5))]
+            pts += [(yhi - TAB_LEAD, TOP - drop), (ylo, TOP - drop)]
+        svg.el.append(
+            '<polygon points="'
+            + " ".join(f"{a:.1f},{b:.1f}" for a, b in (s.p(u, w) for u, w in pts))
+            + '" fill="none" stroke="#111" stroke-width="1" stroke-dasharray="2,1.5"/>'
+        )
     s.rect(0, PCB0, 68, PCB1, C["board"], dash="3,3", sw=1)
     if which == "left":
         for yb, lab, dx, anc in (
@@ -307,6 +323,22 @@ def sheet_detail(path):
     )
     z.text(-1.5 * k, -1.6 * k, "lid frame sits in a 1 mm rebate", size=11)
     z.text(-7.5 * k, -9.8 * k, "wall", size=11)
+
+    title(svg, 900, 100, "G. Tab from the side")
+    g = View(svg, 930, 140, -3, 3)
+    kk = 3.0
+    g.rect(
+        -3 * kk, -9 * kk, -1 * kk, 1 * kk, "#374151", fill=BASE_C
+    )  # cable wall (end wall)
+    tab = [(-0.8, 0), (7.0, 0), (7.0, -6.5), (-0.8 + TAB_LEAD, -6.5), (-0.8, -TAB_FLAT)]
+    svg.el.append(
+        '<polygon points="'
+        + " ".join(f"{a:.1f},{b:.1f}" for a, b in (g.p(u * kk, w * kk) for u, w in tab))
+        + f'" fill="{LID_C}" stroke="#374151" stroke-width="1"/>'
+    )
+    g.text(-3 * kk, -10.5 * kk, "cable wall", size=11)
+    g.text(1 * kk, -8.5 * kk, "same lead-in toward the end wall:", size=11)
+    g.text(1 * kk, -9.7 * kk, "the tip narrows both ways", size=11)
 
     svg.text(
         60,
