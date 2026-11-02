@@ -19,6 +19,7 @@ Everything is on port 80, no authentication. Errors on `/device/*` are JSON `{"e
 | `PUT /device/network` | store a trial network config and reboot into it | 400 `invalid_config` (`detail` names the field); 409 `busy`; 413 |
 | `POST /device/network/confirm` | commit the trial config | 409 `no_trial`; 403 `wrong_interface` |
 | `POST /device/reboot` | reboot | 409 `busy` while an update or push runs |
+| `GET /metrics` | device health and Thread figures in the Prometheus text format, see [metrics](metrics.md) | 500 `no_memory` |
 
 `/device/status` modes: `STARTING`, `BR_RUNNING`, `SNIFFER`, `RADIO_FAULT`.
 

@@ -6,7 +6,7 @@ Date: 2026-11-02. Status: draft for review.
 
 Let people monitor one or many boards from Prometheus (and Grafana) without polling JSON: device health (CPU, memory,
 tasks, OpenThread lock, mode, versions) and the Thread network the board serves (role, mesh size, MAC and IP counters,
-border routing, NAT64, SRP).
+border routing, SRP).
 
 In scope: `GET /metrics` in the Prometheus text format, a Thread collector that caches OpenThread figures, two small
 additions to `diag`, docs.
@@ -112,13 +112,12 @@ Task names are the FreeRTOS names the sampler already tracks (at most 48, `br_ta
 | `br_border_routing_bytes_total` | counter | `direction`, `cast` | BR counters |
 | `br_border_routing_ra_total` | counter | `event` = rx, tx_success, tx_failure | BR counters |
 | `br_border_routing_rs_total` | counter | `event` = rx, tx_success, tx_failure | BR counters |
-| `br_nat64_state` | state set | `state` = disabled, not_running, idle, active | `otNat64GetTranslatorState` |
-| `br_nat64_packets_total` | counter | `direction` = 4to6/6to4, `protocol` = tcp, udp, icmp | `otNat64GetCounters` |
-| `br_nat64_bytes_total` | counter | `direction`, `protocol` | NAT64 counters |
-| `br_nat64_errors_total` | counter | `direction`, `reason` = unknown, illegal_packet, unsupported_protocol, no_mapping | NAT64 counters |
 | `br_srp_server_state` | state set | `state` = disabled, running, stopped | `otSrpServerGetState` |
 | `br_srp_hosts` | gauge | | `otSrpServerGetNextHost` (not deleted) |
 | `br_srp_services` | gauge | | `otSrpServerHostGetNextService` (not deleted) |
+
+NAT64 translation counters are not exported: the NAT64 translator is not compiled into this firmware
+(`otNat64GetCounters` and `otNat64GetTranslatorState` are absent from the linked libraries). See section 10.
 
 ### 4.3 Collector (always present)
 
@@ -196,6 +195,8 @@ treats a decrease as a counter reset; the endpoint does nothing special.
 
 ## 10. Follow-ups
 
+- NAT64 translator figures (`br_nat64_state`, `br_nat64_packets_total`, `br_nat64_bytes_total`,
+  `br_nat64_errors_total`) once the translator is enabled in the OpenThread build.
 - Per-neighbour series (RSSI, link quality, frame error rate by extended address), behind an opt-in, because label
   cardinality grows with the mesh.
 - mDNS advertisement (`_prometheus-http._tcp`) for service discovery.

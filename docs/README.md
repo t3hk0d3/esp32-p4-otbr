@@ -14,6 +14,7 @@ Running it:
 - [Sniffer](sniffer.md): 802.15.4 captures into Wireshark.
 - [Maintenance jumper](maintenance-jumper.md): C6 recovery and console capture.
 - [Diagnostics](diagnostics.md): CPU, memory, tasks and OpenThread lock statistics.
+- [Prometheus metrics](metrics.md): `GET /metrics`, scrape config, the metric list and example alerts.
 - [Troubleshooting and limitations](troubleshooting.md): fault reasons, common problems, known limitations.
 
 Working on it:
