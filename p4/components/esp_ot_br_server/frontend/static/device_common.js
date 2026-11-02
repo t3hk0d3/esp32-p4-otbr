@@ -420,7 +420,25 @@ return {
 };
 }
 
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = DeviceCommon;
-  module.exports.DeviceKit = DeviceKit;
+/* The browser's environment for DeviceKit and the pages; the tests pass their own. */
+function DeviceEnv() {
+  return {
+    document : document,
+    location : location,
+    fetch : function(url, opts) { return fetch(url, opts); },
+    setTimeout : function(f, ms) { return setTimeout(f, ms); },
+    clearTimeout : function(t) { clearTimeout(t); },
+    setInterval : function(f, ms) { return setInterval(f, ms); },
+    now : function() { return Date.now(); },
+    confirm : function(t) { return confirm(t); },
+    reload : function() { location.reload(); },
+    AbortController : AbortController,
+    IntersectionObserver : typeof IntersectionObserver !== 'undefined' ? IntersectionObserver : null
+  };
 }
+
+DeviceCommon.DeviceKit = DeviceKit;
+DeviceCommon.DeviceEnv = DeviceEnv;
+
+if (typeof module !== 'undefined' && module.exports)
+  module.exports = DeviceCommon;

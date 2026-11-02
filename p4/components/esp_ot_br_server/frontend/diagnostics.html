@@ -1,0 +1,83 @@
+<!--
+  SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Thread Border Router - Diagnostics</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="/favicon.ico">
+</head>
+<body class="device-page">
+<nav class="nav" id="nav"></nav>
+<div class="container">
+    <div class="page-head">
+        <div>
+            <h1 class="page-title">Diagnostics</h1>
+            <p class="page-desc">CPU, memory, tasks and OpenThread lock figures, refreshed every 2 seconds.</p>
+        </div>
+        <span class="form-hint">For Prometheus: <a href="/metrics">/metrics</a></span>
+    </div>
+
+    <div class="disabled-banner hidden" id="trialBanner" role="status">
+        <strong>New network settings are on trial.</strong>
+        The board goes back to the previous settings in <span id="trialRemaining">-</span> unless you keep them from the
+        management interface.
+        <button class="btn btn-primary btn-sm" id="confirmBtn" type="button">Keep new settings</button>
+    </div>
+    <div class="form-hint" id="confirmMsg" role="status" aria-live="polite"></div>
+
+    <div class="tile-grid" id="diagSection">
+        <section class="card">
+            <h2 class="card-title">CPU load</h2>
+            <p class="card-sub">Averages over 1 s, 10 s and 60 s; the bar shows 10 s.</p>
+            <div id="d-cpu"></div>
+            <dl class="facts">
+                <dt>Uptime</dt><dd id="d-uptime">-</dd>
+                <dt>Last reset</dt><dd id="d-reset">-</dd>
+            </dl>
+        </section>
+        <section class="card">
+            <h2 class="card-title">Memory</h2>
+            <p class="card-sub">Free now, lowest since boot, and the largest block that can be allocated.</p>
+            <div id="d-mem"></div>
+        </section>
+    </div>
+
+    <section class="card mt-16">
+        <h2 class="card-title">OpenThread lock</h2>
+        <div class="table-wrap">
+            <table class="diff-table">
+                <thead><tr><th scope="col">Period</th><th scope="col" class="num">Acquisitions</th>
+                    <th scope="col" class="num">Longest hold</th><th scope="col">Held by</th>
+                    <th scope="col" class="num">Longest wait</th></tr></thead>
+                <tbody id="d-lock"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card mt-16">
+        <div class="tile-head">
+            <h2 class="card-title">Tasks</h2>
+            <span class="form-hint">Busiest first. Stack below 1 KB is marked.</span>
+        </div>
+        <div class="table-wrap">
+            <table class="diff-table">
+                <thead><tr><th scope="col">Task</th><th scope="col">State</th><th scope="col" class="num">Core</th>
+                    <th scope="col" class="num">Priority</th><th scope="col" class="num">CPU 1 s / 10 s / 60 s</th>
+                    <th scope="col" class="num">Stack free</th></tr></thead>
+                <tbody id="d-tasks"></tbody>
+            </table>
+        </div>
+        <div class="form-hint" id="d-note" role="status" aria-live="polite"></div>
+    </section>
+</div>
+<div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
+<script src="/static/api.js"></script>
+<script src="/static/device_common.js"></script>
+<script src="/static/diagnostics.js"></script>
+</body>
+</html>

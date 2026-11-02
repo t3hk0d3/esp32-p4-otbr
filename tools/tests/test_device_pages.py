@@ -6,9 +6,11 @@ import subprocess
 
 import pytest
 
-from device_js import FRONTEND, needs_node
+from device_js import FRONTEND, REPO, STATIC, needs_node
 
 API_JS = FRONTEND / "static" / "api.js"
+DEVICE_API = REPO / "p4" / "components" / "device_api" / "device_api.c"
+WEB_BUDGET_BYTES = 256 * 1024  # of the 2 MB web partition; the whole frontend is well below it
 
 DEVICE_MENU = [
     ["/device.html", "Status"],
@@ -17,6 +19,23 @@ DEVICE_MENU = [
     ["/capture.html", "Packet capture"],
     ["/diagnostics.html", "Diagnostics"],
 ]
+
+# page -> (script, endpoints its script names)
+PAGES = {
+    "diagnostics": ("diagnostics", ["/device/diag"]),
+}
+
+KIT_IDS = ["trialBanner", "trialRemaining", "confirmBtn", "confirmMsg"]
+KIT_ENDPOINTS = ["/device/network", "/device/network/confirm", "/device/diag"]
+LIVE_ID = re.compile(r"Msg$|-note$|-offline$|-stale$")
+
+
+def html_of(name):
+    return (FRONTEND / f"{name}.html").read_text()
+
+
+def js_of(script):
+    return (STATIC / f"{script}.js").read_text()
 
 
 def nav_html(pathname):
@@ -52,3 +71,80 @@ class TestNav:
     def test_device_toggle_is_not_active_elsewhere(self):
         # On the dashboard: the Device toggle is not active.
         assert 'nav-dropdown-toggle">Device</a>' in nav_html("/index.html")
+
+
+@pytest.mark.parametrize("name", sorted(PAGES))
+class TestPages:
+    """every device page and its script"""
+
+    def test_page_loads_style_nav_api_common_and_its_script_in_order(self, name):
+        # On the page: shared stylesheet, nav placeholder, then api.js, device_common.js and its own script.
+        html = html_of(name)
+        script = PAGES[name][0]
+        assert '<link rel="stylesheet" href="/static/style.css">' in html
+        assert '<nav class="nav" id="nav"></nav>' in html
+        assert '<body class="device-page">' in html
+        tags = re.findall(r'<script src="([^"]+)"></script>', html)
+        assert tags == ["/static/api.js", "/static/device_common.js", f"/static/{script}.js"]
+
+    def test_page_has_the_trial_banner_and_the_source_link(self, name):
+        # On the page: the shared banner ids and the AGPL source link in the footer.
+        html = html_of(name)
+        for ident in KIT_IDS:
+            assert f'id="{ident}"' in html, ident
+        assert 'href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a>' in html
+
+    def test_script_never_inserts_markup(self, name):
+        # On the script: no innerHTML/outerHTML/insertAdjacentHTML/document.write.
+        assert not re.search(r"innerHTML|outerHTML|insertAdjacentHTML|document\.write", js_of(PAGES[name][0]))
+
+    def test_page_and_script_load_nothing_remote(self, name):
+        # On both: no script/link/src/href to a remote host, no import (a plain <a> link is navigation).
+        for text in (html_of(name), js_of(PAGES[name][0])):
+            text = re.sub(r"<a\s[^>]*>", "", text)
+            assert not re.search(r"(?:src|href)=[\"']?(?:https?:)?//", text)
+            assert "import " not in text
+
+    def test_every_id_the_script_names_exists_in_the_page(self, name):
+        # On the script: each id given to $, setText, show or note is an element of the page.
+        used = set(re.findall(r"(?:\$|setText|show|note)\('([A-Za-z0-9_-]+)'", js_of(PAGES[name][0])))
+        present = set(re.findall(r'id="([^"]+)"', html_of(name)))
+        assert used
+        assert used <= present, used - present
+
+    def test_message_areas_are_live_regions(self, name):
+        # On the page: every message, note, offline and stale area carries aria-live.
+        html = html_of(name)
+        ids = [i for i in re.findall(r'id="([^"]+)"', html) if LIVE_ID.search(i)]
+        assert ids
+        for ident in ids:
+            assert re.search(rf'id="{ident}"[^>]*aria-live="polite"', html), ident
+
+    def test_each_endpoint_is_named_by_the_script_and_registered(self, name):
+        # On the endpoints of the page: quoted in its script and present in the device_api route table.
+        source, routes = js_of(PAGES[name][0]), DEVICE_API.read_text()
+        for endpoint in PAGES[name][1]:
+            assert re.search(rf"['\"]{re.escape(endpoint)}['\"?]", source), endpoint
+            assert f'"{endpoint}"' in routes, endpoint
+
+
+class TestShared:
+    """device_common.js and the frontend directory"""
+
+    def test_common_names_the_endpoints_it_uses_and_they_are_registered(self):
+        # On device_common.js: the trial and reboot-wait endpoints are quoted and registered.
+        source, routes = js_of("device_common"), DEVICE_API.read_text()
+        for endpoint in KIT_ENDPOINTS:
+            assert f"'{endpoint}'" in source, endpoint
+            assert f'"{endpoint}"' in routes, endpoint
+
+    def test_common_writes_text_only(self):
+        # On device_common.js: text goes in through textContent, never as markup.
+        source = js_of("device_common")
+        assert "textContent" in source
+        assert not re.search(r"innerHTML|outerHTML|insertAdjacentHTML|document\.write", source)
+
+    def test_frontend_stays_within_the_web_image_budget(self):
+        # On the frontend directory: total size below the budget.
+        total = sum(p.stat().st_size for p in FRONTEND.rglob("*") if p.is_file())
+        assert total < WEB_BUDGET_BYTES
