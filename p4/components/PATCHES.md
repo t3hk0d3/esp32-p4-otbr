@@ -24,7 +24,7 @@ reason, spec reference.
    gives 0, 409 or 503; host test in `test_host/`). Call-site edits: `src/esp_br_web.c` (dispatcher
    `esp_otbr_thread_rest_handler`: lock-free pre-check replaces the patch 9 ready check; new glue `guard_now`,
    `guard_lock`, `guard_check_thread_op`, `guard_refuse_gui`, `guard_refuse_resource` and the macros `GUARD_PRECHECK`,
-   `GUARD_LOCKED_CALL` after `httpd_send_packet`; one or two lines at the top of every handler in `s_web_gui_handlers`
+   `GUARD_CHECKED_CALL` after `httpd_send_packet`; one or two lines at the top of every handler in `s_web_gui_handlers`
    and `s_resource_handlers` that touches OpenThread), `src/esp_br_web_api.c` (`esp_br_thread_rest_request` checks again
    right after taking the OpenThread lock; `handle_openthread_join_network_request` re-checks every time it holds the lock
    again), `CMakeLists.txt` (`br_core` in `PRIV_REQUIRES`: a cycle with `br_core`'s own `PRIV_REQUIRES esp_ot_br_server`,
@@ -36,14 +36,14 @@ reason, spec reference.
    (`thread_rest_send`), Web GUI `{"error","result","message"}` (`pack_response`, `error` = `OT_ERROR_INVALID_STATE`),
    resources `{"ErrorCode","ErrorMessage"}` (`resource_status`). Details: 409 `sniffer active`, 503
    `radio not available`. (spec 5.7, 5.8)
-   The six functions called under `GUARD_LOCKED_CALL` (`handle_openthread_form_network_request`,
-   `handle_openthread_add_network_prefix_request`, `handle_openthread_delete_network_prefix_request`,
-   `handle_openthread_network_commission_request`, `handle_openthread_add_ipaddr_request`,
-   `handle_openthread_delete_ipaddr_request`) no longer take the OpenThread lock themselves (2026-11-02). Upstream
-   they did, so the lock was held twice. ESP-IDF's `otPlatUdpSocket` drops the task switching lock once while it waits
-   for the lwIP thread, and the lwIP thread needs that lock to send into the Thread interface: Form network (Thread up
-   opens the DNS-SD socket while the multicast leaves of the interface down are queued) deadlocked the web server, lwIP,
-   OpenThread and the event loop, without a watchdog reset. Test: `tools/tests/test_web_gui_locking.py`.
+   `GUARD_CHECKED_CALL` (form, add/delete prefix, commission, add/delete ipaddr) checks the mode under the
+   OpenThread lock and releases it before the `handle_*` call, which takes the lock itself (2026-11-02; it was
+   `GUARD_LOCKED_CALL` and held the lock around the call). Holding it there held it twice: ESP-IDF's `otPlatUdpSocket`
+   gives the task switching lock back once while it waits for the lwIP thread, which needs that lock to send into the
+   Thread interface, so Form network (Thread up opens the DNS-SD socket while the multicast leaves of the interface down
+   are queued) deadlocked the web server, lwIP, OpenThread and the event loop without a watchdog reset. A capture started
+   between the check and the call is interrupted by it; the window is the time to take the lock again. Test:
+   `tools/tests/test_web_gui_locking.py`.
 3. Applied (Task 20; split into pages 2026-11). `esp_ot_br_server`: device pages. Rewritten upstream file
    `frontend/index.html` (the Dashboard becomes the status page: our status cards plus the upstream Thread network,
    identifiers and address table, read from `/get_properties` and `/ipaddr` only in BR_RUNNING; the PSKc is masked until
@@ -198,7 +198,7 @@ happens.
 | Thread REST `GET`/`HEAD` (`/node`, `/node/state`, `/node/dataset/*`, `/api/*` ...) | READ | 503 | 503 | n/a |
 | Thread REST `PUT`/`POST`/`DELETE` (`/node/state`, `/node/dataset/*`, commissioner, ePSKc, `/api/actions`, `DELETE /node` ...) | THREAD_OP | 409 | 503 | yes, under the lock in `esp_br_thread_rest_request` |
 | `GET /get_properties`, `/node_information`, `/ipaddr` | READ | 503 | 503 | n/a |
-| `POST /form_network`, `/add_prefix`, `/delete_prefix`, `/commission`, `/add_ipaddr`, `/delete_ipaddr` | THREAD_OP | 409 | 503 | yes, `GUARD_LOCKED_CALL` holds the lock around the `handle_*` call only (not around body read or reply) |
+| `POST /form_network`, `/add_prefix`, `/delete_prefix`, `/commission`, `/add_ipaddr`, `/delete_ipaddr` | THREAD_OP | 409 | 503 | no: `GUARD_CHECKED_CALL` checks under the lock and releases it before the `handle_*` call, which takes the lock itself (holding it across the call deadlocked Form network); a capture started in between is interrupted |
 | `POST /join_network` | THREAD_OP | 409 | 503 | yes for every state change: `handle_openthread_join_network_request` re-checks each time it takes the lock (a race ends in the generic failure reply, nothing changed) |
 | `GET /available_network` (scan), `/topology`, `/diagnostics` (mesh queries), `POST /ping` | THREAD_OP | 409 | 503 | check under the lock, then released: they wait with the lock released, so a mode change during the wait cannot be excluded; they change no Thread state |
 | Background poll task `rest_process_task` (starts queued `/api/actions`, cancels expired ones) | THREAD_OP | not run | not run | yes, `rest_poll_guarded` checks under the lock each cycle; outside BR_RUNNING the queue is left untouched and polling resumes on return (actions past their deadline are then cancelled) |
