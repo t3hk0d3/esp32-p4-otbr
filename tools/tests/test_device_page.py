@@ -95,12 +95,6 @@ class TestPageFiles:
         assert used
         assert used <= present, used - present
 
-    def test_navigation_links_the_device_page(self):
-        # On api.js: the shared nav bar has a Device entry for /device.html.
-        assert re.search(
-            r"href : '/device\.html', label : 'Device'", API_JS.read_text()
-        )
-
     def test_every_html_page_that_builds_the_nav_gets_it_from_api_js(self):
         # On the existing pages: the nav is built by api.js only, so no page needs its own link.
         for page in FRONTEND.glob("*.html"):

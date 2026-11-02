@@ -36,14 +36,18 @@ reason, spec reference.
    (`thread_rest_send`), Web GUI `{"error","result","message"}` (`pack_response`, `error` = `OT_ERROR_INVALID_STATE`),
    resources `{"ErrorCode","ErrorMessage"}` (`resource_status`). Details: 409 `sniffer active`, 503
    `radio not available`. (spec 5.7, 5.8)
-3. Applied (Task 20). `esp_ot_br_server`: device page. New files `frontend/device.html`, `frontend/static/device.js` (the pure
-   logic is exported for node, the page code is guarded by `typeof document`); edit in `frontend/static/api.js`: one entry
-   `{href : '/device.html', label : 'Device'}` in the `pages` array that builds the navigation bar of every page (no other page
-   needs a change). The page only uses `/device/*`, so it renders in every mode, also where the Thread REST reads answer 503;
-   it polls `/device/status` (3 s), `/device/network` (10 s) and `/device/diag` (2 s) only while the tab is shown and the
-   section is on screen, one request at a time. `/device.html` and `/static/device.js` are served by the `/*` static handler:
-   the device routes are exact `/device/...` paths. Its footer links the source code
-   (https://github.com/t3hk0d3/esp32-p4-otbr), which the AGPL asks a network-facing modified version to offer. (spec 5.7, 5.8)
+3. Applied (Task 20; split into five pages 2026-11). `esp_ot_br_server`: device pages. New files `frontend/device.html`
+   (status), `frontend/ethernet.html`, `frontend/firmware.html`, `frontend/capture.html`, `frontend/diagnostics.html`, and
+   their scripts `frontend/static/status.js`, `ethernet.js`, `firmware.js`, `capture.js`, `diagnostics.js` on top of the
+   shared `frontend/static/device_common.js` (pure logic exported for node, page code guarded by `typeof document`). Edits:
+   `frontend/static/api.js`, a "Device" dropdown with the five pages in the `pages` array that builds the navigation bar of
+   every page (no other page needs a change); `frontend/static/style.css`, new classes appended after the upstream rules
+   (no upstream rule changed) and `:focus-within` on the nav dropdowns so they open from the keyboard. The pages only use
+   `/device/*`, so they render in every mode, also where the Thread REST reads answer 503; they poll only while the tab is
+   shown and the watched section is on screen, one request at a time. They are served by the `/*` static handler: the
+   device routes are exact `/device/...` paths. Their footer links the source code
+   (https://github.com/t3hk0d3/esp32-p4-otbr), which the AGPL asks a network-facing modified version to offer. (spec 5.7,
+   5.8; docs/superpowers/specs/2026-11-02-device-pages-design.md)
 4. Not applied. Not needed: Phase 0 showed `esp_ot_br_server` links without Wi-Fi. (spec 5.8)
 5. Applied (part a Task 11B, part b Task 13). `esp_br_http_ota`: (a) minimal RCP strip: removed the
    `esp_rcp_ota_*` / `esp_rcp_firmware.h` use and the `esp_rcp_update` entry in `REQUIRES`. Reason: the RCP firmware
