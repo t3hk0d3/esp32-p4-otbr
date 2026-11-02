@@ -11,6 +11,8 @@ curl -N "http://<board>/device/sniffer.pcap?channel=15" | wireshark -k -i -
 the duration, when the client disconnects, or on `curl -X DELETE http://<board>/device/sniffer`, and the border router
 resumes by itself. The Packet capture page (`/capture.html`) can start, stop and download a capture too, and shows a `curl | wireshark` command for watching live.
 
+![Packet capture page during a capture: channel, time left, frames and dropped frames, Stop capture](images/capture-running.png)
+
 - While sniffing, the Thread stack is stopped: the Thread REST API answers 503 for reads and 409 for changes, and the
   Thread network sees the border router leave. Ethernet (IPv4/IPv6, the web UI and `/device/*`) keeps working.
 - The format is pcap with link type 283 (IEEE 802.15.4 TAP). The radio delivers frames without a valid FCS

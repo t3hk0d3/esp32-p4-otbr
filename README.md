@@ -52,14 +52,16 @@ down, the others keep the network reachable.
 
 <table>
   <tr>
-    <td width="33%"><img src="docs/images/device.png" alt="Device status page: mode, firmware versions, radio and network status"></td>
-    <td width="33%"><img src="docs/images/topology.png" alt="Topology page: the Thread mesh with its leader and routers"></td>
-    <td width="33%"><img src="docs/images/diagnostics.png" alt="Diagnostics: CPU load per core, memory, OpenThread lock timings and tasks"></td>
+    <td width="25%"><img src="docs/images/device.png" alt="Device status page: mode, firmware versions, radio and network status"></td>
+    <td width="25%"><img src="docs/images/topology.png" alt="Topology page: the Thread mesh with its leader and routers"></td>
+    <td width="25%"><img src="docs/images/diagnostics.png" alt="Diagnostics: CPU load per core, memory, OpenThread lock timings and tasks"></td>
+    <td width="25%"><img src="docs/images/capture.png" alt="Packet capture page: channel, length and a curl-to-Wireshark command"></td>
   </tr>
   <tr>
     <td align="center">Device status</td>
     <td align="center">Thread mesh topology</td>
     <td align="center">Live diagnostics</td>
+    <td align="center">Packet capture</td>
   </tr>
 </table>
 
