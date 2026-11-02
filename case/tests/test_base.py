@@ -99,9 +99,11 @@ class TestDefaultBase:
         assert not solid_bz(base, P.INNER[1] + 0.5, 63.0, z)
         assert not solid_bz(base, 27.5, P.INNER[3] + 0.5, z)
         assert solid_bz(base, 27.5, P.INNER[3] + 1.5, z)
-        assert solid_bz(
-            base, P.INNER[0] - 0.5, 40.0, z
-        )  # no recess away from the header
+        # no recess away from the header
+        assert solid_bz(base, P.INNER[0] - 0.5, 40.0, z)
+        top = P.RIBBON_RECESS_TOP
+        assert not solid_bz(base, 27.5, P.INNER[3] + 0.3, top + 0.5)  # sloped ceiling
+        assert solid_bz(base, 27.5, P.INNER[3] + 0.9, top + 0.5)
 
     def test_has_four_tab_dents_level_with_the_bumps(self, base):
         z = P.BUMP_Z
