@@ -184,9 +184,14 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 - **Corner tabs (snaps and guide pins):**
   - Four, hanging from the frame's underside into the four inner corners of the base. As the lid goes down, they find the
     corners first and steer it into the rebate. Their tips are chamfered to help with that.
-  - All are wedge-shaped: 2.0 mm thick at the root, tapering to 1.4 mm at the tip. The taper is on the inner face; the
-    outer face stays flat against the wall with 0.2 mm clearance. The thick root makes them stiff guides, and the thinner
-    tip leaves enough flex for the snap. The tip has a 0.6 mm lead-in chamfer.
+  - All are wedged on both faces, so the lid glides into place:
+    - **Inner face:** tapers from 2.0 mm thick at the root to 1.6 mm at the tip.
+    - **Outer face:** flat and parallel to the wall (0.2 mm clearance) for the first 3 mm below the lid. That is where the
+      snap bump sits. Below that it tapers 0.5 mm inward to the tip, a lead-in that slides off the wall edge and centres
+      the lid.
+    - The tip is about 1.1 mm thick. The thick root makes the tabs stiff guides; the thinner lower part flexes for the
+      snap.
+    - The dents in the walls sit level with the bumps, about 2 mm below the rebate floor.
   - **Cable-end corners:**
     - L-shaped: a 7 mm leg along the side wall and a 3.5 mm leg along the cable wall. They locate the lid in X and Y.
     - They reach 6.5 mm below the lid's underside, to about 10.5 mm above the board. That clears the buttons (3.3), the
