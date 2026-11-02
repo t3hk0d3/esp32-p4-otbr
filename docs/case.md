@@ -11,6 +11,10 @@ an SMA antenna, and wiring on the 40-pin header.
 
 ![Exploded preview: base with the board, lid lifted](images/case/preview-exploded.png)
 
+More views: [front](images/case/preview-front.png), [back](images/case/preview-back.png),
+[cable end](images/case/preview-cable-end.png), [header end](images/case/preview-header-end.png),
+[button side](images/case/preview-button-side.png). `make case` renders them all into `dist/case/`.
+
 The model is parametric Python (build123d) in `case/`. Its design is
 `docs/superpowers/specs/2026-11-02-p4-case-design.md`.
 
