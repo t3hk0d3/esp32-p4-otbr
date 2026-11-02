@@ -159,6 +159,23 @@ const char *device_api_mode_name(int mode);
 /** The /device/status body. Returns its length, or -1 when `cap` is too small. */
 int device_api_status_json(char *buf, size_t cap, const device_api_status_t *status);
 
+/* ---- topology.c: POST /device/topology ---- */
+
+typedef struct {
+    int status;      /**< 202, 409, 500 or 503 */
+    const char *error; /**< error code; NULL on 202 */
+    char detail[64];   /**< error detail; "" on 202 */
+} device_api_topology_reply_t;
+
+/**
+ * Reply of POST /device/topology. Checks in order: `mode`, a br_core_mode_t (not BR_RUNNING: 409 busy "mode <MODE>"), `long_op_busy` (409 busy
+ * with `long_op_detail`), then `start_err`, the result of mesh_scan_start: ESP_OK and ESP_ERR_INVALID_STATE (a scan already
+ * runs; the caller joins it) 202; ESP_ERR_NOT_FINISHED 409 busy; ESP_ERR_NO_MEM 500 no_memory; anything else
+ * (ESP_ERR_TIMEOUT, ESP_FAIL) 503 busy "OpenThread is busy, retry".
+ */
+void device_api_topology_start_reply(esp_err_t start_err, int mode, bool long_op_busy, const char *long_op_detail,
+                                     device_api_topology_reply_t *out);
+
 #ifdef __cplusplus
 }
 #endif

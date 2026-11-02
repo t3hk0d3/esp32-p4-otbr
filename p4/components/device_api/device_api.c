@@ -32,6 +32,7 @@
 #endif
 #include "device_api_priv.h"
 #include "diag_handler.h"
+#include "mesh_scan.h"
 #include "metrics.h"
 #include "esp_br_http_ota.h"
 #include "netcfg.h"
@@ -365,6 +366,46 @@ static esp_err_t metrics_get_handler(httpd_req_t *req)
     return err == ESP_OK ? ESP_OK : ESP_FAIL;
 }
 
+/* ---- POST/GET /device/topology ---- */
+
+static esp_err_t send_topology_state(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = mesh_scan_render(send_metrics_chunk, req); // streams with httpd_resp_send_chunk
+
+    if (err == ESP_ERR_NO_MEM) { // nothing was sent yet
+        return send_error(req, 500, "no_memory", "out of memory", false);
+    }
+    if (err == ESP_OK) {
+        err = httpd_resp_send_chunk(req, NULL, 0);
+    }
+    return err == ESP_OK ? ESP_OK : ESP_FAIL;
+}
+
+static esp_err_t topology_get_handler(httpd_req_t *req)
+{
+    return send_topology_state(req);
+}
+
+// Checks in order: the mode, the long-operation slot (read, not taken), then the scan start.
+static esp_err_t topology_post_handler(httpd_req_t *req)
+{
+    const br_core_mode_t mode = br_core_get_mode();
+    const bool long_busy = device_api_op_long_running();
+    device_api_topology_reply_t reply;
+    esp_err_t start_err = ESP_OK;
+
+    if (mode == BR_MODE_BR_RUNNING && !long_busy) {
+        start_err = mesh_scan_start();
+    }
+    device_api_topology_start_reply(start_err, mode, long_busy, device_api_op_busy_detail(DEVICE_API_OP_OTA), &reply);
+    if (reply.error) {
+        return send_error(req, reply.status, reply.error, reply.detail, false);
+    }
+    httpd_resp_set_status(req, device_api_status_line(reply.status));
+    return send_topology_state(req);
+}
+
 /* ---- GET /device/sniffer.pcap, DELETE /device/sniffer ---- */
 
 typedef struct {
@@ -425,6 +466,7 @@ static void pcap_task(void *arg)
         send_error(req, 500, "no_memory", "out of memory", false);
         goto done;
     }
+    mesh_scan_cancel(); // a running scan must not hold OpenThread while the sniffer takes the radio
     const esp_err_t start_err = sniffer_start(job->channel, job->duration_s);
 
     if (start_err != ESP_OK) {
@@ -885,6 +927,7 @@ static void push_task(void *arg)
             .total_size = (size_t)url_src.length, .read = url_source_read, .reopen = url_source_reopen, .ctx = &url_src,
         };
     }
+    mesh_scan_cancel(); // the push tears OpenThread down
     err = br_core_push_radio_firmware(&source, detail, sizeof(detail));
     push_reply_result(req, err, detail, upload);
 done:
@@ -963,6 +1006,7 @@ static void recover_task(void *arg)
 {
     httpd_req_t *req = arg;
     char detail[96] = "";
+    mesh_scan_cancel(); // the recovery tears OpenThread down
     const esp_err_t err = br_core_rom_recover(detail, sizeof(detail));
     br_core_status_t bs;
     char body[384];
@@ -1213,6 +1257,11 @@ esp_err_t device_api_register(httpd_handle_t server)
         const esp_timer_create_args_t args = {.callback = reboot_now, .name = "device_reboot"};
         ESP_RETURN_ON_ERROR(esp_timer_create(&args, &s_reboot_timer), TAG, "creating the reboot timer failed");
     }
+    const esp_err_t scan_err = mesh_scan_init();
+
+    if (scan_err != ESP_OK) { // the rest of the device API does not depend on it
+        ESP_LOGE(TAG, "mesh scan init failed: %s", esp_err_to_name(scan_err));
+    }
     static const route_t routes[] = {
         {"/device/status", HTTP_GET, status_get_handler},
         {"/device/sniffer.pcap", HTTP_GET, pcap_get_handler},
@@ -1229,6 +1278,8 @@ esp_err_t device_api_register(httpd_handle_t server)
         {"/device/network/confirm", HTTP_POST, network_confirm_post_handler},
         {"/device/names", HTTP_GET, names_get_handler},
         {"/device/names", HTTP_PUT, names_put_handler},
+        {"/device/topology", HTTP_POST, topology_post_handler},
+        {"/device/topology", HTTP_GET, topology_get_handler},
         {"/metrics", HTTP_GET, metrics_get_handler},
     };
 
