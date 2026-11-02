@@ -95,8 +95,8 @@ jobs:
             echo
             echo "## Files"
             echo
-            echo "- \`otbr.bundle\`: P4 app and web UI, for an OTA update (device page \"Firmware update\" or \`POST /device/ota\`)."
-            echo "- \`c6_rcp.bin\`: C6 radio firmware from the same build (device page \"Radio firmware\" or \`POST /device/radio/firmware\`)."
+            echo "- \`otbr.bundle\`: P4 app and web UI, for an OTA update (Device > Firmware page or \`POST /device/ota\`)."
+            echo "- \`c6_rcp.bin\`: C6 radio firmware from the same build (Device > Firmware page or \`POST /device/radio/firmware\`)."
             echo "- \`p4-flash.zip\`: full P4 flash over USB: \`esptool --chip esp32p4 write-flash @flash_args\` inside the unpacked directory."
             echo "- \`c6-updater-flash.zip\`: C6 base images for the no-jumper first install (see docs/first-install.md)."
             echo "- \`third-party-licenses.zip\`: license texts of the code linked into the images."
