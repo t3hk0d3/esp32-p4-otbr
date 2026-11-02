@@ -62,7 +62,7 @@ typedef struct {
     mesh_scan_ip6_t addrs[MESH_SCAN_MAX_ROUTER_ADDRS];
     uint8_t n_addrs;
     bool children_detail;
-    mesh_scan_child_t *children; /**< PSRAM array of n_children */
+    mesh_scan_child_t *children; /**< n_children entries allocated by scan.c through ops.alloc; NULL when 0 */
     uint16_t n_children;
 } mesh_scan_router_t;
 
@@ -88,6 +88,7 @@ typedef struct {
     uint8_t n_omr;
 } mesh_scan_network_t;
 
+/** Tens of KB: allocated by scan.c through `ops.alloc` (PSRAM on target), never on a stack. */
 typedef struct {
     mesh_scan_network_t network;
     mesh_scan_router_t routers[MESH_SCAN_MAX_ROUTERS]; /**< by router ID; absent entries have present == false */
