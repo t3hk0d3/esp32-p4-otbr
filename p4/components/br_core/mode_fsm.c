@@ -301,9 +301,9 @@ bool mode_fsm_next_recovery_failed(bool previous, bool attempted, bool succeeded
     return attempted ? !succeeded : previous;
 }
 
-esp_err_t mode_fsm_radio_job_result(bool is_recovery, esp_err_t job_err, esp_err_t restart_err)
+esp_err_t mode_fsm_radio_job_result(bool base_only, esp_err_t job_err, esp_err_t restart_err)
 {
-    if (is_recovery || job_err != ESP_OK) {
+    if (base_only || job_err != ESP_OK) {
         return job_err;
     }
     return restart_err;

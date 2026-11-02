@@ -404,6 +404,12 @@ static esp_err_t boot_radio(void)
         // The updater answered (base version mismatch): an RCP may be installed, so the boot goes on with it.
         ESP_LOGE(TAG, "the ROM recovery of the C6 base image failed; continuing with the installed RCP (see status jumper.recovery_failed)");
     }
+    if (probe.esp_hosted) {
+        // A factory C6: OpenThread cannot run on it. The device page asks for c6_installer.bin.
+        ESP_LOGE(TAG, "the C6 runs its factory ESP-Hosted firmware: upload c6_installer.bin, then c6_rcp.bin");
+        enter_fault(RCP_SYNC_ESP_HOSTED_ERROR);
+        return ESP_ERR_NOT_FOUND;
+    }
     if (!probe.updater_reachable) {
         ESP_LOGW(TAG, "RCP probe failed (%s), trying the installed firmware", probe.last_error);
     } else if (!probe.installed_valid) {
@@ -879,6 +885,9 @@ static esp_err_t op_radio_job(const rcp_fw_source_t *source, char *err_detail, s
     if (push_err != ESP_OK) {
         ESP_LOGE(TAG, "%s failed: %s", what, esp_err_to_name(push_err));
     }
+    // A ROM recovery, or c6_installer.bin through ESP-Hosted: the C6 has its updater and no RCP, so the restart below ends
+    // in RADIO_FAULT "no rcp firmware" by design.
+    const bool base_only = source == NULL || (push_err == ESP_OK && rcp_sync_last_push_was_installer());
 
     esp_err_t err = start_ot_task();
     if (err == ESP_OK) {
@@ -892,15 +901,15 @@ static esp_err_t op_radio_job(const rcp_fw_source_t *source, char *err_detail, s
               ? ESP_OK : ESP_FAIL;
     }
     if (err != ESP_OK) {
-        if (source) {
+        if (!base_only) {
             ESP_LOGE(TAG, "restarting OpenThread after the %s failed: %s", what, esp_err_to_name(err));
-        } else { // the normal outcome of a ROM recovery on a C6 without RCP firmware
+        } else { // the normal outcome on a C6 without RCP firmware
             ESP_LOGW(TAG, "restarting OpenThread after the %s failed: %s (the status shows why)", what, esp_err_to_name(err));
         }
         if (s_core.fault_reason[0] == '\0') {
             enter_fault("radio restart failed");
         }
-        return mode_fsm_radio_job_result(source == NULL, push_err, err);
+        return mode_fsm_radio_job_result(base_only, push_err, err);
     }
     *restarted = true;
     return push_err;

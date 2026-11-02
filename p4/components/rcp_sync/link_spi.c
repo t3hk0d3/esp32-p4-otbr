@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "board.h"
 #include "base_image.h"
+#include "c6_hosted.h"
 #include "jumper.h"
 #include "link.h"
 #include "rcp_sync_proto.h"
@@ -89,18 +90,9 @@ static void link_release(void)
     gpio_reset_pin(P4_PIN_RCP_INT);
 }
 
-static esp_err_t link_enter_updater(void)
+/* Bring up the SPI bus to the updater; GPIO6 is low already. */
+static esp_err_t bus_up(void)
 {
-    link_release();
-    ESP_RETURN_ON_ERROR(ctl_init(), TAG, "ctl init");
-    // The jumper receiver listens during the reset below: the C6 ROM banner it sees shows that the wire is fitted.
-    if (jumper_start() != ESP_OK) {
-        ESP_LOGW(TAG, "jumper receiver not available, detection skipped");
-    }
-    gpio_set_level(P4_PIN_C6_UPDATE, 0);
-    pulse_reset();
-    vTaskDelay(pdMS_TO_TICKS(UPDATER_BOOT_MS));
-
     const gpio_config_t in = {
         .pin_bit_mask = 1ULL << P4_PIN_RCP_INT,
                              .mode = GPIO_MODE_INPUT,
@@ -134,6 +126,39 @@ static esp_err_t link_enter_updater(void)
         link_release();
     }
     return err;
+}
+
+static esp_err_t link_enter_updater(void)
+{
+    link_release();
+    ESP_RETURN_ON_ERROR(ctl_init(), TAG, "ctl init");
+    // The jumper receiver listens during the reset below: the C6 ROM banner it sees shows that the wire is fitted.
+    if (jumper_start() != ESP_OK) {
+        ESP_LOGW(TAG, "jumper receiver not available, detection skipped");
+    }
+    gpio_set_level(P4_PIN_C6_UPDATE, 0);
+    pulse_reset();
+    vTaskDelay(pdMS_TO_TICKS(UPDATER_BOOT_MS));
+    return bus_up();
+}
+
+static esp_err_t link_attach_updater(void)
+{
+    link_release();
+    ESP_RETURN_ON_ERROR(ctl_init(), TAG, "ctl init");
+    gpio_set_level(P4_PIN_C6_UPDATE, 0); // no reset: the C6 may be writing its bootloader right now
+    return bus_up();
+}
+
+static esp_err_t link_hosted_detect(bool *present)
+{
+    return c6_hosted_detect(present);
+}
+
+static esp_err_t link_hosted_ota(const rcp_fw_source_t *source, char *detail, size_t cap)
+{
+    const c6_hosted_source_t src = {.total_size = source->total_size, .read = source->read, .ctx = source->ctx};
+    return c6_hosted_ota(&src, detail, cap);
 }
 
 /* Wait until INT reads `level`. Spins briefly (reply phases are short), then yields. */
@@ -200,4 +225,7 @@ const rcp_sync_link_t rcp_sync_link_spi = {
     .jumper_present = rcp_sync_jumper_present,
     .rom_recover = rcp_sync_rom_recover,
     .base_version = rcp_sync_base_image_version,
+    .hosted_detect = link_hosted_detect,
+    .hosted_ota = link_hosted_ota,
+    .attach_updater = link_attach_updater,
 };

@@ -534,6 +534,238 @@ TEST_CASE("On a sequence of requests: each new request uses a fresh distinct seq
     }
 }
 
+/* ---- first install through the factory ESP-Hosted firmware ---- */
+
+#define BASE_VERSION "base-12345678"
+
+static struct {
+    bool present;    /* ESP-Hosted answers on SDIO */
+    bool jumper;
+    bool comes_back; /* the updater answers after the OTA */
+    esp_err_t ota_err;
+    int detect_count, ota_count, attach_count;
+    uint8_t got[IMAGE_SIZE];
+    size_t got_len;
+} hs;
+
+static void hosted_setup(bool esp_hosted)
+{
+    c6_setup(BOOT_VERSION);
+    memset(&hs, 0, sizeof(hs));
+    c6.silent = esp_hosted; /* no updater on a factory C6 */
+    hs.present = esp_hosted;
+    hs.comes_back = true;
+}
+
+/* Make `image` an app image of this project and version (esp_image_header_t, segment header, esp_app_desc_t). */
+static void make_image(const char *project, const char *version)
+{
+    memset(image, 0, 128);
+    image[0] = 0xE9;
+    u32(image + 32, 0xABCD5432);
+    strcpy((char *)image + 32 + 16, version);
+    strcpy((char *)image + 32 + 48, project);
+}
+
+static esp_err_t hs_detect(bool *present)
+{
+    hs.detect_count++;
+    *present = hs.present;
+    return ESP_OK;
+}
+
+static esp_err_t hs_ota(const rcp_fw_source_t *src, char *d, size_t cap)
+{
+    hs.ota_count++;
+    for (size_t off = 0; off < src->total_size; off += 1400) {
+        const size_t n = src->total_size - off < 1400 ? src->total_size - off : 1400;
+        TEST_ASSERT_EQUAL(ESP_OK, src->read(src->ctx, off, hs.got + off, n));
+        hs.got_len = off + n;
+    }
+    if (hs.ota_err != ESP_OK) {
+        strlcpy(d, "OTAWrite refused (-1)", cap);
+        return hs.ota_err;
+    }
+    c6.silent = !hs.comes_back;
+    strcpy(c6.boot_version, ""); /* the installer leaves ota_0 blank */
+    return ESP_OK;
+}
+
+static esp_err_t hs_attach(void)
+{
+    hs.attach_count++;
+    c6.gpio6_high = false;
+    return ESP_OK;
+}
+
+static bool hs_jumper(void)
+{
+    return hs.jumper;
+}
+
+static const char *hs_base(void)
+{
+    return BASE_VERSION;
+}
+
+static const rcp_sync_link_t hosted_link = {
+    .enter_updater = fake_enter, .transact = fake_transact, .release = fake_release, .jumper_present = hs_jumper,
+    .base_version = hs_base, .hosted_detect = hs_detect, .hosted_ota = hs_ota, .attach_updater = hs_attach,
+};
+
+static esp_err_t hosted_push(void)
+{
+    rcp_fw_source_t src = source(false, IMAGE_SIZE);
+    detail[0] = 'x';
+    return rcp_sync_push_firmware_with(&hosted_link, &src, detail, sizeof(detail));
+}
+
+static rcp_sync_probe_result_t hosted_probe(void)
+{
+    rcp_sync_probe_result_t r;
+    TEST_ASSERT_EQUAL(ESP_OK, rcp_sync_probe_with(&hosted_link, &r));
+    return r;
+}
+
+TEST_CASE("On probe with the updater silent, no jumper, ESP-Hosted answering: esp_hosted and last_error esp-hosted firmware", "[hosted]")
+{
+    hosted_setup(true);
+    rcp_sync_probe_result_t r = hosted_probe();
+    TEST_ASSERT_TRUE(r.esp_hosted);
+    TEST_ASSERT_EQUAL_STRING(RCP_SYNC_ESP_HOSTED_ERROR, r.last_error);
+    TEST_ASSERT_EQUAL(0, hs.ota_count);
+    TEST_ASSERT_EQUAL(0, c6.begin_count);
+}
+
+TEST_CASE("On probe with the updater silent and nothing on SDIO: updater not responding as before", "[hosted]")
+{
+    hosted_setup(true);
+    hs.present = false;
+    rcp_sync_probe_result_t r = hosted_probe();
+    TEST_ASSERT_FALSE(r.esp_hosted);
+    TEST_ASSERT_EQUAL_STRING("updater not responding", r.last_error);
+}
+
+TEST_CASE("On probe with the jumper present: ESP-Hosted is never looked for", "[hosted]")
+{
+    hosted_setup(true);
+    hs.jumper = true;
+    rcp_sync_probe_result_t r = hosted_probe();
+    TEST_ASSERT_FALSE(r.esp_hosted);
+    TEST_ASSERT_EQUAL(0, hs.detect_count);
+}
+
+TEST_CASE("On probe with the updater answering: ESP-Hosted is never looked for", "[hosted]")
+{
+    hosted_setup(false);
+    rcp_sync_probe_result_t r = hosted_probe();
+    TEST_ASSERT_TRUE(r.updater_reachable);
+    TEST_ASSERT_EQUAL(0, hs.detect_count);
+}
+
+TEST_CASE("On push to ESP-Hosted of a matching c6_installer: the whole image goes through the OTA unchanged", "[hosted]")
+{
+    hosted_setup(true);
+    make_image(RCP_SYNC_INSTALLER_PROJECT, BASE_VERSION);
+    TEST_ASSERT_EQUAL(ESP_OK, hosted_push());
+    TEST_ASSERT_EQUAL(1, hs.ota_count);
+    TEST_ASSERT_EQUAL(IMAGE_SIZE, hs.got_len);
+    TEST_ASSERT_EQUAL_MEMORY(image, hs.got, IMAGE_SIZE);
+    TEST_ASSERT_TRUE(src_sequential);
+}
+
+TEST_CASE("On push to ESP-Hosted of a matching c6_installer: waits for the updater without a reset and reports the installer", "[hosted]")
+{
+    hosted_setup(true);
+    make_image(RCP_SYNC_INSTALLER_PROJECT, BASE_VERSION);
+    TEST_ASSERT_EQUAL(ESP_OK, hosted_push());
+    TEST_ASSERT_EQUAL(1, hs.attach_count);
+    TEST_ASSERT_EQUAL(1, c6.enter_count); /* only the first HELLO attempt reset the C6 */
+    TEST_ASSERT_EQUAL(0, c6.begin_count);
+    TEST_ASSERT_TRUE(rcp_sync_last_push_was_installer());
+    TEST_ASSERT_TRUE(c6.gpio6_high);
+}
+
+TEST_CASE("On push to ESP-Hosted of a c6_installer of another release: image rejected naming both versions, nothing sent", "[hosted]")
+{
+    hosted_setup(true);
+    make_image(RCP_SYNC_INSTALLER_PROJECT, "base-87654321");
+    TEST_ASSERT_EQUAL(RCP_SYNC_ERR_IMAGE_REJECTED, hosted_push());
+    TEST_ASSERT_NOT_NULL(strstr(detail, "base-87654321"));
+    TEST_ASSERT_NOT_NULL(strstr(detail, BASE_VERSION));
+    TEST_ASSERT_EQUAL(0, hs.ota_count);
+}
+
+TEST_CASE("On push to ESP-Hosted of any other image: image rejected asking for c6_installer.bin, nothing sent", "[hosted]")
+{
+    hosted_setup(true);
+    make_image("c6_rcp", "20261101T000000Z-aaaaaaa");
+    TEST_ASSERT_EQUAL(RCP_SYNC_ERR_IMAGE_REJECTED, hosted_push());
+    TEST_ASSERT_NOT_NULL(strstr(detail, "upload c6_installer.bin first"));
+    TEST_ASSERT_EQUAL(0, hs.ota_count);
+    TEST_ASSERT_FALSE(rcp_sync_last_push_was_installer());
+}
+
+TEST_CASE("On the ESP-Hosted OTA failing: RCP_SYNC_ERR_HOSTED_OTA with its step, no wait", "[hosted]")
+{
+    hosted_setup(true);
+    make_image(RCP_SYNC_INSTALLER_PROJECT, BASE_VERSION);
+    hs.ota_err = ESP_FAIL;
+    TEST_ASSERT_EQUAL(RCP_SYNC_ERR_HOSTED_OTA, hosted_push());
+    TEST_ASSERT_EQUAL_STRING("OTAWrite refused (-1)", detail);
+    TEST_ASSERT_EQUAL(0, hs.attach_count);
+}
+
+TEST_CASE("On no HELLO after the installer: ESP_ERR_TIMEOUT, the C6 did not come back", "[hosted]")
+{
+    hosted_setup(true);
+    make_image(RCP_SYNC_INSTALLER_PROJECT, BASE_VERSION);
+    hs.comes_back = false;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, hosted_push());
+    TEST_ASSERT_EQUAL_STRING("the C6 did not come back after the installer", detail);
+    TEST_ASSERT_EQUAL(1, c6.enter_count);
+    TEST_ASSERT_FALSE(rcp_sync_last_push_was_installer());
+}
+
+TEST_CASE("On push of a c6_installer to our updater: image rejected before BEGIN, ESP-Hosted never looked for", "[hosted]")
+{
+    hosted_setup(false);
+    make_image(RCP_SYNC_INSTALLER_PROJECT, BASE_VERSION);
+    TEST_ASSERT_EQUAL(RCP_SYNC_ERR_IMAGE_REJECTED, hosted_push());
+    TEST_ASSERT_EQUAL(0, c6.begin_count);
+    TEST_ASSERT_EQUAL(0, hs.detect_count);
+}
+
+TEST_CASE("On push with the jumper present and the updater silent: ESP-Hosted never looked for, updater not responding", "[hosted]")
+{
+    hosted_setup(true);
+    hs.jumper = true;
+    make_image(RCP_SYNC_INSTALLER_PROJECT, BASE_VERSION);
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, hosted_push());
+    TEST_ASSERT_EQUAL_STRING("updater not responding", detail);
+    TEST_ASSERT_EQUAL(0, hs.detect_count);
+}
+
+TEST_CASE("On push with the updater silent and no ESP-Hosted: updater not responding as before", "[hosted]")
+{
+    hosted_setup(true);
+    hs.present = false;
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, hosted_push());
+    TEST_ASSERT_EQUAL_STRING("updater not responding", detail);
+    TEST_ASSERT_EQUAL(1, hs.detect_count);
+    TEST_ASSERT_EQUAL(0, hs.ota_count);
+}
+
+TEST_CASE("On a normal push after an installer push: last_push_was_installer is false again", "[hosted]")
+{
+    hosted_setup(true);
+    make_image(RCP_SYNC_INSTALLER_PROJECT, BASE_VERSION);
+    TEST_ASSERT_EQUAL(ESP_OK, hosted_push());
+    hosted_setup(false);
+    TEST_ASSERT_EQUAL(ESP_OK, hosted_push());
+    TEST_ASSERT_FALSE(rcp_sync_last_push_was_installer());
+}
+
 void app_main(void)
 {
     UNITY_BEGIN();
