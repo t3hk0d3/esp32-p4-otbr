@@ -200,6 +200,12 @@ def sheet_views(path):
     )
     b = View(svg, 640, 620, -X1 - 6, Y1 + 2)
     b.rect(-X1, Y0, -X0, Y1, "#374151", fill=BASE_C, sw=2, rx=8)
+    for hx, hy in ((3.5, 24.3), (51.5, 24.3), (3.5, 57.3), (51.5, 57.3)):
+        b.circ(-hx, hy, 2.5, "#374151", fill="white", sw=1.2)
+        b.circ(-hx, hy, 1.4, "#374151", fill="#374151", sw=0)
+    b.text(
+        -27.5, 60.5, "4× countersunk M2.5 board screws, flush", size=10, anchor="middle"
+    )
     for kx, ky in KEYS:
         u = -kx
         b.rect(u - 2.15, ky, u + 2.15, ky + 7, "#374151", fill="white", sw=1.5, rx=2)
