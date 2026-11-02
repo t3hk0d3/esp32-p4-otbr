@@ -22,8 +22,8 @@ release's `versions.txt`.
 ### Fixed
 
 - `PUT /node/dataset/active` answered 409 while Thread ran, which broke Home Assistant's Thread panel (moving the board
-  onto the preferred network). It now stops Thread, stores the dataset and starts Thread on it; writing the stored
-  dataset again changes nothing.
+  onto the preferred network). For a complete dataset it now stops Thread, stores it and starts Thread on it; writing
+  the stored dataset again changes nothing, and a partial change still answers 409 (use the pending dataset).
 - `c6-updater-flash.zip` put the C6 updater into the first RCP slot (`ota_0`, 0xa0000) and wrote `otadata`; it now
   writes bootloader, partition table and the updater into the `test` partition (0x20000), as the ROM recovery does. The
   v0.1.0 release asset was replaced.

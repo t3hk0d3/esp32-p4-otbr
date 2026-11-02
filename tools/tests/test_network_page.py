@@ -34,7 +34,7 @@ function fakeFetch(answers) {
     if (a === undefined || a === 'error') return Promise.reject(new Error('network'));
     const text = a.body === undefined ? '' : (typeof a.body === 'string' ? a.body : JSON.stringify(a.body));
     return Promise.resolve({status: a.status, ok: a.status >= 200 && a.status < 300,
-                            text: () => Promise.resolve(text), json: () => Promise.resolve(JSON.parse(text))});
+                            text: () => a.textError ? Promise.reject(new Error('reset')) : Promise.resolve(text), json: () => Promise.resolve(JSON.parse(text))});
   };
   fn.calls = calls;
   return fn;
@@ -183,6 +183,9 @@ class TestParseDatasetTlvs:
             (3, "Network Name"),
             (5, "Network Key"),
             (7, "Mesh-Local Prefix"),
+            (4, "PSKc"),
+            (12, "Security Policy"),
+            (53, "Channel Mask"),
         ],
     )
     def test_missing_required_tlv_is_named(self, kind, name):
@@ -194,7 +197,24 @@ class TestParseDatasetTlvs:
     def test_every_missing_tlv_is_named(self):
         assert parse(dataset(without=[3, 5])) == {
             "ok": False,
-            "error": "Not a complete active dataset: missing Network Name, Network Key",
+            "error": "Not a complete active dataset: missing Network Key, Network Name",
+        }
+
+    @pytest.mark.parametrize(
+        "kind,value,name",
+        [
+            (0, "000f", "Channel"),
+            (5, "", "Network Key"),
+            (2, "11111111222222", "Ext PAN ID"),
+            (3, "", "Network Name"),
+            (1, "12", "PAN ID"),
+        ],
+    )
+    def test_wrong_tlv_length_is_named(self, kind, value, name):
+        text = dataset(without=[kind], extra=tlv(kind, bytes.fromhex(value)))
+        assert parse(text) == {
+            "ok": False,
+            "error": f"Malformed TLVs: wrong length of {name}",
         }
 
     def test_unknown_tlvs_are_kept(self):
@@ -300,6 +320,13 @@ class TestJoinWithDataset:
             "status": 503,
         }
 
+    def test_body_read_failure_reports_status_0_at_its_step(self):
+        assert self.run("{status: 200}, {status: 200, textError: true}")["r"] == {
+            "ok": False,
+            "step": "state",
+            "status": 0,
+        }
+
     def test_failed_enable_reports_step_enable(self):
         assert self.run(
             "{status: 200}, {status: 200, body: 'disabled'}, {status: 500}"
@@ -327,14 +354,17 @@ class TestJoinErrorMessage:
     def test_400_on_dataset_says_rejected(self):
         assert "rejected the dataset" in self.message("dataset", 400)
 
-    def test_500_on_dataset_says_thread_did_not_restart(self):
+    def test_500_on_dataset_says_it_could_not_apply(self):
         text = self.message("dataset", 500)
-        assert "did not restart" in text and "reboot" in text
+        assert "could not apply the dataset" in text and "reboot" in text
 
     @pytest.mark.parametrize("status", [0, 409, 500])
     def test_enable_step_says_dataset_stored(self, status):
         text = self.message("enable", status)
         assert "dataset is stored" in text and "could not start" in text
+
+    def test_status_0_says_connection_lost(self):
+        assert "Connection lost" in self.message("state", 0)
 
     def test_other_status_names_step_and_status(self):
         text = self.message("state", 418)

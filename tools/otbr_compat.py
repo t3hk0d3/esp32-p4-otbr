@@ -237,6 +237,7 @@ async def refused_write(otbr):
 async def same_dataset_while_attached(session, url, otbr, tlvs):
     """PATCHES.md item 14: the stored dataset written again while Thread runs is accepted without a detach
     (ot-br-posix answers 409 here)."""
+    await wait_attached(session, url, otbr)
     before = await node_state(session, url)
     await call(
         "set_active_dataset_tlvs while Thread is enabled",

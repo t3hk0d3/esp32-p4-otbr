@@ -2126,6 +2126,15 @@ static void rest_dataset(const esp_br_thread_rest_request_t *request, esp_br_thr
         if (stored && base.mLength == current.mLength && !memcmp(base.mTlvs, current.mTlvs, base.mLength)) {
             return;
         }
+        /* Only a whole network moves this node at once; a partial change (e.g. only the channel) would split it from
+         * the mesh and belongs in the pending dataset, so it keeps ot-br-posix's 409. */
+        const otOperationalDatasetComponents *has = &dataset.mComponents;
+        if (!has->mIsActiveTimestampPresent || !has->mIsNetworkKeyPresent || !has->mIsNetworkNamePresent ||
+                !has->mIsExtendedPanIdPresent || !has->mIsMeshLocalPrefixPresent || !has->mIsPanIdPresent ||
+                !has->mIsChannelPresent) {
+            response->status = 409;
+            return;
+        }
         if (otThreadSetEnabled(instance, false) != OT_ERROR_NONE) {
             response->status = 500;
             return;

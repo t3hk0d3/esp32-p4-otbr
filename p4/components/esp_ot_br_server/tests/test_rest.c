@@ -200,6 +200,10 @@ static void test_dataset(void)
 #define GUARD_DATASET                                                                                     \
     "{\"networkName\":\"mesh\",\"networkKey\":\"00112233445566778899aabbccddeeff\",\"channel\":15," \
     "\"activeTimestamp\":{\"seconds\":42}}"
+#define COMPLETE_JSON_DATASET                                                                         \
+    "{\"networkName\":\"mesh\",\"networkKey\":\"00112233445566778899aabbccddeeff\",\"channel\":15,"  \
+    "\"panId\":4660,\"extPanId\":\"1111111122222222\",\"meshLocalPrefix\":\"fd11:22::/64\","       \
+    "\"activeTimestamp\":{\"seconds\":42}}"
 /* Patch 14: PUT /node/dataset/active while Thread runs stops Thread, stores the dataset and starts Thread again. */
 static const uint8_t s_new_tlvs[] = {0x01, 0x02, 0x03};
 static void dataset_case(otDeviceRole role, bool changes)
@@ -215,6 +219,9 @@ static void dataset_case(otDeviceRole role, bool changes)
     mock_active_tlvs.mTlvs[0] = 0xab;
     mock_active_tlvs.mTlvs[1] = 0xcd;
     memset(&mock_update_tlvs, 0, sizeof(mock_update_tlvs));
+    otOperationalDatasetComponents *has = &mock_dataset.mComponents; /* what otDatasetParseTlvs reports: complete */
+    has->mIsActiveTimestampPresent = has->mIsNetworkKeyPresent = has->mIsNetworkNamePresent = true;
+    has->mIsExtendedPanIdPresent = has->mIsMeshLocalPrefixPresent = has->mIsPanIdPresent = has->mIsChannelPresent = true;
     if (changes) {
         mock_update_tlvs.mLength = sizeof(s_new_tlvs);
         memcpy(mock_update_tlvs.mTlvs, s_new_tlvs, sizeof(s_new_tlvs));
@@ -275,11 +282,25 @@ static void test_dataset_active_while_running(void)
     cJSON *json = run_request(&req, 412);
     release(&req, json);
     assert(mock_ot_writes == 0 && stored_is_old());
-    /* A JSON body (create_active_dataset) while attached takes the same path. */
+    /* A complete JSON body (create_active_dataset) while attached takes the same path. */
     dataset_case(OT_DEVICE_ROLE_ROUTER, true);
-    put_active(GUARD_DATASET, "application/json", 200);
+    put_active(COMPLETE_JSON_DATASET, "application/json", 200);
     assert(!strcmp(mock_calls, "DSE") && stored_is_new());
+    /* A partial dataset while attached (here only the channel) would move this node alone: 409, nothing written. */
+    dataset_case(OT_DEVICE_ROLE_ROUTER, true);
+    put_active("{\"channel\":20}", "application/json", 409);
+    assert(mock_ot_writes == 0 && stored_is_old());
+    dataset_case(OT_DEVICE_ROLE_ROUTER, true);
+    mock_dataset.mComponents.mIsNetworkKeyPresent = false;
+    put_active("010203", "text/plain", 409);
+    assert(mock_ot_writes == 0 && stored_is_old());
+    /* Partial while Thread is disabled: stored as before (the caller starts Thread). */
+    dataset_case(OT_DEVICE_ROLE_DISABLED, true);
+    put_active("{\"channel\":20}", "application/json", 200);
+    assert(!strcmp(mock_calls, "S"));
     dataset_case(OT_DEVICE_ROLE_DISABLED, false);
+    memset(&mock_dataset.mComponents, 0, sizeof(mock_dataset.mComponents));
+    mock_dataset.mComponents.mIsNetworkNamePresent = true;
 }
 static void test_actions(void)
 {

@@ -17,6 +17,9 @@ Manual check list (browser, board in BR_RUNNING as leader, a second dataset at h
   7. Split network mode, page opened on the management address: Join ends with the message about the management address.
   8. Home Assistant, Thread panel: move the board onto the preferred network; it succeeds (it failed with 409 before) and
      the board log shows "active dataset replaced while attached, Thread restarted" or the preceding disable.
+  9. Stale pending dataset: start a channel change with a long delay (`PUT /node/dataset/pending`, delay 300000), then
+     join another network with the card before it expires. After the delay `GET /node/dataset/active` must still be the
+     joined network (if not, item 14 has to clear the pending dataset as well).
 """
 
 import asyncio
@@ -93,6 +96,17 @@ class TestActiveDatasetWhileAttached:
     ):
         wait_ot_state(dut, {"leader"}, LEADER_TIMEOUT_S)
         assert put_active(base_url, stored_dataset).status_code == 200
+        assert node_state(base_url) == "leader"
+        assert active_tlvs(base_url) == stored_dataset.lower()
+
+    def test_partial_dataset_is_refused_with_409(self, dut, stored_dataset, base_url):
+        wait_ot_state(dut, {"leader"}, LEADER_TIMEOUT_S)
+        response = requests.put(
+            f"{base_url}/node/dataset/active",
+            json={"channel": 20},
+            timeout=REQUEST_TIMEOUT_S,
+        )
+        assert response.status_code == 409
         assert node_state(base_url) == "leader"
         assert active_tlvs(base_url) == stored_dataset.lower()
 

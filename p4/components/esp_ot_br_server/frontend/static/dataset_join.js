@@ -10,11 +10,12 @@
 
 var DatasetJoin = (function() {
   var MAX_BYTES = 254; /* OT_OPERATIONAL_DATASET_MAX_LENGTH */
-  /* TLVs an active dataset needs; the board merges what it gets into what it has stored, so a partial set would keep
-   * parts of the old network. */
+  /* TLVs of a complete active dataset with their allowed value lengths [type, name, min, max]; the board merges what it
+   * gets into what it has stored, so a partial set would keep parts of the old network. */
   var REQUIRED = [
-    [ 14, 'Active Timestamp' ], [ 0, 'Channel' ], [ 1, 'PAN ID' ], [ 2, 'Ext PAN ID' ], [ 3, 'Network Name' ],
-    [ 5, 'Network Key' ], [ 7, 'Mesh-Local Prefix' ]
+    [ 14, 'Active Timestamp', 8, 8 ], [ 0, 'Channel', 3, 3 ], [ 53, 'Channel Mask', 2, 255 ], [ 2, 'Ext PAN ID', 8, 8 ],
+    [ 7, 'Mesh-Local Prefix', 8, 8 ], [ 5, 'Network Key', 16, 16 ], [ 3, 'Network Name', 1, 16 ], [ 1, 'PAN ID', 2, 2 ],
+    [ 4, 'PSKc', 16, 16 ], [ 12, 'Security Policy', 3, 255 ]
   ];
 
   function hex(bytes) {
@@ -60,14 +61,18 @@ var DatasetJoin = (function() {
     var missing = REQUIRED.filter(function(r) { return !tlvs[r[0]]; }).map(function(r) { return r[1]; });
     if (missing.length)
       return {ok : false, error : 'Not a complete active dataset: missing ' + missing.join(', ')};
+    var wrong = REQUIRED.filter(function(r) { return tlvs[r[0]].length < r[2] || tlvs[r[0]].length > r[3]; })
+                    .map(function(r) { return r[1]; });
+    if (wrong.length)
+      return {ok : false, error : 'Malformed TLVs: wrong length of ' + wrong.join(', ')};
     var channel = tlvs[0], pan = tlvs[1];
     return {
       ok : true,
       hex : compact,
       network : {
         name : utf8(tlvs[3]),
-        channel : channel.length >= 3 ? (channel[1] << 8) | channel[2] : null,
-        panId : pan.length >= 2 ? panText((pan[0] << 8) | pan[1]) : null,
+        channel : (channel[1] << 8) | channel[2],
+        panId : panText((pan[0] << 8) | pan[1]),
         extPanId : hex(tlvs[2])
       }
     };
@@ -100,11 +105,13 @@ var DatasetJoin = (function() {
   /* PUT the TLVs (the board restarts Thread itself when it runs); start Thread only when it is off, because enabling a
    * running Thread starts a fresh attach. */
   function joinWithDataset(hexTlvs, fetchFn) {
+    var step = 'dataset';
     return statusOf(fetchFn('/node/dataset/active',
                             {method : 'PUT', headers : {'Content-Type' : 'text/plain'}, body : hexTlvs}))
         .then(function(put) {
           if (!put.ok)
             return {ok : false, step : 'dataset', status : put.status};
+          step = 'state';
           return statusOf(fetchFn('/node/state')).then(function(state) {
             if (state.status !== 200)
               return {ok : false, step : 'state', status : state.status};
@@ -116,6 +123,7 @@ var DatasetJoin = (function() {
               }
               if (role !== 'disabled')
                 return {ok : true, started : false};
+              step = 'enable';
               return statusOf(fetchFn('/node/state', {
                        method : 'PUT',
                        headers : {'Content-Type' : 'application/json'},
@@ -127,7 +135,8 @@ var DatasetJoin = (function() {
                   });
             });
           });
-        });
+        })
+        .catch(function() { return {ok : false, step : step, status : 0}; });
   }
 
   function joinErrorMessage(step, status) {
@@ -142,7 +151,10 @@ var DatasetJoin = (function() {
     if (step === 'dataset' && status === 400)
       return 'The board rejected the dataset.';
     if (step === 'dataset' && status === 500)
-      return 'The dataset may be stored, but Thread did not restart. Check the Device page or reboot the board.';
+      return 'The board could not apply the dataset (HTTP 500). Check that it is a valid active dataset; if the board ' +
+             'left its network, see the Device page or reboot it.';
+    if (status === 0)
+      return 'Connection lost at step "' + step + '". Reload the page and check the board state.';
     return 'Join failed at step "' + step + '" (HTTP ' + status + ').';
   }
 
@@ -238,6 +250,11 @@ if (typeof document !== 'undefined') {
           updateBlockingStatus('Dataset stored — attaching...');
           poll();
         });
+      }).catch(function() {
+        button.disabled = false;
+        showBlockingOverlay('Joining Thread Network', ''); /* finishBlocking needs the overlay to exist */
+        finishBlocking(false, 'Unexpected error — reload the page and check the board state');
+        setStatus(false, 'Unexpected error — reload the page and check the board state');
       });
     }
 
