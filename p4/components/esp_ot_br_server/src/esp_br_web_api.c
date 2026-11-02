@@ -2115,15 +2115,21 @@ static void rest_dataset(const esp_br_thread_rest_request_t *request, esp_br_thr
         return;
     }
     if (!pending) {
+        /* Patch 14: a stored pending dataset belongs to the network being replaced. OpenThread applies it when its delay
+         * expires if its network key differs from the active one, which would take the board back to the old network,
+         * so it is deleted whenever the active dataset changes (OpenThread then drops the delay timer by itself). */
+        bool same = stored && base.mLength == current.mLength && !memcmp(base.mTlvs, current.mTlvs, base.mLength);
+        otOperationalDatasetTlvs no_pending = {0};
         if (role == OT_DEVICE_ROLE_DISABLED) {
-            if (otDatasetSetActiveTlvs(instance, &base) != OT_ERROR_NONE) {
+            if ((stored && !same && otDatasetSetPendingTlvs(instance, &no_pending) != OT_ERROR_NONE) ||
+                    otDatasetSetActiveTlvs(instance, &base) != OT_ERROR_NONE) {
                 response->status = 500;
             }
             return;
         }
         /* Patch 14: Thread runs. The same dataset again is a no-op (no detach); a different one is stored with Thread
          * stopped and Thread is started on it, all under the OpenThread lock this handler holds. */
-        if (stored && base.mLength == current.mLength && !memcmp(base.mTlvs, current.mTlvs, base.mLength)) {
+        if (same) {
             return;
         }
         /* Only a whole network moves this node at once; a partial change (e.g. only the channel) would split it from
@@ -2135,11 +2141,15 @@ static void rest_dataset(const esp_br_thread_rest_request_t *request, esp_br_thr
             response->status = 409;
             return;
         }
+        /* A whole network replaces the old one: store the request's own dataset, not its merge with the old one (which
+         * would keep TLVs the request lacks, e.g. the old network's Wake-up Channel). */
+        otDatasetConvertToTlvs(&dataset, &base);
         if (otThreadSetEnabled(instance, false) != OT_ERROR_NONE) {
             response->status = 500;
             return;
         }
-        if (otDatasetSetActiveTlvs(instance, &base) != OT_ERROR_NONE) {
+        if ((stored && otDatasetSetPendingTlvs(instance, &no_pending) != OT_ERROR_NONE) ||
+                otDatasetSetActiveTlvs(instance, &base) != OT_ERROR_NONE) {
             otThreadSetEnabled(instance, true); /* back on the old dataset */
             response->status = 500;
             return;

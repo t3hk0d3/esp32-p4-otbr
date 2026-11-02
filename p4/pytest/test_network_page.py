@@ -17,18 +17,19 @@ Manual check list (browser, board in BR_RUNNING as leader, a second dataset at h
   7. Split network mode, page opened on the management address: Join ends with the message about the management address.
   8. Home Assistant, Thread panel: move the board onto the preferred network; it succeeds (it failed with 409 before) and
      the board log shows "active dataset replaced while attached, Thread restarted" or the preceding disable.
-  9. Stale pending dataset: start a channel change with a long delay (`PUT /node/dataset/pending`, delay 300000), then
-     join another network with the card before it expires. After the delay `GET /node/dataset/active` must still be the
-     joined network (if not, item 14 has to clear the pending dataset as well).
+
+The stale pending dataset case (a channel change scheduled on the old network) is automated below:
+test_pending_dataset_of_the_old_network_is_dropped.
 """
 
 import asyncio
+import time
 
 import aiohttp
 import pytest
 import python_otbr_api as api
 import requests
-from conftest import ot, wait_ot_state
+from conftest import BOOT_TIMEOUT_S, ot, wait_ot_state
 
 LEADER_TIMEOUT_S = 90
 REQUEST_TIMEOUT_S = 10
@@ -41,8 +42,14 @@ def base_url(board_ip):
 
 
 @pytest.fixture
-def other_dataset(dut):
-    """A second complete active dataset (new keys, PAN and name), generated on the board without committing it."""
+def other_dataset(dut, stored_dataset):
+    """A second complete active dataset (new keys, PAN and name), generated on the board without committing it.
+
+    Depends on stored_dataset, which returns while the board is still booting: wait until OpenThread runs (the test
+    console's `ot` command must not be used before that)."""
+    dut.expect(
+        rb"br_core: Thread started with the stored dataset", timeout=BOOT_TIMEOUT_S
+    )
     ot(dut, "dataset init new")
     tlvs = ot(dut, "dataset tlvs")[-1]
     ot(dut, "dataset clear")
@@ -141,3 +148,45 @@ class TestActiveDatasetWhileAttached:
         asyncio.run(set_network(stored_dataset))
         wait_ot_state(dut, {"leader"}, LEADER_TIMEOUT_S)
         assert active_tlvs(base_url) == stored_dataset.lower()
+
+
+PENDING_DELAY_MS = 60000
+
+
+class TestPendingDatasetOfTheOldNetwork:
+    """PUT /node/dataset/active while a pending dataset of the old network waits (PATCHES.md item 14)"""
+
+    def test_pending_dataset_of_the_old_network_is_dropped(
+        self, dut, stored_dataset, other_dataset, base_url
+    ):
+        # A channel change scheduled on the old network must not take the board back once its delay expires.
+        wait_ot_state(dut, {"leader"}, LEADER_TIMEOUT_S)
+        current = requests.get(
+            f"{base_url}/node/dataset/active", timeout=REQUEST_TIMEOUT_S
+        ).json()
+        channel = 20 if current["channel"] != 20 else 21
+        response = requests.put(
+            f"{base_url}/node/dataset/pending",
+            json={
+                "activeDataset": {
+                    "channel": channel,
+                    "activeTimestamp": {
+                        "seconds": current["activeTimestamp"]["seconds"] + 1
+                    },
+                },
+                "delay": PENDING_DELAY_MS,
+            },
+            timeout=40,
+        )
+        assert response.status_code in (200, 201)
+        assert put_active(base_url, other_dataset).status_code == 200
+        wait_ot_state(dut, {"leader"}, LEADER_TIMEOUT_S)
+        pending = requests.get(
+            f"{base_url}/node/dataset/pending",
+            headers={"Accept": "text/plain"},
+            timeout=REQUEST_TIMEOUT_S,
+        )
+        assert pending.status_code == 204
+        time.sleep(PENDING_DELAY_MS / 1000 + 20)
+        wait_ot_state(dut, {"leader"}, LEADER_TIMEOUT_S)
+        assert active_tlvs(base_url) == other_dataset.lower()

@@ -214,11 +214,13 @@ static void dataset_case(otDeviceRole role, bool changes)
     mock_dataset_error = OT_ERROR_NONE;
     mock_set_active_error = OT_ERROR_NONE;
     mock_thread_enable_error = OT_ERROR_NONE;
+    mock_clear_pending_error = OT_ERROR_NONE;
     memset(&mock_active_tlvs, 0, sizeof(mock_active_tlvs));
     mock_active_tlvs.mLength = 2;
     mock_active_tlvs.mTlvs[0] = 0xab;
     mock_active_tlvs.mTlvs[1] = 0xcd;
     memset(&mock_update_tlvs, 0, sizeof(mock_update_tlvs));
+    memset(&mock_convert_tlvs, 0, sizeof(mock_convert_tlvs));
     otOperationalDatasetComponents *has = &mock_dataset.mComponents; /* what otDatasetParseTlvs reports: complete */
     has->mIsActiveTimestampPresent = has->mIsNetworkKeyPresent = has->mIsNetworkNamePresent = true;
     has->mIsExtendedPanIdPresent = has->mIsMeshLocalPrefixPresent = has->mIsPanIdPresent = has->mIsChannelPresent = true;
@@ -248,19 +250,32 @@ static void test_dataset_active_while_running(void)
     mock_dataset_error = OT_ERROR_NOT_FOUND;
     put_active("010203", "text/plain", 201);
     assert(!strcmp(mock_calls, "S") && stored_is_new());
-    /* Thread disabled, dataset stored: stored, 200, Thread is not touched. */
+    /* Thread disabled, dataset stored: the pending dataset of the old network is deleted, stored, 200, Thread is
+     * not touched. */
     dataset_case(OT_DEVICE_ROLE_DISABLED, true);
     put_active("010203", "text/plain", 200);
-    assert(!strcmp(mock_calls, "S") && stored_is_new());
-    /* Thread attached (any role but disabled), different TLVs: stop, store, start; 200 instead of 409. */
+    assert(!strcmp(mock_calls, "PS") && stored_is_new());
+    /* Thread disabled, the same dataset again: stored, the pending dataset is kept. */
+    dataset_case(OT_DEVICE_ROLE_DISABLED, false);
+    put_active("abcd", "text/plain", 200);
+    assert(!strcmp(mock_calls, "S") && stored_is_old());
+    /* Thread attached (any role but disabled), different TLVs: stop, delete the old network's pending dataset,
+     * store, start; 200 instead of 409. */
     static const otDeviceRole running[] = {OT_DEVICE_ROLE_DETACHED, OT_DEVICE_ROLE_CHILD, OT_DEVICE_ROLE_ROUTER,
                                            OT_DEVICE_ROLE_LEADER
                                           };
     for (unsigned i = 0; i < sizeof(running) / sizeof(running[0]); i++) {
         dataset_case(running[i], true);
         put_active("010203", "text/plain", 200);
-        assert(!strcmp(mock_calls, "DSE") && stored_is_new());
+        assert(!strcmp(mock_calls, "DPSE") && stored_is_new());
     }
+    /* Thread attached: the request's own dataset is stored, not the merge with the old one (no leftover TLVs of the
+     * old network, e.g. its Wake-up Channel). */
+    dataset_case(OT_DEVICE_ROLE_LEADER, true);
+    mock_convert_tlvs.mLength = 4;
+    memset(mock_convert_tlvs.mTlvs, 0x09, 4);
+    put_active("010203", "text/plain", 200);
+    assert(!strcmp(mock_calls, "DPSE") && mock_active_tlvs.mLength == 4 && mock_active_tlvs.mTlvs[3] == 0x09);
     /* Thread attached, TLVs equal to the stored ones: 200 without any OpenThread write. */
     dataset_case(OT_DEVICE_ROLE_LEADER, false);
     put_active("abcd", "text/plain", 200);
@@ -269,12 +284,17 @@ static void test_dataset_active_while_running(void)
     dataset_case(OT_DEVICE_ROLE_LEADER, true);
     mock_set_active_error = OT_ERROR_FAILED;
     put_active("010203", "text/plain", 500);
-    assert(!strcmp(mock_calls, "DSE") && stored_is_old());
+    assert(!strcmp(mock_calls, "DPSE") && stored_is_old());
+    /* Thread attached, deleting the pending dataset fails: nothing stored, Thread started again, 500. */
+    dataset_case(OT_DEVICE_ROLE_LEADER, true);
+    mock_clear_pending_error = OT_ERROR_FAILED;
+    put_active("010203", "text/plain", 500);
+    assert(!strcmp(mock_calls, "DPE") && stored_is_old());
     /* Thread attached, the restart fails: the new dataset stays stored, 500. */
     dataset_case(OT_DEVICE_ROLE_LEADER, true);
     mock_thread_enable_error = OT_ERROR_FAILED;
     put_active("010203", "text/plain", 500);
-    assert(!strcmp(mock_calls, "DSE") && stored_is_new());
+    assert(!strcmp(mock_calls, "DPSE") && stored_is_new());
     /* If-None-Match: * with a stored dataset while attached: 412, nothing written. */
     dataset_case(OT_DEVICE_ROLE_LEADER, true);
     httpd_req_t req = request(HTTP_PUT, "/node/dataset/active", "010203", NULL, "text/plain");
@@ -285,7 +305,7 @@ static void test_dataset_active_while_running(void)
     /* A complete JSON body (create_active_dataset) while attached takes the same path. */
     dataset_case(OT_DEVICE_ROLE_ROUTER, true);
     put_active(COMPLETE_JSON_DATASET, "application/json", 200);
-    assert(!strcmp(mock_calls, "DSE") && stored_is_new());
+    assert(!strcmp(mock_calls, "DPSE") && stored_is_new());
     /* A partial dataset while attached (here only the channel) would move this node alone: 409, nothing written. */
     dataset_case(OT_DEVICE_ROLE_ROUTER, true);
     put_active("{\"channel\":20}", "application/json", 409);
@@ -297,7 +317,7 @@ static void test_dataset_active_while_running(void)
     /* Partial while Thread is disabled: stored as before (the caller starts Thread). */
     dataset_case(OT_DEVICE_ROLE_DISABLED, true);
     put_active("{\"channel\":20}", "application/json", 200);
-    assert(!strcmp(mock_calls, "S"));
+    assert(!strcmp(mock_calls, "PS"));
     dataset_case(OT_DEVICE_ROLE_DISABLED, false);
     memset(&mock_dataset.mComponents, 0, sizeof(mock_dataset.mComponents));
     mock_dataset.mComponents.mIsNetworkNamePresent = true;

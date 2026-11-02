@@ -4,8 +4,8 @@ otDeviceRole mock_role;
 otCommissionerState mock_commissioner;
 otError mock_dataset_error, mock_pending_error, mock_pending_result;
 otOperationalDataset mock_dataset;
-otOperationalDatasetTlvs mock_active_tlvs, mock_update_tlvs;
-otError mock_set_active_error, mock_thread_enable_error;
+otOperationalDatasetTlvs mock_active_tlvs, mock_update_tlvs, mock_convert_tlvs;
+otError mock_set_active_error, mock_thread_enable_error, mock_clear_pending_error;
 char mock_calls[32];
 void mock_call(char call) {
     size_t length=strlen(mock_calls);
@@ -27,8 +27,10 @@ void mock_reset(void) {
     memset(&mock_active_tlvs,0,sizeof(mock_active_tlvs));
     mock_active_tlvs.mLength=2;mock_active_tlvs.mTlvs[0]=0xab;mock_active_tlvs.mTlvs[1]=0xcd;
     memset(&mock_update_tlvs,0,sizeof(mock_update_tlvs));
+    memset(&mock_convert_tlvs,0,sizeof(mock_convert_tlvs));
     mock_set_active_error=OT_ERROR_NONE;
     mock_thread_enable_error=OT_ERROR_NONE;
+    mock_clear_pending_error=OT_ERROR_NONE;
     mock_calls[0]=0;
     pending_callback=NULL;
     diagnostic_callback=NULL;

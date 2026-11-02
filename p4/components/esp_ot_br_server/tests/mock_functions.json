@@ -33,5 +33,7 @@
   "otThreadSendDiagnosticGet": "diagnostic_callback=p4;diagnostic_context=p5;return OT_ERROR_NONE;",
   "otThreadSendDiagnosticReset": "return OT_ERROR_NONE;",
   "otBorderAgentEphemeralKeyGenerateTap": "strcpy(p0->mTap,\"123456789\");return OT_ERROR_NONE;",
-  "otBorderAgentEphemeralKeyStart": "return OT_ERROR_NONE;"
+  "otBorderAgentEphemeralKeyStart": "return OT_ERROR_NONE;",
+  "otDatasetSetPendingTlvs": "mock_ot_writes++;mock_call(p1->mLength ? 'p' : 'P');return mock_clear_pending_error;",
+  "otDatasetConvertToTlvs": "if(mock_convert_tlvs.mLength){*p1=mock_convert_tlvs;}"
 }

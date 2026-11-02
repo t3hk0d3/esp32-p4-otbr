@@ -77,8 +77,9 @@ extern int64_t mock_time;
 extern otOperationalDataset mock_dataset;
 extern otOperationalDatasetTlvs mock_active_tlvs; /* stored active TLVs: read by otDatasetGetActiveTlvs, set by otDatasetSetActiveTlvs */
 extern otOperationalDatasetTlvs mock_update_tlvs; /* otDatasetUpdateTlvs result when mLength != 0 (else the base is unchanged) */
-extern otError mock_set_active_error, mock_thread_enable_error; /* injected failures of the store and of the Thread start */
-extern char mock_calls[32]; /* order of Thread/dataset writes: 'D' disable, 'S' store active TLVs, 'E' enable */
+extern otOperationalDatasetTlvs mock_convert_tlvs; /* otDatasetConvertToTlvs result when mLength != 0 */
+extern otError mock_set_active_error, mock_thread_enable_error, mock_clear_pending_error; /* injected failures */
+extern char mock_calls[32]; /* order of Thread/dataset writes: 'D' disable, 'P' delete pending, 'S' store active, 'E' enable */
 void mock_call(char call);
 extern unsigned mock_registered;
 extern br_core_mode_t mock_mode;
