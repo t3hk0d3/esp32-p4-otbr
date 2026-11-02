@@ -13,7 +13,7 @@ else()
                                 "link_spi.c" "base_image.c" "jumper.c" "rom_flash.c" "run_device.c"
                            INCLUDE_DIRS "include" "."
                            REQUIRES rcp_sync_proto
-                           PRIV_REQUIRES board_cores c6_hosted esp_driver_gpio esp_driver_spi esp_driver_uart esp_timer esp_rom log freertos
+                           PRIV_REQUIRES board_cores c6_hosted nvs_flash esp_driver_gpio esp_driver_spi esp_driver_uart esp_timer esp_rom log freertos
                                          espressif__esp-serial-flasher)
     target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../main" "${c6_board_dir}")
 endif()

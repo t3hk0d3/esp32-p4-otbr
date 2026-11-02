@@ -354,10 +354,11 @@ def probe_override(send):
 
 
 def _clear_test_flags(dut):
-    """Best effort: `c6_hold 0` and `rcp_probe_override real`, each repeated until acknowledged."""
+    """Best effort: `c6_hold 0`, `rcp_probe_override real` and `c6_jumper_ignore 0`, each repeated until acknowledged."""
     for command, ack in (
         ("c6_hold 0", rb"c6_hold: ok"),
         ("rcp_probe_override real", rb"rcp_probe_override: ok"),
+        ("c6_jumper_ignore 0", rb"c6_jumper_ignore: ok"),
     ):
         for _ in range(CLEAR_ATTEMPTS):
             dut.write(command)

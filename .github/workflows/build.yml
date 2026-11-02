@@ -49,7 +49,7 @@ jobs:
           apt-get update -qq
           # clang++: the vendored REST tests read the OpenThread declarations from a clang AST dump
           apt-get install -y -qq zip clang >/dev/null
-      - name: Build c6_updater, c6_rcp, p4
+      - name: Build c6_updater, c6_rcp, c6_installer, p4
         run: |
           # version.cmake reads the git hash; the checkout belongs to another user than the container's root
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -97,6 +97,7 @@ jobs:
             echo
             echo "- \`otbr.bundle\`: P4 app and web UI, for an OTA update (Device > Firmware page or \`POST /device/ota\`)."
             echo "- \`c6_rcp.bin\`: C6 radio firmware from the same build (Device > Firmware page or \`POST /device/radio/firmware\`)."
+            echo "- \`c6_installer.bin\`: one-time first install on a factory C6 (ESP-Hosted): upload it like the radio firmware, then \`c6_rcp.bin\` (see docs/first-install.md)."
             echo "- \`p4-flash.zip\`: full P4 flash over USB: \`esptool --chip esp32p4 write-flash @flash_args\` inside the unpacked directory."
             echo "- \`c6-updater-flash.zip\`: C6 base images for the no-jumper first install (see docs/first-install.md)."
             echo "- \`third-party-licenses.zip\`: license texts of the code linked into the images."

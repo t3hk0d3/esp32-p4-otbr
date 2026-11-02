@@ -150,6 +150,50 @@ static esp_err_t link_attach_updater(void)
     return bus_up();
 }
 
+#ifdef OTBR_TEST_BUILD
+#include "nvs.h"
+
+#define TEST_NVS_NAMESPACE   "otbr_dev"
+#define TEST_KEY_JUMPER_IGN  "test_jmp_ign"
+
+static bool jumper_ignored(void)
+{
+    nvs_handle_t handle;
+    uint8_t value = 0;
+
+    if (nvs_open(TEST_NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        return false;
+    }
+    nvs_get_u8(handle, TEST_KEY_JUMPER_IGN, &value);
+    nvs_close(handle);
+    return value != 0;
+}
+
+esp_err_t rcp_sync_test_set_jumper_ignore(bool ignore)
+{
+    nvs_handle_t handle;
+
+    ESP_RETURN_ON_ERROR(nvs_open(TEST_NVS_NAMESPACE, NVS_READWRITE, &handle), TAG, "nvs_open");
+    esp_err_t err = nvs_set_u8(handle, TEST_KEY_JUMPER_IGN, ignore ? 1 : 0);
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return err;
+}
+#endif
+
+/* What the probe and the push see of the jumper. Test builds can hide it (c6_jumper_ignore) to run the wireless paths. */
+static bool link_jumper_present(void)
+{
+#ifdef OTBR_TEST_BUILD
+    if (jumper_ignored()) {
+        return false;
+    }
+#endif
+    return rcp_sync_jumper_present();
+}
+
 static esp_err_t link_hosted_detect(bool *present)
 {
     return c6_hosted_detect(present);
@@ -222,7 +266,7 @@ const rcp_sync_link_t rcp_sync_link_spi = {
     .enter_updater = link_enter_updater,
     .transact = link_transact,
     .release = link_release,
-    .jumper_present = rcp_sync_jumper_present,
+    .jumper_present = link_jumper_present,
     .rom_recover = rcp_sync_rom_recover,
     .base_version = rcp_sync_base_image_version,
     .hosted_detect = link_hosted_detect,

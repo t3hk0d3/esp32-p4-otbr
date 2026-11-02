@@ -165,6 +165,19 @@ static int cmd_c6_hold(int argc, char **argv)
     return err == ESP_OK ? 0 : 1;
 }
 
+// c6_jumper_ignore <0|1>: the probe and the push treat the maintenance jumper as absent (persisted; the first install
+// through ESP-Hosted can then be tested with the jumper still fitted).
+static int cmd_c6_jumper_ignore(int argc, char **argv)
+{
+    if (argc != 2) {
+        printf("usage: c6_jumper_ignore <0|1>\n");
+        return 1;
+    }
+    esp_err_t err = rcp_sync_test_set_jumper_ignore(atoi(argv[1]) != 0);
+    printf("c6_jumper_ignore: %s\n", err == ESP_OK ? "ok" : esp_err_to_name(err));
+    return err == ESP_OK ? 0 : 1;
+}
+
 // br_status: br_core mode, installed RCP version, dataset and DHCPv6-PD state.
 static int cmd_br_status(int argc, char **argv)
 {
@@ -447,6 +460,8 @@ esp_err_t test_cmds_register(void)
     ESP_RETURN_ON_ERROR(register_command("ota_state", "running slot and rollback state", cmd_ota_state), TAG, "ota_state");
     ESP_RETURN_ON_ERROR(register_command("crash", "abort (panic)", cmd_crash), TAG, "crash");
     ESP_RETURN_ON_ERROR(register_command("c6_hold", "hold the C6 in reset from the next boot (0 clears)", cmd_c6_hold), TAG, "c6_hold");
+    ESP_RETURN_ON_ERROR(register_command("c6_jumper_ignore", "treat the maintenance jumper as absent (0 clears)", cmd_c6_jumper_ignore),
+                        TAG, "c6_jumper_ignore");
     ESP_RETURN_ON_ERROR(register_command("busy", "spin a task on a core for 1..3 s", cmd_busy), TAG, "busy");
     ESP_RETURN_ON_ERROR(register_command("br_status", "br_core mode, dataset and DHCPv6-PD state", cmd_br_status), TAG, "br_status");
     ESP_RETURN_ON_ERROR(register_command("rcp_probe_override", "force the next boot's probe: real, empty or fail", cmd_rcp_probe_override), TAG, "rcp_probe_override");

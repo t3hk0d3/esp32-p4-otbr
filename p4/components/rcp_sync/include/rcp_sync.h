@@ -130,6 +130,12 @@ size_t rcp_sync_log_read(char *buf, size_t cap);
 #ifdef OTBR_TEST_BUILD
 /** Test builds: erase one C6 flash range over the jumper (c6_erase). Same preconditions and exit state as rcp_sync_rom_recover. */
 esp_err_t rcp_sync_test_c6_erase(uint32_t offset, uint32_t size);
+
+/**
+ * Test builds: from now on (NVS, survives reboots) the probe and the push treat the jumper as absent (c6_jumper_ignore), so
+ * the wireless first install runs on a board that has the jumper fitted. Manual ROM recovery still uses the jumper.
+ */
+esp_err_t rcp_sync_test_set_jumper_ignore(bool ignore);
 #endif
 
 #ifdef __cplusplus

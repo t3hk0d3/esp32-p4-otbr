@@ -5,6 +5,8 @@
 # Writes:
 #   otbr.bundle                  P4 OTA bundle (web UI and P4 app), POST /device/ota
 #   c6_rcp.bin                   C6 radio firmware, POST /device/radio/firmware
+#   c6_installer.bin             one-time C6 installer for a factory C6 (ESP-Hosted), POST /device/radio/firmware before
+#                                c6_rcp.bin; its version is the c6 base version
 #   p4-flash.zip                 full P4 USB flash: images and flash_args (esptool --chip esp32p4 write-flash @flash_args)
 #   c6-updater-flash.zip         C6 base images for the no-jumper first install (docs/first-install.md, Path 2)
 #   third-party-licenses.zip     license texts of the code linked into the images
@@ -28,7 +30,7 @@ project_version() {
 }
 
 # A test build must never be released (build_all.sh records the choice as the OTBR_TEST_BUILD cache entry).
-for project in p4 c6_rcp c6_updater; do
+for project in p4 c6_rcp c6_updater c6_installer; do
     if grep -q '^OTBR_TEST_BUILD:[A-Z]*=1$' "$root/$project/build/CMakeCache.txt"; then
         echo "$project/build is a --test build; rebuild with make build" >&2
         exit 1
@@ -70,7 +72,7 @@ c6_base_zip() {
 
 python3 "$root/tools/make_bundle.py" --web "$root/p4/build/web_0.bin" --app "$root/p4/build/p4.bin" \
     --out "$out/otbr.bundle"
-cp "$root/c6_rcp/build/c6_rcp.bin" "$out/"
+cp "$root/c6_rcp/build/c6_rcp.bin" "$root/c6_installer/build/c6_installer.bin" "$out/"
 flash_zip p4 p4-flash
 c6_base_zip
 
@@ -101,6 +103,6 @@ done
     echo "ESP-IDF:     $(cd "$IDF_PATH" && git describe --tags --always 2>/dev/null || echo unknown)"
 } >"$out/versions.txt"
 
-(cd "$out" && sha256sum otbr.bundle c6_rcp.bin p4-flash.zip c6-updater-flash.zip third-party-licenses.zip \
+(cd "$out" && sha256sum otbr.bundle c6_rcp.bin c6_installer.bin p4-flash.zip c6-updater-flash.zip third-party-licenses.zip \
     versions.txt >SHA256SUMS)
 cat "$out/versions.txt"
