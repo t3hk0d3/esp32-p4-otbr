@@ -85,7 +85,12 @@ The pins are fixed in `p4/main/board.h`. The firmware detects the jumper by itse
    instead, run `curl -X POST http://<board>/device/radio/recover` and look at `/device/status` again. On a C6 that has no RCP
    firmware this request answers 200 `{"recovered":true,"rcp":"no rcp firmware",...}` (OpenThread cannot start without
    firmware: the status shows `no rcp firmware`); `recovery_failed` (502) means the recovery itself failed.
-4. Upload the radio firmware, with the Firmware page (`http://<board>/firmware.html`, "Radio") or:
+4. Upload the radio firmware on the Firmware page (`http://<board>/firmware.html`, "Radio"). The page highlights the
+   Radio card while the C6 has no radio firmware:
+
+   <img src="images/firmware-radio-fault.png" width="640" alt="Firmware page in RADIO_FAULT: the Radio (ESP32-C6) card is outlined and says the C6 has no valid radio firmware, install c6_rcp.bin below">
+
+   Or from a checkout:
 
    ```
    make radio BOARD=<board>
@@ -141,6 +146,9 @@ The board needs a dataset before it does anything. Either:
 
 - Web UI: `http://<board>/network.html`, "Form" a new network, "Join" a scanned one, or "Join with Dataset" with the
   active dataset TLVs (hex) of an existing network; then check the dashboard.
+
+  <img src="images/network.png" width="640" alt="Network page: a scan lists three nearby Thread networks with a Join button each; Join with Dataset shows pasted dataset TLVs and the preview MyHome, channel 15, PAN 0x1234; Form New Network has name, key, PAN ID and channel">
+
 - Home Assistant: add the OpenThread Border Router integration with the URL `http://<board>`; it creates or imports the
   dataset. See [Home Assistant](home-assistant.md).
 - `python-otbr-api` (`pip install python-otbr-api aiohttp`):

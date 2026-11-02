@@ -5,6 +5,10 @@
 `GET /device/status` (`make status BOARD=<board>`) shows `mode` and `fault_reason`. In `RADIO_FAULT` the Thread API
 answers 503; `/device/*`, the device pages and OTA keep working.
 
+The Dashboard shows the fault in red, with what to do and a link to the page that fixes it:
+
+<img src="images/dashboard-radio-fault.png" width="640" alt="Dashboard in RADIO_FAULT: Radio fault, the radio has no firmware so the Thread network cannot start, install c6_rcp.bin on the Firmware page; the Thread cards are empty and the Radio card says none installed">
+
 | `fault_reason` | Meaning and fix |
 | --- | --- |
 | `no rcp firmware` | The C6 has no valid RCP image (new board, erased slots). Upload `c6_rcp.bin`. Not retried automatically. |

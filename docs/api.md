@@ -45,6 +45,8 @@ recovery with the jumper), `/capture.html` (packet capture) and `/diagnostics.ht
 banner with **Keep new settings** while network settings are on trial. They use only `/device/*`, so they also work in
 `RADIO_FAULT` and while sniffing.
 
+<img src="images/dashboard.png" width="640" alt="Dashboard: Border router running, with the Thread network, identifiers, board firmware, radio, Ethernet, prefix delegation, packet capture and load cards, and the Thread address table">
+
 ## Creating a Thread network
 
 The board never forms or joins a network by itself. Use the Web UI (Network page: form, join a scanned network, or join
