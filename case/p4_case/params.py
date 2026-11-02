@@ -70,6 +70,9 @@ HEADER_BODY_TOP = 2.5  # board Z where a plug seats (top of the header's plastic
 RIBBON_RECESS = 1.0  # depth into the walls around the header end
 RIBBON_RECESS_Y0 = 58.0
 RIBBON_RECESS_TOP = HEADER_BODY_TOP + RIBBON_PLUG[2] + 1.0  # board Z
+RECESS_CHAMFER_RISE = (
+    1.2  # recess ceiling rises 1.2 per 1 of depth (about 40 degrees from vertical)
+)
 
 # --- buttons (5.2) ---
 BUTTON_HOLE_D = 2.5
