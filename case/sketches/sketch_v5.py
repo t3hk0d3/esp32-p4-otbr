@@ -30,6 +30,8 @@ TABS_Y = (3.0, 65.0)  # label positions
 CORNER_TABS = ((-0.5, 6.5, 6.5, True), (61.5, 68.5, 3.5, False))
 TAB_W = 7.0
 TAB_DROP = 6.5
+TAB_ROOT = 2.0  # wedge-shaped tab: thickness at the lid
+TAB_TIP = 1.4  # ... and at the tip; taper on the inner face
 PRY_Y = ()  # pry cut-outs dropped: deferred to a later revision
 PRY_W = 10.0
 PRY_D = 3.0
@@ -61,10 +63,17 @@ def front(svg):
     v.rect(lx0 + FRAME, 33.1, lx1 - FRAME, 34.9, "#374151", fill=LID_C, sw=0.8)
     for ylo, yhi, _, end_leg in CORNER_TABS:
         for x, d in ((X0 + W, 1), (X1 - W, -1)):
-            v.rect(x, ylo, x + d * 1.2, yhi, "#111", fill="#111", op=0.35, sw=1)
+            v.rect(x, ylo, x + d * TAB_ROOT, yhi, "#111", fill="#111", op=0.35, sw=1)
             if end_leg:
                 v.rect(
-                    x, ylo, x + d * 3.5, ylo + 1.2, "#111", fill="#111", op=0.35, sw=1
+                    x,
+                    ylo,
+                    x + d * 3.5,
+                    ylo + TAB_ROOT,
+                    "#111",
+                    fill="#111",
+                    op=0.35,
+                    sw=1,
                 )
     for y in PRY_Y:
         for x, d in ((X0, 1), (X1, -1)):
@@ -230,7 +239,18 @@ def sheet_detail(path):
     v.rect(X1 - W, FLOOR, X1, ZMAX, "#374151", fill=BASE_C)
     v.rect(X0 + W / 2, TOP, X1 - W / 2, ZMAX, "#374151", fill=LID_C)
     for x, d in ((X0 + W, 1), (X1 - W, -1)):
-        v.rect(x, TOP - TAB_DROP, x + d * 1.2, TOP, "#374151", fill=LID_C)
+        pts = [
+            v.p(x, TOP),
+            v.p(x + d * TAB_ROOT, TOP),
+            v.p(x + d * TAB_TIP, TOP - TAB_DROP + 0.6),
+            v.p(x + d * (TAB_TIP - 0.6), TOP - TAB_DROP),
+            v.p(x, TOP - TAB_DROP),
+        ]
+        svg.el.append(
+            '<polygon points="'
+            + " ".join(f"{a:.1f},{b:.1f}" for a, b in pts)
+            + f'" fill="{LID_C}" stroke="#374151" stroke-width="1"/>'
+        )
     v.rect(0, PCB0, 55, PCB1, C["board"], fill=C["board"], op=0.5)
     v.rect(4.3, PCB1, 19.9, PCB1 + 16, C["part"], fill=C["part"], op=0.15, sw=1)
     v.text(12, PCB1 + 8, "USB", size=10, anchor="middle")
@@ -255,7 +275,24 @@ def sheet_detail(path):
     r(-6, -9, -4, 0.0, "#374151", fill=BASE_C)  # wall (2 mm)
     r(-4, -1, 4, 0.0, "#374151", fill=LID_C)  # lid frame (lower 1 mm in rebate)
     r(-5, 0, 4, 1.0, "#374151", fill=LID_C)
-    r(-4, -7.5, -2.8, -1, "#374151", fill=LID_C)  # tab
+    tab = [
+        (-4, -1),
+        (-4 + TAB_ROOT, -1),
+        (-4 + TAB_TIP, -6.9),
+        (-4 + TAB_TIP - 0.6, -7.5),
+        (-4, -7.5),
+    ]
+    svg.el.append(
+        '<polygon points="'
+        + " ".join(f"{a:.1f},{b:.1f}" for a, b in (z.p(u * k, w * k) for u, w in tab))
+        + f'" fill="{LID_C}" stroke="#374151" stroke-width="1"/>'
+    )
+    z.text(
+        -1.5 * k,
+        -3.6 * k,
+        f"wedge: {TAB_ROOT} mm at the root, {TAB_TIP} at the tip",
+        size=11,
+    )
     pts = [z.p(-4 * k, -6.4 * k), z.p(-4.6 * k, -5.8 * k), z.p(-4 * k, -5.2 * k)]
     svg.el.append(
         '<polygon points="'
