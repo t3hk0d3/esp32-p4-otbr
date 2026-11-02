@@ -183,24 +183,33 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
   - The grille sits flat on the build plate when printing, so it has no bridges.
 - **Corner tabs (snaps and guide pins):**
   - Four identical tabs, hanging from the frame's underside into the four inner corners of the base, against the side
-    walls. Each is 7 mm long along the side wall and reaches 3.5 mm below the lid's underside, to about 13.5 mm above the
+    walls. Each is 10 mm long along the side wall and reaches 3.5 mm below the lid's underside, to about 13.5 mm above the
     board.
+  - **Built for layer strength:** the lid prints top-face down, so each tab's layers stack along its length and the layer
+    bonds take the bending load. To keep that load low and spread out:
+    - the tabs are thick: 2.4 mm at the root;
+    - a 1.5 mm fillet joins each tab to the lid frame, so there's no sharp corner for a crack to start from;
+    - they're 10 mm wide;
+    - the snap is shallow, so the tab barely bends (see the bump below);
+    - `docs/case.md` recommends PETG and solid infill for the lid.
   - As the lid goes down they find the corners first and steer it into the rebate. Each tab's end sits 0.2 mm from the end
     wall, so the four of them locate the lid along the case as well as across it.
-  - At that length they stay clear of everything: the USB stack (X 4.26 and up), the buttons, a ribbon plug on the header
-    (top about 11.5 above the board) and the ribbon itself (X 2.1–52.9). No tab runs along an end wall, so the header
-    slot stays fully open.
-  - Every tab is wedged so the lid glides into place:
-    - **Inner face:** tapers from 2.0 mm thick at the root to 1.6 mm at the tip.
+  - **Clearance:** at this length they stay clear of the USB stack (X 4.26 and up), the buttons and a ribbon plug on the
+    header (top about 11.5 above the board). The two header-end tabs reach X 2.1 at the root, the edge of a 40-wire ribbon
+    (X 2.1–52.9). The ribbon may touch them there, and that's accepted because the ribbon is flexible. No tab runs along
+    an end wall, so the header slot stays fully open.
+  - **Wedge, so the lid glides into place:**
+    - **Inner face:** tapers from 2.4 mm thick at the root to 1.9 mm at the tip.
     - **Face toward the side wall:** flat and parallel to the wall (0.2 mm clearance) for the first 2 mm below the lid,
       where the snap bump sits. Below that it tapers 0.5 mm inward to the tip.
     - **End face toward the end wall:** the same flat-then-lead-in profile, so each tip narrows in both directions.
-    - The tip is about 1.1 mm thick, and its outer corner is rounded.
-  - Each tab carries a bump on its side-wall face, about 0.5 mm high and ramped 45° on both faces, centred 1 mm below the
-    lid. A firm lever pops it out. The dents in the side walls sit level with the bumps, about 1 mm below the rebate floor.
-    At the header end that's above the ribbon-plug recess, where the wall is full thickness.
-  - Bump height, dent fit, tab length and drop, and the wedge thicknesses go into named constants, so they can be tuned
-    after a test print.
+    - The tip is about 1.4 mm thick, and its outer corner is rounded.
+  - **Snap bump:** each tab carries a bump on its side-wall face, about 0.4 mm high with 30° ramps on both faces, centred
+    1 mm below the lid. It works as a detent rather than a hook: a firm lever pops it out without bending the tab much. The
+    dents in the side walls sit level with the bumps, about 1 mm below the rebate floor. At the header end that's above the
+    ribbon-plug recess, where the wall is full thickness.
+  - Bump height and angle, dent fit, tab length and drop, wedge thicknesses and the root fillet go into named constants, so
+    they can be tuned after a test print.
 - **LED:** the LED (board X 0.3–1.6, Y 17.4–19.1) sits under the solid frame. The frame narrows locally there, so two or
   three honeycomb cells (3.5 mm or less) sit directly over it. There's no separate window.
 
@@ -269,6 +278,7 @@ pencil, insert and eject a card, fit and remove the lid, and hang the case both 
 - The exact grille layout within the stated hole size.
 - The thumb-scoop shape.
 - The exact dent depth and position, within section 5.3.
+- Slicer hints for the lid in `docs/case.md` (perimeters and infill around the tabs).
 - The SMA hole's exact height, within the clearance rule.
 - The M2.5 pilot-hole size, as a named constant.
 
