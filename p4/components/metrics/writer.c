@@ -67,19 +67,14 @@ void metrics_writer_usec(metrics_writer_t *w, uint64_t usec)
 
 void metrics_writer_label_value(metrics_writer_t *w, const char *text)
 {
-    for (const char *p = text; *p; p++) {
-        switch (*p) {
-        case '\\':
-            put(w, "\\\\", 2);
-            break;
-        case '"':
-            put(w, "\\\"", 2);
-            break;
-        case '\n':
-            put(w, "\\n", 2);
-            break;
-        default:
-            put(w, p, 1);
+    while (*text) {
+        const size_t run = strcspn(text, "\\\"\n"); // plain bytes up to the next character to escape
+
+        put(w, text, run);
+        text += run;
+        if (*text) {
+            put(w, *text == '\n' ? "\\n" : *text == '"' ? "\\\"" : "\\\\", 2);
+            text++;
         }
     }
 }

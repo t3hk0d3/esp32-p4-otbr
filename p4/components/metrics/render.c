@@ -44,14 +44,25 @@ static sample_t begin(metrics_writer_t *w, const char *name)
     };
 }
 
-static void label(sample_t *s, const char *key, const char *value)
+// A label is label_open, its value written through the writer, then label_close.
+static void label_open(sample_t *s, const char *key)
 {
     metrics_writer_raw(s->w, s->labelled ? "," : "{");
     metrics_writer_raw(s->w, key);
     metrics_writer_raw(s->w, "=\"");
-    metrics_writer_label_value(s->w, value);
-    metrics_writer_raw(s->w, "\"");
     s->labelled = true;
+}
+
+static void label_close(sample_t *s)
+{
+    metrics_writer_raw(s->w, "\"");
+}
+
+static void label(sample_t *s, const char *key, const char *value)
+{
+    label_open(s, key);
+    metrics_writer_label_value(s->w, value);
+    label_close(s);
 }
 
 static void close_labels(sample_t *s)
@@ -82,6 +93,15 @@ static void single(metrics_writer_t *w, const char *name, const char *type, cons
     end_u64(&s, value);
 }
 
+// A family with one unlabelled sample in seconds.
+static void single_usec(metrics_writer_t *w, const char *name, const char *type, const char *help, uint64_t usec)
+{
+    family(w, name, type, help);
+    sample_t s = begin(w, name);
+
+    end_usec(&s, usec);
+}
+
 // One series per state, 1 for `current`, 0 for the others.
 static void state_set(metrics_writer_t *w, const char *name, const char *help, const char *key, const char *const *names,
                       size_t count, int current)
@@ -95,37 +115,19 @@ static void state_set(metrics_writer_t *w, const char *name, const char *help, c
     }
 }
 
-static void u32_text(char *out, size_t cap, uint32_t value)
-{
-    char digits[11];
-    size_t n = 0;
-
-    do {
-        digits[n++] = (char)('0' + value % 10);
-        value /= 10;
-    } while (value > 0 && n < sizeof(digits));
-    size_t i = 0;
-
-    while (n > 0 && i + 1 < cap) {
-        out[i++] = digits[--n];
-    }
-    out[i] = '\0';
-}
-
 // ---- device ----
 
 static void render_info(metrics_writer_t *w, const metrics_device_t *d)
 {
-    char slot[12] = "";
-
-    if (d->slot >= 0) {
-        u32_text(slot, sizeof(slot), (uint32_t)d->slot);
-    }
     family(w, "br_info", "gauge", "Firmware and radio versions (value 1).");
     sample_t s = begin(w, "br_info");
 
     label(&s, "version", d->version ? d->version : "");
-    label(&s, "slot", slot);
+    label_open(&s, "slot");
+    if (d->slot >= 0) {
+        metrics_writer_u64(w, (uint64_t)d->slot);
+    }
+    label_close(&s);
     label(&s, "rcp_version", d->rcp_version ? d->rcp_version : "");
     label(&s, "rcp_compatible", d->rcp_compatible ? "true" : "false");
     end_u64(&s, 1);
@@ -133,67 +135,73 @@ static void render_info(metrics_writer_t *w, const metrics_device_t *d)
 
 static void render_cpu(metrics_writer_t *w, const diag_metrics_view_t *g)
 {
-    static const char *const core_names[DIAG_METRICS_CORES] = {"0", "1"};
-
     family(w, "br_cpu_seconds_total", "counter", "CPU time per core, busy and idle.");
-    for (int c = 0; c < DIAG_METRICS_CORES; c++) {
+    for (int c = 0; c < DIAG_CORES; c++) {
         const uint64_t idle = g->cores[c].idle_us < g->cores[c].wall_us ? g->cores[c].idle_us : g->cores[c].wall_us;
-        sample_t busy = begin(w, "br_cpu_seconds_total");
+        const uint64_t usec[2] = {g->cores[c].wall_us - idle, idle};
+        static const char *const modes[2] = {"busy", "idle"};
 
-        label(&busy, "core", core_names[c]);
-        label(&busy, "mode", "busy");
-        end_usec(&busy, g->cores[c].wall_us - idle);
-        sample_t idle_sample = begin(w, "br_cpu_seconds_total");
+        for (int m = 0; m < 2; m++) {
+            sample_t s = begin(w, "br_cpu_seconds_total");
 
-        label(&idle_sample, "core", core_names[c]);
-        label(&idle_sample, "mode", "idle");
-        end_usec(&idle_sample, idle);
-    }
-}
-
-// Task names are not unique in FreeRTOS: the second task of a name is "<name>#2", the third "<name>#3".
-static void task_label(const diag_metrics_view_t *g, size_t i, char *out, size_t cap)
-{
-    uint32_t same = 0;
-
-    for (size_t k = 0; k < i; k++) {
-        if (strncmp(g->tasks[k].name, g->tasks[i].name, DIAG_METRICS_NAME_MAX) == 0) {
-            same++;
+            label_open(&s, "core");
+            metrics_writer_u64(w, (uint64_t)c);
+            label_close(&s);
+            label(&s, "mode", modes[m]);
+            end_usec(&s, usec[m]);
         }
     }
-    strncpy(out, g->tasks[i].name, DIAG_METRICS_NAME_MAX);
-    out[DIAG_METRICS_NAME_MAX] = '\0';
-    if (same > 0) {
-        const size_t len = strlen(out);
+}
 
-        out[len] = '#';
-        u32_text(out + len + 1, cap - len - 1, same + 1);
+// Task names are not unique in FreeRTOS: the second task of a name is "<name>#2", the third "<name>#3". nth[i] is
+// the occurrence of task i's name, counted once for both task families.
+static void task_occurrences(const diag_metrics_view_t *g, uint8_t nth[DIAG_MAX_TASKS])
+{
+    for (size_t i = 0; i < g->task_count; i++) {
+        nth[i] = 1;
+        for (size_t k = 0; k < i; k++) {
+            if (strncmp(g->tasks[k].name, g->tasks[i].name, DIAG_NAME_MAX) == 0) {
+                nth[i]++;
+            }
+        }
     }
 }
 
-#define TASK_LABEL_MAX (DIAG_METRICS_NAME_MAX + 12)
+static void task_label(sample_t *s, const diag_metrics_view_t *g, const uint8_t nth[DIAG_MAX_TASKS], size_t i)
+{
+    char name[DIAG_NAME_MAX + 1];
+
+    memcpy(name, g->tasks[i].name, DIAG_NAME_MAX);
+    name[DIAG_NAME_MAX] = '\0';
+    label_open(s, "task");
+    metrics_writer_label_value(s->w, name);
+    if (nth[i] > 1) {
+        metrics_writer_raw(s->w, "#");
+        metrics_writer_u64(s->w, nth[i]);
+    }
+    label_close(s);
+}
 
 static void render_tasks(metrics_writer_t *w, const diag_metrics_view_t *g)
 {
-    char name[TASK_LABEL_MAX];
+    uint8_t nth[DIAG_MAX_TASKS];
 
     if (g->task_count == 0) {
         return;
     }
+    task_occurrences(g, nth);
     family(w, "br_task_cpu_seconds_total", "counter", "CPU time per task since it was first seen.");
     for (size_t i = 0; i < g->task_count; i++) {
-        task_label(g, i, name, sizeof(name));
         sample_t s = begin(w, "br_task_cpu_seconds_total");
 
-        label(&s, "task", name);
+        task_label(&s, g, nth, i);
         end_usec(&s, g->tasks[i].cpu_us);
     }
     family(w, "br_task_stack_free_min_bytes", "gauge", "Least free stack per task since it started.");
     for (size_t i = 0; i < g->task_count; i++) {
-        task_label(g, i, name, sizeof(name));
         sample_t s = begin(w, "br_task_stack_free_min_bytes");
 
-        label(&s, "task", name);
+        task_label(&s, g, nth, i);
         end_u64(&s, g->tasks[i].stack_free_min);
     }
 }
@@ -234,14 +242,10 @@ static void render_diag(metrics_writer_t *w, const diag_metrics_view_t *g)
     heap_family(w, "br_heap_largest_free_block_bytes", "Largest free heap block.", g->internal.largest_free_block,
                 g->psram.largest_free_block);
     single(w, "br_ot_lock_acquisitions_total", "counter", "OpenThread lock acquisitions.", g->lock.acquisitions);
-    family(w, "br_ot_lock_hold_seconds_total", "counter", "Time the OpenThread lock was held.");
-    sample_t hold = begin(w, "br_ot_lock_hold_seconds_total");
-
-    end_usec(&hold, g->lock.hold_us_total);
-    family(w, "br_ot_lock_wait_seconds_total", "counter", "Time spent waiting for the OpenThread lock.");
-    sample_t wait = begin(w, "br_ot_lock_wait_seconds_total");
-
-    end_usec(&wait, g->lock.wait_us_total);
+    single_usec(w, "br_ot_lock_hold_seconds_total", "counter", "Time the OpenThread lock was held.",
+                g->lock.hold_us_total);
+    single_usec(w, "br_ot_lock_wait_seconds_total", "counter", "Time spent waiting for the OpenThread lock.",
+                g->lock.wait_us_total);
     window_family(w, "br_ot_lock_hold_max_seconds", "Longest OpenThread lock hold.", g->lock.max_hold_us,
                   g->lock.max_hold_60s_us);
     window_family(w, "br_ot_lock_wait_max_seconds", "Longest wait for the OpenThread lock.", g->lock.max_wait_us,
@@ -380,10 +384,8 @@ esp_err_t metrics_render(metrics_writer_t *w, const metrics_input_t *in)
     }
     if (collector_ok) {
         if (c->ever_collected) {
-            family(w, "br_thread_collect_age_seconds", "gauge", "Seconds since the last successful Thread collection.");
-            sample_t s = begin(w, "br_thread_collect_age_seconds");
-
-            end_usec(&s, (uint64_t)c->age_ms * 1000);
+            single_usec(w, "br_thread_collect_age_seconds", "gauge", "Seconds since the last successful Thread collection.",
+                        (uint64_t)c->age_ms * 1000);
         }
         single(w, "br_thread_collect_failures_total", "counter",
                "Thread collections skipped because the OpenThread lock was busy.", c->failures);

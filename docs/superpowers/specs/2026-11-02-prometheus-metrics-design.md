@@ -36,9 +36,12 @@ OpenMetrics format.
 - New component `p4/components/metrics/`:
   - `render.c`: pure text-format writer and the metric families (no FreeRTOS, no OpenThread): host-tested;
   - `collector.c`: the Thread collector task and its cache;
-  - `metrics_handler.c`: the HTTP glue that gathers the sources and streams the body;
-  - `include/metrics.h`: `metrics_start()` (starts the collector) and `metrics_get_handler(httpd_req_t *)`.
-- `device_api` registers `GET /metrics` in its route table (`device_api.c`), before the catch-all. The extra-handler
+  - `scrape.c`: `metrics_write()`, which copies the diag view and the collector cache once and streams the body through a
+    flush callback;
+  - `include/metrics.h`: `metrics_start()` (starts the collector), `metrics_device_t` and `metrics_write()`.
+- `device_api` owns the HTTP side: its `GET /metrics` handler (`device_api.c`, next to `/device/status`) gathers the
+  device figures with the same helpers as `/device/status`, then calls `metrics_write()` with `httpd_resp_send_chunk`.
+  The route sits in its table, before the catch-all. The extra-handler
   budget (`EXTRA_HANDLER_SLOTS 16` in `esp_br_web.c`) has room: 13 device routes plus the catch-all today.
 - `diag` gains `diag_metrics_view(diag_metrics_view_t *out)`: copies 64-bit CPU totals per core (busy and idle) and per
   task, minimum free stack per task, the untracked count, heap figures and the lock sums under the existing snapshot

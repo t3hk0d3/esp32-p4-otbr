@@ -7,12 +7,11 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "metrics.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-typedef esp_err_t (*metrics_flush_fn)(void *ctx, const char *data, size_t len);
 
 typedef struct {
     char *buf;

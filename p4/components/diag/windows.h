@@ -6,14 +6,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "diag.h" // DIAG_NAME_MAX, DIAG_MAX_TASKS, DIAG_CORES
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define DIAG_NAME_MAX 16
-#define DIAG_MAX_TASKS 48   /**< tasks tracked at once; more are counted in diag_view_t.untracked and left out */
 #define DIAG_WINDOW_SLOTS 60 /**< one slot per sampler tick */
-#define DIAG_CORES 2
 #define DIAG_WINDOW_COUNT 3  /**< 1 s, 10 s, 60 s */
 #define DIAG_CORE_ANY (-1)   /**< task_sample.core of an unpinned task */
 

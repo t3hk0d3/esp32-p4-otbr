@@ -1,33 +1,19 @@
 #pragma once
 
-// Inputs of the renderer: plain copies of each source, filled by metrics_handler.c and the collector. No OpenThread or
+// Inputs of the renderer: plain copies of each source, filled by device_api, scrape.c and the collector. No OpenThread or
 // FreeRTOS types, so that render.c is host-tested.
 
 #include <stdbool.h>
 #include <stdint.h>
 
 #include "diag.h"
+#include "metrics.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #define METRICS_ROLE_COUNT 5 /**< otDeviceRole: disabled, detached, child, router, leader */
-
-/** Figures that need no OpenThread lock. */
-typedef struct {
-    int mode;                /**< br_core_mode_t: STARTING, BR_RUNNING, SNIFFER, RADIO_FAULT */
-    const char *version;
-    int slot;                /**< running OTA slot, -1 unknown */
-    const char *rcp_version; /**< "" unknown or none */
-    bool rcp_compatible;
-    bool storage_ok;
-    bool sniffer_active;
-    uint32_t sniffer_frames;
-    uint32_t sniffer_drops;
-    bool eth_up;
-    bool trial_pending;
-} metrics_device_t;
 
 /** Figures the collector reads under the OpenThread lock. */
 typedef struct {

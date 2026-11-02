@@ -204,15 +204,27 @@ static esp_err_t reboot_post_handler(httpd_req_t *req)
 
 /* ---- GET /device/status ---- */
 
+// The management interface (the only one in single mode), or the Ethernet netif until netcfg has created the interfaces.
+static esp_netif_t *mgmt_netif(void)
+{
+    esp_netif_t *netif = netcfg_mgmt_netif();
+
+    return netif ? netif : esp_netif_get_handle_from_ifkey(ETH_IFKEY);
+}
+
+static int running_slot(void)
+{
+    const esp_partition_t *running = esp_ota_get_running_partition();
+
+    return running ? (int)(running->subtype - ESP_PARTITION_SUBTYPE_APP_OTA_0) : -1;
+}
+
 static void fill_eth(device_api_status_t *s, char *ipv4_text, size_t ipv4_cap)
 {
-    // The status shows the management interface (the only one in single mode).
-    esp_netif_t *netif = netcfg_mgmt_netif();
+    // The status shows the management interface.
+    esp_netif_t *netif = mgmt_netif();
     esp_netif_ip_info_t ip4;
 
-    if (!netif) {
-        netif = esp_netif_get_handle_from_ifkey(ETH_IFKEY);
-    }
     s->ipv4 = "";
     if (!netif) {
         return;
@@ -273,12 +285,10 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     rcp_sync_probe_result_t probe;
 
     rcp_sync_get_last_probe(&probe);
-    const esp_partition_t *running = esp_ota_get_running_partition();
-
     base_expected_version(base_expected, sizeof(base_expected));
     s->mode = bs.mode;
     s->app_version = esp_app_get_description()->version;
-    s->app_slot = running ? (int)(running->subtype - ESP_PARTITION_SUBTYPE_APP_OTA_0) : -1;
+    s->app_slot = running_slot();
     s->rcp_installed_known = bs.rcp_installed_known;
     s->rcp_installed = bs.rcp_installed;
     s->rcp_compatible = bs.rcp_compatible;
@@ -309,6 +319,48 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     free(s);
     free(body);
     return err;
+}
+
+/* ---- GET /metrics ---- */
+
+static esp_err_t send_metrics_chunk(void *ctx, const char *data, size_t len)
+{
+    return httpd_resp_send_chunk((httpd_req_t *)ctx, data, (ssize_t)len);
+}
+
+// Like /device/status without the OpenThread read: br_core_get_status_brief. The Thread figures come from the collector.
+static esp_err_t metrics_get_handler(httpd_req_t *req)
+{
+    br_core_status_t bs;
+    sniffer_stats_t ss;
+
+    br_core_get_status_brief(&bs);
+    sniffer_get_stats(&ss);
+    esp_netif_t *netif = mgmt_netif();
+    const metrics_device_t device = {
+        .mode = bs.mode,
+        .version = esp_app_get_description()->version,
+        .slot = running_slot(),
+        .rcp_version = bs.rcp_installed_known ? bs.rcp_installed : "",
+        .rcp_compatible = bs.rcp_compatible,
+        .storage_ok = !bs.storage_degraded,
+        .sniffer_active = ss.active,
+        .sniffer_frames = ss.frames,
+        .sniffer_drops = ss.drops,
+        .eth_up = netif && esp_netif_is_netif_up(netif),
+        .trial_pending = netcfg_trial_pending(),
+    };
+
+    httpd_resp_set_type(req, METRICS_CONTENT_TYPE);
+    esp_err_t err = metrics_write(&device, send_metrics_chunk, req);
+
+    if (err == ESP_ERR_NO_MEM) { // nothing was sent yet
+        return send_error(req, 500, "no_memory", "out of memory", false);
+    }
+    if (err == ESP_OK) {
+        err = httpd_resp_send_chunk(req, NULL, 0);
+    }
+    return err == ESP_OK ? ESP_OK : ESP_FAIL;
 }
 
 /* ---- GET /device/sniffer.pcap, DELETE /device/sniffer ---- */

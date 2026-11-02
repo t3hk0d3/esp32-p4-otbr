@@ -21,9 +21,6 @@
 
 static const char *TAG = "diag";
 
-_Static_assert(DIAG_METRICS_MAX_TASKS == DIAG_MAX_TASKS && DIAG_METRICS_CORES == DIAG_CORES &&
-               DIAG_METRICS_NAME_MAX == DIAG_NAME_MAX, "diag_metrics_view_t must match the windows");
-
 #define SAMPLER_CORE MGMT_CORE
 #define SAMPLER_PRIORITY (tskIDLE_PRIORITY + 1) // lowest application priority
 #define SAMPLER_STACK 4096

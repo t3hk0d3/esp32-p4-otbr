@@ -34,7 +34,7 @@ void sample_input(sample_input_t *s)
     };
     s->diag.uptime_s = 3600;
     s->diag.reset_reason = "power-on";
-    for (int c = 0; c < DIAG_METRICS_CORES; c++) {
+    for (int c = 0; c < DIAG_CORES; c++) {
         s->diag.cores[c].wall_us = 3600000000ull;
         s->diag.cores[c].idle_us = 3000000000ull + c;
     }
@@ -42,7 +42,7 @@ void sample_input(sample_input_t *s)
 
     s->diag.task_count = sizeof(names) / sizeof(names[0]);
     for (size_t i = 0; i < s->diag.task_count; i++) {
-        strncpy(s->diag.tasks[i].name, names[i], DIAG_METRICS_NAME_MAX - 1);
+        strncpy(s->diag.tasks[i].name, names[i], DIAG_NAME_MAX - 1);
         s->diag.tasks[i].cpu_us = 1000000ull * (i + 1) + 1;
         s->diag.tasks[i].stack_free_min = 512 + (uint32_t)i;
     }

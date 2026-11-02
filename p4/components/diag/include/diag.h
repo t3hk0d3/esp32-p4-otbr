@@ -33,9 +33,9 @@ esp_err_t diag_start(void);
  */
 esp_err_t diag_snapshot_json(char **out_json);
 
-#define DIAG_METRICS_CORES 2
-#define DIAG_METRICS_MAX_TASKS 48 /**< equals the sampler's DIAG_MAX_TASKS */
-#define DIAG_METRICS_NAME_MAX 16
+#define DIAG_NAME_MAX 16
+#define DIAG_MAX_TASKS 48 /**< tasks tracked at once; more are counted as untracked and left out */
+#define DIAG_CORES 2
 
 /** Cumulative figures for GET /metrics (totals since boot, not windows). */
 typedef struct {
@@ -44,13 +44,13 @@ typedef struct {
     struct {
         uint64_t wall_us; /**< run time counter total of the core */
         uint64_t idle_us; /**< of that, the core's idle task: busy = wall - idle */
-    } cores[DIAG_METRICS_CORES];
+    } cores[DIAG_CORES];
     size_t task_count;
     struct {
-        char name[DIAG_METRICS_NAME_MAX];
+        char name[DIAG_NAME_MAX];
         uint64_t cpu_us;
         uint32_t stack_free_min; /**< bytes */
-    } tasks[DIAG_METRICS_MAX_TASKS];
+    } tasks[DIAG_MAX_TASKS];
     uint32_t untracked;
     struct {
         uint32_t free;
