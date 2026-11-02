@@ -2,7 +2,7 @@
 
 Setting up:
 
-- [First install](first-install.md): bring a new board up, with or without the maintenance jumper, and create a Thread
+- [First install](first-install.md): bring a new board up (no wires, maintenance jumper or USB-UART) and create a Thread
   network.
 - [Building and flashing](building.md): prerequisites, `make` targets, build outputs, versions, USB flashing.
 

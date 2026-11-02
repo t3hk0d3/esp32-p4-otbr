@@ -76,9 +76,10 @@ You need [the board](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.htm), a 2.
 3. Upload the radio firmware on the Firmware page at `http://<board>/firmware.html`.
 4. Add the board to Home Assistant, or form a network in its web UI.
 
-A new board's C6 still has its factory firmware. With the maintenance jumper fitted, the P4 replaces it by itself;
-without the jumper, you write it once over a USB-UART adapter. [First install](docs/first-install.md) walks through both
-paths.
+A new board's C6 still has its factory firmware (Espressif ESP-Hosted). Without any wires, upload `c6_installer.bin`
+once on the Firmware page before `c6_rcp.bin`: the P4 sends it through ESP-Hosted's own update and it installs what
+the radio updates need. With the maintenance jumper fitted, the P4 replaces the factory firmware by itself; a USB-UART
+adapter on the C6 header also works. [First install](docs/first-install.md) walks through all three paths.
 
 ## Documentation
 

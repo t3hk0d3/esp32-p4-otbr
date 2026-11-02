@@ -11,7 +11,7 @@ answers 503; `/device/*`, the device pages and OTA keep working.
 | `esp-hosted firmware` | The C6 still runs its factory ESP-Hosted firmware and no jumper was seen. Upload `c6_installer.bin` of the same build, then `c6_rcp.bin` ([First install](first-install.md), Path 1). OpenThread is not started. |
 | `rcp incompatible` | OpenThread rejected the RCP, or it did not answer its reset. Upload the `c6_rcp.bin` of the same release. |
 | `storage unavailable` | NVS did not initialise (for example no free pages), `storage_ok` is `false`. The board booted degraded instead of boot-looping: HTTP, OTA and `/device/*` work, OpenThread does not start. NVS is never erased automatically because it holds the Thread credentials. Update to a firmware that fixes it, or erase NVS by hand (`esptool --chip esp32p4 -p /dev/ttyACM0 erase-region 0x9000 0x10000`; the Thread network has to be set up again) and reboot. |
-| `rom recovery failed` | The updater was silent and the jumper recovery failed. Check the jumper wires and `GET /device/radio/log`; try `make recover`; without a jumper use the no-jumper path of [First install](first-install.md). |
+| `rom recovery failed` | The updater was silent and the jumper recovery failed. Check the jumper wires and `GET /device/radio/log`; try `make recover`; without a jumper use Path 3 of [First install](first-install.md) (USB-UART on H7). |
 | `resetting the RCP failed`, `radio boot timed out`, `radio restart failed`, `OpenThread main loop ended` | Radio did not come up. The board retries (at most three automatic recoveries per 10 minutes), then waits: reboot, or upload firmware. Check the antenna and the C6 console log. |
 
 ## Other problems
@@ -40,8 +40,10 @@ answers 503; `/device/*`, the device pages and OTA keep working.
 - The `-dirty` flag of the app version stamp is as of the last configure (see [Building](building.md#versions)); a new commit
   refreshes the stamp.
 - Untested on hardware: the no-jumper first install ([First install](first-install.md), Path 3, esptool over H7).
-- Untested on hardware: recovery of a truly blank C6 (bootloader, partition table and otadata erased) and overwriting the
-  factory ESP-Hosted firmware.
+- Untested on hardware: recovery of a truly blank C6 (bootloader, partition table and otadata erased).
+- The no-wires first install ([First install](first-install.md), Path 1) ran on the board against an ESP-Hosted 0.0.27
+  stand-in, not yet against an untouched factory C6; nor the case where the installer lands in the slot it must overwrite
+  (a factory C6 updated before) and moves itself first.
 - A mDNS reflector between the two VLANs is tolerated, but a host that claims the board's mDNS name with different addresses
   can rename it (standard mDNS behaviour).
 - Radio firmware updates interrupt the border router for a few seconds; seamless updates are not implemented.
