@@ -25,14 +25,27 @@ Either way the border router needs an antenna and the RCP firmware upload at the
 
 ## Maintenance jumper wiring
 
-Optional. Solder or clip three or four wires between the C6 header H7 (SH1.0, 1 mm pitch) and the P4 40-pin header:
+Optional. Solder or clip three wires between the C6 UART pads H7 and the P4 40-pin header. H7 is the column of four
+2.54 mm through-hole pads right of the TF card slot; the back of the board names them TXD, RXD, GND and IO9 (pin 1, the
+square pad, is TXD). The header pins are in the row along the board edge.
+
+![Maintenance jumper: H7 pad TXD to header pin 18 (GPIO4), RXD to pin 16 (GPIO5), IO9 to pin 12 (GPIO22)](images/jumper-wiring.png)
 
 | H7 pin | Signal | P4 header pin | P4 GPIO | Name in the firmware |
 | --- | --- | --- | --- | --- |
 | 1 | `C6_U0TXD` (C6 transmits, P4 receives) | 18 | GPIO4 | `JUMPER_RX` |
 | 2 | `C6_U0RXD` (P4 transmits, C6 receives) | 16 | GPIO5 | `JUMPER_TX` |
-| 3 | GND | 14 | GND | |
+| 3 | GND | (14) | GND | not needed: both chips share the board's ground |
 | 4 | `C6_IO9` (C6 boot strap, low at reset = ROM download) | 12 | GPIO22 | `JUMPER_BOOT` |
+
+Board photo: Waveshare ([ESP32-P4-WIFI6-POE-ETH documentation](https://docs.waveshare.com/ESP32-P4-WIFI6-POE-ETH)),
+dimension lines removed and wiring drawn on.
+
+The easiest way: solder a 4-pin 2.54 mm pin header into H7 and use female-to-female Dupont jumper wires. TXD and RXD sit
+next to each other on both ends (H7 pads 1 and 2, header pins 18 and 16), so a two-pin Dupont housing fits there; IO9 to
+pin 12 is a single wire, and H7 pad 3 and header pin 14 stay free:
+
+![As built: a pin header soldered into H7, Dupont wires to header pins 12, 16 and 18](images/jumper-as-built.jpg)
 
 Leave header pins 15 (GPIO6) and 32 (GPIO54) alone: they are already wired to the C6 on the board (update select and reset).
 The pins are fixed in `p4/main/board.h`. The firmware detects the jumper by itself at boot.
