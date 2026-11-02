@@ -7,6 +7,8 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-02
+
 ### Fixed
 
 - Web UI "Form Network" froze the board until it was power-cycled: the web server held the OpenThread lock twice,
@@ -82,6 +84,7 @@ on-board ESP32-C6 as the radio co-processor over SPI.
 
 See `docs/troubleshooting.md` for the full list.
 
-[Unreleased]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/t3hk0d3/esp32-p4-otbr/releases/tag/v0.1.0
