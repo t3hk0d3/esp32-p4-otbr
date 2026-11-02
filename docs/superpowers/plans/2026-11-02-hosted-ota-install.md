@@ -1,263 +1,101 @@
-# First install without wires: detect the stock ESP-Hosted C6, replace it in one upload of the radio firmware
+# First install without wires, simplified: ESP-Hosted slave OTA + one-time `c6_installer`
 
 ## Context
 
-A new Waveshare ESP32-P4-WIFI6-POE-ETH comes with ESP-Hosted on its ESP32-C6. Today our P4 firmware can replace it only
-with the maintenance jumper (three wires) or a USB-UART adapter on H7 (Path 2, untested). The stock ESP-Hosted firmware
-updates itself over the air from the host, over the P4↔C6 SDIO lines. The first install becomes:
-1. flash the P4 over USB-C;
-2. the device page reports "ESP-Hosted firmware on the C6";
-3. upload `c6_rcp.bin` as usual. That single upload replaces ESP-Hosted with our boot loader, partition table, updater
-   and the RCP.
+A factory Waveshare ESP32-P4-WIFI6-POE-ETH ships ESP-Hosted on its ESP32-C6. Today the C6 can only be replaced over the
+maintenance jumper. The first attempt (branch `feat/hosted-ota-install`, parked at 55fd399) packed everything into one
+upload: installer app + appended bundle (boot loader, partition table, updater, RCP), a bundle format, P4-side bundle
+assembly, buffering of the RCP upload and a version-checked wait. Too much machinery for a one-time step.
 
-Decided with the user:
-- **Nothing happens automatically.** At boot the P4 only detects ESP-Hosted and reports it. The install runs only inside
-  an explicit radio firmware update (`POST /device/radio/firmware`, body or URL).
-- **One ESP-Hosted transfer carries everything.** It is a small C6 installer app (`c6_migrator`, the "tricky boot
-  loader") with a bundle appended:
-  - our boot loader;
-  - our partition table;
-  - the updater;
-  - the uploaded RCP.
+The user's simplification:
+- The P4 learns ESP-Hosted slave OTA: it forwards an uploaded image to a stock C6 unchanged.
+- A **one-time firmware** `c6_installer.bin` installs only our boot loader, partition table and updater, then restarts.
+- After that the C6 is exactly what ROM recovery leaves behind: the updater with a blank RCP slot. The existing
+  "no rcp firmware" flow takes over; the user uploads `c6_rcp.bin` as usual.
 
-  The stock boot loader starts the installer; the installer writes our images into place.
-- The jumper path is unchanged.
+New first install: flash the P4 over USB-C → upload `c6_installer.bin` → upload `c6_rcp.bin`. No wires.
 
-Facts this rests on (research of 2026-11-02, esp-hosted-mcu source, the stock P4 dump `~/esp/phase0/backup/p4_factory_full.bin`):
-- **Stock pair.**
-  - The stock P4 (IDF v5.4.2, built 2025-08-05) is an ESP-Hosted host over SDIO. It has the OTABegin/OTAWrite/OTAEnd RPCs,
-    but neither GetCoprocessorFwVersion nor OTAActivate: esp_hosted 0.0.6–0.0.27.
-  - Every slave from 0.0.6 on has OTA over SDIO.
-  - The wire format is identical in 0.0.27, 1.4.7 and 2.13.1.
-- **What the slave does with the image.**
-  - OTABegin: `esp_ota_begin(next slot, OTA_SIZE_UNKNOWN)`, which erases the 1.5 MB slot before it answers (≤ ~15 s).
-  - OTAWrite: `esp_ota_write`.
-  - OTAEnd: `esp_ota_end`, which runs `esp_image_verify` over the app image only (its length comes from the image header).
-    Bytes written after the image stay in the slot unchecked. That is what carries the bundle.
-    `esp_ota_set_boot_partition` follows, and the slave restarts after 5 s.
-  - Stock C6 layout (`slave/partitions.esp32c6.csv`, 4 MB):
+## What changes against the parked branch
 
-    | Partition | Offset | Size |
-    | --- | --- | --- |
-    | nvs | 0x9000 | |
-    | otadata | 0xd000 | |
-    | phy | 0xf000 | |
-    | ota_0 | 0x10000 | 1.5 MB |
-    | ota_1 | 0x190000 | 1.5 MB |
+Kept (reused as is or trimmed):
+- `p4/components/c6_hosted/` `hosted_frame.c/.h`, `hosted_rpc.c/.h`, `hosted_session.h`, `c6_hosted.h` (written, never
+  compiled): the ESP-Hosted wire format, already researched (facts in the handover doc).
+- `c6_migrator/` → renamed **`c6_installer/`**; `migrator_core` keeps decide / relocate / install, minus the RCP step.
 
-  - A stock C6 that was never updated runs `ota_0`, so the transfer lands in `ota_1` at 0x190000.
-- **Sizes.**
-  - Transfer: installer (~150 KB) + boot loader (22 KB) + partition table (3 KB) + updater (228 KB) + RCP (278 KB),
-    about 0.7 MB. That is well inside 1.5 MB.
-  - Our target regions:
-
-    | Region | Range |
-    | --- | --- |
-    | boot loader | 0x0 |
-    | partition table | 0x8000 |
-    | otadata | 0xf000 |
-    | `test` (updater) | 0x20000–0xA0000 |
-    | `ota_0` (RCP) | 0xA0000 |
-
-    With an RCP below 960 KB, all of these lie below 0x190000, so they never overlap a transfer in stock `ota_1`.
-- **Wire protocol** (small enough to implement ourselves; no esp_hosted host or esp_wifi_remote component).
-  - Transport: SDIO function 1, 512-byte blocks.
-  - SLCHOST registers: exactly IDF's `esp_serial_slave_link` (essl_sdio).
-  - Payload header: 12 bytes, packed little-endian.
-    - Fields: `if_type:4|if_num:4`, `flags`, `len u16`, `offset u16 (=12)`, `checksum u16`, `seq u16`, `throttle`, `pkt_type`.
-    - Checksum: u16 sum with the field zeroed.
-  - Serial interface (`if_type 3`) carries TLV `[0x01][len16]"RPCRsp"[0x02][len16]<protobuf>`.
-  - Protobuf message `Rpc{msg_type=1, msg_id=2, uid=3, payload oneof field = msg id}`.
-    - Requests: OTABegin 272, OTAWrite 273 (`bytes ota_data=1`), OTAEnd 274.
-    - Responses: 528/529/530, each `{int32 resp=1}`.
-  - Startup sequence:
-    1. The slave waits for host interrupt bit 0 (open data path).
-    2. It sends a PRIV packet (`if_type 5`, chip ID TLV 0x12) and an RPC event `ESPInit`.
-  - Packets are at most 1536 bytes; data chunks are about 1400 bytes.
-- **Pins.** esp_hosted's P4 defaults match `p4/main/board.h`:
-  - SDIO slot 1: CLK 18, CMD 19, D0–D3 14/15/16/17.
-  - Reset: GPIO54, pulled low to reset.
-- **Where it plugs in.**
-  - Boot: `rcp_sync_probe_with` (`p4/components/rcp_sync/sync.c`) ends with "updater not responding" for a stock C6;
-    br_core then tries OpenThread on it anyway.
-  - Upload: `rcp_sync_push_firmware_with` fails with "updater not responding".
-  - Body uploads are a one-shot source read from the socket (`device_api.c` `body_source_read`, 60 s receive timeout).
-- **The C6 images the P4 already embeds.** Boot loader, partition table, updater and base version
-  (`p4/CMakeLists.txt`, `p4/main/c6_base_image.h`, set into rcp_sync by `rcp_sync_set_base_image`). The installer is
-  embedded the same way.
-
-Considered and not taken: keeping ESP-Hosted with the OpenThread RCP inside it (esp-hosted-mcu ≥ 2.12.7).
-- Spinel only runs over a dedicated UART (`slave/main/slave_openthread.c@v2.13.1`: `#error … not yet supported`).
-- On this board that UART is H7, i.e. the jumper.
-- Wi-Fi/Thread coexistence on one radio, with `OPENTHREAD_RX_ON_WHEN_IDLE=n` on the host.
-- Revisit if upstream ships Spinel over the ESP-Hosted transport.
+Dropped:
+- `common/c6_bundle/` (whole component and its tests). The installer **embeds** its three images with `EMBED_FILES`, so
+  `esp_ota_end` on the C6 and the boot loader verify everything through the app image's own SHA-256. No appended data.
+- The P4 embedding of the migrator (`p4/CMakeLists.txt`, `p4/main/CMakeLists.txt`, `c6_base_image.h`, `app_main.c`,
+  `rcp_sync_base_image_t.migrator_*`, `base_image.c` check). The installer is a release file the user uploads.
+- PSRAM buffering of the source, segment lists, bundle header building, RCP version check after install.
+- Test-build commands `c6_stock_restore` / `c6_hosted_ota`: stock restore stays a host-side esptool step over the jumper
+  (the stand-in build script stays a session file, never in the repo). `c6_jumper_ignore` stays (needed to test without
+  removing wires).
 
 ## Approach
 
-**Bundle format: new shared component `common/c6_bundle/`** (prefix `c6_bundle_`). It is pure and used by both sides.
-- **Placement.** The bundle starts at the first 4 KB boundary after the installer image, padded with 0xFF.
-- **Header.**
-  - magic `OTBRMIG1`;
-  - format version 1;
-  - entry count;
-  - entries `{kind (BOOTLOADER, PTABLE, UPDATER, RCP), length, sha256[32]}`;
-  - a SHA-256 over the header.
-- **Data.** Blobs follow back to back, in kind order.
-- **Destinations** come from `common/c6_board/c6_board.h`, not from the bundle.
-- **API:**
-  - `c6_bundle_header_encode(entries, out)`;
-  - `c6_bundle_header_decode(buf, len, out)`, which checks magic, version, header hash, sizes against the room each
-    destination has (`C6_FLASH_*`), and that the RCP fits below 0x190000.
-  - Host tests in `common/c6_bundle/test_host/`.
+### C6: `c6_installer/` (IDF 6.1 project, built by `tools/build_all.sh` after `c6_updater`)
+- `main/CMakeLists.txt` embeds `c6_updater/build/{bootloader/bootloader.bin, partition_table/partition-table.bin,
+  c6_updater.bin}`. App version = the C6 base version (`tools/base_version.cmake`), so the P4 can tell a matching
+  installer from one of another release.
+- `sdkconfig.defaults` as today (dangerous flash writes on, TWDT off, size-optimised, single-app table).
+- **Decision** (`installer_decide`, pure): running slot clear of 0x0–0xA0000 → INSTALL; running in stock `ota_0`
+  (0x10000, overlaps the updater target) → RELOCATE into the other stock app slot; our partition table already at
+  0x8000 → ALREADY_OURS (idle); else STUCK → select the other (ESP-Hosted) slot and restart.
+- **Install order**: updater → `test` (0x20000, image-verified) → boot loader 0x0 → partition table 0x8000 → erase
+  first sector of `ota_0` (0xA0000, leftover ESP-Hosted bytes) → erase otadata (0xf000, 8 KB) → restart. Each region
+  skipped when it already matches, verified after writing, one retry. Power cut before the boot loader write: stock
+  boot still runs the installer, which resumes. During boot loader / partition table write (~26 KB): needs the jumper
+  (documented).
+- After restart our boot loader finds no valid `ota_0`; the P4 holds GPIO6 low (below) so it boots the updater.
 
-**C6: new project `c6_migrator/`** (IDF 6.1, built by `tools/build_all.sh` before p4; `CONFIG_SPI_FLASH_DANGEROUS_WRITE_ALLOWED=y`).
-- No SPI and no radio; it logs on its UART (H7).
-- It must not depend on its own partition table: it runs under the stock table.
-- **Pure logic in `migrator_core.c/.h`**, host-tested over a fake flash ops struct:
-  - the decision;
-  - the step list;
-  - the skip-if-equal rule;
-  - the retry rule.
-- **Decision**, from the running partition's offset and size and the foreign table:
-  - **already ours** (the partition table at 0x8000 equals the bundle's): do nothing and idle (misuse guard).
-  - **RELOCATE**: the running slot overlaps 0x0–0x190000, i.e. stock `ota_0` at 0x10000. Copy image + bundle into the
-    other stock app slot with `esp_ota_*`, select it, restart.
-  - **INSTALL**: the running slot is clear of all targets.
-  - **STUCK**: neither applies. Log it, select the other stock slot (ESP-Hosted) again, restart.
-- **Install steps, in order.** Each region is skipped when its content already matches, and verified after writing (one
-  retry). Power cuts:
-  - steps 2–3: the stock table and otadata still boot the installer, which carries on;
-  - step 4 or 5 (boot loader ~22 KB, partition table 4 KB): unrecoverable without the jumper (documented);
-  - after step 5: our boot loader boots the RCP in `ota_0`.
+### P4: `c6_hosted` component (prefix `c6_hosted_` / `hosted_`)
+- Pure, host-tested: frame, rpc (exist), `hosted_session.c` — **detect** (reset C6 with GPIO6 high, open data path,
+  ≤ 3 s for PRIV with chip ID C6) and **ota(source)** (detect, drain ESPInit, OTABegin 30 s, stream the source in
+  1400-byte OTAWrite chunks 5 s each, OTAEnd 30 s). The source is the existing `rcp_fw_source_t` (sequential read),
+  so a body upload streams straight through, no buffering.
+- Device: `hosted_link_sdio.c` — SDMMC slot 1 (CLK 18, CMD 19, D0–D3 14–17, 4-bit, 20 MHz) + `essl_sdio`
+  (`espressif/esp_serial_slave_link`, pinned); release frees the pins for the SPI link. Pins in `p4/main/board.h`.
 
-  1. Verify the bundle: header and SHA-256 of every blob read from flash. On failure, select stock `ota_0` (ESP-Hosted)
-     again and restart: nothing was touched.
-  2. RCP → `ota_0` (0xA0000), then `esp_image_verify` there. This overwrites ESP-Hosted; from here on there is no way
-     back to stock.
-  3. Updater → `test` (0x20000), then `esp_image_verify`.
-  4. Boot loader → 0x0.
-  5. Partition table → 0x8000.
-  6. Erase our otadata (0xf000, 8 KB). The boot loader then picks the first valid slot, `ota_0`, or `test` while P4
-     GPIO6 is low.
-  7. `esp_restart`.
+### P4: `rcp_sync`
+- New link ops: `hosted_detect(bool *)`, `hosted_ota(source, detail, cap)`, `wait_updater(timeout_ms)` (SPI up and
+  GPIO6 low **without** resetting the C6, HELLO every 500 ms — never reset a C6 that may be mid-install).
+- Probe: updater silent, no jumper → `hosted_detect`; `esp_hosted = true`, `last_error "esp-hosted firmware"`. Nothing
+  written.
+- Push (`rcp_sync_push_firmware_with`): HELLO fails, no jumper, `hosted_detect` true → read the image header from the
+  source (first read, project name and version from `esp_app_desc_t`):
+  - project `c6_installer` and version == `link->base_version()` → `hosted_ota`, then `wait_updater(90 s)`; ESP_OK when
+    HELLO answers. br_core's re-probe then lands in the existing "no rcp firmware" fault.
+  - project `c6_installer`, other version → `RCP_SYNC_ERR_IMAGE_REJECTED` "installer from another release (x, need y)".
+  - anything else (e.g. `c6_rcp.bin`) → `RCP_SYNC_ERR_IMAGE_REJECTED` "the C6 runs ESP-Hosted; upload c6_installer.bin
+    first". Nothing sent.
+- On a C6 that already runs our updater, an uploaded `c6_installer.bin` is rejected ("not an RCP image") so it never
+  lands in `ota_0`.
+- The jumper keeps priority: with the jumper present nothing ESP-Hosted runs.
 
-**P4: new component `p4/components/c6_hosted/`** (prefix `c6_hosted_`).
-- **Pure, host-tested:**
-  - `hosted_frame.c`: payload header encode/decode and checksum, serial TLV, splitting a streamed read buffer into packets.
-  - `hosted_rpc.c`: protobuf encode of the three requests, decode of the three responses; events are skipped.
-  - `hosted_session.c`: sequences over an ops struct.
-    - **detect:**
-      1. reset the C6 into its normal boot (GPIO6 high);
-      2. bus up and open the data path;
-      3. wait ≤ 3 s for PRIV with chip ID ESP32-C6;
-      4. release.
-    - **install(segments):** detect's first three steps, then:
-      1. drain `ESPInit`;
-      2. OTABegin (30 s);
-      3. OTAWrite: the segments streamed back to back in 1400-byte chunks (5 s each);
-      4. OTAEnd (30 s);
-      5. release.
+### br_core / device_api / web
+- `boot_radio`: `probe.esp_hosted` → `RADIO_FAULT "esp-hosted firmware"`, OpenThread not started.
+- Push result: hosted path returns `{"installed": "c6_installer <ver>"}`; mode stays RADIO_FAULT "no rcp firmware".
+- `RCP_SYNC_ERR_HOSTED_OTA` → 502 `install_failed` in `device_api_map_push_error`.
+- `firmware.js` `faultHint`: "esp-hosted firmware" → "The C6 still runs its factory ESP-Hosted firmware. Upload
+  c6_installer.bin first, then c6_rcp.bin."
 
-      A non-zero `resp` or a timeout is an error naming the step.
-- **Device-only:** `hosted_link_sdio.c`.
-  - Bus: `sdmmc_host` slot 1 on the `board.h` pins, 4-bit, 20 MHz; `sdmmc_card_init` + `essl_sdio`
-    (`espressif/esp_serial_slave_link`, exact version pinned).
-  - Release returns the pins to the SPI link.
-- **API:**
-  - `c6_hosted_detect(bool *present)`
-  - `c6_hosted_install(const c6_hosted_segment_t *segs, size_t n, char *err_detail, size_t cap)`
-
-**P4: `rcp_sync`** (`sync.c`, `link.h`, `link_spi.c`, `base_image.c`, `rcp_sync.h`; `p4/CMakeLists.txt` and
-`p4/main/c6_base_image.h` embed `c6_migrator.bin`).
-- **New link ops:**
-  - `hosted_detect`.
-  - `hosted_install`.
-  - `wait_updater(timeout_ms)`.
-    - Brings up the SPI link without resetting the C6, holds GPIO6 low, and sends HELLO every 500 ms.
-    - The P4 never resets the C6 while the installer runs.
-- **Boot probe.** When the updater is silent and no jumper is present (or the jumper is ignored in a test build), it runs
-  `hosted_detect`.
-  - Result field `esp_hosted`; `last_error` "esp-hosted firmware".
-  - Nothing is written.
-- **Push: the ESP-Hosted branch** in `rcp_sync_push_firmware_with`. It runs when HELLO fails, there is no jumper, and
-  `hosted_detect` is true.
-  1. Read the whole source into a PSRAM buffer (≤ `C6_OTA_SLOT_SIZE`). The body is read at once, inside its timeout.
-  2. Build the bundle header (SHA-256 of each blob) and the segment list: installer, 0xFF padding, header, boot loader,
-     partition table, updater, RCP buffer.
-  3. `hosted_install`.
-  4. `wait_updater(120 s)`. The updater must answer HELLO, and its `boot_slot_version` must equal the RCP version read
-     from the uploaded image's app description.
-  5. Return ESP_OK. br_core then resets the C6 into the RCP and starts OpenThread, as after any push.
-
-  Failures:
-  - install fails: `RCP_SYNC_ERR_HOSTED_INSTALL`, detail with the step. The C6 is still ESP-Hosted, or still runs the
-    installer.
-  - wait times out, or the version differs: `ESP_ERR_TIMEOUT` / `RCP_SYNC_ERR_IMAGE_REJECTED` with a detail.
-  - source fails while buffering: its error, nothing sent.
-- **The jumper keeps priority.** With the jumper present, nothing ESP-Hosted is tried; boot ROM recovery and
-  `POST /device/radio/recover` are unchanged.
-
-**br_core, device_api, web.**
-- `boot_radio`: on `probe.esp_hosted`, `RADIO_FAULT "esp-hosted firmware"`; OpenThread is not started.
-- `device_api_map_push_error`: `RCP_SYNC_ERR_HOSTED_INSTALL` → 502 `install_failed`.
-- `firmware.js` `faultHint` for "esp-hosted firmware": "The C6 still runs its factory ESP-Hosted firmware. Upload the radio
-  firmware to replace it; the first upload takes about a minute."
-
-**Test build only.**
-- Console `c6_jumper_ignore <0|1>`: NVS-persisted like `c6_hold`. The probe and push treat the jumper as absent.
-- Console `c6_stock_restore <http base url>`: flashes the stand-in as-is over the jumper's ROM loader, exactly as
-  `idf.py flash` / esptool would, never through OTA. Reuses `rom_flash.c`; `ROM_PLAN_MAX_REGIONS` is raised to fit.
-  1. Fetch `flash_args` from the URL, then every file it lists, into PSRAM.
-  2. Erase the whole C6 flash.
-  3. Write each file at its `flash_args` offset, MD5-verified. That is the slave build's boot loader, partition table,
-     `ota_data_initial.bin` and app in stock `ota_0`.
-
-  The C6 then boots the stand-in from `ota_0`, like a factory board.
-- Console `c6_hosted_ota <url>`: one real ESP-Hosted OTA of an arbitrary image, through `c6_hosted_install`. Used only to
-  set up the relocation case: OTA the stock app onto itself, so the stand-in runs from stock `ota_1` like a C6 that was
-  updated before.
-
-**Stock stand-in images: session files only, nothing in the repo.**
-- A scratch script in the job directory (`$CLAUDE_JOB_DIR/tmp/c6_stock/`) builds the esp-hosted-mcu C6 slave in the
-  `espressif/idf:v5.4.2` Docker image (esp_hosted 0.0.27 commit). Its output is the build's own `flash_args` and the
-  files it lists, served unchanged.
-- The host serves them over HTTP during the hardware pass.
-- `p4/pytest/test_hosted_install.py` takes the base URL from `--c6-stock-url` (or `C6_STOCK_URL`) and skips without it.
-- The two test-build console commands are generic and stay in the repo.
-
-**Release.** `tools/package_release.sh`: no new artifact (the installer is inside the P4 image); `versions.txt` gets a
-`c6 migrator` line.
+### Release
+- `tools/package_release.sh` ships `c6_installer.bin` (header comment: "one-time, POST /device/radio/firmware on a
+  factory C6"); `versions.txt` line.
 
 ## Styleguide
 
-`STYLEGUIDE.md`:
-- astyle C;
-- the prefixes `c6_bundle_`, `c6_hosted_`, `migrator_`;
-- `esp_err_t` + `ESP_RETURN_ON_ERROR`;
-- the C6 flash layout only in `c6_board.h`; pins in `board.h` (add SDIO D3 = 17);
-- the new project's `CMakeLists.txt` in the order project.cmake → `tools/version.cmake` → `tools/test_build.cmake` →
-  `project()`;
-- host tests in `<component>/test_host/` named `"<scenario>: <effect>"`;
-- target tests in `p4/pytest/test_<feature>.py`;
-- a make target with `## ` help;
-- conventional commits.
-
-Ops structs only where host tests need them.
+Existing `STYLEGUIDE.md` / repo conventions: astyle C (`make lint`), prefixes `c6_hosted_`/`hosted_`, `installer_`;
+`esp_err_t` + `ESP_RETURN_ON_ERROR`; C6 layout only in `common/c6_board/c6_board.h` (read-only for this work — base
+version input), stock layout constants inside `c6_installer`; pins in `board.h`; host tests in `<component>/test_host/`
+named `"<scenario>: <effect>"`; target tests `p4/pytest/test_<feature>.py`; conventional commits.
 
 ## BDD skeleton
 
 ```
-c6_bundle (common, pure)
-    c6_bundle_header_encode / decode
-        On four entries round-tripped
-            - decode returns the same kinds, lengths and hashes
-        On a wrong magic, version or header hash
-            - ESP_ERR_INVALID_CRC / ESP_ERR_NOT_SUPPORTED, nothing returned
-        On a blob larger than its destination's room (bootloader > 0x8000, ptable > 0x1000, updater > test, RCP past 0x190000)
-            - ESP_ERR_INVALID_SIZE
-
-migrator_core (c6_migrator, pure)
-    migrator_decide(running, foreign_table, ptable_at_0x8000, bundle)
+installer_core (c6_installer, pure)
+    installer_decide
         On running in stock ota_1 (0x190000), stock table
             - INSTALL
         On running in stock ota_0 (0x10000)
@@ -266,142 +104,121 @@ migrator_core (c6_migrator, pure)
             - ALREADY_OURS
         On no clear slot to relocate into
             - STUCK
-    migrator_install(ops, bundle)
-        On a valid bundle on a stock C6
-            - writes RCP 0xA0000, updater 0x20000, bootloader 0x0, partition table 0x8000, erases otadata 0xf000, in that order
-            - verifies each region (image verify for RCP and updater, read-back compare for the others)
-            - asks for a restart last
-        On a blob whose SHA-256 does not match
-            - writes nothing, selects the stock ESP-Hosted slot, asks for a restart
-        On regions already holding the right content (repeat after a power cut)
+    installer_install(flash ops, embedded images)
+        On a stock C6
+            - writes updater 0x20000, bootloader 0x0, ptable 0x8000, erases 0xA0000 sector and otadata 0xf000, in that order
+            - image-verifies the updater, read-back compares the others
+        On regions already matching (resume after a power cut)
             - skips them
         On a region failing verification twice
-            - stops, later regions untouched, returns the error
-    migrator_relocate(ops)
+            - returns the error, later regions untouched
+    installer_relocate
         On running in stock ota_0
-            - copies image + bundle (length from the header) into stock ota_1, selects it, asks for a restart
+            - copies the own image into stock ota_1 and selects it
     app_main
         On STUCK
-            - logs, selects the stock ESP-Hosted slot, restarts
+            - selects the ESP-Hosted slot, restarts
         On ALREADY_OURS
-            - logs and idles, writes nothing
+            - idles, writes nothing
 
-c6_hosted (P4, pure parts)
-    hosted_frame_encode / decode
+c6_hosted (P4, pure)
+    hosted_frame_encode / hosted_frame_next
         On a serial RPC payload
-            - if_type 3, offset 12, len = payload length, checksum = u16 sum with the field zeroed
-        On a streamed buffer holding PRIV + event + response
+            - if_type 3, offset 12, len, checksum = u16 sum with the field zeroed
+        On a stream holding PRIV + event + response
             - yields the three packets in order
         On a truncated or bad-offset header
-            - reports malformed, consumes nothing past it
-    hosted_rpc_encode_req
-        On OTABegin / OTAWrite(1400 bytes) / OTAEnd
-            - Rpc msg_type 1, msg_id 272/273/274, uid increments, oneof field number = msg id
-    hosted_rpc_decode_resp
-        On Resp 528/529/530 with resp 0
-            - ok for the matching request
-        On resp != 0 (negative varint)
-            - returns the slave error code
-        On an Event or another msg id
+            - waits for more / reports malformed
+    hosted_rpc_encode_req / hosted_rpc_decode
+        On OTABegin / OTAWrite(1400 B) / OTAEnd
+            - msg_type 1, msg_id 272/273/274, uid, oneof field = msg id
+        On Resp 528/529/530
+            - resp value decoded, negative varints included
+        On an event or unknown field
             - skipped
     hosted_session_detect
-        On PRIV with chip ID ESP32-C6
-            - present = true; bus released
-        On no PRIV within 3 s, or another chip ID
-            - present = false, ESP_OK; bus released
-    hosted_session_install(segments)
+        On PRIV with chip ID C6
+            - present = true; link released
+        On silence for 3 s or another chip
+            - present = false, ESP_OK; link released
+    hosted_session_ota(source)
         On a slave answering everything
-            - resets the C6 with GPIO6 high, opens the data path, drains PRIV + ESPInit
-            - BEGIN, then WRITEs carrying the segments back to back in ≤ 1400-byte chunks (chunks may span segments), then END
-        On BEGIN/WRITE/END answering resp != 0
-            - stops there, ESP_FAIL naming the step; no END after a failed WRITE
-        On a response timeout
-            - ESP_ERR_TIMEOUT naming the step; bus released on every path
+            - BEGIN, WRITEs carrying the source in order in ≤ 1400-byte chunks, END
+        On resp != 0 at BEGIN/WRITE/END
+            - stops, ESP_FAIL with the step named; no END after a failed WRITE
+        On a timeout / source read error
+            - error with the step named; link released on every path
 
-rcp_sync (P4)
+rcp_sync
     rcp_sync_probe_with
-        On updater silent, no jumper, ESP-Hosted answering
-            - esp_hosted = true, last_error "esp-hosted firmware"; nothing written
-        On updater silent, no jumper, nothing on SDIO
-            - esp_hosted = false, last_error "updater not responding"
+        On updater silent, no jumper, ESP-Hosted present
+            - esp_hosted = true, last_error "esp-hosted firmware"; no writes
+        On updater silent, nothing on SDIO
+            - "updater not responding" as today
         On jumper present
             - hosted_detect never called
     rcp_sync_push_firmware_with
-        On a stock C6 (HELLO fails, hosted_detect true, no jumper)
-            - reads the whole source into a buffer first
-            - hosted_install segments: migrator, 0xFF pad to 4 KB, bundle header, bootloader, ptable, updater, RCP
-            - wait_updater without a reset; ESP_OK when HELLO's boot_slot_version equals the uploaded RCP version
-        On hosted_install failing
-            - RCP_SYNC_ERR_HOSTED_INSTALL with the step; no wait
+        On ESP-Hosted and a matching c6_installer image
+            - hosted_ota gets the whole source unchanged
+            - wait_updater without reset; ESP_OK when HELLO answers
+        On ESP-Hosted and a c6_installer of another base version
+            - RCP_SYNC_ERR_IMAGE_REJECTED naming both versions; hosted_ota never called
+        On ESP-Hosted and any other image
+            - RCP_SYNC_ERR_IMAGE_REJECTED "upload c6_installer.bin first"; nothing sent
+        On hosted_ota failing
+            - RCP_SYNC_ERR_HOSTED_OTA with the step; no wait
         On no HELLO within the wait
-            - ESP_ERR_TIMEOUT, detail "the C6 did not come back after the install"
-        On a boot slot version other than the uploaded one
-            - RCP_SYNC_ERR_IMAGE_REJECTED, detail names both versions
-        On the source failing while buffering
-            - its error; hosted_install never called
-        On HELLO failing and no ESP-Hosted
-            - "updater not responding" as today
+            - ESP_ERR_TIMEOUT "the C6 did not come back after the installer"
+        On our updater answering and a c6_installer image
+            - RCP_SYNC_ERR_IMAGE_REJECTED "not an RCP image"; nothing written
         On jumper present
             - hosted_detect never called
 
 br_core / device_api / web
     boot_radio
         On probe.esp_hosted
-            - RADIO_FAULT "esp-hosted firmware", OpenThread not started
+            - RADIO_FAULT "esp-hosted firmware"; OpenThread not started
     POST /device/radio/firmware
-        On a stock C6
-            - 200 {"installed": "<version>"}, BR_RUNNING afterwards
-        On a failed install
-            - 502 install_failed with the detail
+        On a stock C6 + c6_installer.bin
+            - 200 installed c6_installer; status then RADIO_FAULT "no rcp firmware"
+        On a stock C6 + c6_rcp.bin
+            - 4xx with the "upload c6_installer.bin first" detail
+        On a failed OTA
+            - 502 install_failed
     firmware.js faultHint
         On "esp-hosted firmware"
-            - tells the user to upload the radio firmware to replace it
+            - tells to upload c6_installer.bin, then c6_rcp.bin
 
-p4/pytest/test_hosted_install.py (target, deferred to the hardware pass)
-    On a C6 restored to the stock stand-in (ota_0), jumper ignored, after a reboot
-        - /device/status RADIO_FAULT "esp-hosted firmware"; the C6 still answers as ESP-Hosted (nothing written at boot)
-    On uploading c6_rcp.bin
-        - 200 with the uploaded version; BR_RUNNING; base_installed == base_expected
-    On the relocation case (stock restored with ota1)
-        - same outcome
+p4/pytest/test_hosted_install.py (target; skips without the stock stand-in)
+    On a stock-restored C6, jumper ignored
+        - RADIO_FAULT "esp-hosted firmware"; upload c6_rcp.bin rejected
+        - upload c6_installer.bin → 200; RADIO_FAULT "no rcp firmware"
+        - upload c6_rcp.bin → 200; BR_RUNNING; base_installed == base_expected
 ```
 
 ## Steps
 
-0. **Pin the dependencies.**
-   - Registry: the `esp_serial_slave_link` version for IDF v6.1.
-   - esp-hosted-mcu: the 0.0.27 commit.
-1. **`common/c6_bundle`.** Host tests, then code. Commit.
-2. **`c6_migrator` project.**
-   - Tests: `migrator_core` host tests, then code.
-   - Wiring: `tools/build_all.sh`, `make clean`, embedded into p4 (`p4/CMakeLists.txt`, `c6_base_image.h`).
-   - Commit.
-3. **`c6_hosted` pure parts.** Host tests, then code; register in `tools/run_host_tests.sh`. Commit.
-4. **`c6_hosted` SDIO link.** `idf_component.yml`, `board.h`. Build only. Commit.
-5. **rcp_sync, br_core, device_api, firmware.js wiring.**
-   - Host tests: `rcp_sync/test_host` (scripted link), the device_api error map, `tools/tests` for `faultHint`.
-   - Then the code. Commit.
-6. **Test build commands.** `c6_jumper_ignore`, `c6_stock_restore` (as-is flash from `flash_args`), `c6_hosted_ota`. Write `p4/pytest/test_hosted_install.py`, not run.
-   Commit. The stock stand-in build script stays a session file.
-7. **Docs.**
-   - `docs/first-install.md`: new Path 1 "no wires": flash the P4, upload the radio firmware. The jumper becomes the
-     repair path, Path 2 stays for a broken C6.
-   - `docs/api.md`, the spec (sections 5.3 and 5.5), `CHANGELOG.md`, `docs/building.md` (the new `c6_migrator` project).
-   - Commit.
-8. `/code-review` and fixes, before any hardware run.
+1. Rebase `feat/hosted-ota-install` on master. Remove `common/c6_bundle/` and the P4 migrator embedding; rename
+   `c6_migrator` → `c6_installer`; embed the three images; trim `installer_core` + tests. `make test-host`, `make build`.
+   Commit.
+2. `c6_hosted` pure parts: CMakeLists, `hosted_session.c` (detect, ota over `rcp_fw_source_t`), host tests for frame /
+   rpc / session; register in `tools/run_host_tests.sh`. Commit.
+3. `hosted_link_sdio.c`, `idf_component.yml` (pinned `esp_serial_slave_link`), `board.h` pins. Build only. Commit.
+4. rcp_sync link ops + probe/push branches (scripted-link host tests first), br_core fault, device_api error map,
+   `firmware.js` hint (+ `tools/tests`). Commit.
+5. Test build: `c6_jumper_ignore`; `p4/pytest/test_hosted_install.py`. Release script. Commit.
+6. Docs: `docs/first-install.md` (Path 1 "no wires": installer, then RCP; jumper becomes the repair path), `docs/api.md`,
+   `CHANGELOG.md`, `docs/building.md`; update the handover doc to "superseded". Commit.
+7. `/code-review`, fixes; then the hardware pass.
 
 ## Verification
 
 - `logrun make test-host`, `logrun make test-tools`, `logrun make lint`, `logrun make build`, `logrun make build-test`.
-- **Lean hardware pass after review.** Budget: one USB flash of the P4 test build, two stock restores of the C6, two
-  uploads.
-  1. Build the stand-in with the session script; serve its output over HTTP from the host.
-  2. Console: `c6_stock_restore http://<host>/`, then `c6_jumper_ignore 1`, then reboot.
-  3. `make test-target TEST="p4/pytest/test_hosted_install.py --c6-stock-url http://<host>/"`.
-     - This checks stock-bootloader (IDF 5.4) ↔ IDF 6.1 installer and updater compatibility, SDIO bring-up, erase timing,
-       and the C6 log over the jumper.
-  4. Relocation: `c6_stock_restore http://<host>/`, then `c6_hosted_ota http://<host>/network_adapter.bin` (the stand-in
-     now runs from stock `ota_1`); same test.
-  5. Finish: `c6_jumper_ignore 0`; the board is in `BR_RUNNING`.
-- **Still unproven after this pass:** an untouched factory C6 (its exact slave version, any secure boot or flash
-  encryption). `first-install.md` says so until someone runs it on a new board.
+- Lean hardware pass after review (one P4 flash, one stock restore, three uploads):
+  1. Build the ESP-Hosted 0.0.27 stand-in with the session script; flash it as-is over the jumper with esptool from the
+     host (its own `flash_args`).
+  2. Console `c6_jumper_ignore 1`, reboot.
+  3. `make test-target TEST="p4/pytest/test_hosted_install.py"`.
+  4. `c6_jumper_ignore 0`; board in BR_RUNNING.
+- Still unproven after the pass: an untouched factory C6 (exact slave version, secure boot / flash encryption) and the
+  RELOCATE case (stock C6 updated before) — the latter is host-tested only.

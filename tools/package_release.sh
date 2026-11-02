@@ -8,7 +8,7 @@
 #   c6_installer.bin             one-time C6 installer for a factory C6 (ESP-Hosted), POST /device/radio/firmware before
 #                                c6_rcp.bin; its version is the c6 base version
 #   p4-flash.zip                 full P4 USB flash: images and flash_args (esptool --chip esp32p4 write-flash @flash_args)
-#   c6-updater-flash.zip         C6 base images for the no-jumper first install (docs/first-install.md, Path 2)
+#   c6-updater-flash.zip         C6 base images for the no-jumper first install (docs/first-install.md, Path 3)
 #   third-party-licenses.zip     license texts of the code linked into the images
 #   versions.txt, SHA256SUMS
 set -euo pipefail

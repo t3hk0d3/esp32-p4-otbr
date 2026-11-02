@@ -7,6 +7,20 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+### Added
+
+- First install without wires: on a factory C6 (ESP-Hosted firmware, no jumper) the board reports `RADIO_FAULT`
+  `esp-hosted firmware`, and uploading the new release file `c6_installer.bin` sends it through ESP-Hosted's own update
+  over the P4-C6 SDIO lines; it installs the C6 bootloader, partition table and updater, after which `c6_rcp.bin` is
+  uploaded as usual. Nothing is written to the C6 without that upload. Not yet run on hardware. See
+  `docs/first-install.md`, Path 1.
+
+### Changed
+
+- `POST /device/radio/firmware` refuses `c6_installer.bin` on a C6 that already runs the updater (400 `invalid_image`),
+  before anything is erased.
+- `docs/first-install.md`: the jumper path is now Path 2 and the USB-UART path Path 3.
+
 ## [0.2.0] - 2026-11-02
 
 ### Added

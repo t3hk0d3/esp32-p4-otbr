@@ -8,6 +8,7 @@ answers 503; `/device/*`, the device pages and OTA keep working.
 | `fault_reason` | Meaning and fix |
 | --- | --- |
 | `no rcp firmware` | The C6 has no valid RCP image (new board, erased slots). Upload `c6_rcp.bin`. Not retried automatically. |
+| `esp-hosted firmware` | The C6 still runs its factory ESP-Hosted firmware and no jumper was seen. Upload `c6_installer.bin` of the same build, then `c6_rcp.bin` ([First install](first-install.md), Path 1). OpenThread is not started. |
 | `rcp incompatible` | OpenThread rejected the RCP, or it did not answer its reset. Upload the `c6_rcp.bin` of the same release. |
 | `storage unavailable` | NVS did not initialise (for example no free pages), `storage_ok` is `false`. The board booted degraded instead of boot-looping: HTTP, OTA and `/device/*` work, OpenThread does not start. NVS is never erased automatically because it holds the Thread credentials. Update to a firmware that fixes it, or erase NVS by hand (`esptool --chip esp32p4 -p /dev/ttyACM0 erase-region 0x9000 0x10000`; the Thread network has to be set up again) and reboot. |
 | `rom recovery failed` | The updater was silent and the jumper recovery failed. Check the jumper wires and `GET /device/radio/log`; try `make recover`; without a jumper use the no-jumper path of [First install](first-install.md). |
@@ -38,7 +39,7 @@ answers 503; `/device/*`, the device pages and OTA keep working.
 - Flash writes (OTA) use XIP from PSRAM so traffic keeps flowing, but the P4 reboots after an update.
 - The `-dirty` flag of the app version stamp is as of the last configure (see [Building](building.md#versions)); a new commit
   refreshes the stamp.
-- Untested on hardware: the no-jumper first install ([First install](first-install.md), Path 2, esptool over H7).
+- Untested on hardware: the no-jumper first install ([First install](first-install.md), Path 3, esptool over H7).
 - Untested on hardware: recovery of a truly blank C6 (bootloader, partition table and otadata erased) and overwriting the
   factory ESP-Hosted firmware.
 - A mDNS reflector between the two VLANs is tolerated, but a host that claims the board's mDNS name with different addresses
