@@ -244,6 +244,19 @@ class TestBootRadioFault:
         assert status["fault"] == "rcp incompatible"
         assert not status["compatible"]
 
+    def test_ot_console_command_without_openthread_answers_error_13(
+        self, dut, c6_held_in_reset
+    ):
+        # Test console `ot` while OpenThread does not run: answers Error 13 instead of crashing on OpenThread's
+        # missing task queue, and the console keeps working.
+        dut.expect(rb"mode_fsm: mode RADIO_FAULT", timeout=BOOT_TIMEOUT_S)
+        dut.write("ot state")
+        dut.expect(
+            rb"Error 13: InvalidState \(OpenThread not running\)",
+            timeout=CONSOLE_TIMEOUT_S,
+        )
+        assert br_status(dut)["mode"] == "RADIO_FAULT"
+
     def test_radio_fault_still_starts_http_server(self, dut, c6_held_in_reset):
         # On OpenThread failing to initialise the RCP: the HTTP server is still started.
         # The /device/status endpoint comes with Task 15; until then the server's start log and a

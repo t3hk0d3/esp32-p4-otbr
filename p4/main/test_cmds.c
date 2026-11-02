@@ -19,7 +19,6 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#include "esp_openthread_cli.h"
 #include "nvs.h"
 
 #include "board.h"
@@ -460,7 +459,7 @@ esp_err_t test_cmds_register(void)
     ESP_RETURN_ON_ERROR(register_command("ota_commit_delay", "ota_commit_delay <ms>: wait before the boot partition is set", cmd_ota_commit_delay), TAG, "ota_commit_delay");
     ESP_RETURN_ON_ERROR(register_command("ota_boot", "boot and running slot", cmd_ota_boot), TAG, "ota_boot");
     ESP_RETURN_ON_ERROR(register_command("c6_erase", "c6_erase <bootloader|ptable|otadata|test|ota0|ota1>: erase a C6 flash region over the jumper", cmd_c6_erase), TAG, "c6_erase");
-    return esp_openthread_cli_console_command_register();
+    return br_core_test_ot_command_register();
 }
 
 #endif // OTBR_TEST_BUILD

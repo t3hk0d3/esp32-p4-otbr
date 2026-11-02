@@ -133,6 +133,41 @@ reason, spec reference.
    (`esp-otbr-xxxxxx-N`, about 5 per second) behind a gateway that reflects mDNS between VLAN 10 and 20. Companion rule without
    patch: in split mode `mgmt` is never registered with mDNS (`mdns_register_netif`), so it neither announces, answers nor joins
    the multicast groups; the library drops datagrams that arrive on an unregistered netif. (spec 5.13)
+14. Applied. `esp_ot_br_server/src/esp_br_web_api.c` `rest_dataset`: `PUT /node/dataset/active` is accepted while Thread runs
+   (ot-br-posix and upstream answer 409 unless the role is `disabled`). With Thread running, a request that is not a whole
+   network (Active Timestamp, Network Key, Network Name, Ext PAN ID, Mesh-Local Prefix, PAN ID and Channel all present in
+   the request itself) still answers 409, also when it would change nothing: a partial change such as only the channel
+   would move this node alone and split it from the mesh; it belongs in the pending dataset. A whole network is taken as
+   the request's own TLVs: as sent for `text/plain` (TLVs the parser does not map are kept), converted from the request for
+   JSON; not merged with the old dataset, which kept e.g. the old network's Wake-up Channel TLV on hardware. If they equal
+   the stored TLVs the answer is 200 with no OpenThread write (no detach). Otherwise, under the OpenThread lock the handler
+   already holds, Thread is stopped, the stored pending dataset is deleted, the request's TLVs are stored and Thread is
+   started on them (200, one `ESP_LOGI` "active dataset replaced while attached, Thread restarted"). A failed delete or store starts
+   Thread again on the old dataset (500); a failed start leaves the new dataset stored (500). With Thread disabled the
+   dataset is merged and stored as before and Thread stays off (201/200); only the pending dataset is deleted first when the
+   stored active dataset changes. Why the pending dataset goes: it belongs to the old network, and OpenThread
+   (`PendingDatasetManager::HandleDelayTimer`) applies it when its delay expires if its network key differs from the
+   active one, which took the board back to the old network on hardware; with no local pending dataset the timer finds
+   nothing and clears itself. `If-None-Match: *`, `PUT /node/dataset/pending` and the guard statuses are unchanged.
+   Reason: a 409 was reported from Home Assistant's Thread panel moving a running board onto the preferred network. HA's
+   `otbr/set_network` disables Thread first (`set_enabled(False)`, `set_active_dataset_tlvs`, `set_enabled(True)`), and
+   `PUT /node/state "disable"` is synchronous here, so the exact cause is not confirmed; the hardware pass captures the
+   board log of that flow. The patch also lets any client move a running board to another whole network in one call (the
+   Network page "Join with Dataset" card, item 15). Host tests: `tests/test_rest.c`
+   `test_dataset_active_while_running` (new mock seams `mock_active_tlvs`, `mock_update_tlvs`, `mock_convert_tlvs`,
+   `mock_set_active_error`, `mock_thread_enable_error`, `mock_clear_pending_error`, `mock_calls` in `tests/openthread_mock.inc`, `tests/mock_functions.json`,
+   `tests/host_platform.h`, which also stubs `ESP_LOGI`); `tools/otbr_compat.py` expects success and an unchanged role. Target tests: `p4/pytest/test_network_page.py`.
+15. Applied. `esp_ot_br_server` frontend: "Join with Dataset" card on the Network page (`frontend/network.html`, between
+   Scan and Form) and new `frontend/static/dataset_join.js` (pure logic exported for node, page code guarded by
+   `typeof document`, text only through `textContent`). The pasted hex must be a complete active dataset (Active
+   Timestamp, Channel, Channel Mask, Ext PAN ID, Mesh-Local Prefix, Network Key, Network Name, PAN ID, PSKc, Security
+   Policy, each with a valid length; ≤ 254 bytes), because the board merges what it gets into the stored dataset. A confirm names the network the board is on (if any; when it cannot be read, the confirm says so and still warns that
+   it is replaced) and the new one; Join stays disabled while a join runs, and role replies that arrive after the poll
+   ended are ignored;
+   then the page uses only existing REST endpoints: `PUT /node/dataset/active` (text/plain; item 14 restarts Thread when
+   it runs), `GET /node/state`, and `PUT /node/state "enable"` only when Thread is `disabled` (enabling a running Thread
+   starts a fresh attach), then polls the role for up to 60 s like the Form flow. 403 (management address), 409
+   (sniffer) and 503 (radio) are shown as readable messages. Host tests: `tools/tests/test_network_page.py`.
 
 ### REST guard classification (patches 2 and 9)
 

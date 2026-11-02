@@ -28,7 +28,10 @@ Everything is on port 80, no authentication. Errors on `/device/*` are JSON `{"e
 Upstream esp-thread-br, ot-br-posix 0.6.0 compatible: `/node`, `/node/state`, `/node/dataset/active|pending`,
 `/node/ba-id`, `/node/ext-address`, `/node/coprocessor/version`, `/node/ba-epskc/*`, `/node/commissioner/*`, `/api/actions`,
 `/api/devices`, `/api/diagnostics`, `/api/node`, `/.well-known/thread/br-rest`. In `SNIFFER` these answer 503 (reads) or 409
-(changes); in `STARTING` and `RADIO_FAULT` they answer 503. `DELETE /node/dataset/...` is not supported. The mode, fault reason
+(changes); in `STARTING` and `RADIO_FAULT` they answer 503. `DELETE /node/dataset/...` is not supported. `PUT /node/dataset/active`
+is accepted while Thread runs (ot-br-posix answers 409): the board stops Thread, stores the dataset and starts Thread on
+it (the old network's pending dataset is deleted); the dataset it already has is accepted without a restart. A partial dataset (e.g. only `channel`) still answers 409
+while Thread runs: use `/node/dataset/pending` to change a running network. The mode, fault reason
 and version information are in `/device/status`, which works in every mode. Home Assistant's OpenThread Border Router integration
 connects to `http://<board>` (verified with `python-otbr-api` by `tools/otbr_compat.py`; a run against a real Home Assistant is
 still open, see `docs/phase0/RESULTS.md`).
@@ -41,7 +44,8 @@ confirm banner, diagnostics). `device.html` uses only `/device/*`, so it also wo
 
 ## Creating a Thread network
 
-The board never forms or joins a network by itself. Use the Web UI (Network page: form or join), Home Assistant (add the
+The board never forms or joins a network by itself. Use the Web UI (Network page: form, join a scanned network, or join
+with dataset TLVs), Home Assistant (add the
 OpenThread Border Router integration with the URL `http://<board>`), or the REST API / `python-otbr-api`:
 
 ```
@@ -63,13 +67,17 @@ The dataset is stored on the board and used again at every boot. `GET /node/stat
 
 Several boards can serve the same Thread network: each one adds coverage, and the others keep the network reachable when
 one goes down. Form the network on the first board, then give every other board the same active dataset, either with the
-Web UI (Network page: join) or by copying it over the REST API:
+Web UI (Network page, "Join with Dataset": paste the TLVs of the first board) or by copying it over the REST API:
 
 ```
 curl -H 'Accept: text/plain' http://<first-board>/node/dataset/active > dataset.tlv
 curl -X PUT -H 'Content-Type: text/plain' --data-binary @dataset.tlv http://<new-board>/node/dataset/active
 curl -X PUT -H 'Content-Type: application/json' -d '"enable"' http://<new-board>/node/state
 ```
+
+The last call is only needed when Thread was off on the new board (no dataset before): `GET /node/state` says `disabled`.
+On a board that is already on a network, the `PUT` of the dataset restarts Thread on the new one by itself, and enabling a
+running Thread would start a fresh attach.
 
 In Home Assistant, add each board as its own OpenThread Border Router integration entry. Running several of these boards
 on one network has not been tested on hardware yet.

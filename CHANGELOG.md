@@ -14,6 +14,8 @@ release's `versions.txt`.
   every 10 s with a 10 ms lock timeout, so a scrape never waits for OpenThread. See `docs/metrics.md`.
 - `Makefile` as the single entry point for building, flashing, network updates, packaging and tests (`make help`); CI
   uses the same targets.
+- Web UI, Network page: "Join with Dataset" joins an existing Thread network from its active dataset TLVs (hex), with
+  a confirm that names the network being replaced.
 
 ### Changed
 
@@ -22,6 +24,11 @@ release's `versions.txt`.
 
 ### Fixed
 
+- `PUT /node/dataset/active` answered 409 while Thread ran, which broke Home Assistant's Thread panel (moving the board
+  onto the preferred network). For a complete dataset it now stops Thread, stores it and starts Thread on it; writing
+  the stored dataset again changes nothing, and a partial change still answers 409 (use the pending dataset). Writing a
+  different active dataset deletes the pending dataset of the old network, which otherwise took the board back to the
+  old network when its delay expired.
 - `c6-updater-flash.zip` put the C6 updater into the first RCP slot (`ota_0`, 0xa0000) and wrote `otadata`; it now
   writes bootloader, partition table and the updater into the `test` partition (0x20000), as the ROM recovery does. The
   v0.1.0 release asset was replaced.

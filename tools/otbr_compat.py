@@ -7,6 +7,8 @@ Exits non-zero at the first failing call, printing `FAIL <call>`. The run restor
   - dataset: replaced by `create_active_dataset` while Thread is disabled and put back with
     `set_active_dataset_tlvs`; the channel is moved by `set_channel` and put back by `create_pending_dataset`;
   - Thread is enabled again and the ePSKc setting is restored.
+`set_active_dataset_tlvs` with the stored dataset while Thread is attached must succeed without changing the role
+(PATCHES.md item 14; ot-br-posix answers 409 there).
 `factory_reset` (DELETE /node) is destructive (erases the settings, the board restarts), so it runs LAST: afterwards
 the original dataset is written back through the REST API and Thread is enabled. Skip it with --no-factory-reset.
 
@@ -49,22 +51,6 @@ async def call(name, coroutine):
     shown = result.hex() if isinstance(result, bytes) else result
     say(f"OK   {name}" + (f" -> {str(shown)[:100]}" if shown is not None else ""))
     return result
-
-
-async def call_expecting(name, coroutine, error_type):
-    """Await a call that must raise `error_type`."""
-    try:
-        await coroutine
-    except error_type as error:
-        say(f"OK   {name} -> {type(error).__name__} (expected)")
-        return
-    except Exception as error:  # noqa: BLE001
-        say(
-            f"FAIL {name}: expected {error_type.__name__}, got {type(error).__name__}: {error}"
-        )
-        sys.exit(1)
-    say(f"FAIL {name}: expected {error_type.__name__}, the call succeeded")
-    sys.exit(1)
 
 
 def check(name, condition, detail=""):
@@ -248,6 +234,23 @@ async def refused_write(otbr):
     sys.exit(1)
 
 
+async def same_dataset_while_attached(session, url, otbr, tlvs):
+    """PATCHES.md item 14: the stored dataset written again while Thread runs is accepted without a detach
+    (ot-br-posix answers 409 here)."""
+    await wait_attached(session, url, otbr)
+    before = await node_state(session, url)
+    await call(
+        "set_active_dataset_tlvs while Thread is enabled",
+        otbr.set_active_dataset_tlvs(tlvs),
+    )
+    after = await node_state(session, url)
+    check(
+        "same dataset while attached keeps the role",
+        before in ATTACHED and after == before,
+        f"{before} -> {after}",
+    )
+
+
 async def main(args):
     url = args.url.rstrip("/")
     async with aiohttp.ClientSession() as session:
@@ -257,11 +260,7 @@ async def main(args):
             await refused_write(otbr)
             return
         await ephemeral_key_calls(otbr, ephemeral_was_enabled)
-        await call_expecting(
-            "set_active_dataset_tlvs while Thread is enabled",
-            otbr.set_active_dataset_tlvs(tlvs),
-            api.ThreadNetworkActiveError,
-        )
+        await same_dataset_while_attached(session, url, otbr, tlvs)
         await dataset_calls(session, url, otbr, tlvs, dataset)
         await channel_calls(session, url, otbr, dataset)
         if not args.no_factory_reset:
