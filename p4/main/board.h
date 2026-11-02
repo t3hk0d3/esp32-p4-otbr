@@ -18,6 +18,14 @@
 #define P4_PIN_RCP_INT 16
 #define P4_RCP_SPI_HZ 10000000
 
+// The same six lines as SDIO slot 1, the bus of the factory ESP-Hosted firmware on the C6 (c6_hosted).
+#define P4_PIN_C6_SDIO_CLK 18
+#define P4_PIN_C6_SDIO_CMD 19
+#define P4_PIN_C6_SDIO_D0 14
+#define P4_PIN_C6_SDIO_D1 15
+#define P4_PIN_C6_SDIO_D2 16
+#define P4_PIN_C6_SDIO_D3 17
+
 // C6 control: UPDATE low at reset boots the updater; RESET drives C6 CHIP_PU.
 #define P4_PIN_C6_UPDATE 6
 #define P4_PIN_C6_RESET 54
