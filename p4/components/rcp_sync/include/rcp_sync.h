@@ -77,7 +77,6 @@ typedef struct {
     const uint8_t *bootloader_start, *bootloader_end;
     const uint8_t *ptable_start, *ptable_end;
     const uint8_t *updater_start, *updater_end;
-    const uint8_t *migrator_start, *migrator_end; /**< optional (both NULL): without it no ESP-Hosted install is attempted */
     const uint8_t *version_start, *version_end;
 } rcp_sync_base_image_t;
 

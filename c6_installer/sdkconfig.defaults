@@ -2,7 +2,7 @@ CONFIG_IDF_TARGET="esp32c6"
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 
-# The migrator rewrites the bootloader (0x0) and the partition table (0x8000).
+# The installer rewrites the bootloader (0x0) and the partition table (0x8000).
 CONFIG_SPI_FLASH_DANGEROUS_WRITE_ALLOWED=y
 
 # The install runs in app_main for seconds without yielding to the idle task.

@@ -17,13 +17,11 @@ project(p4)
 # build tree at configure time; configure_file() registers each source as a configure dependency,
 # so a rebuilt C6 image re-runs CMake and refreshes everything below.
 set(c6_updater_build "${CMAKE_CURRENT_LIST_DIR}/../c6_updater/build")
-set(c6_migrator_build "${CMAKE_CURRENT_LIST_DIR}/../c6_migrator/build")
 set(c6_inputs
     "${c6_updater_build}/bootloader/bootloader.bin"
     "${c6_updater_build}/partition_table/partition-table.bin"
     "${c6_updater_build}/c6_updater.bin"
-    "${c6_updater_build}/project_description.json"
-    "${c6_migrator_build}/c6_migrator.bin")
+    "${c6_updater_build}/project_description.json")
 foreach(input IN LISTS c6_inputs)
     if(NOT EXISTS "${input}")
         # Also make CMake re-check once the file appears.
@@ -38,8 +36,6 @@ set(c6_stage "${CMAKE_BINARY_DIR}/c6_images")
 configure_file("${c6_updater_build}/bootloader/bootloader.bin" "${c6_stage}/c6_bootloader.bin" COPYONLY)
 configure_file("${c6_updater_build}/partition_table/partition-table.bin" "${c6_stage}/c6_partition_table.bin" COPYONLY)
 configure_file("${c6_updater_build}/c6_updater.bin" "${c6_stage}/c6_updater.bin" COPYONLY)
-# The installer the P4 sends through the factory ESP-Hosted OTA on the first radio firmware upload (c6_hosted).
-configure_file("${c6_migrator_build}/c6_migrator.bin" "${c6_stage}/c6_migrator.bin" COPYONLY)
 file(READ "${c6_updater_build}/project_description.json" c6_updater_description)
 string(JSON c6_updater_version GET "${c6_updater_description}" project_version)
 set(c6_version_file "${c6_stage}/c6_base_version.txt")

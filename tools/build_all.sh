@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the projects that exist, in order c6_updater, c6_rcp, c6_migrator, p4; stop at the first failure.
+# Build the projects that exist, in order c6_updater, c6_rcp, c6_installer, p4; stop at the first failure.
 # Usage: tools/build_all.sh [--test]
 #   --test  enable test-only console commands (macro OTBR_TEST_BUILD=1, via tools/test_build.cmake).
 #           Every run passes OTBR_TEST_BUILD=0|1 explicitly, so it never sticks in the CMake cache.
@@ -18,7 +18,7 @@ case "${1:-}" in
         ;;
 esac
 
-for project in c6_updater c6_rcp c6_migrator p4; do
+for project in c6_updater c6_rcp c6_installer p4; do
     if [[ ! -f "$root/$project/CMakeLists.txt" ]]; then
         echo "skipping $project (not present)"
         continue

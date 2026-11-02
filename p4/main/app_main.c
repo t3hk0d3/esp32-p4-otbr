@@ -91,7 +91,6 @@ void app_main(void)
         .bootloader_start = c6_base_bootloader_start, .bootloader_end = c6_base_bootloader_end,
         .ptable_start = c6_base_ptable_start, .ptable_end = c6_base_ptable_end,
         .updater_start = c6_base_updater_start, .updater_end = c6_base_updater_end,
-        .migrator_start = c6_base_migrator_start, .migrator_end = c6_base_migrator_end,
         .version_start = c6_base_version_start, .version_end = c6_base_version_end,
     });
     if (err != ESP_OK) {

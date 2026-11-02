@@ -10,5 +10,4 @@ idf_component_register(SRCS ${srcs}
                        EMBED_FILES "${CMAKE_BINARY_DIR}/c6_images/c6_bootloader.bin"
                                    "${CMAKE_BINARY_DIR}/c6_images/c6_partition_table.bin"
                                    "${CMAKE_BINARY_DIR}/c6_images/c6_updater.bin"
-                                   "${CMAKE_BINARY_DIR}/c6_images/c6_migrator.bin"
                                    "${CMAKE_BINARY_DIR}/c6_images/c6_base_version.txt")
