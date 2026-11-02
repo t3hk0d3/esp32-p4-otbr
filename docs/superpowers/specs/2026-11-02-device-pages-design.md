@@ -5,25 +5,28 @@ states, Firmware, Packet capture, Diagnostics).
 
 ## 1. Goal
 
-`device.html` today holds six unrelated sections on one page. Split it into five pages, keep only the device status on
-`device.html`, and replace the network form with a setup-first editor that shows what will change before the board
+`device.html` today holds six unrelated sections on one page. Split it up: the device status becomes the Dashboard
+(`index.html`, merged with the upstream Dashboard; amendment of 2026-11-02, `device.html` is removed), four device pages
+take the rest, and the network form is replaced with a setup-first editor that shows what will change before the board
 reboots.
 
-Frontend only: no firmware or API change. Every page uses only `/device/*`, so all of them work in `RADIO_FAULT` and while
-sniffing, as `device.html` does today.
+Frontend only: no firmware or API change. The device pages use only `/device/*`, so they work in `RADIO_FAULT` and while
+sniffing. The Dashboard also reads the Thread web GUI's `/get_properties` and `/ipaddr`, but only while the status says
+`BR_RUNNING`; in the other modes its Thread cards say they show while the border router runs.
 
 ## 2. Pages and navigation
 
 | Page | File | Script | Endpoints |
 | --- | --- | --- | --- |
-| Status | `device.html` | `static/status.js` | `/device/status`, `/device/diag`, `/device/reboot` |
+| Dashboard (status) | `index.html` | `static/status.js` | `/device/status`, `/device/diag`, `/device/reboot`, `/get_properties`, `/ipaddr` |
 | Ethernet | `ethernet.html` | `static/ethernet.js` | `/device/network`, `/device/network/confirm` |
 | Firmware | `firmware.html` | `static/firmware.js` | `/device/status`, `/device/ota`, `/device/ota/url`, `/device/radio/firmware`, `/device/radio/recover`, `/device/radio/log` |
 | Packet capture | `capture.html` | `static/capture.js` | `/device/status`, `/device/sniffer.pcap`, `/device/sniffer` |
 | Diagnostics | `diagnostics.html` | `static/diagnostics.js` | `/device/diag` |
 
-- `device.html` keeps its URL, so README and docs links to the status page stay valid.
-- The nav entry "Device" in `static/api.js` becomes a dropdown like "Management", with the five pages in the table order.
+- The Dashboard stays the landing page at `/`; `device.html` is removed and the docs point at the Dashboard.
+- The nav entry "Device" in `static/api.js` becomes a dropdown like "Management", with the four device pages in the table
+  order.
   It is highlighted on any of them.
 - Shared code goes in `static/device_common.js`, loaded before the page script. It holds the pure helpers (error messages,
   backoff, last-seen text, boot detection, remaining time, whole-number parsing), the request wrapper, the poller (visibility
@@ -35,7 +38,12 @@ sniffing, as `device.html` does today.
 - New look in `static/style.css`: segmented control, chips, mode cards, tiles, bars, drop zone, sticky action bar. The
   palette, cards and fonts stay those of the current UI.
 
-## 3. Status (`device.html`)
+## 3. Dashboard (`index.html`, the status page)
+
+Amendment: besides the content below, the Dashboard shows the Thread network (name, role, RLOC16, channel, TX power,
+PAN ID, extended PAN ID, partition ID), identifiers (EUI-64, Border Agent ID, RLOC, OpenThread version, PSKc hidden
+until Show) and the Thread address table, from `/get_properties` and `/ipaddr` in `BR_RUNNING` only.
+
 
 - **Hero:** mode in words, with a colored top border and dot.
   - `BR_RUNNING`: "Border router running" (green).
@@ -156,7 +164,7 @@ cable diagram. The running mode carries "In use now". Picking a card changes the
   - `test_capture_page.py`;
   - `test_diagnostics_page.py`.
 - Behaviour that survives keeps its test; behaviour that changes gets its test changed in the same step.
-- `p4/pytest/test_device_page.py` serves all five pages and their scripts. It runs on the board only in the next batched hardware pass.
+- `p4/pytest/test_device_page.py` serves the Dashboard, the four device pages and their scripts. It runs on the board only in the next batched hardware pass.
 
 ## 9. Out of scope
 

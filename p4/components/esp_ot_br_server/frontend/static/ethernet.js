@@ -149,7 +149,18 @@ function draftFromConfig(cfg) {
   return d;
 }
 
-function vlanText(i) { return i.tagged ? 'VLAN ' + (String(i.vlan).trim() || '?') : 'Untagged'; }
+function vlanText(i) {
+  if (!i.tagged)
+    return 'Untagged';
+  var n = C.wholeNumber(i.vlan, 1, VLAN_MAX); // "010" and "10" are the same VLAN
+  return 'VLAN ' + (n === null ? (String(i.vlan).trim() || '?') : n);
+}
+
+/* The board stores an unset gateway or DNS server as 0.0.0.0. */
+function unset(text) {
+  var t = String(text).trim();
+  return t === '0.0.0.0' ? '' : t;
+}
 
 function ipText(i) {
   if (i.dhcp)
@@ -174,7 +185,7 @@ function staticProblems(i, e) {
     else if ((a & host) >>> 0 === 0 || (a & host) >>> 0 === host)
       e.push('This is the network or broadcast address of the subnet: pick another host address.');
   }
-  var gw = String(i.gw).trim(), dns = String(i.dns).trim();
+  var gw = unset(i.gw), dns = unset(i.dns);
   if (gw && !ipv4Valid(gw)) {
     e.push('The gateway is not an IPv4 address.');
   } else if (gw) {
@@ -436,7 +447,13 @@ function refreshNetwork() {
       return false;
     }
     net = r.body;
-    cur = L.draftFromConfig(net.trial || net.active);
+    var running = L.draftFromConfig(net.trial || net.active);
+    if (cur && review && JSON.stringify(running) !== JSON.stringify(cur)) {
+      // Someone changed the running settings: the reviewed diff no longer holds.
+      review = false;
+      ack = false;
+    }
+    cur = running;
     if (!draft)
       draft = clone(cur);
     kit.renderTrial(net);
@@ -515,9 +532,15 @@ function apply() {
           }
           note('netMsg', 'Saved as a trial. The board is rebooting: open ' + reach + ' and press Keep new settings ' +
                              'within 5 minutes.', false);
-          kit.waitForBoard('netMsg');
+          kit.waitForBoard('netMsg', 'The board did not come back at this address. Open ' + reach + ' and press ' +
+                                         'Keep new settings within 5 minutes of its reboot, or it goes back to the ' +
+                                         'previous settings by itself.');
           return {handoff : true};
-        }, function(e) { note('netMsg', e.message, true); });
+        }, function(e) {
+          // The board may have saved the trial before the connection dropped.
+          note('netMsg', e.message + ' If the board saved the new settings, it is rebooting: open ' + reach +
+                             ' and press Keep new settings within 5 minutes.', true);
+        });
   });
 }
 

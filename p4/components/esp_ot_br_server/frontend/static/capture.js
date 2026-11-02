@@ -54,6 +54,8 @@ var $ = kit.$, setText = kit.setText, show = kit.show, note = kit.note;
 var duration = 60;
 var lastStatus = null;
 var statusPoll = null;
+var startedAt = 0;   // time of the last Start click until the board is seen capturing (or not)
+var START_CHECK_MS = 5000;
 
 function captureHref() { return L.captureUrl($('capChannel').value, duration); }
 
@@ -61,10 +63,29 @@ function captureHref() { return L.captureUrl($('capChannel').value, duration); }
 function updateLink() {
   L.LENGTHS.forEach(function(s) { $('len-' + s).setAttribute('aria-pressed', s === duration ? 'true' : 'false'); });
   var url = captureHref();
-  if (!url)
+  if (!url) {
+    setText('cap-cmd', 'Enter a channel from 11 to 26, or leave it empty, to get the command.');
     return;
+  }
   $('capStart').setAttribute('href', url);
   setText('cap-cmd', L.liveCommand(env.location.host, url));
+}
+
+/*
+ * The capture is a plain download, so the page never sees the board's answer to it. After Start it watches the
+ * status instead: capturing means it started; still idle after a few seconds means the board refused it.
+ */
+function checkStart(sn) {
+  if (!startedAt)
+    return;
+  if (sn.active) {
+    startedAt = 0;
+    note('capMsg', 'Capture running: your browser saves sniffer.pcap as the frames arrive.', false);
+  } else if (env.now() - startedAt >= START_CHECK_MS) {
+    startedAt = 0;
+    note('capMsg', 'The board did not start the capture (it may be busy, or it has no Thread network to take the ' +
+                       'channel from). The downloaded file holds its answer.', true);
+  }
 }
 
 function render(s) {
@@ -74,6 +95,7 @@ function render(s) {
   show('cap-idle', !sn.active);
   show('cap-active', !!sn.active);
   show('cap-fault', !sn.active && !!sn.ended_by_fault);
+  checkStart(sn);
   if (sn.active) {
     var v = L.activeView(sn);
     setText('cap-a-title', v.title);
@@ -119,11 +141,14 @@ function onStart(ev) {
     return;
   }
   $('capStart').setAttribute('href', url);
-  note('capMsg', 'Capture started: your browser saves sniffer.pcap as the frames arrive.', false);
-  env.setTimeout(function() {
-    if (statusPoll)
-      statusPoll.wake();
-  }, 1500);
+  note('capMsg', 'Starting the capture: your browser saves sniffer.pcap as the frames arrive.', false);
+  startedAt = env.now();
+  [ 1500, START_CHECK_MS + 500 ].forEach(function(ms) {
+    env.setTimeout(function() {
+      if (statusPoll)
+        statusPoll.wake();
+    }, ms);
+  });
 }
 
 function stopCapture() {

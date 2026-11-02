@@ -315,9 +315,10 @@ function poller(task, period, sectionId) {
 
 /*
  * Waits for the board to reboot and come back (rule: L.bootObserved), probing /device/diag every 2 s for at most
- * 3 minutes, then reloads the page. One waiter at a time. Polling stays off meanwhile (busy).
+ * 3 minutes, then reloads the page. One waiter at a time. Polling stays off meanwhile (busy). `giveUpText` replaces
+ * the generic message shown when the board does not come back here (for example, it moved to another address).
  */
-function waitForBoard(msgId) {
+function waitForBoard(msgId, giveUpText) {
   if (waiting)
     return;
   waiting = true;
@@ -325,7 +326,7 @@ function waitForBoard(msgId) {
   var state = {outage : false, baseline : lastUptime};
   function giveUp() {
     waiting = false;
-    note(msgId, GIVE_UP_TEXT, true);
+    note(msgId, giveUpText || GIVE_UP_TEXT, true);
     setBusy(false);
   }
   function probe() {

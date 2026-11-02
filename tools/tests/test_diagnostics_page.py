@@ -151,3 +151,31 @@ class TestDiagnosticsPage:
             + "t.page.init(); await t.advance(100); return [...new Set(t.calls.map((c) => c.url))].sort();"
         )
         assert r == ["/device/diag", "/device/network"]
+
+
+@needs_node
+class TestDiagnosticsPrReview:
+    """PR review findings"""
+
+    def test_diag_is_polled_again_after_one_period(self):
+        # On init and 2.1 s: two /device/diag requests.
+        r = scenario(
+            page("diagnostics", ROUTES)
+            + "t.page.init(); await t.advance(2100); return t.calls.filter((c) => c.url === '/device/diag').length;"
+        )
+        assert r == 2
+
+
+def test_the_watched_section_holds_the_lock_and_task_tables():
+    # On diagnostics.html: diagSection wraps the CPU, memory, lock and task cards.
+    import re
+
+    from device_js import FRONTEND
+
+    html = (FRONTEND / "diagnostics.html").read_text()
+    start = html.index('id="diagSection"')
+    assert start < html.index('id="d-lock"') and start < html.index('id="d-tasks"')
+    opening = re.search(r'<(\w+)[^>]*id="diagSection"', html).group(1)
+    assert opening == "div" and html.index(
+        '</div>\n</div>\n<div class="footer"'
+    ) > html.index('id="d-tasks"')

@@ -411,3 +411,36 @@ class TestKitReview:
         """
         )
         assert r is True
+
+
+@needs_node
+class TestKitPrReview:
+    """PR review findings"""
+
+    def test_a_wake_while_a_request_runs_does_not_start_a_second_one(self):
+        # On visibilitychange while the first request is pending: no second request until it answers.
+        r = scenario(
+            kit()
+            + """
+            let release; let n = 0;
+            t.env.fetch = () => { n++; return new Promise((res) => { release = () => res({status: 200, text: () => Promise.resolve('{}')}); }); };
+            t.kit.poller(() => t.kit.request('GET', '/device/status').then(() => true), 100, 'sec');
+            await t.advance(10);
+            t.doc.fire('visibilitychange'); await t.advance(500);
+            const during = n; release(); await t.advance(150);
+            return [during, n];
+        """
+        )
+        assert r == [1, 2]
+
+    def test_wait_for_board_can_give_up_with_its_own_text(self):
+        # On waitForBoard(msg, text) with a board that never reboots: that text after 3 minutes.
+        r = scenario(
+            kit("(u) => ({status: 200, body: {uptime_s: 100}})")
+            + """
+            t.kit.setBusy(true); t.kit.waitForBoard('msg', 'Open http://10.0.0.2 now.');
+            await t.advance(200000);
+            return [t.el('msg').textContent, t.kit.isBusy()];
+        """
+        )
+        assert r == ["Open http://10.0.0.2 now.", False]

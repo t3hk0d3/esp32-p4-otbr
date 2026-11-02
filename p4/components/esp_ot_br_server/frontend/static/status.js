@@ -236,10 +236,20 @@ function refreshDiag() {
 
 /* ---- Thread network (the Thread web GUI answers {error, result, message}; 503 outside BR_RUNNING) ---- */
 
+var THREAD_FIELDS = [
+  't-net-name', 't-net-role', 't-net-rloc16', 't-net-channel', 't-net-txpower', 't-net-panid', 't-net-xpanid',
+  't-net-partition', 't-id-eui64', 't-id-baid', 't-id-rloc', 't-id-otver'
+];
+
+/* Outside BR_RUNNING there is no Thread data: nothing from the last network stays on screen. */
 function threadOff() {
   show('t-net-off', true);
   show('t-net-none', false);
   setText('h-role', '');
+  THREAD_FIELDS.forEach(function(id) { setText(id, '-'); });
+  pskc = '-';
+  showPskc();
+  kit.clear($('addr-body'));
 }
 
 function showPskc() {
@@ -296,12 +306,19 @@ function guiResult(url) {
 function refreshThread() {
   if (lastMode !== 'BR_RUNNING')
     return Promise.resolve(true); // asked for again when the status says it runs
+  // The mode can change while a request runs: a late answer from a stopped network is dropped.
   return guiResult('/get_properties').then(function(props) {
+    if (lastMode !== 'BR_RUNNING')
+      return true;
     if (props)
       renderThread(props);
     return guiResult('/ipaddr').then(function(list) {
+      if (lastMode !== 'BR_RUNNING')
+        return true;
       if (list)
         renderAddresses(list);
+      else
+        kit.clear($('addr-body')); // no stale addresses from an earlier network
       return !!(props && list);
     });
   });

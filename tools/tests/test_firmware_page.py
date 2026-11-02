@@ -158,10 +158,18 @@ class TestFirmwarePage:
             t.el('ota-src-url').click(); t.el('otaUrl').value = ' http://h/b.bin ';
             await t.page.install('ota');
             const c = t.calls.find((x) => x.url === '/device/ota/url');
-            return [t.el('ota-url-pane').hidden(), t.el('ota-file-pane').hidden(), JSON.parse(c.body), c.headers['Content-Type']];
+            return [t.el('ota-url-pane').hidden(), t.el('ota-file-pane').hidden(), JSON.parse(c.body), c.headers['Content-Type'],
+                    t.page.kit.isBusy(), t.page.kit.isWaiting()];
         """
         )
-        assert r == [False, True, {"url": "http://h/b.bin"}, "application/json"]
+        assert r == [
+            False,
+            True,
+            {"url": "http://h/b.bin"},
+            "application/json",
+            True,
+            True,
+        ]
 
     def test_radio_from_url_sends_an_empty_body_and_the_encoded_query(self):
         # On From a URL for the radio: POST with no body and from_url percent-encoded; the result is shown.
@@ -306,3 +314,12 @@ class TestFirmwarePageReview:
             + "const before = t.el('c6Log').hidden(); await t.page.showLog(); return [before, t.el('c6Log').hidden()];"
         )
         assert r == [True, False]
+
+
+def test_recovery_text_asks_for_a_reinstall_only_without_radio_firmware():
+    # On the recovery card: the reinstall is conditional on the Radio card showing no firmware.
+    from device_js import FRONTEND
+
+    html = (FRONTEND / "firmware.html").read_text()
+    assert "Afterwards install the radio firmware again" not in html
+    assert "If the Radio card then shows no installed firmware" in html

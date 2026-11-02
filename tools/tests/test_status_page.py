@@ -433,3 +433,51 @@ class TestThreadCards:
             + "t.p = H.fixture(H.PROPS); t.p.result['Network:Name'] = '<b>x</b>'; await t.page.refreshStatus(); await t.page.refreshThread(); return t.el('t-net-name').textContent;"
         )
         assert r == "<b>x</b>"
+
+
+@needs_node
+class TestDashboardPrReview:
+    """PR review findings"""
+
+    def test_leaving_br_running_clears_the_thread_data(self):
+        # On Thread data shown, then a SNIFFER status: fields back to "-", no address rows.
+        r = scenario(
+            page("index", ROUTES)
+            + """
+            await t.page.refreshStatus(); await t.page.refreshThread();
+            t.s = H.fixture(H.STATUS, {mode: 'SNIFFER'}); await t.page.refreshStatus();
+            return [t.el('t-net-name').textContent, t.el('t-id-rloc').textContent, t.el('addr-body').children.length];
+        """
+        )
+        assert r == ["-", "-", 0]
+
+    def test_a_late_answer_after_the_mode_changed_is_dropped(self):
+        # On /get_properties answering after the status went to SNIFFER: nothing rendered, no /ipaddr request.
+        r = scenario(
+            page("index", ROUTES)
+            + """
+            await t.page.refreshStatus();
+            const fetch = t.env.fetch; let release;
+            t.env.fetch = (u, o) => u === '/get_properties'
+                ? new Promise((res) => { release = () => res({status: 200, text: () => Promise.resolve(JSON.stringify(H.PROPS))}); })
+                : fetch(u, o);
+            const pending = t.page.refreshThread();
+            t.s = H.fixture(H.STATUS, {mode: 'SNIFFER'}); await t.page.refreshStatus();
+            release(); await pending;
+            return [t.el('t-net-name').textContent, t.calls.filter((c) => c.url === '/ipaddr').length];
+        """
+        )
+        assert r[0] in ("-", "")
+        assert r[1] == 0
+
+    def test_failed_address_list_clears_the_table(self):
+        # On a good answer and then /ipaddr failing: the old rows are gone.
+        r = scenario(
+            page("index", ROUTES)
+            + """
+            await t.page.refreshStatus(); await t.page.refreshThread();
+            t.a = {error: 1, message: 'busy', result: null}; await t.page.refreshThread();
+            return t.el('addr-body').children.length;
+        """
+        )
+        assert r == 0

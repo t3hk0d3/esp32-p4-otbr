@@ -198,3 +198,56 @@ class TestCapturePage:
             + "t.page.init(); await t.advance(100); return [...new Set(t.calls.map((c) => c.url))].sort();"
         )
         assert r == ["/device/network", "/device/status"]
+
+
+@needs_node
+class TestCapturePrReview:
+    """PR review findings"""
+
+    def test_invalid_channel_replaces_the_command_with_a_hint(self):
+        # On channel 15 then 30: the command no longer shows channel=15.
+        r = scenario(
+            page("capture", status_routes())
+            + """
+            t.page.init(); await t.advance(100);
+            t.el('capChannel').type('15'); const ok = t.el('cap-cmd').textContent;
+            t.el('capChannel').type('30');
+            return [ok.includes('channel=15'), t.el('cap-cmd').textContent];
+        """
+        )
+        assert r[0] is True
+        assert "channel=15" not in r[1] and "11 to 26" in r[1]
+
+    def test_start_sets_the_link_to_the_capture_url(self):
+        # On Start with channel 20 and 10 min: the link points at that capture.
+        r = scenario(
+            page("capture", status_routes())
+            + """
+            t.page.init(); await t.advance(100);
+            t.el('capChannel').type('20'); t.el('len-600').click(); t.el('capStart').click();
+            return t.el('capStart').getAttribute('href');
+        """
+        )
+        assert r == "/device/sniffer.pcap?channel=20&duration=600"
+
+    def test_a_capture_the_board_did_not_start_is_reported(self):
+        # On Start while the board stays in BR_RUNNING: after a few seconds the message says it did not start.
+        r = scenario(
+            page("capture", status_routes())
+            + "t.page.init(); await t.advance(100); t.el('capStart').click(); await t.advance(7000); return t.el('capMsg').textContent;"
+        )
+        assert "did not start" in r
+
+    def test_a_started_capture_is_confirmed(self):
+        # On Start and the board switching to SNIFFER: the message says the capture runs.
+        r = scenario(
+            page(
+                "capture",
+                "(u, o) => ({status: 200, body: u === '/device/status' ? (t.s || H.STATUS) : H.NETWORK})",
+            )
+            + f"""
+            t.page.init(); await t.advance(100); t.el('capStart').click(); t.s = {ACTIVE};
+            await t.advance(7000); return t.el('capMsg').textContent;
+        """
+        )
+        assert "running" in r and "did not start" not in r

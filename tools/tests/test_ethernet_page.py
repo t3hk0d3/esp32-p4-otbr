@@ -795,3 +795,66 @@ class TestEthernetPageReview:
         """
         )
         assert r is True
+
+
+@needs_node
+class TestEthernetPrReview:
+    """PR review findings"""
+
+    @pytest.mark.parametrize("field", ["gw", "dns"])
+    def test_zero_address_means_unset(self, field):
+        # On 0.0.0.0 as gateway or DNS: no error (the board treats it as not set).
+        d = draft(single={"dhcp": False, "cidr": "192.168.1.10/24", field: "0.0.0.0"})
+        assert eth(f"L.validate({json.dumps(d)}).count") == 0
+
+    def test_vlan_with_a_leading_zero_is_no_change(self):
+        # On a running VLAN 10 and the draft "010": no change rows.
+        cur = draft("split")
+        new = draft("split", mgmt={"vlan": "010"})
+        assert eth(f"L.changes({json.dumps(cur)}, {json.dumps(new)})") == []
+
+    def test_review_closes_when_the_running_settings_change(self):
+        # On an open review and a poll with different running settings: the review closes and the tick clears.
+        r = scenario(
+            page("ethernet", "(u, o) => ({status: 200, body: t.n || H.NETWORK})")
+            + START
+            + """
+            t.el('mode-split').click(); t.el('if-mgmt-vlan').type('10'); t.el('if-thread_bb-vlan').type('20');
+            t.el('reviewBtn').click(); t.el('ackBox').tick(true);
+            t.n = H.fixture(H.NETWORK, {active: {mode: 'single', single: {vlan: 7, ipv4: {dhcp: true}}}});
+            await t.page.refreshNetwork();
+            return [t.el('reviewSection').hidden(), t.el('ackBox').checked];
+        """
+        )
+        assert r == [True, False]
+
+    def test_give_up_keeps_the_new_address(self):
+        # On Apply of a static address and a board that never comes back here: the message still names it.
+        r = scenario(
+            page("ethernet", routes())
+            + START
+            + """
+            t.el('if-single-edit').click(); t.el('if-single-staticbtn').click(); t.el('if-single-cidr').type('10.0.0.2/24');
+            t.el('reviewBtn').click(); await t.page.apply();
+            await t.advance(200000);
+            return [t.el('netMsg').textContent, t.page.kit.isBusy()];
+        """
+        )
+        assert "http://10.0.0.2" in r[0] and "5 minutes" in r[0]
+        assert r[1] is False
+
+    def test_lost_reply_to_apply_names_where_to_look(self):
+        # On a dropped connection during the PUT: the error plus where to open the page if it was saved.
+        r = scenario(
+            page(
+                "ethernet",
+                "(u, o) => { if (o.method === 'PUT') throw new Error('reset'); return {status: 200, body: H.NETWORK}; }",
+            )
+            + START
+            + """
+            t.el('if-single-edit').click(); t.el('if-single-staticbtn').click(); t.el('if-single-cidr').type('10.0.0.2/24');
+            t.el('reviewBtn').click(); await t.page.apply();
+            return t.el('netMsg').textContent;
+        """
+        )
+        assert "No answer" in r and "http://10.0.0.2" in r
