@@ -27,11 +27,11 @@ from sketch_v4 import CELL, FRAME, LID_C, RIB, SMA, grille
 
 TABS_Y = (3.0, 65.0)  # label positions
 # corner tabs: (y_lo, y_hi, drop below lid underside, end-leg along the cable wall?)
-CORNER_TABS = ((-0.5, 6.5, 3.5, False), (61.5, 68.5, 3.5, False))
-TAB_W = 7.0
+CORNER_TABS = ((-0.5, 9.5, 3.5, False), (58.5, 68.5, 3.5, False))
+TAB_W = 10.0
 TAB_DROP = 3.5
-TAB_ROOT = 2.0  # wedge-shaped tab: thickness at the lid
-TAB_TIP = 1.6  # inner face tapers from TAB_ROOT to this at the tip
+TAB_ROOT = 2.4  # wedge-shaped tab: thickness at the lid
+TAB_TIP = 1.9  # inner face tapers from TAB_ROOT to this at the tip
 TAB_FLAT = 2.0  # outer face stays flat this far below the lid (bump zone)
 TAB_LEAD = 0.5  # then the outer face tapers in by this much to the tip
 PRY_Y = ()  # pry cut-outs dropped: deferred to a later revision
@@ -321,7 +321,12 @@ def sheet_detail(path):
         + " ".join(f"{a:.1f},{b:.1f}" for a, b in pts)
         + f'" fill="{LID_C}" stroke="#374151" stroke-width="1"/>'
     )
-    z.text(-1.5 * k, -5.2 * k, "bump on the flat part (both sides 45°)", size=11)
+    z.text(
+        -1.5 * k,
+        -5.2 * k,
+        "shallow detent bump (30° ramps), 1.5 mm root fillet",
+        size=11,
+    )
     z.text(
         -1.5 * k, -6.4 * k, "outer lead-in below it: tip glides off the wall", size=11
     )
@@ -336,8 +341,8 @@ def sheet_detail(path):
     )  # cable wall (end wall)
     tab = [
         (-0.8, 0),
-        (7.0, 0),
-        (7.0, -TAB_DROP),
+        (10.0, 0),
+        (10.0, -TAB_DROP),
         (-0.8 + TAB_LEAD, -TAB_DROP),
         (-0.8, -TAB_FLAT),
     ]
