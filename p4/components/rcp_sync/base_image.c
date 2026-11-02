@@ -15,7 +15,8 @@ static bool range_ok(const uint8_t *start, const uint8_t *end)
 esp_err_t rcp_sync_set_base_image(const rcp_sync_base_image_t *image)
 {
     if (!image || !range_ok(image->bootloader_start, image->bootloader_end) || !range_ok(image->ptable_start, image->ptable_end) ||
-            !range_ok(image->updater_start, image->updater_end) || !range_ok(image->version_start, image->version_end)) {
+            !range_ok(image->updater_start, image->updater_end) || !range_ok(image->version_start, image->version_end) ||
+            ((image->migrator_start || image->migrator_end) && !range_ok(image->migrator_start, image->migrator_end))) {
         return ESP_ERR_INVALID_ARG;
     }
     size_t len = (size_t)(image->version_end - image->version_start);

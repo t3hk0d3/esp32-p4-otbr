@@ -30,7 +30,7 @@ help: ## List the targets
 
 # --- build ---
 
-build: ## Release build of c6_updater, c6_rcp and p4
+build: ## Release build of c6_updater, c6_rcp, c6_migrator and p4
 	$(IDF) tools/build_all.sh
 
 build-test: ## Test build (adds the test-only console commands; never ship it)
@@ -40,7 +40,7 @@ reconfigure: ## Refresh the P4 version stamp (the -dirty flag is as of the last 
 	$(IDF) idf.py -C p4 reconfigure
 
 clean: ## Remove all build directories and dist/
-	rm -rf c6_updater/build c6_rcp/build p4/build $(DIST)
+	rm -rf c6_updater/build c6_rcp/build c6_migrator/build p4/build $(DIST)
 	find . -path ./.venv -prune -o -type d -name build -path '*/test_host/build' -print0 | xargs -0 rm -rf
 
 # --- flash over USB ---

@@ -24,6 +24,10 @@ extern const uint8_t c6_base_ptable_end[] asm("_binary_c6_partition_table_bin_en
 extern const uint8_t c6_base_updater_start[] asm("_binary_c6_updater_bin_start");
 extern const uint8_t c6_base_updater_end[] asm("_binary_c6_updater_bin_end");
 
+/** c6_migrator app: sent through the factory ESP-Hosted OTA, followed by the install bundle. */
+extern const uint8_t c6_base_migrator_start[] asm("_binary_c6_migrator_bin_start");
+extern const uint8_t c6_base_migrator_end[] asm("_binary_c6_migrator_bin_end");
+
 /** Updater PROJECT_VER as plain text, no terminating NUL (length is end - start). */
 extern const uint8_t c6_base_version_start[] asm("_binary_c6_base_version_txt_start");
 extern const uint8_t c6_base_version_end[] asm("_binary_c6_base_version_txt_end");
