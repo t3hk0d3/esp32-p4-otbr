@@ -104,6 +104,8 @@ Concurrency:
   fails with `busy`. The REST side already retries its own start on later passes, so no vendored change is needed there.
 - A mode change away from `BR_RUNNING` cancels a running scan (`otMeshDiagCancel`) and leaves it `failed`, error
   `stopped`.
+  - While a scan runs, a 1 s watchdog checks the mode. This catches faults that happen outside `device_api`.
+  - When the watchdog fails the scan this way, it does not call OpenThread. OpenThread may already be gone.
 - Other long operations (my call):
   - While the `device_api` long-op slot is held (OTA, radio firmware push, ROM recovery), `POST` answers 409 `busy`
     with that operation's `detail`.
@@ -161,7 +163,14 @@ This shape is the contract between the firmware and the page:
 - Each router reports one direction of each link. The page pairs them up: the LQ out of A towards B is B's `lq_in` for
   A.
 - The fields from `otMeshDiagQueryChildTable` (`timeout_s` through `csl`, and `ext_address`) are left out when
-  `children_detail` is false.
+  `children_detail` is false. They are also left out for a child the router's child table did not return.
+- Unknown values are left out, not given a fake number (amendment, 2026-11-03):
+  - `version` when the router or child reports no Thread version;
+  - `frame_error_pct` and `message_error_pct` when the child does not track error rates.
+
+  The page shows "–" for a missing value.
+- IPv6 addresses and prefixes are in RFC 5952 short form (`fdde:ad00:beef::/64`). The addresses in the sample above
+  are only illustrative.
 
 ## 4. Page
 
