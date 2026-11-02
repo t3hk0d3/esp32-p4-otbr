@@ -44,6 +44,13 @@ function formatRemaining(seconds) {
   return Math.floor(s / 60) + ':' + (rest < 10 ? '0' : '') + rest;
 }
 
+/** Share of the trial window left, whole percent: the board reverts after NETCFG_TRIAL_TIMEOUT_S (300 s). */
+var TRIAL_WINDOW_S = 300;
+function trialLeftPct(seconds) {
+  var s = Math.min(TRIAL_WINDOW_S, Math.max(0, seconds));
+  return Math.round(s * 100 / TRIAL_WINDOW_S);
+}
+
 /** Uptime in words: "2 d 3 h", "7 h 35 min", "12 min", "40 s". */
 function durationText(seconds) {
   var s = Math.max(0, Math.floor(seconds));
@@ -131,6 +138,7 @@ return {
   wholeNumber : wholeNumber,
   errorMessage : errorMessage,
   formatRemaining : formatRemaining,
+  trialLeftPct : trialLeftPct,
   durationText : durationText,
   shouldPoll : shouldPoll,
   checkUploadSize : checkUploadSize,
@@ -375,6 +383,7 @@ function tickTrial() {
     return;
   var left = Math.max(0, Math.round((trialEnd - env.now()) / 1000));
   setText('trialRemaining', L.formatRemaining(left));
+  $('trialFill').style.width = L.trialLeftPct(left) + '%';
   if (left === 0) {
     // The board reverts and reboots now: the banner and its button are stale until the next answer.
     trialEnd = 0;

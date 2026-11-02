@@ -49,6 +49,17 @@ class TestCommonLogic:
         assert common("L.formatRemaining(299)") == "4:59"
         assert common("L.formatRemaining(0)") == "0:00"
 
+    def test_trial_left_is_a_share_of_the_five_minute_trial(self):
+        # On 300 s: 100; 150 s: 50; 0 s: 0; outside 0..300 it is clamped; whole percent.
+        assert common("[300, 150, 0, 400, -5, 100].map(L.trialLeftPct)") == [
+            100,
+            50,
+            0,
+            100,
+            0,
+            33,
+        ]
+
     @pytest.mark.parametrize(
         ("seconds", "text"),
         [(40, "40 s"), (720, "12 min"), (27303, "7 h 35 min"), (183600, "2 d 3 h")],
@@ -345,6 +356,19 @@ class TestKit:
         """
         )
         assert r == ["1:40", "1:00", "1:30", True]
+
+    def test_trial_bar_shows_the_share_of_the_trial_left(self):
+        # On remaining_s 150 of the 300 s trial, then 60 s later: the bar is half full, then a third full.
+        r = scenario(
+            kit()
+            + f"""
+            const net = {NET};
+            t.kit.renderTrial(net(150).body); const first = t.el('trialFill').style.width;
+            await t.advance(60000); t.kit.tickTrial();
+            return [first, t.el('trialFill').style.width];
+        """
+        )
+        assert r == ["50%", "30%"]
 
     def test_no_trial_hides_the_banner(self):
         # On trial null after a trial: the banner is hidden.

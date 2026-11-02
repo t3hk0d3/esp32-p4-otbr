@@ -12,6 +12,12 @@ release's `versions.txt`.
 - `docs/home-assistant.md`: adding the board to Home Assistant, moving it onto the preferred Thread network, phones and
   Matter, several boards, troubleshooting.
 
+### Changed
+
+- The "settings on trial" banner (Dashboard and device pages) shows the time left as a countdown tile, with the
+  explanation next to it, **Keep new settings** on the right and a bar that drains over the 5 minutes. On a phone the
+  button goes below at full width.
+
 ## [0.2.1] - 2026-11-02
 
 ### Fixed

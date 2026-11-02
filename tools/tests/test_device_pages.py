@@ -54,7 +54,7 @@ PAGES = {
     ),
 }
 
-KIT_IDS = ["trialBanner", "trialRemaining", "confirmBtn", "confirmMsg"]
+KIT_IDS = ["trialBanner", "trialRemaining", "trialFill", "confirmBtn", "confirmMsg"]
 KIT_ENDPOINTS = ["/device/network", "/device/network/confirm", "/device/diag"]
 LIVE_ID = re.compile(r"Msg$|-note$|-offline$|-stale$")
 
