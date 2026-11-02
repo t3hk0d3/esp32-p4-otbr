@@ -205,6 +205,25 @@ esp_err_t rcp_sync_rom_recover(void)
 }
 
 #ifdef OTBR_TEST_BUILD
+esp_err_t rcp_sync_test_c6_write(const rcp_sync_test_image_t *images, size_t count)
+{
+    rom_plan_t plan = {0};
+
+    ESP_RETURN_ON_ERROR(require_jumper(), TAG, "write refused");
+    ESP_RETURN_ON_FALSE(images && count > 0 && count <= ROM_PLAN_MAX_REGIONS, ESP_ERR_INVALID_ARG, TAG,
+                        "1..%d images", ROM_PLAN_MAX_REGIONS);
+    for (size_t i = 0; i < count; i++) {
+        ESP_RETURN_ON_FALSE(images[i].data && images[i].len > 0 && images[i].offset % 0x1000 == 0, ESP_ERR_INVALID_ARG, TAG,
+                            "image %u: empty or offset not 4 KiB aligned", (unsigned)i);
+        plan.regions[i] = (rom_region_t) {
+            .name = images[i].name, .kind = ROM_REGION_WRITE, .offset = images[i].offset, .size = (uint32_t)images[i].len,
+            .data = images[i].data,
+        };
+    }
+    plan.count = count;
+    return run_plan(&plan);
+}
+
 esp_err_t rcp_sync_test_c6_erase(uint32_t offset, uint32_t size)
 {
     rom_plan_t plan;

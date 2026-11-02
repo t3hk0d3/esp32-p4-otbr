@@ -107,6 +107,12 @@ TEST_CASE("On a push whose image the C6 rejected at END: 400 invalid_image", "[d
     TEST_ASSERT_EQUAL_STRING("invalid_image", e.code);
 }
 
+TEST_CASE("On c6_installer.bin failing to go through ESP-Hosted: 502 install_failed", "[device_api]")
+{
+    TEST_ASSERT_EQUAL(502, device_api_map_push_error(RCP_SYNC_ERR_HOSTED_OTA).http_status);
+    TEST_ASSERT_EQUAL_STRING("install_failed", device_api_map_push_error(RCP_SYNC_ERR_HOSTED_OTA).code);
+}
+
 TEST_CASE("On a push that failed in the transfer: 502 push_failed", "[device_api]")
 {
     TEST_ASSERT_EQUAL(502, device_api_map_push_error(ESP_ERR_TIMEOUT).http_status);

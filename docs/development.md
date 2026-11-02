@@ -54,8 +54,14 @@ Tests that need a person or a special rig are deselected by marker and run with 
 - `vlan_switch`: managed switch and Docker macvlan hosts, env `VLAN_MGMT`, `VLAN_THREAD`, `HOST_IF_MGMT`, `HOST_IF_THREAD`.
 - `pd_router`: delegating server in Docker, env `PD_HOST_IF`.
 
+`test_hosted_install.py` (the no-wires first install) skips unless `OTBR_C6_STOCK_URL`, `OTBR_C6_INSTALLER` and
+`OTBR_RCP_IMAGE` are set. `OTBR_C6_STOCK_URL` is an HTTP server on the build directory of an ESP-Hosted C6 slave (e.g.
+esp-hosted-mcu 0.0.27 `slave/`, `idf.py set-target esp32c6 build` with IDF v5.4); the test writes it to the C6 over the
+jumper (console `c6_stock_restore`, with the C6 held in reset) and hides the jumper from the probe (`c6_jumper_ignore`).
+The board ends up in `BR_RUNNING` with the given RCP.
+
 A test that kills the radio (`rcp_kill`, `c6_hold`) leaves a flag: after an aborted run use the console `c6_hold 0` and
-reboot. A Thread peer that stops answering is fixed by an RTS reset. Test builds add console commands (`p4/main/test_cmds.c`)
+reboot (and `c6_jumper_ignore 0` after an aborted `test_hosted_install.py`). A Thread peer that stops answering is fixed by an RTS reset. Test builds add console commands (`p4/main/test_cmds.c`)
 that the on-board tests use; never ship them.
 
 ## CI and releases
@@ -77,7 +83,8 @@ git push origin v0.2.0
 | `otbr.bundle` | P4 app and web UI, for an OTA update |
 | `c6_rcp.bin` | C6 radio firmware from the same build |
 | `p4-flash.zip` | full P4 flash over USB: `esptool --chip esp32p4 write-flash @flash_args` in the unpacked directory |
-| `c6-updater-flash.zip` | C6 base images for the no-jumper first install |
+| `c6_installer.bin` | one-time C6 installer for the no-wires first install on a factory C6 (ESP-Hosted) |
+| `c6-updater-flash.zip` | C6 base images for the USB-UART first install |
 | `third-party-licenses.zip` | license texts of the code linked into the images |
 | `versions.txt`, `SHA256SUMS` | build versions and checksums |
 

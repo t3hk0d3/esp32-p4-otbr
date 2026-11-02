@@ -807,6 +807,12 @@ TEST_CASE("On a ROM recovery that worked and a failed restart: the job result is
     TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_radio_job_result(true, ESP_OK, ESP_FAIL));
 }
 
+TEST_CASE("On a c6_installer push that worked (base only) and a failed restart: the job result is ESP_OK", "[mode_fsm]")
+{
+    /* br_core passes base_only for an installer push as for a recovery: both leave the C6 without RCP firmware. */
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_radio_job_result(true, ESP_OK, ESP_ERR_TIMEOUT));
+}
+
 TEST_CASE("On a ROM recovery that failed: the job result is its error, whatever the restart did", "[mode_fsm]")
 {
     TEST_ASSERT_EQUAL(ESP_FAIL, mode_fsm_radio_job_result(true, ESP_FAIL, ESP_OK));

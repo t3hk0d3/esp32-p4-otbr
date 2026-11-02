@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "esp_log.h"
@@ -21,6 +22,19 @@ static const char *TAG = "rcp_sync";
 /* Largest reply is HELLO; round up to the SPI word size. */
 #define REPLY_BUF_LEN       ((RCP_SYNC_PROTO_HEADER_LEN + RCP_SYNC_PROTO_HELLO_REPLY_LEN + RCP_SYNC_PROTO_CRC_LEN + 3) & ~3u)
 #define ERR_PAYLOAD_LEN     6
+/* After the ESP-Hosted OTA: HELLOs until the updater answers. Each silent HELLO costs EXCHANGE_TRIES link timeouts
+ * (about 3 s on the device), so this is about 3 min: OTA restart (5 s), relocation, the installer's quiet period (30 s,
+ * c6_installer), the install and the updater's boot. The C6 is never reset meanwhile. */
+#define WAIT_UPDATER_HELLOS 60
+
+/* esp_app_desc_t inside an app image: after esp_image_header_t (24 bytes) and the first segment header (8 bytes). */
+#define APP_DESC_OFFSET     32
+#define APP_DESC_MAGIC      0xABCD5432u
+#define APP_DESC_VERSION    16 /* char version[32] */
+#define APP_DESC_PROJECT    48 /* char project_name[32] */
+#define APP_DESC_FIELD_LEN  32
+#define IMAGE_MAGIC         0xE9
+#define IMAGE_HEAD_LEN      (APP_DESC_OFFSET + APP_DESC_PROJECT + APP_DESC_FIELD_LEN)
 
 typedef struct {
     const rcp_sync_link_t *link;
@@ -114,6 +128,31 @@ static void set_text(char *dst, size_t cap, const char *msg)
     }
 }
 
+/* Copy a fixed-size, possibly unterminated text field of the app description. */
+static void desc_field(const uint8_t *p, char *out)
+{
+    memcpy(out, p, APP_DESC_FIELD_LEN);
+    out[APP_DESC_FIELD_LEN] = '\0';
+}
+
+/* Project name and version from the app description at the start of an image. False when it is no app image. */
+static bool image_desc(const uint8_t *img, size_t len, char project[APP_DESC_FIELD_LEN + 1],
+                       char version[APP_DESC_FIELD_LEN + 1])
+{
+    if (len < IMAGE_HEAD_LEN || img[0] != IMAGE_MAGIC || get_u32(img + APP_DESC_OFFSET) != APP_DESC_MAGIC) {
+        return false;
+    }
+    desc_field(img + APP_DESC_OFFSET + APP_DESC_PROJECT, project);
+    desc_field(img + APP_DESC_OFFSET + APP_DESC_VERSION, version);
+    return true;
+}
+
+static bool is_installer(const uint8_t *img, size_t len)
+{
+    char project[APP_DESC_FIELD_LEN + 1], version[APP_DESC_FIELD_LEN + 1];
+    return image_desc(img, len, project, version) && strcmp(project, RCP_SYNC_INSTALLER_PROJECT) == 0;
+}
+
 /* Outcome of one whole-transfer attempt: whether another attempt may help. */
 typedef enum {
     ATTEMPT_RETRY,
@@ -129,9 +168,22 @@ static esp_err_t transfer(sync_ctx_t *ctx, const rcp_fw_source_t *source, uint8_
     uint8_t size_payload[4];
 
     *end = ATTEMPT_RETRY;
+    // The first chunk is read before BEGIN: an installer image is refused before the C6 erases anything.
+    const size_t first = size < CHUNK_MAX ? size : CHUNK_MAX;
+    esp_err_t err = source->read(source->ctx, 0, chunk + DATA_OFFSET_LEN, first);
+    if (err != ESP_OK) {
+        set_text(detail, cap, "reading the firmware source failed");
+        return err;
+    }
+    if (is_installer(chunk + DATA_OFFSET_LEN, first)) {
+        set_text(detail, cap, "c6_installer.bin is for a factory C6; upload c6_rcp.bin");
+        *end = ATTEMPT_FINAL;
+        return RCP_SYNC_ERR_IMAGE_REJECTED;
+    }
+
     put_u32(size_payload, (uint32_t)size);
     ESP_LOGI(TAG, "BEGIN %u bytes", (unsigned)size);
-    esp_err_t err = exchange(ctx, RCP_SYNC_MSG_BEGIN, size_payload, sizeof(size_payload), BEGIN_TIMEOUT_MS, &reply);
+    err = exchange(ctx, RCP_SYNC_MSG_BEGIN, size_payload, sizeof(size_payload), BEGIN_TIMEOUT_MS, &reply);
     if (err != ESP_OK) {
         set_text(detail, cap, "C6 refused or did not answer BEGIN");
         return err;
@@ -141,10 +193,12 @@ static esp_err_t transfer(sync_ctx_t *ctx, const rcp_fw_source_t *source, uint8_
     while (offset < size) {
         size_t n = size - offset < CHUNK_MAX ? size - offset : CHUNK_MAX;
         put_u32(chunk, (uint32_t)offset);
-        err = source->read(source->ctx, offset, chunk + DATA_OFFSET_LEN, n);
-        if (err != ESP_OK) {
-            set_text(detail, cap, "reading the firmware source failed");
-            return err;
+        if (offset > 0) { // the first chunk is in place already
+            err = source->read(source->ctx, offset, chunk + DATA_OFFSET_LEN, n);
+            if (err != ESP_OK) {
+                set_text(detail, cap, "reading the firmware source failed");
+                return err;
+            }
         }
         err = exchange(ctx, RCP_SYNC_MSG_DATA, chunk, (uint16_t)(DATA_OFFSET_LEN + n), DATA_TIMEOUT_MS, &reply);
         if (err == ESP_FAIL && offset == 0 && ctx->err_code == RCP_SYNC_ERR_FLASH) {
@@ -199,6 +253,112 @@ static bool jumper_seen(const rcp_sync_link_t *link)
     return link->jumper_present && link->jumper_present();
 }
 
+/* The factory ESP-Hosted firmware answers on SDIO. Releases the SPI link first (the same lines). */
+static bool esp_hosted_answers(const rcp_sync_link_t *link)
+{
+    if (!link->hosted_detect || !link->hosted_ota || !link->attach_updater) {
+        return false;
+    }
+    link->release();
+    bool present = false;
+    const esp_err_t err = link->hosted_detect(&present);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "looking for ESP-Hosted failed: %s", esp_err_to_name(err));
+    }
+    return err == ESP_OK && present;
+}
+
+/* The source as it was, with its first head_len bytes already read into head (a one-shot source cannot reread them). */
+typedef struct {
+    const rcp_fw_source_t *source;
+    const uint8_t *head;
+    size_t head_len;
+} replay_t;
+
+static esp_err_t replay_read(void *arg, size_t offset, void *buf, size_t len)
+{
+    const replay_t *r = arg;
+    uint8_t *out = buf;
+
+    if (offset < r->head_len) {
+        const size_t n = r->head_len - offset < len ? r->head_len - offset : len;
+        memcpy(out, r->head + offset, n);
+        offset += n;
+        out += n;
+        len -= n;
+    }
+    return len ? r->source->read(r->source->ctx, offset, out, len) : ESP_OK;
+}
+
+/* Wait for the updater without resetting the C6: it boots into the updater once the installer is through. */
+static esp_err_t wait_updater(sync_ctx_t *ctx)
+{
+    esp_err_t err = ctx->link->attach_updater();
+    for (int i = 0; err == ESP_OK && i < WAIT_UPDATER_HELLOS; i++) {
+        rcp_sync_hello_reply_t h;
+        if (hello(ctx, &h) == ESP_OK) {
+            ESP_LOGI(TAG, "updater %s answers after the installer", h.updater_version);
+            return ESP_OK;
+        }
+    }
+    return err == ESP_OK ? ESP_ERR_TIMEOUT : err;
+}
+
+/* First install: c6_installer.bin of this release through the ESP-Hosted OTA, then wait for the updater. */
+static esp_err_t push_installer(sync_ctx_t *ctx, const rcp_fw_source_t *source, uint8_t *head, char *detail, size_t cap,
+                                bool *base_only)
+{
+    const rcp_sync_link_t *link = ctx->link;
+    char project[APP_DESC_FIELD_LEN + 1], version[APP_DESC_FIELD_LEN + 1];
+    char text[160];
+    const size_t head_len = source->total_size < IMAGE_HEAD_LEN ? source->total_size : IMAGE_HEAD_LEN;
+
+    esp_err_t err = source->read(source->ctx, 0, head, head_len);
+    if (err != ESP_OK) {
+        set_text(detail, cap, "reading the firmware source failed");
+        return err;
+    }
+    if (!image_desc(head, head_len, project, version) || strcmp(project, RCP_SYNC_INSTALLER_PROJECT) != 0) {
+        set_text(detail, cap, "C6 runs factory ESP-Hosted: upload c6_installer.bin first");
+        return RCP_SYNC_ERR_IMAGE_REJECTED;
+    }
+    const char *base = link->base_version ? link->base_version() : NULL;
+    if (!base || strcmp(version, base) != 0) {
+        snprintf(text, sizeof(text), "wrong c6_installer.bin: %s, need %s", version,
+                 base ? base : "none");
+        set_text(detail, cap, text);
+        return RCP_SYNC_ERR_IMAGE_REJECTED;
+    }
+
+    ESP_LOGW(TAG, "sending c6_installer %s through the ESP-Hosted OTA", version);
+    const replay_t replay = {.source = source, .head = head, .head_len = head_len};
+    const rcp_fw_source_t through = {.total_size = source->total_size, .read = replay_read, .ctx = (void *) &replay};
+    err = link->hosted_ota(&through, detail, cap);
+    if (err != ESP_OK && err != ESP_ERR_TIMEOUT) {
+        // Refused, or never got that far: the C6 still runs ESP-Hosted and is safe to reset.
+        ESP_LOGE(TAG, "ESP-Hosted OTA failed: %s (%s)", esp_err_to_name(err), detail ? detail : "");
+        return RCP_SYNC_ERR_HOSTED_OTA;
+    }
+    if (err == ESP_ERR_TIMEOUT) {
+        // An unanswered OTAEnd may still have switched the C6 to the installer: wait as after a success, never reset.
+        ESP_LOGW(TAG, "ESP-Hosted OTA timed out (%s); waiting for the updater in case the C6 took the image", detail);
+    }
+    const esp_err_t ota_err = err;
+    err = wait_updater(ctx);
+    if (err != ESP_OK) {
+        if (ota_err != ESP_OK) {
+            return RCP_SYNC_ERR_HOSTED_OTA; // detail names the OTA step that timed out
+        }
+        set_text(detail, cap, "the C6 did not come back after the installer");
+        return err;
+    }
+    set_text(detail, cap, "");
+    if (base_only) {
+        *base_only = true;
+    }
+    return ESP_OK;
+}
+
 esp_err_t rcp_sync_probe_with(const rcp_sync_link_t *link, rcp_sync_probe_result_t *out)
 {
     if (!link || !out) {
@@ -214,6 +374,10 @@ esp_err_t rcp_sync_probe_with(const rcp_sync_link_t *link, rcp_sync_probe_result
 
     probe_updater(ctx, out);
     out->jumper_present = jumper_seen(link); // the banner shows during the reset of an updater entry
+    if (!out->updater_reachable && !out->jumper_present && esp_hosted_answers(link)) {
+        out->esp_hosted = true;
+        strlcpy(out->last_error, RCP_SYNC_ESP_HOSTED_ERROR, sizeof(out->last_error));
+    }
 
     const char *base = link->base_version ? link->base_version() : NULL;
     const rcp_sync_recovery_input_t input = {
@@ -268,9 +432,12 @@ void rcp_sync_recovery_guard_reset(void)
 }
 
 esp_err_t rcp_sync_push_firmware_with(const rcp_sync_link_t *link, const rcp_fw_source_t *source, char *err_detail,
-                                      size_t err_cap)
+                                      size_t err_cap, bool *base_only)
 {
     set_text(err_detail, err_cap, "");
+    if (base_only) {
+        *base_only = false;
+    }
     if (!link || !source || !source->read) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -298,6 +465,10 @@ esp_err_t rcp_sync_push_firmware_with(const rcp_sync_link_t *link, const rcp_fw_
         rcp_sync_hello_reply_t h;
         if (link->enter_updater() != ESP_OK || hello(ctx, &h) != ESP_OK) {
             ESP_LOGW(TAG, "attempt %d: no HELLO reply", attempt);
+            if (attempt == 1 && !jumper_seen(link) && esp_hosted_answers(link)) {
+                result = push_installer(ctx, source, chunk, err_detail, err_cap, base_only);
+                break;
+            }
             set_text(err_detail, err_cap, "updater not responding");
             result = ESP_ERR_TIMEOUT;
             continue;

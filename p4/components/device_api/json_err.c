@@ -132,6 +132,11 @@ device_api_error_t device_api_map_push_error(esp_err_t err)
             400, "invalid_image", NULL
         };
     }
+    if (err == RCP_SYNC_ERR_HOSTED_OTA) {
+        return (device_api_error_t) {
+            502, "install_failed", NULL
+        };
+    }
     return (device_api_error_t) {
         502, "push_failed", NULL
     };
