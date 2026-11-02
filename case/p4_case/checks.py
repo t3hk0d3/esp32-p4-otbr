@@ -28,11 +28,18 @@ OVERHANG_NZ = (
 HORIZONTAL_NZ = -0.99
 BRIDGE_MAX = 18.0  # 8: longest accepted bridge
 DROOP_MAX = 0.5  # small round tops (pin-holes, SMA) sag less than this; accepted
+DROOP_SPAN_MAX = 8.0  # ... as long as they are small
+BRIDGE_WIDTH_MAX = 3.0  # bridges here run across a 2 mm wall
 FIT_STEP_DEG = 1.0
 FIT_MAX_DEG = 30.0
 SMA_ENVELOPE_R = 5.0  # 5.2: free radius around the SMA axis inside the wall
 SMA_ENVELOPE_LEN = 12.0
 HEADER_RIBBON_X = (2.1, 52.9)  # a 40-wire ribbon centred on the header
+# header-slot probes run between the header-end tabs' root fillets (the ribbon's edges may brush them, spec 5.3)
+SLOT_PROBE_X = (
+    HEADER_RIBBON_X[0] + P.TAB_FILLET + 0.2,
+    HEADER_RIBBON_X[1] - P.TAB_FILLET - 0.2,
+)
 
 
 def to_mesh(part: Part) -> trimesh.Trimesh:
@@ -43,10 +50,13 @@ def to_mesh(part: Part) -> trimesh.Trimesh:
 
 
 def _volume(shape) -> float:
-    try:
-        return float(shape.volume) if shape is not None else 0.0
-    except (AttributeError, ValueError):
+    """Volume of a boolean result; an empty result is 0. A failed boolean counts as a collision (inf), never as clear."""
+    if shape is None:
         return 0.0
+    try:
+        return float(shape.volume)
+    except (AttributeError, ValueError):
+        return math.inf
 
 
 def _intersection(a: Part, b: Part) -> float:
@@ -96,7 +106,10 @@ def board_clearance(board: BoardModel, part: Part, name: str) -> CheckResult:
             True,
             f"≥ {CLEARANCE} mm everywhere ({n} samples)",
         )
-    worst = np.argmax(np.minimum(z - (bot - CLEARANCE), (top + CLEARANCE) - z) * hit)
+    depth = np.where(
+        hit, np.minimum(z - (bot - CLEARANCE), (top + CLEARANCE) - z), -np.inf
+    )
+    worst = int(np.argmax(depth))
     x, y, zz = pts[worst]
     return CheckResult(
         f"{name} clears the board",
@@ -127,7 +140,12 @@ def opening_paths_spec() -> dict[str, Part]:
         "RJ45": _box(rj.x0 + 1, rj.x1 - 1, out_y, rj.y0, 1.0, 12.5),
         "microSD": _box(sd.x0 + 0.5, sd.x1 - 0.5, out_y, sd.y0, 0.1, 1.2),
         "header slot": _box(
-            2.0, 53.0, FACTS["header"].y1, P.OUTER[3] + 2, board_z(23.3), board_z(26.4)
+            SLOT_PROBE_X[0],
+            SLOT_PROBE_X[1],
+            FACTS["header"].y1,
+            P.OUTER[3] + 2,
+            board_z(P.HEADER_SLOT_BOTTOM) + 0.05,
+            board_z(P.LID_UNDERSIDE) - 0.05,
         ),
         "SMA": _x_rod(
             P.SMA_Y, board_z(P.SMA_CASE_Z), 5.0, P.INNER[1] - 1, P.OUTER[1] + 2
@@ -141,11 +159,13 @@ def opening_paths_spec() -> dict[str, Part]:
     return paths
 
 
-def opening_paths(base: Part) -> CheckResult:
+def opening_paths(base: Part, lid: Part) -> CheckResult:
+    """Each probe passes through the assembled case (base and lid) without touching it."""
+    case = base + lid
     blocked = [
         name
         for name, probe in opening_paths_spec().items()
-        if _intersection(probe, base) > BOOL_EPS
+        if _intersection(probe, case) > BOOL_EPS
     ]
     return CheckResult(
         "every opening has a clear path",
@@ -162,7 +182,7 @@ def opening_paths(base: Part) -> CheckResult:
 BOARD_CORNER_R = 2.0  # the PCB's corner radius (spec section 3)
 
 
-def _board_bodies() -> list[Part]:
+def board_bodies() -> list[Part]:
     """The board for the motion check: the rounded PCB and the boxes of the parts above it.
 
     Part boxes are clipped to Z ≥ 0: below the PCB they hold only pins, which never reach the walls.
@@ -194,7 +214,7 @@ def fitting_motion(base: Part) -> CheckResult:
     face, drops in between the walls. From there the board slides forward at that tilt and rotates down to 0°, checked
     at every FIT_STEP_DEG and every 0.5 mm of slide.
     """
-    bodies = _board_bodies()
+    bodies = board_bodies()
     back = (
         P.INNER[2] - min(FACTS[k].y0 for k in ("usb", "rj45")) + 0.2
     )  # connectors just inside the wall face
@@ -355,15 +375,61 @@ def nut_circles(board: BoardModel) -> CheckResult:
 # --- opening size, watertight, printability ------------------------------------------------------------------------
 
 
-def opening_size(lid: Part) -> CheckResult:
+def opening_size(base: Part, lid: Part) -> CheckResult:
+    """No way into the assembled case is wider than CELL: lid cells measured, the header-slot passage probed."""
     widths = opening_widths(lid)
     widest = max(widths) if widths else 0.0
-    slot = P.REBATE_FLOOR - P.HEADER_SLOT_BOTTOM
-    ok = widest <= P.CELL + 1e-6 and slot <= P.CELL + 1e-6
+    case = base + lid
+
+    # slabs across the wall's inner face, between the tabs
+    def slab(z0: float, z1: float) -> Part:
+        return _box(*SLOT_PROBE_X, P.INNER[3] - 0.3, P.INNER[3] + 0.3, z0, z1)
+
+    # find the real slot floor: walk down from the lid underside while a thin slab stays clear
+    step = 0.05
+    floor = board_z(P.LID_UNDERSIDE) - step
+    while (
+        floor > board_z(P.STANDOFF_TOP)
+        and _intersection(slab(floor - step, floor), case) <= BOOL_EPS
+    ):
+        floor -= step
+    fits = _intersection(slab(floor + 0.01, floor + P.CELL - 0.05), case) <= BOOL_EPS
+    too_big = _intersection(slab(floor + 0.01, floor + P.CELL + 0.1), case) > BOOL_EPS
+    ok = widest <= P.CELL + 1e-6 and fits and too_big
     return CheckResult(
         "no opening wider than 3.5 mm",
         ok,
-        f"widest lid opening {widest:.2f} mm, header slot {slot:.2f} mm",
+        f"widest lid opening {widest:.2f} mm; header-slot passage {'≥' if fits else '<'} {P.CELL - 0.05:.2f} and "
+        f"{'<' if too_big else '≥'} {P.CELL + 0.1:.2f} mm",
+    )
+
+
+def lid_seats(base: Part, lid: Part) -> CheckResult:
+    """The fitted lid does not overlap the base anywhere (tabs, bumps in their dents, flange in the rebate)."""
+    overlap = _intersection(base, lid)
+    return CheckResult(
+        "lid seats on the base", overlap <= BOOL_EPS, f"overlap {overlap:.3f} mm³"
+    )
+
+
+LED_PROBE = 0.1  # mm: column size for the LED sight lines
+
+
+def led_visible(lid: Part) -> CheckResult:
+    """From straight above, the LED's top face shows through at least one grille cell."""
+    led = FACTS["led"]
+    xs = np.arange(led.x0 + LED_PROBE, led.x1 - LED_PROBE, 0.2)
+    ys = np.arange(led.y0 + LED_PROBE, led.y1 - LED_PROBE, 0.2)
+    top = board_z(P.TOP) + 1
+    free = 0
+    for x in xs:
+        for y in ys:
+            col = _box(x, x + LED_PROBE, y, y + LED_PROBE, led.z1, top)
+            free += _intersection(col, lid) <= 1e-6
+    return CheckResult(
+        "LED visible through the lid",
+        free > 0,
+        f"{free} of {len(xs) * len(ys)} sight lines clear",
     )
 
 
@@ -409,11 +475,13 @@ def printability(part: Part, name: str, top_down: bool) -> CheckResult:
         tri = mesh.triangles[region]
         span = np.ptp(tri[:, :, :2].reshape(-1, 2), axis=0)
         height = float(np.ptp(tri[:, :, 2]))
+        area = float(mesh.area_faces[region].sum())
         if (nz[region] < HORIZONTAL_NZ).all():
-            if max(span) <= BRIDGE_MAX:
+            # a bridge is a narrow strip spanning a gap: short enough and no wider on average than BRIDGE_WIDTH_MAX
+            if max(span) <= BRIDGE_MAX and area / max(span) <= BRIDGE_WIDTH_MAX:
                 continue
-            kind = f"bridge {max(span):.1f} mm"
-        elif height <= DROOP_MAX:
+            kind = f"bridge or ledge {max(span):.1f} × {area / max(span):.1f} mm"
+        elif height <= DROOP_MAX and max(span) <= DROOP_SPAN_MAX:
             continue
         else:
             kind = f"overhang {height:.1f} mm tall"
@@ -432,12 +500,14 @@ def run_all(board: BoardModel, base: Part, lid: Part) -> list[CheckResult]:
         *check_facts(board),
         board_clearance(board, base, "base"),
         *lid_clearance(board, lid),
-        opening_paths(base),
+        opening_paths(base, lid),
+        lid_seats(base, lid),
+        led_visible(lid),
         fitting_motion(base),
         ribbon_plug_fit(base),
         keyhole_volumes(board),
         nut_circles(board),
-        opening_size(lid),
+        opening_size(base, lid),
         watertight(base, "base"),
         watertight(lid, "lid"),
         printability(base, "base", top_down=False),

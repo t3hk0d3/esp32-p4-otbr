@@ -71,7 +71,6 @@ class TestDefaultBase:
         assert solid(base, 27.5, y, P.HEADER_SLOT_BOTTOM - 0.1)
         assert solid(base, 0.3, y, P.HEADER_SLOT_BOTTOM + 1.0)
         assert not solid(base, 0.7, y, P.HEADER_SLOT_BOTTOM + 1.0)
-        assert P.REBATE_FLOOR - P.HEADER_SLOT_BOTTOM == pytest.approx(3.5)
 
     def test_has_two_pin_holes_on_the_plunger_axes_and_the_button_recess(self, base):
         x = P.INNER[0] - 1.2  # inside the left wall
