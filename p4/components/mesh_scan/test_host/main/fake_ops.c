@@ -79,11 +79,12 @@ static int64_t fake_now_ms(void)
     return g_fake.now_ms;
 }
 
-static void fake_arm_cap(uint32_t ms)
+static void fake_arm_cap(uint32_t ms, uint32_t gen)
 {
     g_fake.ops_calls++;
     g_fake.arm_calls++;
     g_fake.armed_ms = ms;
+    g_fake.armed_gen = gen;
 }
 
 static void fake_disarm_cap(void)

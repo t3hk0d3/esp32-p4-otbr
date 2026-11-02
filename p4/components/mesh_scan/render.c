@@ -276,10 +276,12 @@ static void write_child(writer_t *w, const mesh_scan_router_t *r, const mesh_sca
         raw(w, ",\"rssi_last\":");
         i64(w, c->rssi_last);
         key_u64(w, ",\"link_margin_db\":", c->link_margin_db);
-        raw(w, ",\"frame_error_pct\":");
-        percent(w, c->frame_err);
-        raw(w, ",\"message_error_pct\":");
-        percent(w, c->msg_err);
+        if (c->has_err_rate) {
+            raw(w, ",\"frame_error_pct\":");
+            percent(w, c->frame_err);
+            raw(w, ",\"message_error_pct\":");
+            percent(w, c->msg_err);
+        }
         key_u64(w, ",\"version\":", c->version);
         raw(w, ",\"csl\":");
         boolean(w, c->csl);
@@ -301,7 +303,9 @@ static void write_router(writer_t *w, const mesh_scan_router_t *r)
     key_u64(w, ",\"router_id\":", r->router_id);
     raw(w, ",\"ext_address\":");
     ext_address(w, r->ext);
-    key_u64(w, ",\"version\":", r->version);
+    if (r->has_version) {
+        key_u64(w, ",\"version\":", r->version);
+    }
     raw(w, ",\"leader\":");
     boolean(w, r->leader);
     raw(w, ",\"this_device\":");

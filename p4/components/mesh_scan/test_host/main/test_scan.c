@@ -17,6 +17,7 @@ static const mesh_scan_router_t *router(uint8_t id, uint16_t n)
     memset(s_children, 0, sizeof(s_children));
     s_router.router_id = id;
     s_router.rloc16 = RLOC16(id);
+    s_router.has_version = true;
     s_router.version = 5;
     s_router.ext[0] = id;
     for (uint16_t i = 0; i < n; i++) {
@@ -35,7 +36,7 @@ static mesh_scan_child_t table_entry(uint16_t rloc16)
         .rloc16 = rloc16, .ext = { 0xaa, 1, 2, 3, 4, 5, 6, (uint8_t)rloc16 }, .rx_on_when_idle = true,
         .full_thread_device = true, .full_network_data = true, .lq_in = 3, .timeout_s = 240, .age_s = 12,
         .connected_s = 86400, .rssi_avg = -61, .rssi_last = -63, .link_margin_db = 39, .frame_err = 0x0100,
-        .msg_err = 0x0200, .version = 4, .csl = true,
+        .has_err_rate = true, .msg_err = 0x0200, .version = 4, .csl = true,
     };
 }
 
@@ -236,6 +237,7 @@ TEST_CASE("On each router reported: stores ext address, rloc16, router id, versi
     TEST_ASSERT_EQUAL_HEX8_ARRAY(r.ext, got->ext, 8);
     TEST_ASSERT_EQUAL_HEX16(RLOC16(9), got->rloc16);
     TEST_ASSERT_EQUAL(9, got->router_id);
+    TEST_ASSERT_TRUE(got->has_version);
     TEST_ASSERT_EQUAL(5, got->version);
     TEST_ASSERT_TRUE(got->leader);
     TEST_ASSERT_TRUE(got->this_device);
@@ -330,6 +332,7 @@ TEST_CASE("On a child-table entry: fills that child's ext address, timeout, age,
     TEST_ASSERT_EQUAL(-61, c->rssi_avg);
     TEST_ASSERT_EQUAL(-63, c->rssi_last);
     TEST_ASSERT_EQUAL(39, c->link_margin_db);
+    TEST_ASSERT_TRUE(c->has_err_rate);
     TEST_ASSERT_EQUAL_HEX16(0x0100, c->frame_err);
     TEST_ASSERT_EQUAL_HEX16(0x0200, c->msg_err);
     TEST_ASSERT_EQUAL(4, c->version);
@@ -641,6 +644,58 @@ TEST_CASE("On 60 s elapsed while the mode is not BR_RUNNING: state becomes faile
     mesh_scan_on_cap();
     assert_failed(MESH_SCAN_ERR_STOPPED);
     TEST_ASSERT_EQUAL(0, g_fake.snapshot_calls);
+}
+
+// mode watchdog (ruling R6)
+
+TEST_CASE("On each start: arms the cap and the watchdog with a new generation", "[mesh_scan]")
+{
+    start();
+    const uint32_t first = g_fake.armed_gen;
+
+    mesh_scan_core_cancel();
+    TEST_ASSERT_EQUAL(ESP_OK, mesh_scan_core_start());
+    TEST_ASSERT_NOT_EQUAL(first, g_fake.armed_gen);
+}
+
+TEST_CASE("On the mode left while running (the watchdog fires): state becomes failed with error stopped, ops.cancel "
+          "is not called, the cap and the watchdog are disarmed", "[mesh_scan]")
+{
+    const uint8_t ids[] = { 3, 9 };
+
+    discover(ids, 2); // in router 3's child-table query
+    g_fake.br_running = false;
+    const int disarms = g_fake.disarm_calls;
+
+    mesh_scan_on_mode_lost(g_fake.armed_gen);
+    assert_failed(MESH_SCAN_ERR_STOPPED);
+    TEST_ASSERT_EQUAL(0, g_fake.cancel_calls);
+    TEST_ASSERT_EQUAL(0, g_fake.snapshot_calls);
+    TEST_ASSERT_EQUAL(disarms + 1, g_fake.disarm_calls);
+    TEST_ASSERT_EQUAL(g_fake.allocs, g_fake.releases); // the result went with the failure
+}
+
+TEST_CASE("On a mode-lost event of an older generation: the newer scan keeps running", "[mesh_scan]")
+{
+    start();
+    const uint32_t old = g_fake.armed_gen;
+
+    mesh_scan_core_cancel();
+    TEST_ASSERT_EQUAL(ESP_OK, mesh_scan_core_start());
+    mesh_scan_on_mode_lost(old);
+    TEST_ASSERT_EQUAL(MESH_SCAN_RUNNING, view().state);
+    TEST_ASSERT_EQUAL(1, g_fake.cancel_calls); // only the cancel of the first scan
+}
+
+TEST_CASE("On a mode-lost event while not running: does nothing", "[mesh_scan]")
+{
+    start();
+    mesh_scan_on_router(router(3, 0));
+    mesh_scan_on_discover_done(MESH_SCAN_OT_ERROR_NONE);
+    answer_router();
+    done_result();
+    mesh_scan_on_mode_lost(g_fake.armed_gen);
+    done_result();
 }
 
 // any callback

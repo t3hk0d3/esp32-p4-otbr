@@ -4,7 +4,9 @@
 //
 // otMeshDiagCancel (OpenThread mesh_diag.cpp) is synchronous: it aborts the discover CoAP transactions, returns the
 // module to idle and stops its timer, and every response path checks that state first. So no callback of a cancelled
-// operation runs afterwards, and the callbacks below need no guard of their own.
+// operation runs afterwards, and the callbacks below need no guard of their own. The one path that fails a scan
+// without cancelling (the mode watchdog) relies on OpenThread's single mesh-diag slot instead: a new discover gets
+// OT_ERROR_BUSY until the abandoned operation has ended.
 #include <stdatomic.h>
 #include <stdint.h>
 #include <string.h>
@@ -30,8 +32,8 @@
 static const char *TAG = "mesh_scan";
 
 #define LOCK_WAIT_MS 100
-#define CAP_POST_RETRY_MS 100  // the OpenThread task queue was full
-#define CAP_DOWN_RETRY_MS 1000 // OpenThread is not up (radio job, fault): deliver the cap once it is back
+#define CAP_POST_RETRY_MS 100 // the OpenThread task queue was full
+#define WATCHDOG_PERIOD_MS 1000
 
 _Static_assert(MESH_SCAN_OT_ERROR_NONE == OT_ERROR_NONE, "OT error code");
 _Static_assert(MESH_SCAN_OT_ERROR_NO_BUFS == OT_ERROR_NO_BUFS, "OT error code");
@@ -53,13 +55,18 @@ extern esp_err_t esp_openthread_task_queue_post(ot_task_fn_t task, void *arg);
 
 static bool s_initialised;
 static esp_timer_handle_t s_cap_timer;
+static esp_timer_handle_t s_watchdog_timer;
 /** Children of the router in a discover callback (OpenThread task only); PSRAM, MESH_SCAN_MAX_CHILDREN entries. */
 static mesh_scan_child_t *s_children;
 
-// Cap delivery. A cap event posted for an old scan must not cut a newer one short: arm_cap bumps the generation and
-// sets the deadline (both under the OpenThread lock); the timer callback captures the generation armed at that moment
-// and posts it to the OpenThread task, where the cap counts only if the generation still matches and its deadline has
-// passed (the deadline catches a re-arm that raced with the capture).
+// Cap delivery. A cap event posted for an old scan must not cut a newer one short: arm_cap records the scan's
+// generation and the deadline (both under the OpenThread lock); the timer callback captures the generation armed at
+// that moment and posts it to the OpenThread task, where the cap counts only if the generation still matches and its
+// deadline has passed (the deadline catches a re-arm that raced with the capture).
+//
+// Mode watchdog (ruling R6). While a scan runs, a 1 s periodic timer checks the mode; once it is not BR_RUNNING it
+// fails the scan through mesh_scan_on_mode_lost(gen) from the esp_timer task (scan mutex only, no OpenThread call:
+// OpenThread may be torn down). The cap does the same when it finds the mode lost. disarm_cap stops both timers.
 static uint32_t s_cap_gen;          // OpenThread lock
 static int64_t s_cap_deadline_us;   // OpenThread lock
 static atomic_uint_fast32_t s_cap_armed_gen;
@@ -87,7 +94,8 @@ static void router_from_info(mesh_scan_router_t *r, otMeshDiagRouterInfo *info)
     r->rloc16 = info->mRloc16;
     r->router_id = info->mRouterId;
     memcpy(r->ext, info->mExtAddress.m8, sizeof(r->ext));
-    r->version = info->mVersion;
+    r->has_version = info->mVersion != OT_MESH_DIAG_VERSION_UNKNOWN;
+    r->version = r->has_version ? info->mVersion : 0;
     r->leader = info->mIsLeader;
     r->this_device = info->mIsThisDevice;
     r->border_router = info->mIsBorderRouter;
@@ -128,8 +136,9 @@ static void child_from_entry(mesh_scan_child_t *c, const otMeshDiagChildEntry *e
     c->rssi_avg = e->mAverageRssi;
     c->rssi_last = e->mLastRssi;
     c->link_margin_db = e->mLinkMargin;
-    c->frame_err = e->mFrameErrorRate;
-    c->msg_err = e->mMessageErrorRate;
+    c->has_err_rate = e->mSupportsErrRate;
+    c->frame_err = e->mSupportsErrRate ? e->mFrameErrorRate : 0;
+    c->msg_err = e->mSupportsErrRate ? e->mMessageErrorRate : 0;
     c->version = e->mVersion;
     c->csl = e->mCslSynchronized;
 }
@@ -208,22 +217,32 @@ static void cap_timer_start(uint64_t us)
     }
 }
 
-/** esp_timer task: hand the cap to the OpenThread task; while OpenThread is down (its queue may not exist), retry. */
+/**
+ * esp_timer task: hand the cap to the OpenThread task. Outside BR_RUNNING the scan fails here instead (OpenThread and
+ * its task queue may be gone).
+ */
 static void cap_timer_cb(void *arg)
 {
     (void)arg;
     const uint32_t gen = (uint32_t)atomic_load(&s_cap_armed_gen);
-    const br_core_mode_t mode = br_core_get_mode();
-    uint32_t retry_ms = CAP_DOWN_RETRY_MS;
 
-    if (mode == BR_MODE_BR_RUNNING || mode == BR_MODE_SNIFFER) {
-        if (esp_openthread_task_queue_post(cap_on_ot_task, (void *)(uintptr_t)gen) == ESP_OK) {
-            return;
-        }
-        retry_ms = CAP_POST_RETRY_MS;
+    if (br_core_get_mode() != BR_MODE_BR_RUNNING) {
+        mesh_scan_on_mode_lost(gen);
+        return;
     }
-    // ESP_ERR_INVALID_STATE: a new scan armed the timer meanwhile, which supersedes this cap.
-    esp_timer_start_once(s_cap_timer, (uint64_t)retry_ms * 1000);
+    if (esp_openthread_task_queue_post(cap_on_ot_task, (void *)(uintptr_t)gen) != ESP_OK) {
+        // ESP_ERR_INVALID_STATE: a new scan armed the timer meanwhile, which supersedes this cap.
+        esp_timer_start_once(s_cap_timer, (uint64_t)CAP_POST_RETRY_MS * 1000);
+    }
+}
+
+/** esp_timer task, every second while a scan runs. */
+static void watchdog_cb(void *arg)
+{
+    (void)arg;
+    if (br_core_get_mode() != BR_MODE_BR_RUNNING) {
+        mesh_scan_on_mode_lost((uint32_t)atomic_load(&s_cap_armed_gen));
+    }
 }
 
 // Ops (scan mutex held; OpenThread lock held by the caller)
@@ -363,17 +382,24 @@ static int64_t op_now_ms(void)
     return esp_timer_get_time() / 1000;
 }
 
-static void op_arm_cap(uint32_t ms)
+static void op_arm_cap(uint32_t ms, uint32_t gen)
 {
-    s_cap_gen++;
+    s_cap_gen = gen;
     s_cap_deadline_us = esp_timer_get_time() + (int64_t)ms * 1000;
-    atomic_store(&s_cap_armed_gen, s_cap_gen);
+    atomic_store(&s_cap_armed_gen, gen);
     cap_timer_start((uint64_t)ms * 1000);
+    esp_timer_stop(s_watchdog_timer);
+    esp_err_t err = esp_timer_start_periodic(s_watchdog_timer, (uint64_t)WATCHDOG_PERIOD_MS * 1000);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "mode watchdog: %s", esp_err_to_name(err));
+    }
 }
 
 static void op_disarm_cap(void)
 {
-    esp_timer_stop(s_cap_timer); // ESP_ERR_INVALID_STATE when it already fired: the generation check covers that
+    // ESP_ERR_INVALID_STATE when not running (the cap already fired): the generation checks cover that.
+    esp_timer_stop(s_cap_timer);
+    esp_timer_stop(s_watchdog_timer);
 }
 
 static void *op_alloc(size_t size)
@@ -410,21 +436,32 @@ esp_err_t mesh_scan_init(void)
     s_children = heap_caps_calloc(MESH_SCAN_MAX_CHILDREN, sizeof(*s_children), MALLOC_CAP_SPIRAM);
     ESP_RETURN_ON_FALSE(s_children, ESP_ERR_NO_MEM, TAG, "no memory for the children buffer");
 
-    const esp_timer_create_args_t args = {
+    const esp_timer_create_args_t cap_args = {
         .callback = cap_timer_cb,
         .dispatch_method = ESP_TIMER_TASK,
         .name = "mesh_scan_cap",
     };
-    esp_err_t err = esp_timer_create(&args, &s_cap_timer);
-    if (err != ESP_OK) {
-        heap_caps_free(s_children);
-        s_children = NULL;
-        ESP_LOGE(TAG, "cap timer: %s", esp_err_to_name(err));
-        return err;
-    }
+    const esp_timer_create_args_t watchdog_args = {
+        .callback = watchdog_cb,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "mesh_scan_wdog",
+    };
+    esp_err_t ret = ESP_OK;
+    ESP_GOTO_ON_ERROR(esp_timer_create(&cap_args, &s_cap_timer), fail, TAG, "cap timer");
+    ESP_GOTO_ON_ERROR(esp_timer_create(&watchdog_args, &s_watchdog_timer), fail, TAG, "mode watchdog");
+
     mesh_scan_set_ops(&real_ops);
     s_initialised = true;
     return ESP_OK;
+
+fail:
+    if (s_cap_timer) {
+        esp_timer_delete(s_cap_timer);
+        s_cap_timer = NULL;
+    }
+    heap_caps_free(s_children);
+    s_children = NULL;
+    return ret;
 }
 
 esp_err_t mesh_scan_start(void)

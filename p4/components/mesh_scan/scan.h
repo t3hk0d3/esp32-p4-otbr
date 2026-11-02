@@ -37,8 +37,12 @@ struct mesh_scan_ops {
     void (*snapshot)(mesh_scan_result_t *r);       /**< fills network, OMR and SRP */
     bool (*br_running)(void);                      /**< the mode is BR_RUNNING */
     int64_t (*now_ms)(void);
-    void (*arm_cap)(uint32_t ms);                  /**< one-shot; on expiry, mesh_scan_on_cap() from the OT task */
-    void (*disarm_cap)(void);
+    /**
+     * One-shot cap for the scan of generation `gen`; on expiry, mesh_scan_on_cap() from the OT task. Also arms the
+     * mode watchdog, which calls mesh_scan_on_mode_lost(gen) once the mode is not BR_RUNNING.
+     */
+    void (*arm_cap)(uint32_t ms, uint32_t gen);
+    void (*disarm_cap)(void);                      /**< stops the cap and the watchdog */
     void *(*alloc)(size_t size);                   /**< zeroed memory (PSRAM on target), NULL on failure */
     void (*release)(void *p);                      /**< frees what alloc returned; never called with NULL */
 };
@@ -72,6 +76,12 @@ void mesh_scan_on_child_table_done(int ot_error);
 void mesh_scan_on_child_addrs(uint16_t child_rloc16, const uint8_t (*addrs)[16], uint8_t n);
 void mesh_scan_on_child_addrs_done(int ot_error);
 void mesh_scan_on_cap(void);
+
+/**
+ * The mode left BR_RUNNING during the scan of generation `gen` (the watchdog, esp_timer task). Fails that scan with
+ * "stopped" if it still runs. Takes only the scan mutex and never calls ops.cancel: OpenThread may be gone.
+ */
+void mesh_scan_on_mode_lost(uint32_t gen);
 
 #ifdef __cplusplus
 }

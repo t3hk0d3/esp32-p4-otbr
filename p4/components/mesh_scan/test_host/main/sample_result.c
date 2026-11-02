@@ -34,6 +34,7 @@ static mesh_scan_router_t *router(uint8_t id, uint16_t rloc16, uint64_t ext_addr
     r->responded = true;
     r->router_id = id;
     r->rloc16 = rloc16;
+    r->has_version = true;
     r->version = 5;
     r->children_detail = true;
     ext(r->ext, ext_addr);
@@ -57,6 +58,7 @@ static void child(mesh_scan_router_t *r, uint16_t rloc16, uint64_t ext_addr, boo
     c->rssi_avg = -61;
     c->rssi_last = -63;
     c->link_margin_db = 39;
+    c->has_err_rate = true;
     c->frame_err = 0x0100; // 0.39 %
     c->msg_err = 0;
     c->version = 4;

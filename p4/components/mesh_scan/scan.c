@@ -39,6 +39,7 @@ static struct {
     uint8_t routers;  /**< routers to query, set when discover ends */
     uint8_t queried;  /**< routers finished */
     int64_t end_ms;
+    uint32_t gen;     /**< bumped by every scan start: cap and watchdog events carry it */
     uint16_t children_capacity[MESH_SCAN_MAX_ROUTERS];
 } s;
 
@@ -255,7 +256,8 @@ esp_err_t mesh_scan_core_start(void)
     s.state = MESH_SCAN_RUNNING;
     s.error = MESH_SCAN_ERR_NONE;
     s.phase = PHASE_DISCOVER;
-    s.ops.arm_cap(MESH_SCAN_CAP_MS);
+    s.gen++;
+    s.ops.arm_cap(MESH_SCAN_CAP_MS, s.gen);
 
     int err = s.ops.discover();
     if (err == MESH_SCAN_OT_ERROR_BUSY) {
@@ -370,6 +372,7 @@ void mesh_scan_on_router(const mesh_scan_router_t *in)
     r->rloc16 = in->rloc16;
     r->router_id = in->router_id;
     memcpy(r->ext, in->ext, sizeof(r->ext));
+    r->has_version = in->has_version;
     r->version = in->version;
     r->leader = in->leader;
     r->this_device = in->this_device;
@@ -480,6 +483,7 @@ void mesh_scan_on_child_entry(const mesh_scan_child_t *in)
     c->rssi_avg = in->rssi_avg;
     c->rssi_last = in->rssi_last;
     c->link_margin_db = in->link_margin_db;
+    c->has_err_rate = in->has_err_rate;
     c->frame_err = in->frame_err;
     c->msg_err = in->msg_err;
     c->version = in->version;
@@ -553,5 +557,15 @@ void mesh_scan_on_cap(void)
         fail(MESH_SCAN_ERR_STOPPED);
     }
 out:
+    unlock();
+}
+
+void mesh_scan_on_mode_lost(uint32_t gen)
+{
+    lock();
+    if (s.state == MESH_SCAN_RUNNING && gen == s.gen) {
+        ESP_LOGW(TAG, "mode left BR_RUNNING during the scan");
+        fail(MESH_SCAN_ERR_STOPPED);
+    }
     unlock();
 }

@@ -40,6 +40,7 @@ typedef struct {
     int8_t rssi_avg;
     int8_t rssi_last;
     uint8_t link_margin_db;
+    bool has_err_rate;  /**< the parent tracks the error rates; frame_err and msg_err are meaningless otherwise */
     uint16_t frame_err; /**< raw 0..0xffff, 0xffff = 100 % */
     uint16_t msg_err;   /**< raw 0..0xffff */
     uint16_t version;
@@ -54,6 +55,7 @@ typedef struct {
     uint16_t rloc16;
     uint8_t router_id;
     uint8_t ext[8];
+    bool has_version; /**< the router reported its Thread version */
     uint16_t version;
     bool leader;
     bool this_device;

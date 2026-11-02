@@ -33,6 +33,7 @@ typedef struct {
     int snapshot_calls;
     int arm_calls;
     uint32_t armed_ms;
+    uint32_t armed_gen;
     int disarm_calls;
     int allocs;
     int releases;

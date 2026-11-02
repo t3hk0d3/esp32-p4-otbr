@@ -252,6 +252,39 @@ TEST_CASE("On done: writes error rates as percent with one decimal", "[mesh_scan
     sink_free(&s);
 }
 
+TEST_CASE("On done: omits the version key of a router whose version is unknown", "[mesh_scan]")
+{
+    mesh_scan_result_t *result = sample_result();
+    const mesh_scan_view_t view = done_view(result);
+    sink_t s;
+
+    result->routers[9].has_version = false;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "\"router_id\":9,\"ext_address\":\"d61a7c03f4e2b918\",\"leader\":true,");
+    assert_contains(out, "\"router_id\":3,\"ext_address\":\"00000000000000a1\",\"version\":5,\"leader\":");
+    assert_json(out);
+    sink_free(&s);
+}
+
+TEST_CASE("On done: omits frame_error_pct and message_error_pct of a child that does not track error rates",
+          "[mesh_scan]")
+{
+    mesh_scan_result_t *result = sample_result();
+    const mesh_scan_view_t view = done_view(result);
+    sink_t s;
+
+    result->routers[9].children[0].has_err_rate = false;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "{\"rloc16\":9217,\"ext_address\":\"1c88f02ab4d6e5a3\",\"mode\":{\"rx_on_when_idle\":false,"
+                    "\"full_thread_device\":false,\"full_network_data\":false},\"lq_in\":3,\"timeout_s\":240,"
+                    "\"age_s\":12,\"connected_s\":86400,\"rssi_avg\":-61,\"rssi_last\":-63,\"link_margin_db\":39,"
+                    "\"version\":4,\"csl\":false,");
+    assert_json(out);
+    sink_free(&s);
+}
+
 TEST_CASE("On failed: writes error (\"busy\" | \"stopped\" | \"no_memory\") and age_s, no result", "[mesh_scan]")
 {
     const struct {
