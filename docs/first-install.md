@@ -126,7 +126,8 @@ jumper is fitted. You write the three C6 images yourself with `esptool` over H7,
 
 The board needs a dataset before it does anything. Either:
 
-- Web UI: `http://<board>/network.html`, "Form" a new network (or "Join" an existing one), then check the dashboard.
+- Web UI: `http://<board>/network.html`, "Form" a new network, "Join" a scanned one, or "Join with Dataset" with the
+  active dataset TLVs (hex) of an existing network; then check the dashboard.
 - Home Assistant: add the OpenThread Border Router integration with the URL `http://<board>`; it creates or imports the dataset.
 - `python-otbr-api` (`pip install python-otbr-api aiohttp`):
 
