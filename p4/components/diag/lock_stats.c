@@ -31,6 +31,7 @@ void diag_lock_on_acquire(diag_lock_stats_t *s, uint64_t now_us, uint32_t wait_u
 {
     diag_lock_bucket_t *b = bucket_for(s, now_us);
 
+    s->wait_us_total += wait_us;
     if (wait_us > s->max_wait_us) {
         s->max_wait_us = wait_us;
     }
@@ -55,6 +56,7 @@ void diag_lock_on_release(diag_lock_stats_t *s, uint64_t now_us, const char *tas
     const uint32_t hold = clamp_us(now_us - s->hold_start_us);
     diag_lock_bucket_t *b = bucket_for(s, now_us);
 
+    s->hold_us_total += now_us - s->hold_start_us;
     if (hold > s->max_hold_us) {
         s->max_hold_us = hold;
         set_name(s->hold_task, task);
@@ -71,6 +73,8 @@ void diag_lock_view(const diag_lock_stats_t *s, uint64_t now_us, diag_lock_view_
 
     memset(out, 0, sizeof(*out));
     out->since_boot.acquisitions = s->acquisitions;
+    out->hold_us_total = s->hold_us_total;
+    out->wait_us_total = s->wait_us_total;
     out->since_boot.max_hold_us = s->max_hold_us;
     out->since_boot.max_wait_us = s->max_wait_us;
     set_name(out->since_boot.hold_task, s->hold_task);

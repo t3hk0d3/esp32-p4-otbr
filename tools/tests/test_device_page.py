@@ -114,15 +114,22 @@ class TestPageFiles:
         assert total < WEB_BUDGET_BYTES
 
 
+TOP_LEVEL_ROUTES = {
+    "/metrics"
+}  # device_api routes outside /device/ (Prometheus scrapes /metrics by default)
+
+
 class TestRouting:
     """device_api URI table against the static file handler"""
 
     def test_registered_device_routes_are_exact_paths_under_device_slash(self):
-        # On the route table: every URI starts with /device/ and has no wildcard, so /device.html reaches the /* file handler.
+        # On the route table: every URI is exact (no wildcard) and under /device/ or one of the allowed top-level
+        # paths, so /device.html and the other static files reach the /* file handler.
         source = DEVICE_API.read_text()
         uris = re.findall(r'\{"(/[^"]*)", HTTP_[A-Z]+, ', source)
         assert uris
-        assert all(u.startswith("/device/") and "*" not in u for u in uris)
+        assert all("*" not in u for u in uris)
+        assert all(u.startswith("/device/") or u in TOP_LEVEL_ROUTES for u in uris)
 
     def test_every_endpoint_the_page_uses_is_registered_by_the_api(self):
         # On the route table: all endpoints of the page exist in the device_api table.

@@ -29,7 +29,7 @@ Get the board from [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.
 - **Fixes its own radio.** With three optional jumper wires, the board repairs the C6 radio by itself and captures its
   console.
 - **Shows what it is doing.** A device page and `/device/diag` report CPU load per core and task, memory and
-  OpenThread lock timings.
+  OpenThread lock timings, and `/metrics` exports them with the Thread figures to Prometheus.
 
 ## Compared with the usual setups
 
@@ -82,7 +82,7 @@ paths.
 
 Everything is in [`docs/`](docs/README.md): [building](docs/building.md), [updates](docs/updates.md),
 [API and web UI](docs/api.md), [networking and VLANs](docs/networking.md), [sniffer](docs/sniffer.md),
-[maintenance jumper](docs/maintenance-jumper.md), [diagnostics](docs/diagnostics.md),
+[maintenance jumper](docs/maintenance-jumper.md), [diagnostics](docs/diagnostics.md), [Prometheus metrics](docs/metrics.md),
 [troubleshooting and limitations](docs/troubleshooting.md) and [development](docs/development.md). Run `make help`
 to list the targets for building, flashing, updating and testing.
 

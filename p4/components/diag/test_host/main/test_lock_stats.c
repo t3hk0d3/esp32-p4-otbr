@@ -77,6 +77,33 @@ TEST_CASE("On nested acquire by the holder: only the outermost pair counts and t
     TEST_ASSERT_EQUAL(900, v.since_boot.max_hold_us);
 }
 
+TEST_CASE("On acquires, including timeouts: adds every wait to wait_us_total", "[diag]")
+{
+    diag_lock_stats_t s = {0};
+    diag_lock_view_t v;
+
+    diag_lock_on_acquire(&s, 10 * S, 30, true);
+    diag_lock_on_release(&s, 10 * S + 100, "ot");
+    diag_lock_on_acquire(&s, 11 * S, 70, false);
+    diag_lock_view(&s, 12 * S, &v);
+    TEST_ASSERT_EQUAL_UINT64(100, v.wait_us_total);
+}
+
+TEST_CASE("On outermost releases: adds each hold to hold_us_total; nested releases add nothing", "[diag]")
+{
+    diag_lock_stats_t s = {0};
+    diag_lock_view_t v;
+
+    diag_lock_on_acquire(&s, 10 * S, 0, true);
+    diag_lock_on_acquire(&s, 10 * S + 100, 0, true);
+    diag_lock_on_release(&s, 10 * S + 200, "ot");
+    diag_lock_on_release(&s, 10 * S + 900, "ot");
+    diag_lock_on_acquire(&s, 11 * S, 0, true);
+    diag_lock_on_release(&s, 11 * S + 100, "ot");
+    diag_lock_view(&s, 12 * S, &v);
+    TEST_ASSERT_EQUAL_UINT64(1000, v.hold_us_total);
+}
+
 TEST_CASE("On release of a free lock: ignored", "[diag]")
 {
     diag_lock_stats_t s = {0};

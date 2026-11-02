@@ -11,6 +11,7 @@
 #include "rcp_sync.h"
 #include "device_api.h"
 #include "diag.h"
+#include "metrics.h"
 #include "esp_br_web.h"
 #include "console.h"
 #include "eth.h"
@@ -56,6 +57,12 @@ void app_main(void)
 
     if (diag_err != ESP_OK) {
         ESP_LOGE(TAG, "diag_start: %s, /device/diag answers 503", esp_err_to_name(diag_err));
+    }
+    // The Thread collector of /metrics is not essential either: without it /metrics serves device metrics only.
+    const esp_err_t metrics_err = metrics_start();
+
+    if (metrics_err != ESP_OK) {
+        ESP_LOGE(TAG, "metrics_start: %s, /metrics has no Thread series", esp_err_to_name(metrics_err));
     }
     // NVS that cannot be initialised (e.g. no free pages) must not boot-loop the board: the rollback target has the
     // same NVS. The device boots degraded (see br_core_note_storage_init); NVS is never erased here.

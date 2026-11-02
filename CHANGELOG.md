@@ -9,6 +9,9 @@ release's `versions.txt`.
 
 ### Added
 
+- `GET /metrics`: device health (CPU time per core and task, stacks, heap, OpenThread lock) and Thread figures (role,
+  mesh size, MAC and IPv6 counters, border routing, SRP) in the Prometheus text format. Thread figures are collected
+  every 10 s with a 10 ms lock timeout, so a scrape never waits for OpenThread. See `docs/metrics.md`.
 - `Makefile` as the single entry point for building, flashing, network updates, packaging and tests (`make help`); CI
   uses the same targets.
 

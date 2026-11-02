@@ -63,6 +63,9 @@ esp_err_t netcfg_confirm(httpd_req_t *req);
 /** Erase the stored configs and reboot: the next boot uses the defaults. */
 esp_err_t netcfg_reset(void);
 
+/** A trial configuration waits for confirmation. false before netcfg_start. */
+bool netcfg_trial_pending(void);
+
 /**
  * JSON for GET /device/network: the running mode, the active config, the trial (config plus remaining_s) or null, the number of
  * received frames the VLAN demux dropped (vlan_rx_dropped), `fallback` (true, with `error`, when the stored config could not

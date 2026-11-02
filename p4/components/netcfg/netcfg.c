@@ -330,6 +330,18 @@ static cJSON *trial_json(const netcfg_config_t *cfg, uint32_t remaining_s)
     return item;
 }
 
+bool netcfg_trial_pending(void)
+{
+    if (!s.ready) {
+        return false;
+    }
+    xSemaphoreTake(s.lock, portMAX_DELAY);
+    const bool pending = s.trial.on_trial;
+
+    xSemaphoreGive(s.lock);
+    return pending;
+}
+
 char *netcfg_state_json(void)
 {
     netcfg_config_t running, active;

@@ -25,6 +25,8 @@ typedef struct {
     uint32_t depth;         /**< recursion depth of the current holder, 0 = free */
     uint64_t hold_start_us; /**< when the outermost acquire succeeded */
     uint32_t acquisitions;  /**< outermost acquires since boot */
+    uint64_t hold_us_total; /**< sum of the outermost holds since boot */
+    uint64_t wait_us_total; /**< sum of every acquire's wait since boot, timeouts included */
     uint32_t max_hold_us;
     uint32_t max_wait_us;
     char hold_task[DIAG_LOCK_NAME_MAX]; /**< the task of the longest hold */
@@ -41,6 +43,8 @@ typedef struct {
 typedef struct {
     diag_lock_totals_t since_boot;
     diag_lock_totals_t last_60s;
+    uint64_t hold_us_total; /**< since boot */
+    uint64_t wait_us_total; /**< since boot */
 } diag_lock_view_t;
 
 /**
