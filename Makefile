@@ -23,6 +23,9 @@ SIZES_BASE ?=
 SIZES_BASE_LABEL ?=
 MKDOCS ?= uvx --with mkdocs-material mkdocs
 SITE ?= site
+CASE_PY ?= PYTHONPATH=case uv run --quiet --python 3.12 --no-project --with build123d==0.13.0 --with trimesh==5.1.1 \
+	--with numpy==2.5.4 --with matplotlib==3.11.2 --with rtree==1.4.1 --with scipy==1.18.1 --with pytest==9.1.1 python
+BOARD_STEP := .artifacts/board/board.stp
 
 IDF := $(if $(shell command -v idf.py),,. "$(IDF_EXPORT)" >/dev/null &&)
 # The firmware target (BOARD_ID and CHIP_ID, both or neither for the default one) as key=value words from tools/targets.py.
@@ -37,7 +40,8 @@ target_option = $(if $(BOARD_ID),--target $(BOARD_ID)/$(CHIP_ID))
 board_url = $(if $(BOARD),http://$(BOARD),$(error set BOARD=<board address>, e.g. make $@ BOARD=192.168.1.50))
 
 .PHONY: help build build-test build-release reconfigure clean flash monitor erase c6-flash-base bundle package sizes sizes-report ota radio recover \
-	status zigbee-test-device docs docs-serve docs-firmware test test-host test-vendored test-tools test-target lan-ping-up lan-ping-down lint routing-vectors
+	status zigbee-test-device docs docs-serve docs-firmware test test-host test-vendored test-tools test-target lan-ping-up lan-ping-down lint routing-vectors \
+	case-board case case-test
 
 help: ## List the targets
 	@awk -F':.*## ' '/^[a-z0-9-]+:.*## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -152,6 +156,17 @@ lan-ping-up: ## Disposable LAN container that reaches Thread through the board, 
 
 lan-ping-down: ## Remove the latency tests' LAN container
 	tools/lan_ping.sh down
+
+# --- case (3D-printable enclosure, docs/case.md) ---
+
+case-board: ## Download and verify the vendor 3D model of the board (.artifacts/board/board.stp)
+	tools/fetch_board_model.sh
+
+case: case-board ## Build the case STL/STEP files and previews into dist/case/ and run the fit checks
+	$(CASE_PY) -m p4_case.build --board $(BOARD_STEP) --out $(DIST)/case --check
+
+case-test: case-board ## Tests of the case model and its fit checks (slow: loads the board model)
+	$(CASE_PY) -m pytest $(or $(TEST),case/tests) -q -p no:cacheprovider
 
 lint: ## Format and lint checks (pre-commit)
 	uvx pre-commit run --all-files
