@@ -36,6 +36,14 @@ reason, spec reference.
    (`thread_rest_send`), Web GUI `{"error","result","message"}` (`pack_response`, `error` = `OT_ERROR_INVALID_STATE`),
    resources `{"ErrorCode","ErrorMessage"}` (`resource_status`). Details: 409 `sniffer active`, 503
    `radio not available`. (spec 5.7, 5.8)
+   The six functions called under `GUARD_LOCKED_CALL` (`handle_openthread_form_network_request`,
+   `handle_openthread_add_network_prefix_request`, `handle_openthread_delete_network_prefix_request`,
+   `handle_openthread_network_commission_request`, `handle_openthread_add_ipaddr_request`,
+   `handle_openthread_delete_ipaddr_request`) no longer take the OpenThread lock themselves (2026-11-02). Upstream
+   they did, so the lock was held twice. ESP-IDF's `otPlatUdpSocket` drops the task switching lock once while it waits
+   for the lwIP thread, and the lwIP thread needs that lock to send into the Thread interface: Form network (Thread up
+   opens the DNS-SD socket while the multicast leaves of the interface down are queued) deadlocked the web server, lwIP,
+   OpenThread and the event loop, without a watchdog reset. Test: `tools/tests/test_web_gui_locking.py`.
 3. Applied (Task 20; split into pages 2026-11). `esp_ot_br_server`: device pages. Rewritten upstream file
    `frontend/index.html` (the Dashboard becomes the status page: our status cards plus the upstream Thread network,
    identifiers and address table, read from `/get_properties` and `/ipaddr` only in BR_RUNNING; the PSKc is masked until

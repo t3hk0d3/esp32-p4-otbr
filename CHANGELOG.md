@@ -7,6 +7,13 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Web UI "Form Network" froze the board until it was power-cycled: the web server held the OpenThread lock twice,
+  and bringing Thread up deadlocked with the lwIP thread (no Ethernet, no web UI, no Thread, no watchdog reset). Adding
+  or removing an on-mesh prefix or a Thread address, and starting the commissioner, held the lock the same way and are
+  fixed too.
+
 ## [0.2.0] - 2026-11-02
 
 ### Added

@@ -613,7 +613,7 @@ otError handle_openthread_form_network_request(const cJSON *request, cJSON *log)
     otOperationalDataset dataset;
     add_prefix_field(param.on_mesh_prefix);
 
-    esp_openthread_lock_acquire(portMAX_DELAY);
+    /* Patch 2: the caller's GUARD_LOCKED_CALL holds the OpenThread lock; taking it again here deadlocks (see PATCHES.md) */
     ret = OT_ERROR_FAILED;
     ERROR_EXIT(otThreadSetEnabled(ins, false), exit, API_TAG, "Failed to stop Thread");
     ESP_LOGI(API_TAG, "thread stop");
@@ -640,7 +640,6 @@ otError handle_openthread_form_network_request(const cJSON *request, cJSON *log)
 
     ret = OT_ERROR_NONE;
 exit:
-    esp_openthread_lock_release();
     if (ret == OT_ERROR_NONE)
         cJSON_SetValuestring(log, "Submit successful, forming...");
     else
@@ -822,7 +821,7 @@ otError handle_openthread_add_network_prefix_request(const cJSON *request)
     config.mDefaultRoute = default_route;
     ESP_RETURN_ON_FALSE(!parse_ipv6_prefix_from_string(str_prefix, &config.mPrefix), OT_ERROR_FAILED, API_TAG,
                         "Failed to parse prefix");
-    esp_openthread_lock_acquire(portMAX_DELAY);
+    /* Patch 2: the caller's GUARD_LOCKED_CALL holds the OpenThread lock; taking it again here deadlocks (see PATCHES.md) */
     ERROR_EXIT(network_prefix_add(&config), exit, API_TAG, "Failed to add thread prefix");
 #if OPENTHREAD_CONFIG_BORDER_ROUTER_ENABLE
     ERROR_EXIT(otBorderRouterRegister(esp_openthread_get_instance()), exit, API_TAG, "Failed to register in data net");
@@ -831,7 +830,6 @@ otError handle_openthread_add_network_prefix_request(const cJSON *request)
 #endif
 
 exit:
-    esp_openthread_lock_release();
     return ret;
 }
 
@@ -849,7 +847,7 @@ otError handle_openthread_delete_network_prefix_request(const cJSON *request)
     ESP_RETURN_ON_FALSE(!parse_ipv6_prefix_from_string(str_prefix, &ip6_prefix), OT_ERROR_FAILED, API_TAG,
                         "Failed to parse prefix");
 
-    esp_openthread_lock_acquire(portMAX_DELAY);
+    /* Patch 2: the caller's GUARD_LOCKED_CALL holds the OpenThread lock; taking it again here deadlocks (see PATCHES.md) */
     ERROR_EXIT(otBorderRouterRemoveOnMeshPrefix(esp_openthread_get_instance(), &ip6_prefix), exit, API_TAG,
                "Failed to remove thread prefix");
 #if OPENTHREAD_CONFIG_BORDER_ROUTER_ENABLE
@@ -859,7 +857,6 @@ otError handle_openthread_delete_network_prefix_request(const cJSON *request)
 #endif
 
 exit:
-    esp_openthread_lock_release();
     return ret;
 }
 
@@ -898,7 +895,7 @@ otError handle_openthread_network_commission_request(const cJSON *request)
     pskd = cJSON_GetStringValue(cJSON_GetObjectItem(request, "pskd"));
     ESP_RETURN_ON_FALSE(pskd, OT_ERROR_INVALID_ARGS, API_TAG, "Failed to get pskd value");
 
-    esp_openthread_lock_acquire(portMAX_DELAY);
+    /* Patch 2: the caller's GUARD_LOCKED_CALL holds the OpenThread lock; taking it again here deadlocks (see PATCHES.md) */
     for (int i = 0; i < 5; i++) {
         switch (otCommissionerGetState(ins)) {
         case OT_COMMISSIONER_STATE_DISABLED:
@@ -929,7 +926,6 @@ otError handle_openthread_network_commission_request(const cJSON *request)
         }
     }
 exit:
-    esp_openthread_lock_release();
     return ret;
 }
 
@@ -1416,7 +1412,7 @@ cJSON *handle_openthread_add_ipaddr_request(const cJSON *request)
     otNetifAddress netif_addr;
     memset(&netif_addr, 0, sizeof(netif_addr));
 
-    esp_openthread_lock_acquire(portMAX_DELAY);
+    /* Patch 2: the caller's GUARD_LOCKED_CALL holds the OpenThread lock; taking it again here deadlocks (see PATCHES.md) */
     otError err = otIp6AddressFromString(addr_json->valuestring, &netif_addr.mAddress);
     if (err == OT_ERROR_NONE) {
         netif_addr.mPrefixLength = 64;
@@ -1425,7 +1421,6 @@ cJSON *handle_openthread_add_ipaddr_request(const cJSON *request)
         netif_addr.mAddressOrigin = OT_ADDRESS_ORIGIN_MANUAL;
         err = otIp6AddUnicastAddress(esp_openthread_get_instance(), &netif_addr);
     }
-    esp_openthread_lock_release();
 
     if (err == OT_ERROR_NONE) {
         cJSON_AddStringToObject(result, "status", "ok");
@@ -1458,12 +1453,11 @@ cJSON *handle_openthread_delete_ipaddr_request(const cJSON *request)
 
     otIp6Address addr;
 
-    esp_openthread_lock_acquire(portMAX_DELAY);
+    /* Patch 2: the caller's GUARD_LOCKED_CALL holds the OpenThread lock; taking it again here deadlocks (see PATCHES.md) */
     otError err = otIp6AddressFromString(addr_json->valuestring, &addr);
     if (err == OT_ERROR_NONE) {
         err = otIp6RemoveUnicastAddress(esp_openthread_get_instance(), &addr);
     }
-    esp_openthread_lock_release();
 
     if (err == OT_ERROR_NONE) {
         cJSON_AddStringToObject(result, "status", "ok");
