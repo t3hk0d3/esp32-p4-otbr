@@ -348,6 +348,7 @@ static esp_err_t init_openthread(void)
     esp_openthread_lock_acquire(portMAX_DELAY);
     esp_openthread_cli_init();
     esp_openthread_lock_release();
+    br_core_test_ot_command_set_running(true);
 #endif
     return ESP_OK;
 }
@@ -774,6 +775,9 @@ static void teardown_openthread(void)
     // its UDP callbacks) and deletes the lock itself, so there is no release afterwards. After an initialisation that
     // was abandoned (an incompatible RCP parks the task inside esp_openthread_init) there is nothing safe to deinit.
     if (s_core.ot_initialised) {
+#ifdef OTBR_TEST_BUILD
+        br_core_test_ot_command_set_running(false); // the CLI's task queue goes with esp_openthread_deinit
+#endif
         esp_openthread_lock_acquire(portMAX_DELAY);
         esp_openthread_deinit();
         s_core.ot_initialised = false;
