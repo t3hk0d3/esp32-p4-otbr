@@ -212,7 +212,7 @@ function linkText(link) {
 
 /** Colour of an LQI: 3 green, 2 amber, 1 red, anything else grey. */
 function lqColor(q) {
-  return q >= 3 ? '#1e7e34' : q === 2 ? '#b35c00' : q === 1 ? '#dc3545' : '#999999';
+  return q >= 3 ? '#1e7e34' : q === 2 ? '#a35f00' : q === 1 ? '#c62828' : '#5f5f5f';
 }
 
 /* ---- names ---- */

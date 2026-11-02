@@ -1,7 +1,5 @@
 """Topology page (BDD: TopologyLogic). Runs static/topology.js under node."""
 
-import json
-
 from device_js import logic, needs_node
 
 # The sketch mesh as a JS literal. R: this board 0x8800 is a router. B: the same mesh with this board as a child.
@@ -69,9 +67,7 @@ def plain(expression):
     return logic("topology", expression)
 
 
-NETWORK = (
-    "{mesh_local_prefix: 'fdde:ad00:beef:0::/64', omr_prefixes: ['2001:db8:4a2:1::/64', 'fd7a:91c3:22e0:1::/64']}"
-)
+NETWORK = "{mesh_local_prefix: 'fdde:ad00:beef:0::/64', omr_prefixes: ['2001:db8:4a2:1::/64', 'fd7a:91c3:22e0:1::/64']}"
 STORE = """(() => { const m = {}; return {m, getItem: (k) => (k in m ? m[k] : null),
   setItem: (k, v) => { m[k] = String(v); }, removeItem: (k) => { delete m[k]; }}; })()"""
 BROKEN = "{getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); }}"
@@ -85,7 +81,10 @@ class TestTopologyLogic:
 
     def test_address_under_a_global_omr_prefix_is_global(self):
         # On an address under a 2000::/3 OMR prefix: "global".
-        assert plain(f"L.addressClass('2001:db8:4a2:1:2be4:6c19:a0f7:3381', {NETWORK})") == "global"
+        assert (
+            plain(f"L.addressClass('2001:db8:4a2:1:2be4:6c19:a0f7:3381', {NETWORK})")
+            == "global"
+        )
 
     def test_address_under_a_ula_omr_prefix_is_ula(self):
         # On an address under an fc00::/7 OMR prefix: "ula".
@@ -93,19 +92,31 @@ class TestTopologyLogic:
 
     def test_mesh_local_rloc_address_is_rloc(self):
         # On mesh-local with IID 0:ff:fe00:xxxx, xxxx < 0xfc00: "rloc".
-        assert plain(f"L.addressClass('fdde:ad00:beef::ff:fe00:5c00', {NETWORK})") == "rloc"
+        assert (
+            plain(f"L.addressClass('fdde:ad00:beef::ff:fe00:5c00', {NETWORK})")
+            == "rloc"
+        )
 
     def test_mesh_local_fc_address_is_aloc(self):
         # On mesh-local with IID 0:ff:fe00:fcxx: "aloc".
-        assert plain(f"L.addressClass('fdde:ad00:beef:0:0:ff:fe00:fc00', {NETWORK})") == "aloc"
+        assert (
+            plain(f"L.addressClass('fdde:ad00:beef:0:0:ff:fe00:fc00', {NETWORK})")
+            == "aloc"
+        )
 
     def test_other_mesh_local_address_is_mleid(self):
         # On other mesh-local: "mleid".
-        assert plain(f"L.addressClass('fdde:ad00:beef::1c88:f02a:b4d6', {NETWORK})") == "mleid"
+        assert (
+            plain(f"L.addressClass('fdde:ad00:beef::1c88:f02a:b4d6', {NETWORK})")
+            == "mleid"
+        )
 
     def test_fe80_address_is_linklocal(self):
         # On fe80::/10: "linklocal".
-        assert plain(f"L.addressClass('fe80::d41a:7c03:f4e2:b918', {NETWORK})") == "linklocal"
+        assert (
+            plain(f"L.addressClass('fe80::d41a:7c03:f4e2:b918', {NETWORK})")
+            == "linklocal"
+        )
 
     def test_ff00_address_is_multicast(self):
         # On ff00::/8: "multicast".
@@ -113,7 +124,9 @@ class TestTopologyLogic:
 
     def test_unknown_address_is_other(self):
         # Otherwise: "other" (also for text that is not an address).
-        assert plain(f"[L.addressClass('2a00:1::1', {NETWORK}), L.addressClass('nonsense', {NETWORK})]") == [
+        assert plain(
+            f"[L.addressClass('2a00:1::1', {NETWORK}), L.addressClass('nonsense', {NETWORK})]"
+        ) == [
             "other",
             "other",
         ]
@@ -147,11 +160,29 @@ class TestTopologyLogic:
             " byId(D, 'r23').detail, byId(D, 'r34').detail, byId(D, 'c23554').ext, byId(D, 'c23554').detail,"
             " byId(D, 'c34818').detail, byId(D, 'c34818').child.rssi_avg, byId(D, 'c34818').sleepy]"
         )
-        assert got == [["r34"], None, False, [], None, 5, False, True, None, False, True, -61, True]
+        assert got == [
+            ["r34"],
+            None,
+            False,
+            [],
+            None,
+            5,
+            False,
+            True,
+            None,
+            False,
+            True,
+            -61,
+            True,
+        ]
 
-    def test_devices_marks_the_child_matching_this_rloc16_when_no_router_is_this_device(self):
+    def test_devices_marks_the_child_matching_this_rloc16_when_no_router_is_this_device(
+        self,
+    ):
         # On this board being a child (no this_device router): marks the child with rloc16 == this_rloc16 as this board.
-        got = js("[DB.filter((d) => d.thisBoard).map((d) => [d.id, d.kind, d.parentId]), DB.filter((d) => d.kind === 'br').length]")
+        got = js(
+            "[DB.filter((d) => d.thisBoard).map((d) => [d.id, d.kind, d.parentId]), DB.filter((d) => d.kind === 'br').length]"
+        )
         assert got == [[["c40962", "br", "r40"]], 1]
 
     # routerLinks
@@ -188,7 +219,9 @@ class TestTopologyLogic:
 
     def test_displayname_prefers_the_nickname_for_the_ext_address(self):
         # On a nickname for the ext address: the nickname.
-        got = js("L.displayName(byId(D, 'c40961'), {e1000000000a0001: 'Hall light'}, SRP)")
+        got = js(
+            "L.displayName(byId(D, 'c40961'), {e1000000000a0001: 'Hall light'}, SRP)"
+        )
         assert got == "Hall light"
 
     def test_displayname_uses_the_srp_host_sharing_an_address(self):
@@ -218,7 +251,14 @@ class TestTopologyLogic:
 
     def test_rows_routers_keeps_only_routers_in_the_same_order(self):
         # On "routers": only routers, stubs, the leader and the board, same order.
-        assert js("L.rows(D, 'routers', '', {}, SRP).map((d) => d.id)") == ["r34", "r9", "r23", "r40", "r53", "r55"]
+        assert js("L.rows(D, 'routers', '', {}, SRP).map((d) => d.id)") == [
+            "r34",
+            "r9",
+            "r23",
+            "r40",
+            "r53",
+            "r55",
+        ]
 
     def test_rows_end_keeps_only_children_in_the_same_order(self):
         # On "end": only children, same order.
@@ -236,7 +276,12 @@ class TestTopologyLogic:
         # On this board being a child: it sits under its parent, in RLOC16 order, with no leading board row.
         got = js("L.rows(DB, 'all', '', {}, SRP).map((d) => d.id)")
         assert got[0] == "r9"
-        assert got[got.index("r40") : got.index("r40") + 4] == ["r40", "c40961", "c40962", "r53"]
+        assert got[got.index("r40") : got.index("r40") + 4] == [
+            "r40",
+            "c40961",
+            "c40962",
+            "r53",
+        ]
 
     def test_rows_query_matches_name_rloc_ext_srp_and_addresses_ignoring_case(self):
         # On a query: keeps rows whose name, RLOC16, ext address, SRP host name or any address contains it.
@@ -244,7 +289,15 @@ class TestTopologyLogic:
             "['KITCHEN', '0x5C01', '5c01', 'E1000000000A0001', '2001:db8:4a2:1::8801', 'hall', 'zzz']"
             ".map((q) => L.rows(D, 'all', q, {c100000000008801: 'Hall light'}, SRP).map((d) => d.id))"
         )
-        assert got == [["c40961"], ["c23553"], ["c23553"], ["c40961"], ["c34817"], ["c34817"], []]
+        assert got == [
+            ["c40961"],
+            ["c23553"],
+            ["c23553"],
+            ["c40961"],
+            ["c34817"],
+            ["c34817"],
+            [],
+        ]
 
     def test_rows_query_matches_a_name_that_is_markup_literally(self):
         # On a query: the SRP host name is compared as plain text.
@@ -284,7 +337,9 @@ class TestTopologyLogic:
         assert len(got) == 7
         assert all(40 <= d <= 100 for d in got)
 
-    def test_layout_never_goes_below_the_minimum_size_and_grows_with_the_node_count(self):
+    def test_layout_never_goes_below_the_minimum_size_and_grows_with_the_node_count(
+        self,
+    ):
         # On any input: at least 640x420, positions inside the map, and a bigger mesh gives a bigger map.
         got = js(
             "(() => { const small = L.layout(D.slice(0, 1), []); const m = L.layout(D, LK);"
@@ -316,12 +371,14 @@ class TestTopologyLogic:
         )
         assert got == [1700000000000, 6, 1700000000000]
 
-    def test_savedresult_is_null_for_missing_garbage_old_shape_or_throwing_storage(self):
+    def test_savedresult_is_null_for_missing_garbage_old_shape_or_throwing_storage(
+        self,
+    ):
         # On missing, unparsable, wrong-shaped data or a throwing storage: null.
         got = js(
             f"[{STORE}, ...['not json', '{{}}', '[]', 'null', '42', '{{\"saved_at\": 1, \"result\": 5}}',"
-            " '{\"saved_at\": \"x\", \"result\": {\"routers\": [], \"network\": {}}}',"
-            " '{\"savedAt\": 1, \"result\": {\"routers\": [], \"network\": {}}}',"
+            ' \'{"saved_at": "x", "result": {"routers": [], "network": {}}}\','
+            ' \'{"savedAt": 1, "result": {"routers": [], "network": {}}}\','
             " JSON.stringify({routers: [], network: {}}), 'null'].map((raw) => ({getItem: () => raw}))]"
             ".map((s) => L.savedResult(s))"
         )
@@ -330,13 +387,18 @@ class TestTopologyLogic:
 
     def test_saveresult_returns_false_when_storage_throws(self):
         # On a throwing storage: false, no exception.
-        assert js(f"[L.saveResult({BROKEN}, R, 1), L.saveResult({STORE}, R, 1)]") == [False, True]
+        assert js(f"[L.saveResult({BROKEN}, R, 1), L.saveResult({STORE}, R, 1)]") == [
+            False,
+            True,
+        ]
 
     # names
 
     def test_savename_stores_and_loadnames_reads_the_nickname(self):
         # On a nickname: stored under the ext address, returns true.
-        got = js(f"(() => {{ const s = {STORE}; return [L.saveName(s, 'aa11', ' Hall light '), L.loadNames(s)]; }})()")
+        got = js(
+            f"(() => {{ const s = {STORE}; return [L.saveName(s, 'aa11', ' Hall light '), L.loadNames(s)]; }})()"
+        )
         assert got == [True, {"aa11": "Hall light"}]
 
     def test_savename_with_an_empty_name_removes_the_nickname(self):
@@ -384,21 +446,21 @@ class TestTopologyLogic:
 
     def test_conflicttext_names_the_mode_when_the_network_is_not_running(self):
         # On 409 with detail "mode X": "The Thread network isn't running (mode X)".
-        assert plain("L.conflictText(409, {error: 'busy', detail: 'mode DISABLED'})") == (
-            "The Thread network isn't running (mode DISABLED)"
-        )
+        assert plain(
+            "L.conflictText(409, {error: 'busy', detail: 'mode DISABLED'})"
+        ) == ("The Thread network isn't running (mode DISABLED)")
 
     def test_conflicttext_explains_diagnostics_in_use(self):
         # On 409 with detail "mesh diagnostics are in use": ask to try again.
-        assert plain("L.conflictText(409, {error: 'busy', detail: 'mesh diagnostics are in use'})") == (
-            "Another mesh scan is running, try again in a few seconds"
-        )
+        assert plain(
+            "L.conflictText(409, {error: 'busy', detail: 'mesh diagnostics are in use'})"
+        ) == ("Another mesh scan is running, try again in a few seconds")
 
     def test_conflicttext_passes_another_detail_through(self):
         # On 409 with another detail: that detail.
-        assert plain("L.conflictText(409, {error: 'busy', detail: 'firmware update in progress'})") == (
-            "firmware update in progress"
-        )
+        assert plain(
+            "L.conflictText(409, {error: 'busy', detail: 'firmware update in progress'})"
+        ) == ("firmware update in progress")
 
     # pingSummary
 
@@ -412,14 +474,22 @@ class TestTopologyLogic:
 
     def test_pingsummary_adds_the_sleepy_line_for_sleepy_devices(self):
         # On a sleepy device: the sleepy line comes last.
-        got = plain("L.pingSummary({replies: [], statistics: {sent: 4, received: 0, loss_percent: 100}}, true)")
-        assert got == ["0 of 4 replies", "Loss 100%", "Sleepy devices answer when they next wake up."]
+        got = plain(
+            "L.pingSummary({replies: [], statistics: {sent: 4, received: 0, loss_percent: 100}}, true)"
+        )
+        assert got == [
+            "0 of 4 replies",
+            "Loss 100%",
+            "Sleepy devices answer when they next wake up.",
+        ]
 
     # clockText / agoText
 
     def test_clocktext_is_local_time_zero_padded(self):
         # On a time: local HH:MM, zero-padded.
-        assert plain("[L.clockText(new Date(2026, 10, 3, 9, 5).getTime()), L.clockText(new Date(2026, 10, 3, 23, 41).getTime())]") == [
+        assert plain(
+            "[L.clockText(new Date(2026, 10, 3, 9, 5).getTime()), L.clockText(new Date(2026, 10, 3, 23, 41).getTime())]"
+        ) == [
             "09:05",
             "23:41",
         ]
@@ -430,12 +500,26 @@ class TestTopologyLogic:
             "[0, 59000, 60000, 38 * 60000, 59 * 60000, 60 * 60000, 5 * 3600000, 24 * 3600000, 50 * 3600000, -5000]"
             ".map((age) => L.agoText(1000000000000 - age, 1000000000000))"
         )
-        assert got == ["just now", "just now", "1 min ago", "38 min ago", "59 min ago", "1 h ago", "5 h ago", "1 d ago", "2 d ago", "just now"]
+        assert got == [
+            "just now",
+            "just now",
+            "1 min ago",
+            "38 min ago",
+            "59 min ago",
+            "1 h ago",
+            "5 h ago",
+            "1 d ago",
+            "2 d ago",
+            "just now",
+        ]
 
     # lqColor
 
     def test_lqcolor_maps_three_two_one_to_green_amber_red(self):
-        # On LQI 3 / 2 / 1 / 0: green, amber, red, grey (four distinct colours).
-        got = plain("[3, 2, 1, 0].map(L.lqColor)")
-        assert len(set(got)) == 4
-        assert json.dumps(got).count("#") == 4
+        # On LQI 3 / 2 / 1 / 0: green #1e7e34, amber #a35f00, red #c62828, grey #5f5f5f.
+        assert plain("[3, 2, 1, 0].map(L.lqColor)") == [
+            "#1e7e34",
+            "#a35f00",
+            "#c62828",
+            "#5f5f5f",
+        ]
