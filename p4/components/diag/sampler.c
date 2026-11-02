@@ -21,6 +21,9 @@
 
 static const char *TAG = "diag";
 
+_Static_assert(DIAG_METRICS_MAX_TASKS == DIAG_MAX_TASKS && DIAG_METRICS_CORES == DIAG_CORES &&
+               DIAG_METRICS_NAME_MAX == DIAG_NAME_MAX, "diag_metrics_view_t must match the windows");
+
 #define SAMPLER_CORE MGMT_CORE
 #define SAMPLER_PRIORITY (tskIDLE_PRIORITY + 1) // lowest application priority
 #define SAMPLER_STACK 4096
@@ -245,5 +248,49 @@ esp_err_t diag_snapshot_json(char **out_json)
         return ESP_ERR_INVALID_SIZE;
     }
     *out_json = json;
+    return ESP_OK;
+}
+
+esp_err_t diag_metrics_view(diag_metrics_view_t *out)
+{
+    ESP_RETURN_ON_FALSE(out != NULL, ESP_ERR_INVALID_ARG, TAG, "no output");
+    ESP_RETURN_ON_FALSE(s_started, ESP_ERR_INVALID_STATE, TAG, "not started");
+    memset(out, 0, sizeof(*out));
+    if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(MUTEX_WAIT_MS)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    const diag_view_t *view = &s_windows->view;
+
+    for (int c = 0; c < DIAG_CORES; c++) {
+        out->cores[c].wall_us = view->wall_us[c];
+        out->cores[c].idle_us = view->idle_us[c];
+    }
+    out->task_count = view->task_count;
+    for (size_t i = 0; i < view->task_count; i++) {
+        memcpy(out->tasks[i].name, view->tasks[i].task.name, sizeof(out->tasks[i].name));
+        out->tasks[i].cpu_us = view->tasks[i].cpu_us;
+        out->tasks[i].stack_free_min = view->tasks[i].task.stack_hwm;
+    }
+    out->untracked = view->untracked;
+    out->internal.free = s_internal.free_bytes;
+    out->internal.min_free = s_internal.min_free_bytes;
+    out->internal.largest_free_block = s_internal.largest_free_block;
+    out->psram.free = s_psram.free_bytes;
+    out->psram.min_free = s_psram.min_free_bytes;
+    out->psram.largest_free_block = s_psram.largest_free_block;
+    xSemaphoreGive(s_mutex);
+
+    diag_lock_view_t lock;
+
+    diag_ot_lock_view(&lock);
+    out->lock.acquisitions = lock.since_boot.acquisitions;
+    out->lock.hold_us_total = lock.hold_us_total;
+    out->lock.wait_us_total = lock.wait_us_total;
+    out->lock.max_hold_us = lock.since_boot.max_hold_us;
+    out->lock.max_wait_us = lock.since_boot.max_wait_us;
+    out->lock.max_hold_60s_us = lock.last_60s.max_hold_us;
+    out->lock.max_wait_60s_us = lock.last_60s.max_wait_us;
+    out->uptime_s = (uint32_t)(esp_timer_get_time() / 1000000);
+    out->reset_reason = reset_reason_name(esp_reset_reason());
     return ESP_OK;
 }

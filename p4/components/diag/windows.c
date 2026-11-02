@@ -68,6 +68,7 @@ void diag_windows_update(diag_windows_t *w, const diag_task_sample_t *tasks, siz
     for (int c = 0; c < DIAG_CORES; c++) {
         w->core_delta[c][w->head] = total_runtime_per_core[c] - w->prev_total[c];
         w->prev_total[c] = total_runtime_per_core[c];
+        w->view.wall_us[c] += w->core_delta[c][w->head];
     }
 
     // Tasks of this sample: update known ones, add new ones.
@@ -83,9 +84,14 @@ void diag_windows_update(diag_windows_t *w, const diag_task_sample_t *tasks, siz
             i = w->view.task_count++;
             memset(&w->track[i], 0, sizeof(w->track[i]));
             w->track[i].used = true; // prev_runtime 0: the first delta is the whole runtime
+            w->view.tasks[i].cpu_us = 0;
         }
         w->view.tasks[i].task = tasks[k];
         w->track[i].delta[w->head] = tasks[k].runtime - w->track[i].prev_runtime;
+        w->view.tasks[i].cpu_us += w->track[i].delta[w->head];
+        if (is_idle(&tasks[k])) {
+            w->view.idle_us[tasks[k].core] += w->track[i].delta[w->head];
+        }
         w->track[i].prev_runtime = tasks[k].runtime;
         seen[i] = true;
     }

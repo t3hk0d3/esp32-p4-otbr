@@ -1,5 +1,8 @@
 #pragma once
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -29,6 +32,47 @@ esp_err_t diag_start(void);
  * ESP_ERR_INVALID_STATE before diag_start, ESP_ERR_NO_MEM, ESP_ERR_INVALID_ARG for NULL.
  */
 esp_err_t diag_snapshot_json(char **out_json);
+
+#define DIAG_METRICS_CORES 2
+#define DIAG_METRICS_MAX_TASKS 48 /**< equals the sampler's DIAG_MAX_TASKS */
+#define DIAG_METRICS_NAME_MAX 16
+
+/** Cumulative figures for GET /metrics (totals since boot, not windows). */
+typedef struct {
+    uint32_t uptime_s;
+    const char *reset_reason; /**< static string */
+    struct {
+        uint64_t wall_us; /**< run time counter total of the core */
+        uint64_t idle_us; /**< of that, the core's idle task: busy = wall - idle */
+    } cores[DIAG_METRICS_CORES];
+    size_t task_count;
+    struct {
+        char name[DIAG_METRICS_NAME_MAX];
+        uint64_t cpu_us;
+        uint32_t stack_free_min; /**< bytes */
+    } tasks[DIAG_METRICS_MAX_TASKS];
+    uint32_t untracked;
+    struct {
+        uint32_t free;
+        uint32_t min_free;
+        uint32_t largest_free_block;
+    } internal, psram;
+    struct {
+        uint32_t acquisitions;
+        uint64_t hold_us_total;
+        uint64_t wait_us_total;
+        uint32_t max_hold_us;     /**< since boot */
+        uint32_t max_wait_us;     /**< since boot */
+        uint32_t max_hold_60s_us;
+        uint32_t max_wait_60s_us;
+    } lock;
+} diag_metrics_view_t;
+
+/**
+ * Copy the cumulative figures for GET /metrics. Takes the snapshot mutex (waits at most 100 ms, then ESP_ERR_TIMEOUT)
+ * and never takes the OpenThread lock. ESP_ERR_INVALID_STATE before diag_start, ESP_ERR_INVALID_ARG for NULL.
+ */
+esp_err_t diag_metrics_view(diag_metrics_view_t *out);
 
 #ifdef __cplusplus
 }

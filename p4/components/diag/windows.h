@@ -33,6 +33,7 @@ typedef struct {
 typedef struct {
     diag_task_sample_t task;
     float cpu_pct[DIAG_WINDOW_COUNT]; /**< share of its core (both cores for an unpinned task) */
+    uint64_t cpu_us;                  /**< run time since the task was first seen, summed from the modulo-2^32 deltas */
 } diag_task_view_t;
 
 /** What a request reads: refreshed by every diag_windows_update. */
@@ -41,6 +42,8 @@ typedef struct {
     uint32_t untracked; /**< tasks of the last sample beyond DIAG_MAX_TASKS */
     diag_task_view_t tasks[DIAG_MAX_TASKS];
     float load_pct[DIAG_CORES][DIAG_WINDOW_COUNT]; /**< 100 minus the share of that core's idle task */
+    uint64_t wall_us[DIAG_CORES]; /**< sum of the core totals' deltas since the first sample */
+    uint64_t idle_us[DIAG_CORES]; /**< sum of that core's idle-task deltas since the first sample */
 } diag_view_t;
 
 typedef struct {

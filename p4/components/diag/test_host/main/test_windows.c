@@ -97,6 +97,59 @@ TEST_CASE("On runtime counter wrap: delta is computed modulo 2^32", "[diag]")
     free(w);
 }
 
+TEST_CASE("On a task's samples: adds every runtime delta to its cpu_us total", "[diag]")
+{
+    diag_windows_t *w = new_windows();
+    diag_task_sample_t t = task("worker", 0, 1, 100);
+
+    update(w, &t, 1, TICK_US);
+    t.runtime = 350;
+    update(w, &t, 1, 2 * TICK_US);
+    TEST_ASSERT_EQUAL_UINT64(350, find(w, "worker")->cpu_us);
+    free(w);
+}
+
+TEST_CASE("On runtime counter wrap: cpu_us keeps increasing by the modulo-2^32 delta", "[diag]")
+{
+    diag_windows_t *w = new_windows();
+    diag_task_sample_t t = task("worker", 0, 1, 0xFFFFFF00u);
+
+    update(w, &t, 1, 0xFFFFFC18u);
+    t.runtime = 0x00000100u;
+    update(w, &t, 1, 0u);
+    TEST_ASSERT_EQUAL_UINT64(0xFFFFFF00ull + 0x200u, find(w, "worker")->cpu_us);
+    free(w);
+}
+
+TEST_CASE("On a task replaced by a new one with the same name: the new cpu_us starts from its own runtime", "[diag]")
+{
+    diag_windows_t *w = new_windows();
+    diag_task_sample_t t = task("worker", 0, 1, 5000);
+
+    update(w, &t, 1, TICK_US);
+    t.handle_id = 2;
+    t.runtime = 40;
+    update(w, &t, 1, 2 * TICK_US);
+    TEST_ASSERT_EQUAL_UINT64(40, find(w, "worker")->cpu_us);
+    free(w);
+}
+
+TEST_CASE("On each sample: adds the wall delta to wall_us and the core's idle-task delta to idle_us", "[diag]")
+{
+    diag_windows_t *w = new_windows();
+    diag_task_sample_t tasks[2] = {task("IDLE0", 0, 1, 0), task("IDLE1", 1, 2, 0)};
+
+    update(w, tasks, 2, 1000);
+    tasks[0].runtime = 600;
+    tasks[1].runtime = 900;
+    update(w, tasks, 2, 2000);
+    TEST_ASSERT_EQUAL_UINT64(2000, w->view.wall_us[0]);
+    TEST_ASSERT_EQUAL_UINT64(2000, w->view.wall_us[1]);
+    TEST_ASSERT_EQUAL_UINT64(600, w->view.idle_us[0]);
+    TEST_ASSERT_EQUAL_UINT64(900, w->view.idle_us[1]);
+    free(w);
+}
+
 TEST_CASE("On task created since the previous tick: includes it with cpu_pct computed from its runtime since creation", "[diag]")
 {
     diag_windows_t *w = new_windows();
