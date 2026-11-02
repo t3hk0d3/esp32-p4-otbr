@@ -31,7 +31,9 @@ CORNER_TABS = ((-0.5, 6.5, 6.5, True), (61.5, 68.5, 3.5, False))
 TAB_W = 7.0
 TAB_DROP = 6.5
 TAB_ROOT = 2.0  # wedge-shaped tab: thickness at the lid
-TAB_TIP = 1.4  # ... and at the tip; taper on the inner face
+TAB_TIP = 1.6  # inner face tapers from TAB_ROOT to this at the tip
+TAB_FLAT = 3.0  # outer face stays flat this far below the lid (bump zone)
+TAB_LEAD = 0.5  # then the outer face tapers in by this much to the tip
 PRY_Y = ()  # pry cut-outs dropped: deferred to a later revision
 PRY_W = 10.0
 PRY_D = 3.0
@@ -242,9 +244,9 @@ def sheet_detail(path):
         pts = [
             v.p(x, TOP),
             v.p(x + d * TAB_ROOT, TOP),
-            v.p(x + d * TAB_TIP, TOP - TAB_DROP + 0.6),
-            v.p(x + d * (TAB_TIP - 0.6), TOP - TAB_DROP),
-            v.p(x, TOP - TAB_DROP),
+            v.p(x + d * TAB_TIP, TOP - TAB_DROP),
+            v.p(x + d * TAB_LEAD, TOP - TAB_DROP),
+            v.p(x, TOP - TAB_FLAT),
         ]
         svg.el.append(
             '<polygon points="'
@@ -278,9 +280,9 @@ def sheet_detail(path):
     tab = [
         (-4, -1),
         (-4 + TAB_ROOT, -1),
-        (-4 + TAB_TIP, -6.9),
-        (-4 + TAB_TIP - 0.6, -7.5),
-        (-4, -7.5),
+        (-4 + TAB_TIP, -7.5),
+        (-4 + TAB_LEAD, -7.5),
+        (-4, -1 - TAB_FLAT),
     ]
     svg.el.append(
         '<polygon points="'
@@ -290,18 +292,20 @@ def sheet_detail(path):
     z.text(
         -1.5 * k,
         -3.6 * k,
-        f"wedge: {TAB_ROOT} mm at the root, {TAB_TIP} at the tip",
+        f"wedge both sides: {TAB_ROOT} mm root, {TAB_TIP - TAB_LEAD:.1f} mm tip",
         size=11,
     )
-    pts = [z.p(-4 * k, -6.4 * k), z.p(-4.6 * k, -5.8 * k), z.p(-4 * k, -5.2 * k)]
+    pts = [z.p(-4 * k, -3.2 * k), z.p(-4.6 * k, -2.6 * k), z.p(-4 * k, -2.0 * k)]
     svg.el.append(
         '<polygon points="'
         + " ".join(f"{a:.1f},{b:.1f}" for a, b in pts)
         + f'" fill="{LID_C}" stroke="#374151" stroke-width="1"/>'
     )
-    z.text(-1.5 * k, -5.6 * k, "ramped bump (both sides 45°):", size=11)
-    z.text(-1.5 * k, -6.6 * k, "clicks in, pulls out", size=11)
-    z.text(-1.5 * k, -1.8 * k, "lid frame sits in a 1 mm rebate", size=11)
+    z.text(-1.5 * k, -5.2 * k, "bump on the flat part (both sides 45°)", size=11)
+    z.text(
+        -1.5 * k, -6.4 * k, "outer lead-in below it: tip glides off the wall", size=11
+    )
+    z.text(-1.5 * k, -1.6 * k, "lid frame sits in a 1 mm rebate", size=11)
     z.text(-7.5 * k, -9.8 * k, "wall", size=11)
 
     svg.text(
