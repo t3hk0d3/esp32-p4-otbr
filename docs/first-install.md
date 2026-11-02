@@ -4,7 +4,7 @@ How to bring a new Waveshare ESP32-P4-WIFI6-POE-ETH to a working border router. 
 Espressif's ESP-Hosted firmware, which this project overwrites. Three paths:
 
 - **No wires** (Path 1, factory C6): the P4 replaces ESP-Hosted through ESP-Hosted's own update mechanism. Two uploads:
-  `c6_installer.bin` once, then `c6_rcp.bin`. Not yet run on hardware (see the note there).
+  `c6_installer.bin` once, then `c6_rcp.bin`. Tested with an ESP-Hosted stand-in (see the note there).
 - **With the maintenance jumper** (Path 2, three wires): only the P4 USB-C port is needed, and the jumper also repairs a
   broken C6 later.
 - **USB-UART on H7** (Path 3): a 3.3 V adapter on the C6 header writes the first C6 images.
@@ -30,9 +30,10 @@ Every path needs an antenna and ends with the RCP firmware upload.
 
 ## Path 1: no wires (factory C6)
 
-> **NOTE: not yet run on hardware.** The protocol was taken from the ESP-Hosted sources (versions 0.0.6 to 2.x share it)
-> and the P4's factory image, and every step is covered by host tests, but no board has gone through it yet. If it fails,
-> the C6 normally still runs ESP-Hosted (or the installer) and Path 2 or 3 still works.
+> **NOTE: tested with a stand-in, not yet on an untouched factory C6.** The path ran end to end on the board with the
+> ESP-Hosted 0.0.27 C6 slave (the version range the factory P4 image points to) written to the C6 as-is. A factory C6 may
+> run another ESP-Hosted version; the protocol is the same from 0.0.6 to 2.x. If it fails, the C6 normally still runs
+> ESP-Hosted (or the installer) and Path 2 or 3 still works.
 
 For a C6 that still runs its factory ESP-Hosted firmware and has no jumper fitted. ESP-Hosted can update itself from the
 P4 over the SDIO lines between the chips; the P4 uses that once to send `c6_installer.bin`, a small C6 app that writes

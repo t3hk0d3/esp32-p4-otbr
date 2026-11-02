@@ -129,6 +129,20 @@ size_t rcp_sync_log_read(char *buf, size_t cap);
 /** Test builds: erase one C6 flash range over the jumper (c6_erase). Same preconditions and exit state as rcp_sync_rom_recover. */
 esp_err_t rcp_sync_test_c6_erase(uint32_t offset, uint32_t size);
 
+/** One image for rcp_sync_test_c6_write. */
+typedef struct {
+    const char *name;
+    uint32_t offset; /**< 4 KiB aligned */
+    const uint8_t *data;
+    size_t len;
+} rcp_sync_test_image_t;
+
+/**
+ * Test builds: write up to 4 images to the C6 over the jumper (ROM download), each erased, written and MD5-verified as by
+ * esptool, then reset the C6 (c6_stock_restore). Same preconditions and exit state as rcp_sync_rom_recover.
+ */
+esp_err_t rcp_sync_test_c6_write(const rcp_sync_test_image_t *images, size_t count);
+
 /**
  * Test builds: from now on (NVS, survives reboots) the probe and the push treat the jumper as absent (c6_jumper_ignore), so
  * the wireless first install runs on a board that has the jumper fitted. Manual ROM recovery still uses the jumper.

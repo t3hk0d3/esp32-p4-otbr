@@ -12,7 +12,8 @@ release's `versions.txt`.
 - First install without wires: on a factory C6 (ESP-Hosted firmware, no jumper) the board reports `RADIO_FAULT`
   `esp-hosted firmware`, and uploading the new release file `c6_installer.bin` sends it through ESP-Hosted's own update
   over the P4-C6 SDIO lines; it installs the C6 bootloader, partition table and updater, after which `c6_rcp.bin` is
-  uploaded as usual. Nothing is written to the C6 without that upload. Not yet run on hardware. See
+  uploaded as usual. Nothing is written to the C6 without that upload. Tested on the board with an ESP-Hosted 0.0.27
+  stand-in, not yet on an untouched factory C6. See
   `docs/first-install.md`, Path 1.
 
 ### Changed

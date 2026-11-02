@@ -51,12 +51,22 @@ static void pulse_reset_normal_boot(void)
     gpio_set_level(P4_PIN_C6_RESET, 1);
 }
 
+/* sdmmc_card_init allocates a bounce buffer (SDMMC_HOST_FLAG_ALLOC_ALIGNED_BUF) that nothing in IDF frees. */
+static void card_clear(void)
+{
+    if (s_card) {
+        heap_caps_free(s_card->host.dma_aligned_buffer);
+        memset(s_card, 0, sizeof(*s_card));
+    }
+}
+
 static void link_release(void)
 {
     if (s_essl) {
         essl_sdio_deinit_dev(s_essl);
         s_essl = NULL;
     }
+    card_clear();
     free(s_card);
     s_card = NULL;
     if (s_host_up) {
@@ -89,7 +99,9 @@ static esp_err_t link_start(void)
 
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
     host.slot = SDIO_SLOT;
-    host.flags = SDMMC_HOST_FLAG_4BIT;
+    // essl reads its registers (lengths, interrupts) into small buffers that are not DMA-aligned; the SDMMC driver refuses
+    // those unless it may bounce them through its own aligned buffer.
+    host.flags = SDMMC_HOST_FLAG_4BIT | SDMMC_HOST_FLAG_ALLOC_ALIGNED_BUF;
     host.max_freq_khz = SDMMC_FREQ_DEFAULT;
     sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
     slot.width = 4;
@@ -107,6 +119,7 @@ static esp_err_t link_start(void)
     esp_err_t err = ESP_FAIL;
     for (int i = 0; i < CARD_INIT_TRIES && err != ESP_OK; i++) {
         vTaskDelay(pdMS_TO_TICKS(BOOT_WAIT_MS));
+        card_clear(); // a failed attempt leaves a half-filled card behind
         err = sdmmc_card_init(&host, s_card);
     }
     if (err != ESP_OK) {
@@ -121,7 +134,11 @@ static esp_err_t link_start(void)
 
 static esp_err_t link_open_data_path(void)
 {
-    return essl_send_slave_intr(s_essl, OPEN_DATA_PATH, ESSL_TIMEOUT_MS);
+    const esp_err_t err = essl_send_slave_intr(s_essl, OPEN_DATA_PATH, ESSL_TIMEOUT_MS);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "open data path: %s", esp_err_to_name(err));
+    }
+    return err;
 }
 
 static esp_err_t link_send(const uint8_t *buf, size_t len, uint32_t timeout_ms)
@@ -130,7 +147,11 @@ static esp_err_t link_send(const uint8_t *buf, size_t len, uint32_t timeout_ms)
         return ESP_ERR_INVALID_SIZE;
     }
     memcpy(s_tx, buf, len);
-    return essl_send_packet(s_essl, s_tx, len, timeout_ms);
+    const esp_err_t err = essl_send_packet(s_essl, s_tx, len, timeout_ms);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "send: %s", esp_err_to_name(err));
+    }
+    return err;
 }
 
 static uint32_t link_now_ms(void)
@@ -153,6 +174,7 @@ static esp_err_t link_recv(uint8_t *buf, size_t cap, size_t *len, uint32_t timeo
             return ESP_OK;
         }
         if (err != ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(TAG, "receive: %s", esp_err_to_name(err));
             return err;
         }
         if (link_now_ms() - start >= timeout_ms) {
