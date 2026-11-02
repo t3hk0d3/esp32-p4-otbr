@@ -145,6 +145,15 @@ reason, spec reference.
    `test_dataset_active_while_running` (new mock seams `mock_active_tlvs`, `mock_update_tlvs`, `mock_set_active_error`,
    `mock_thread_enable_error`, `mock_calls` in `tests/openthread_mock.inc`, `tests/mock_functions.json`,
    `tests/host_platform.h`, which also stubs `ESP_LOGI`); `tools/otbr_compat.py` expects success and an unchanged role.
+15. Applied. `esp_ot_br_server` frontend: "Join with Dataset" card on the Network page (`frontend/network.html`, between
+   Scan and Form) and new `frontend/static/dataset_join.js` (pure logic exported for node, page code guarded by
+   `typeof document`, text only through `textContent`). The pasted hex must be a complete active dataset (Active
+   Timestamp, Channel, PAN ID, Ext PAN ID, Network Name, Network Key, Mesh-Local Prefix, ≤ 254 bytes), because the board
+   merges what it gets into the stored dataset. A confirm names the network the board is on (if any) and the new one;
+   then the page uses only existing REST endpoints: `PUT /node/dataset/active` (text/plain; item 14 restarts Thread when
+   it runs), `GET /node/state`, and `PUT /node/state "enable"` only when Thread is `disabled` (enabling a running Thread
+   starts a fresh attach), then polls the role for up to 60 s like the Form flow. 403 (management address), 409
+   (sniffer) and 503 (radio) are shown as readable messages. Host tests: `tools/tests/test_network_page.py`.
 
 ### REST guard classification (patches 2 and 9)
 

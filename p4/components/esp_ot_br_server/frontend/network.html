@@ -46,6 +46,21 @@
         </div>
     </div>
 
+    <!-- Join with Dataset Section -->
+    <div class="card section">
+        <div class="card-header">Join with Dataset</div>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Join an existing Thread network with its active dataset TLVs (hex), e.g. from another border router (<code>GET /node/dataset/active</code> with <code>Accept: text/plain</code>), Home Assistant or <code>ot-ctl dataset active -x</code>. A dataset already stored on this board is replaced.</p>
+        <div class="form-group">
+            <label class="form-label" for="datasetTlvs">Active dataset TLVs (hex)</label>
+            <textarea class="form-input" id="datasetTlvs" rows="4" spellcheck="false" autocomplete="off" style="font-family:monospace;resize:vertical" placeholder="0e080000000000010000000300000f..."></textarea>
+        </div>
+        <div id="datasetPreview" style="font-size:13px;margin-bottom:14px"></div>
+        <div class="flex-between">
+            <button type="button" class="btn btn-primary" id="datasetJoinBtn" disabled>Join</button>
+            <span id="datasetStatus" style="font-size:13px"></span>
+        </div>
+    </div>
+
     <!-- Form Network Section -->
     <div class="card section">
         <div class="card-header">Form New Network</div>
@@ -373,5 +388,6 @@ function pollFormState() {
     }, 2000);
 }
 </script>
+<script src="/static/dataset_join.js"></script>
 </body>
 </html>
