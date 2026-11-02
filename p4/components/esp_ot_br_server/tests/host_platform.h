@@ -75,6 +75,11 @@ extern otCommissionerState mock_commissioner;
 extern otError mock_dataset_error, mock_pending_error, mock_pending_result;
 extern int64_t mock_time;
 extern otOperationalDataset mock_dataset;
+extern otOperationalDatasetTlvs mock_active_tlvs; /* stored active TLVs: read by otDatasetGetActiveTlvs, set by otDatasetSetActiveTlvs */
+extern otOperationalDatasetTlvs mock_update_tlvs; /* otDatasetUpdateTlvs result when mLength != 0 (else the base is unchanged) */
+extern otError mock_set_active_error, mock_thread_enable_error; /* injected failures of the store and of the Thread start */
+extern char mock_calls[32]; /* order of Thread/dataset writes: 'D' disable, 'S' store active TLVs, 'E' enable */
+void mock_call(char call);
 extern unsigned mock_registered;
 extern br_core_mode_t mock_mode;
 extern bool mock_ot_ready;
@@ -84,6 +89,9 @@ extern void (*mock_on_lock)(void); /* runs once, right after the next lock acqui
 br_core_mode_t br_core_get_mode(void);
 bool esp_br_web_openthread_ready(void);
 void mock_reset(void);
+#ifndef ESP_LOGI
+#define ESP_LOGI(tag, ...) ((void)0) /* logging is not checked on the host */
+#endif
 void mock_deliver_diagnostic(uintptr_t token);
 otInstance *esp_openthread_get_instance(void);
 bool esp_openthread_lock_acquire(uint32_t timeout);

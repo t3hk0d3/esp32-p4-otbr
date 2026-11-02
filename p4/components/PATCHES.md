@@ -133,6 +133,18 @@ reason, spec reference.
    (`esp-otbr-xxxxxx-N`, about 5 per second) behind a gateway that reflects mDNS between VLAN 10 and 20. Companion rule without
    patch: in split mode `mgmt` is never registered with mDNS (`mdns_register_netif`), so it neither announces, answers nor joins
    the multicast groups; the library drops datagrams that arrive on an unregistered netif. (spec 5.13)
+14. Applied. `esp_ot_br_server/src/esp_br_web_api.c` `rest_dataset`: `PUT /node/dataset/active` is accepted while Thread runs
+   (ot-br-posix and upstream answer 409 unless the role is `disabled`). With Thread running, the TLVs are merged into the
+   stored dataset as before; if the result equals the stored TLVs the answer is 200 with no OpenThread write (no detach);
+   otherwise, under the OpenThread lock the handler already holds, Thread is stopped, the dataset stored and Thread started
+   on it (200, one `ESP_LOGI` "active dataset replaced while attached, Thread restarted"). A failed store starts Thread again
+   on the old dataset (500); a failed start leaves the new dataset stored (500). With Thread disabled nothing changed: the
+   dataset is stored, Thread stays off (201/200). `If-None-Match: *`, the pending dataset and the guard statuses are
+   unchanged. Reason: Home Assistant's Thread panel (`otbr/set_network`: `set_enabled(False)`, `set_active_dataset_tlvs`,
+   `set_enabled(True)`) failed with `ThreadNetworkActiveError` (409) on a running board. Host tests: `tests/test_rest.c`
+   `test_dataset_active_while_running` (new mock seams `mock_active_tlvs`, `mock_update_tlvs`, `mock_set_active_error`,
+   `mock_thread_enable_error`, `mock_calls` in `tests/openthread_mock.inc`, `tests/mock_functions.json`,
+   `tests/host_platform.h`, which also stubs `ESP_LOGI`); `tools/otbr_compat.py` expects success and an unchanged role.
 
 ### REST guard classification (patches 2 and 9)
 

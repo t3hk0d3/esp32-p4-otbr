@@ -2040,8 +2040,9 @@ static void rest_dataset(const esp_br_thread_rest_request_t *request, esp_br_thr
         response->status = 400;
         return;
     }
+    /* Patch 14: an active dataset is also accepted while Thread runs (ot-br-posix answers 409); see below. */
     otDeviceRole role = otThreadGetDeviceRole(instance);
-    if ((!pending && role != OT_DEVICE_ROLE_DISABLED) || (pending && role < OT_DEVICE_ROLE_CHILD)) {
+    if (pending && role < OT_DEVICE_ROLE_CHILD) {
         response->status = 409;
         return;
     }
@@ -2050,6 +2051,8 @@ static void rest_dataset(const esp_br_thread_rest_request_t *request, esp_br_thr
         response->status = 412;
         return;
     }
+    otOperationalDatasetTlvs current = base;
+    bool stored = error == OT_ERROR_NONE;
     response->status = error == OT_ERROR_NOT_FOUND ? 201 : 200;
     if (error == OT_ERROR_NOT_FOUND) {
         if (pending) {
@@ -2112,9 +2115,31 @@ static void rest_dataset(const esp_br_thread_rest_request_t *request, esp_br_thr
         return;
     }
     if (!pending) {
-        if (otDatasetSetActiveTlvs(instance, &base) != OT_ERROR_NONE) {
-            response->status = 500;
+        if (role == OT_DEVICE_ROLE_DISABLED) {
+            if (otDatasetSetActiveTlvs(instance, &base) != OT_ERROR_NONE) {
+                response->status = 500;
+            }
+            return;
         }
+        /* Patch 14: Thread runs. The same dataset again is a no-op (no detach); a different one is stored with Thread
+         * stopped and Thread is started on it, all under the OpenThread lock this handler holds. */
+        if (stored && base.mLength == current.mLength && !memcmp(base.mTlvs, current.mTlvs, base.mLength)) {
+            return;
+        }
+        if (otThreadSetEnabled(instance, false) != OT_ERROR_NONE) {
+            response->status = 500;
+            return;
+        }
+        if (otDatasetSetActiveTlvs(instance, &base) != OT_ERROR_NONE) {
+            otThreadSetEnabled(instance, true); /* back on the old dataset */
+            response->status = 500;
+            return;
+        }
+        if (otThreadSetEnabled(instance, true) != OT_ERROR_NONE) {
+            response->status = 500; /* stored; PUT /node/state "enable" or a reboot starts it */
+            return;
+        }
+        ESP_LOGI(API_TAG, "active dataset replaced while attached, Thread restarted");
         return;
     }
     if (otDatasetParseTlvs(&base, &dataset) != OT_ERROR_NONE) {

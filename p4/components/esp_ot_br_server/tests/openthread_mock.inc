@@ -4,6 +4,13 @@ otDeviceRole mock_role;
 otCommissionerState mock_commissioner;
 otError mock_dataset_error, mock_pending_error, mock_pending_result;
 otOperationalDataset mock_dataset;
+otOperationalDatasetTlvs mock_active_tlvs, mock_update_tlvs;
+otError mock_set_active_error, mock_thread_enable_error;
+char mock_calls[32];
+void mock_call(char call) {
+    size_t length=strlen(mock_calls);
+    if(length+1<sizeof(mock_calls)) {mock_calls[length]=call;mock_calls[length+1]=0;}
+}
 static otDatasetMgmtSetCallback pending_callback;
 static void *pending_context;
 static otReceiveDiagnosticGetCallback diagnostic_callback;
@@ -17,6 +24,12 @@ void mock_reset(void) {
     memset(&mock_dataset,0,sizeof(mock_dataset));
     mock_dataset.mComponents.mIsNetworkNamePresent=true;
     strcpy(mock_dataset.mNetworkName.m8,"test-mesh");
+    memset(&mock_active_tlvs,0,sizeof(mock_active_tlvs));
+    mock_active_tlvs.mLength=2;mock_active_tlvs.mTlvs[0]=0xab;mock_active_tlvs.mTlvs[1]=0xcd;
+    memset(&mock_update_tlvs,0,sizeof(mock_update_tlvs));
+    mock_set_active_error=OT_ERROR_NONE;
+    mock_thread_enable_error=OT_ERROR_NONE;
+    mock_calls[0]=0;
     pending_callback=NULL;
     diagnostic_callback=NULL;
     mock_time=0;

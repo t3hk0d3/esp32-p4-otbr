@@ -197,6 +197,90 @@ static void test_dataset(void)
     release(&req, json);
     mock_role = OT_DEVICE_ROLE_DISABLED;
 }
+#define GUARD_DATASET                                                                                     \
+    "{\"networkName\":\"mesh\",\"networkKey\":\"00112233445566778899aabbccddeeff\",\"channel\":15," \
+    "\"activeTimestamp\":{\"seconds\":42}}"
+/* Patch 14: PUT /node/dataset/active while Thread runs stops Thread, stores the dataset and starts Thread again. */
+static const uint8_t s_new_tlvs[] = {0x01, 0x02, 0x03};
+static void dataset_case(otDeviceRole role, bool changes)
+{
+    mock_role = role;
+    mock_ot_writes = 0;
+    mock_calls[0] = 0;
+    mock_dataset_error = OT_ERROR_NONE;
+    mock_set_active_error = OT_ERROR_NONE;
+    mock_thread_enable_error = OT_ERROR_NONE;
+    memset(&mock_active_tlvs, 0, sizeof(mock_active_tlvs));
+    mock_active_tlvs.mLength = 2;
+    mock_active_tlvs.mTlvs[0] = 0xab;
+    mock_active_tlvs.mTlvs[1] = 0xcd;
+    memset(&mock_update_tlvs, 0, sizeof(mock_update_tlvs));
+    if (changes) {
+        mock_update_tlvs.mLength = sizeof(s_new_tlvs);
+        memcpy(mock_update_tlvs.mTlvs, s_new_tlvs, sizeof(s_new_tlvs));
+    }
+}
+static bool stored_is_new(void)
+{
+    return mock_active_tlvs.mLength == sizeof(s_new_tlvs) && !memcmp(mock_active_tlvs.mTlvs, s_new_tlvs, sizeof(s_new_tlvs));
+}
+static bool stored_is_old(void)
+{
+    return mock_active_tlvs.mLength == 2 && mock_active_tlvs.mTlvs[0] == 0xab && mock_active_tlvs.mTlvs[1] == 0xcd;
+}
+static void put_active(const char *body, const char *type, int status)
+{
+    httpd_req_t req = request(HTTP_PUT, "/node/dataset/active", body, NULL, type);
+    cJSON *json = run_request(&req, status);
+    release(&req, json);
+}
+static void test_dataset_active_while_running(void)
+{
+    /* Thread disabled, no dataset stored: stored, 201, Thread is not touched. */
+    dataset_case(OT_DEVICE_ROLE_DISABLED, true);
+    mock_dataset_error = OT_ERROR_NOT_FOUND;
+    put_active("010203", "text/plain", 201);
+    assert(!strcmp(mock_calls, "S") && stored_is_new());
+    /* Thread disabled, dataset stored: stored, 200, Thread is not touched. */
+    dataset_case(OT_DEVICE_ROLE_DISABLED, true);
+    put_active("010203", "text/plain", 200);
+    assert(!strcmp(mock_calls, "S") && stored_is_new());
+    /* Thread attached (any role but disabled), different TLVs: stop, store, start; 200 instead of 409. */
+    static const otDeviceRole running[] = {OT_DEVICE_ROLE_DETACHED, OT_DEVICE_ROLE_CHILD, OT_DEVICE_ROLE_ROUTER,
+                                           OT_DEVICE_ROLE_LEADER
+                                          };
+    for (unsigned i = 0; i < sizeof(running) / sizeof(running[0]); i++) {
+        dataset_case(running[i], true);
+        put_active("010203", "text/plain", 200);
+        assert(!strcmp(mock_calls, "DSE") && stored_is_new());
+    }
+    /* Thread attached, TLVs equal to the stored ones: 200 without any OpenThread write. */
+    dataset_case(OT_DEVICE_ROLE_LEADER, false);
+    put_active("abcd", "text/plain", 200);
+    assert(mock_ot_writes == 0 && !mock_calls[0] && mock_role == OT_DEVICE_ROLE_LEADER && stored_is_old());
+    /* Thread attached, the store fails: Thread is started again on the old dataset, 500. */
+    dataset_case(OT_DEVICE_ROLE_LEADER, true);
+    mock_set_active_error = OT_ERROR_FAILED;
+    put_active("010203", "text/plain", 500);
+    assert(!strcmp(mock_calls, "DSE") && stored_is_old());
+    /* Thread attached, the restart fails: the new dataset stays stored, 500. */
+    dataset_case(OT_DEVICE_ROLE_LEADER, true);
+    mock_thread_enable_error = OT_ERROR_FAILED;
+    put_active("010203", "text/plain", 500);
+    assert(!strcmp(mock_calls, "DSE") && stored_is_new());
+    /* If-None-Match: * with a stored dataset while attached: 412, nothing written. */
+    dataset_case(OT_DEVICE_ROLE_LEADER, true);
+    httpd_req_t req = request(HTTP_PUT, "/node/dataset/active", "010203", NULL, "text/plain");
+    cJSON_AddStringToObject(req.headers, "If-None-Match", "*");
+    cJSON *json = run_request(&req, 412);
+    release(&req, json);
+    assert(mock_ot_writes == 0 && stored_is_old());
+    /* A JSON body (create_active_dataset) while attached takes the same path. */
+    dataset_case(OT_DEVICE_ROLE_ROUTER, true);
+    put_active(GUARD_DATASET, "application/json", 200);
+    assert(!strcmp(mock_calls, "DSE") && stored_is_new());
+    dataset_case(OT_DEVICE_ROLE_DISABLED, false);
+}
 static void test_actions(void)
 {
     httpd_req_t req = request(HTTP_GET, "/api/actions", NULL, NULL, NULL);
@@ -266,9 +350,6 @@ static void test_actions(void)
     assert(s_rest_actions->complete);
 }
 /* Patches 2 and 9: the mode guard of the Thread REST API. */
-#define GUARD_DATASET                                                                                     \
-    "{\"networkName\":\"mesh\",\"networkKey\":\"00112233445566778899aabbccddeeff\",\"channel\":15," \
-    "\"activeTimestamp\":{\"seconds\":42}}"
 static cJSON *guard_request(httpd_req_t *req, httpd_method_t method, const char *uri, const char *body, int status,
                             const char *detail)
 {
@@ -430,6 +511,7 @@ int main(void)
     test_route_matrix();
     test_routing();
     test_dataset();
+    test_dataset_active_while_running();
     test_actions();
     test_commissioner_and_energy();
     test_guard_br_running();
