@@ -8,7 +8,7 @@ The P4 firmware (app and web UI) and the C6 radio firmware are updated separatel
 make ota BOARD=<board>      # builds dist/otbr.bundle from the current build and uploads it
 ```
 
-or upload `otbr.bundle` from a release with "Firmware update" on the device page (`http://<board>/device.html`), or
+or upload `otbr.bundle` from a release on the Firmware page (`http://<board>/firmware.html`, "Border router"), or
 `curl --data-binary @otbr.bundle http://<board>/device/ota`. The bundle holds the web image and the app image; both are
 written to the inactive pair, the web image is read back and checked against its SHA-256, and only then the boot partition
 is switched. The reply is 200 and the board reboots about a second later. A new app that does not run for 60 s with the
@@ -27,7 +27,7 @@ The RCP firmware is not part of the P4 image and never stored on the P4. Update 
 make radio BOARD=<board>    # uploads c6_rcp/build/c6_rcp.bin
 ```
 
-or "Radio firmware" on the device page, or with a `c6_rcp.bin` from a release:
+or "Radio" on the Firmware page, or with a `c6_rcp.bin` from a release:
 
 ```
 curl --data-binary @c6_rcp.bin http://<board>/device/radio/firmware

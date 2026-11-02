@@ -28,7 +28,7 @@ Get the board from [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.
 - **Sees what is on the air.** Sniffer mode streams 802.15.4 traffic as pcap straight into Wireshark.
 - **Fixes its own radio.** With three optional jumper wires, the board repairs the C6 radio by itself and captures its
   console.
-- **Shows what it is doing.** A device page and `/device/diag` report CPU load per core and task, memory and
+- **Shows what it is doing.** The device pages and `/device/diag` report CPU load per core and task, memory and
   OpenThread lock timings, and `/metrics` exports them with the Thread figures to Prometheus.
 
 ## Compared with the usual setups
@@ -52,14 +52,16 @@ down, the others keep the network reachable.
 
 <table>
   <tr>
-    <td width="33%"><img src="docs/images/device.png" alt="Device page: mode, firmware versions, radio and network status"></td>
-    <td width="33%"><img src="docs/images/topology.png" alt="Topology page: the Thread mesh with its leader and routers"></td>
-    <td width="33%"><img src="docs/images/diagnostics.png" alt="Diagnostics: CPU load per core, memory, OpenThread lock timings and tasks"></td>
+    <td width="25%"><img src="docs/images/dashboard.png" alt="Dashboard: mode, firmware versions, radio, Thread network and Ethernet status"></td>
+    <td width="25%"><img src="docs/images/topology.png" alt="Topology page: the Thread mesh with its leader and routers"></td>
+    <td width="25%"><img src="docs/images/diagnostics.png" alt="Diagnostics: CPU load per core, memory, OpenThread lock timings and tasks"></td>
+    <td width="25%"><img src="docs/images/capture.png" alt="Packet capture page: channel, length and a curl-to-Wireshark command"></td>
   </tr>
   <tr>
-    <td align="center">Device status</td>
+    <td align="center">Dashboard</td>
     <td align="center">Thread mesh topology</td>
     <td align="center">Live diagnostics</td>
+    <td align="center">Packet capture</td>
   </tr>
 </table>
 
@@ -71,7 +73,7 @@ You need [the board](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.htm), a 2.
    or build them yourself with `make build`.
 2. Flash the P4 over USB-C: unpack `p4-flash.zip` and run `esptool --chip esp32p4 write-flash @flash_args` in it, or
    run `make flash` from a checkout.
-3. Upload the radio firmware on the device page at `http://<board>/device.html`.
+3. Upload the radio firmware on the Firmware page at `http://<board>/firmware.html`.
 4. Add the board to Home Assistant, or form a network in its web UI.
 
 A new board's C6 still has its factory firmware. With the maintenance jumper fitted, the P4 replaces it by itself;

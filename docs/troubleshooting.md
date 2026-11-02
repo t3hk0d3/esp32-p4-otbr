@@ -3,7 +3,7 @@
 ## Fault reasons
 
 `GET /device/status` (`make status BOARD=<board>`) shows `mode` and `fault_reason`. In `RADIO_FAULT` the Thread API
-answers 503; `/device/*`, the device page and OTA keep working.
+answers 503; `/device/*`, the device pages and OTA keep working.
 
 | `fault_reason` | Meaning and fix |
 | --- | --- |

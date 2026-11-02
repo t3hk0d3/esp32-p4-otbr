@@ -11,7 +11,8 @@ for Home Assistant), each untagged or on a VLAN ID (1..4094, distinct, at most o
 - mDNS (hostname and every service, including `_meshcop._udp`) runs only on `thread_bb`; `mgmt` is never announced. A
   gateway that reflects mDNS between the VLANs may still show the `thread_bb` records on the `mgmt` VLAN; that is the reflector.
 
-Change it with the device page or `PUT /device/network`, for example:
+Change it on the Ethernet page (`http://<board>/ethernet.html`: pick the setup, edit the interfaces, review the
+changes, then apply) or with `PUT /device/network`, for example:
 
 ```
 curl -X PUT http://<board>/device/network -d '{"mode":"split","mgmt":{"vlan":10,"ipv4":{"dhcp":true}},"thread_bb":{"vlan":20,"ipv4":{"dhcp":true}}}'
@@ -23,7 +24,7 @@ Shape: `{"mode": "single"|"split", "single"|"mgmt"|"thread_bb": {"vlan": 0|1..40
 ## Confirm-or-revert
 
 The change is stored as a trial and the board reboots into it. You then have 5 minutes to call
-`POST /device/network/confirm` (or press Confirm on the device page) from the management side, that is the `single`
+`POST /device/network/confirm` (or press **Keep new settings** on any device page) from the management side, that is the `single`
 interface or `mgmt` of the trial config. If you do not (or the board resets first), the trial is dropped and the board
 reboots into the previous config. If the board is unreachable after a network change: wait 5 minutes, or use the console.
 

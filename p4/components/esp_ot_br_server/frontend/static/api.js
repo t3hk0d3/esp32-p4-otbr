@@ -141,7 +141,15 @@ var pages = [
     ]
   },
   {href : '/topology.html', label : 'Topology'},
-  {href : '/device.html', label : 'Device'},
+  {
+    label : 'Device',
+    children : [
+      {href : '/ethernet.html', label : 'Ethernet'},
+      {href : '/firmware.html', label : 'Firmware'},
+      {href : '/capture.html', label : 'Packet capture'},
+      {href : '/diagnostics.html', label : 'Diagnostics'}
+    ]
+  },
   {href : '/about.html', label : 'About'}
 ];
 var nav = document.getElementById('nav');

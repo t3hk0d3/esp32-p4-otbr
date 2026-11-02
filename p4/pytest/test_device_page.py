@@ -1,17 +1,23 @@
-"""Device page served by the board (BDD: device page; spec 5.7). Hardware-gated: written with Task 20 as the contract,
-deferred to V3 (never run in Task 20). The page logic itself is covered on the host by tools/tests/test_device_page.py.
+"""Device pages served by the board (BDD: Pages, on-board; docs/superpowers/specs/2026-11-02-device-pages-design.md).
+Hardware-gated: runs in the batched hardware pass. The page logic itself is covered on the host by tools/tests
+(test_device_pages.py and one test_<page>_page.py per page).
 
 Manual check list (browser, board in BR_RUNNING, then repeat in SNIFFER and RADIO_FAULT):
-  1. Open http://<board>/device.html: the nav bar has a highlighted "Device" entry; Status shows mode, versions, RCP
-     version, jumper and Ethernet addresses; Diagnostics shows per-core load and the task table, refreshing every 2 s.
-  2. Switch to another tab for 10 s: /device/diag requests stop (check the board log or the browser network tab) and
-     resume on return. Scroll Diagnostics out of view: polling stops as well.
-  3. Jumper removed: Recover and "Show C6 log" are hidden. Jumper fitted: both are shown, the log fills a <pre>.
-  4. Fault "no rcp firmware" (erase the RCP, c6_erase): the RCP upload control is outlined and the hint names c6_rcp.bin.
-  5. Start capture with channel 15, 30 s: the browser saves sniffer.pcap, Status shows frames while it runs; Stop ends it.
-  6. Upload a garbage file as bundle: the Update card shows "...: <detail>" and the board keeps running.
-  7. Network: apply a change: the confirm dialog warns about the reboot and the 5 minutes; after the reboot the banner
-     shows a countdown and Confirm; confirming from the management side clears it.
+  1. Device menu: Ethernet, Firmware, Packet capture, Diagnostics; "Device" is highlighted on each of them and the menu
+     opens from the keyboard (Tab onto "Device"). "Dashboard" is highlighted on /.
+  2. Dashboard (/): the Thread network and Identifiers cards and the Thread address table fill in BR_RUNNING; the PSKc
+     shows only after Show; in SNIFFER the cards say they show while running. The banner says "Border router running" (green); in SNIFFER "Capturing packets" with a link to Packet
+     capture; in RADIO_FAULT "Radio fault" with a link to Firmware. Tiles show versions, addresses and load.
+  3. Switch to another tab for 10 s: /device/* requests stop (browser network tab) and resume on return.
+  4. Firmware: jumper removed: the recovery card explains the jumper; fitted: Recover and Show C6 console, the log fills
+     the box. Fault "no rcp firmware" (c6_erase): the radio card is outlined with the hint. Drop a file on a drop zone:
+     its name shows. Upload a garbage file as bundle: "...: <detail>" and the board keeps running.
+  5. Packet capture: empty channel, 30 s: the browser saves sniffer.pcap; the page switches to the running card with
+     time left and frames; Stop ends it. The Wireshark command streams with curl -N into wireshark -k -i -.
+  6. Ethernet: pick Split, enter VLAN 10 and 20, Review changes: the table lists Setup and both interfaces, the VLAN
+     checkbox gates Apply. Apply on the VLAN rig: the board reboots; at the management address every device page shows
+     the trial banner with a countdown; Keep new settings clears it. Discard brings back the running settings.
+  7. Diagnostics: per-core bars, memory, lock table, tasks busiest first, refreshing every 2 s.
   8. A task name or log text with markup characters appears literally (nothing is interpreted as HTML).
 """
 
@@ -57,40 +63,53 @@ def rcp_image():
     return path.read_bytes()
 
 
-class TestServing:
-    """GET /device.html and /static/device.js"""
+PAGES = {
+    "index": "status",
+    "ethernet": "ethernet",
+    "firmware": "firmware",
+    "capture": "capture",
+    "diagnostics": "diagnostics",
+}
 
-    def test_page_is_served_from_web_as_html(self, base_url):
-        # On GET /device.html: 200, text/html, and the file content of the frontend directory.
-        response = requests.get(f"{base_url}/device.html", timeout=REQUEST_TIMEOUT_S)
+
+class TestServing:
+    """GET each device page and each script"""
+
+    @pytest.mark.parametrize("name", sorted(PAGES))
+    def test_page_is_served_from_web_as_html(self, base_url, name):
+        # On GET /<page>.html: 200, text/html, and the file content of the frontend directory.
+        response = requests.get(f"{base_url}/{name}.html", timeout=REQUEST_TIMEOUT_S)
         assert response.status_code == requests.codes.ok
         assert response.headers["Content-Type"].startswith("text/html")
-        assert response.text == (FRONTEND / "device.html").read_text()
+        # Bytes, not text: the board sends no charset, so requests would decode UTF-8 (the en dash) as Latin-1.
+        assert response.content == (FRONTEND / f"{name}.html").read_bytes()
 
-    def test_script_is_served_from_web_as_javascript(self, base_url):
-        # On GET /static/device.js: 200, a JavaScript content type, and the file content.
+    @pytest.mark.parametrize("script", sorted(set(PAGES.values()) | {"device_common"}))
+    def test_script_is_served_from_web_as_javascript(self, base_url, script):
+        # On GET /static/<script>.js: 200, a JavaScript content type, and the file content.
         response = requests.get(
-            f"{base_url}/static/device.js", timeout=REQUEST_TIMEOUT_S
+            f"{base_url}/static/{script}.js", timeout=REQUEST_TIMEOUT_S
         )
         assert response.status_code == requests.codes.ok
         assert "javascript" in response.headers["Content-Type"]
-        assert response.text == (FRONTEND / "static" / "device.js").read_text()
+        assert response.content == (FRONTEND / "static" / f"{script}.js").read_bytes()
 
-    def test_script_references_each_device_endpoint(self, base_url):
-        # On the served script: every endpoint of the API appears in it.
-        text = requests.get(
-            f"{base_url}/static/device.js", timeout=REQUEST_TIMEOUT_S
-        ).text
+    def test_scripts_reference_each_device_endpoint(self, base_url):
+        # On the served scripts together: every endpoint of the API appears in one of them.
+        text = "".join(
+            requests.get(f"{base_url}/static/{s}.js", timeout=REQUEST_TIMEOUT_S).text
+            for s in set(PAGES.values()) | {"device_common"}
+        )
         assert all(endpoint in text for endpoint in ENDPOINTS)
 
-    def test_nav_script_links_the_page_from_every_page(self, base_url):
-        # On the served api.js: the nav bar entry for /device.html is present.
+    def test_nav_script_links_every_device_page(self, base_url):
+        # On the served api.js: an entry for each of the five pages.
         text = requests.get(f"{base_url}/static/api.js", timeout=REQUEST_TIMEOUT_S).text
-        assert "/device.html" in text
+        assert all(f"/{name}.html" in text for name in PAGES)
 
 
 class TestEndpointsTheSamePathsAsThePage:
-    """The requests the page sends"""
+    """The requests the pages send"""
 
     def test_status_has_the_fields_the_page_renders(self, base_url):
         # On GET /device/status: the keys the status section reads exist.

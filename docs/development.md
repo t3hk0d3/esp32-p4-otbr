@@ -31,7 +31,7 @@ make lint            # formatting and lint (pre-commit)
 ```
 
 - `make test-host`: the component host tests on the ESP-IDF linux target.
-- `make test-tools`: tests of the tools and of the device page script (needs `node`).
+- `make test-tools`: tests of the tools and of the device page scripts (needs `node`).
 - `make test-vendored`: the upstream esp_ot_br_server REST tests (needs `clang++` and a `make build` for the managed
   components).
 

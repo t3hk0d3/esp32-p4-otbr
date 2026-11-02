@@ -9,7 +9,9 @@ curl -N "http://<board>/device/sniffer.pcap?channel=15" | wireshark -k -i -
 `channel` is 11..26 and defaults to the channel of the active dataset (400 `no_channel` if there is no dataset).
 `duration` (seconds) defaults to 600, maximum 3600. Only in `BR_RUNNING` (else 409 `busy`). The capture ends on
 the duration, when the client disconnects, or on `curl -X DELETE http://<board>/device/sniffer`, and the border router
-resumes by itself. The device page can start, stop and download a capture too.
+resumes by itself. The Packet capture page (`/capture.html`) can start, stop and download a capture too, and shows a `curl | wireshark` command for watching live.
+
+![Packet capture page during a capture: channel, time left, frames and dropped frames, Stop capture](images/capture-running.png)
 
 - While sniffing, the Thread stack is stopped: the Thread REST API answers 503 for reads and 409 for changes, and the
   Thread network sees the border router leave. Ethernet (IPv4/IPv6, the web UI and `/device/*`) keeps working.

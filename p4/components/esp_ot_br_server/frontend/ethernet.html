@@ -1,0 +1,275 @@
+<!--
+  SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Thread Border Router - Ethernet</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="/favicon.ico">
+</head>
+<body class="device-page">
+<nav class="nav" id="nav"></nav>
+<div class="container">
+    <div class="page-head">
+        <div>
+            <h1 class="page-title">Ethernet</h1>
+            <p class="page-desc">How the board connects to your network: one port for everything, or management and Thread
+                traffic on separate VLANs of the same cable.</p>
+        </div>
+    </div>
+
+    <div class="disabled-banner hidden" id="trialBanner">
+        <strong>These settings are on trial.</strong>
+        The board goes back to the previous settings in <span id="trialRemaining">-</span> unless you keep them. You can
+        only keep them from the management interface.
+        <button class="btn btn-primary btn-sm" id="confirmBtn" type="button">Keep new settings</button>
+    </div>
+    <div class="form-hint" id="confirmMsg" role="status" aria-live="polite"></div>
+    <div class="disabled-banner hidden" id="n-fallback"></div>
+    <div class="form-hint hidden" id="n-stale" role="status" aria-live="polite"></div>
+
+    <div id="ethSection">
+        <h2 class="section-title">Setup</h2>
+        <div class="mode-cards">
+            <button type="button" class="mode-card" id="mode-single" aria-pressed="false">
+                <span class="mode-card-head">Single port <span class="chip chip-ok hidden" id="mode-single-now">In use now</span></span>
+                <span class="cable" aria-hidden="true">
+                    <span class="cable-box">Board</span>
+                    <span class="cable-lines"><span class="cable-line">untagged</span></span>
+                    <span class="cable-box">Your network</span>
+                </span>
+                <span class="mode-card-text">One untagged connection for the web UI, the device API and Thread. Right for
+                    most homes.</span>
+            </button>
+            <button type="button" class="mode-card" id="mode-split" aria-pressed="false">
+                <span class="mode-card-head">Split management and Thread <span class="chip chip-ok hidden" id="mode-split-now">In use now</span></span>
+                <span class="cable" aria-hidden="true">
+                    <span class="cable-box">Board</span>
+                    <span class="cable-lines">
+                        <span class="cable-line cable-mgmt">management</span>
+                        <span class="cable-line cable-thread">Thread</span>
+                    </span>
+                    <span class="cable-box">VLAN switch</span>
+                </span>
+                <span class="mode-card-text">Two VLANs on one cable: management on one, Thread and Home Assistant on the
+                    other. Needs a switch that carries tagged VLANs.</span>
+            </button>
+        </div>
+
+        <div class="flex-between">
+            <h2 class="section-title">Interfaces</h2>
+            <span class="form-hint">Frames dropped for an unknown VLAN since boot: <span id="n-dropped">-</span></span>
+        </div>
+        <section class="card hidden" id="if-single">
+            <div class="iface-head">
+                <div>
+                    <div class="iface-title">
+                        <h3>Ethernet port</h3>
+                        <span class="chip" id="if-single-vlanchip">-</span>
+                        <span class="chip" id="if-single-linkchip">-</span>
+                    </div>
+                    <p class="iface-role">Carries everything: web UI, device API, Thread backbone and the REST API for Home Assistant.</p>
+                </div>
+                <button class="btn btn-outline" id="if-single-edit" type="button" aria-controls="if-single-editor">Edit</button>
+            </div>
+            <dl class="facts" id="if-single-live">
+                <dt>IPv4</dt><dd><span class="mono" id="if-single-ipv4">-</span> <span id="if-single-src"></span></dd>
+                <div class="hidden" id="if-single-confrow" style="display: contents">
+                    <dt>Configured</dt><dd class="mono" id="if-single-conf"></dd>
+                </div>
+                <dt>IPv6</dt><dd class="mono lines" id="if-single-ipv6">-</dd>
+            </dl>
+            <p class="iface-role hidden" id="if-single-summary"></p>
+            <div class="editor hidden" id="if-single-editor">
+                <fieldset>
+                    <legend>VLAN</legend>
+                    <div class="seg" role="group" aria-label="Ethernet port VLAN">
+                        <button type="button" id="if-single-untagged" aria-pressed="true">Untagged</button>
+                        <button type="button" id="if-single-tagged" aria-pressed="false">Tagged</button>
+                    </div>
+                    <label class="field hidden" id="if-single-vlanfield" for="if-single-vlan">VLAN ID (1–4094)
+                        <input type="text" inputmode="numeric" id="if-single-vlan" size="8">
+                    </label>
+                </fieldset>
+                <fieldset>
+                    <legend>IPv4 address</legend>
+                    <div class="seg" role="group" aria-label="Ethernet port IPv4">
+                        <button type="button" id="if-single-dhcp" aria-pressed="true">Automatic (DHCP)</button>
+                        <button type="button" id="if-single-staticbtn" aria-pressed="false">Static</button>
+                    </div>
+                    <div class="hidden" id="if-single-staticfields">
+                        <label class="field" for="if-single-cidr">Address and prefix length
+                            <input type="text" id="if-single-cidr" placeholder="192.168.1.10/24" size="20">
+                        </label>
+                        <div class="field-row mt-8">
+                            <label class="field" for="if-single-gw">Gateway (optional)
+                                <input type="text" id="if-single-gw" placeholder="192.168.1.1" size="16">
+                            </label>
+                            <label class="field" for="if-single-dns">DNS server (optional)
+                                <input type="text" id="if-single-dns" placeholder="192.168.1.1" size="16">
+                            </label>
+                        </div>
+                    </div>
+                    <p class="form-hint">IPv6 addresses come from your router's advertisements; there is nothing to set.</p>
+                </fieldset>
+            </div>
+            <div id="if-single-errors" role="alert"></div>
+        </section>
+        <section class="card hidden" id="if-mgmt">
+            <div class="iface-head">
+                <div>
+                    <div class="iface-title">
+                        <h3>Management</h3>
+                        <span class="chip" id="if-mgmt-vlanchip">-</span>
+                        <span class="chip" id="if-mgmt-linkchip">-</span>
+                    </div>
+                    <p class="iface-role">Web UI and device API. Never announced over mDNS, and nothing is forwarded to or from it.</p>
+                </div>
+                <button class="btn btn-outline" id="if-mgmt-edit" type="button" aria-controls="if-mgmt-editor">Edit</button>
+            </div>
+            <dl class="facts" id="if-mgmt-live">
+                <dt>IPv4</dt><dd><span class="mono" id="if-mgmt-ipv4">-</span> <span id="if-mgmt-src"></span></dd>
+                <div class="hidden" id="if-mgmt-confrow" style="display: contents">
+                    <dt>Configured</dt><dd class="mono" id="if-mgmt-conf"></dd>
+                </div>
+                <dt>IPv6</dt><dd class="mono lines" id="if-mgmt-ipv6">-</dd>
+            </dl>
+            <p class="iface-role hidden" id="if-mgmt-summary"></p>
+            <div class="editor hidden" id="if-mgmt-editor">
+                <fieldset>
+                    <legend>VLAN</legend>
+                    <div class="seg" role="group" aria-label="Management VLAN">
+                        <button type="button" id="if-mgmt-untagged" aria-pressed="true">Untagged</button>
+                        <button type="button" id="if-mgmt-tagged" aria-pressed="false">Tagged</button>
+                    </div>
+                    <label class="field hidden" id="if-mgmt-vlanfield" for="if-mgmt-vlan">VLAN ID (1–4094)
+                        <input type="text" inputmode="numeric" id="if-mgmt-vlan" size="8">
+                    </label>
+                </fieldset>
+                <fieldset>
+                    <legend>IPv4 address</legend>
+                    <div class="seg" role="group" aria-label="Management IPv4">
+                        <button type="button" id="if-mgmt-dhcp" aria-pressed="true">Automatic (DHCP)</button>
+                        <button type="button" id="if-mgmt-staticbtn" aria-pressed="false">Static</button>
+                    </div>
+                    <div class="hidden" id="if-mgmt-staticfields">
+                        <label class="field" for="if-mgmt-cidr">Address and prefix length
+                            <input type="text" id="if-mgmt-cidr" placeholder="192.168.1.10/24" size="20">
+                        </label>
+                        <div class="field-row mt-8">
+                            <label class="field" for="if-mgmt-gw">Gateway (optional)
+                                <input type="text" id="if-mgmt-gw" placeholder="192.168.1.1" size="16">
+                            </label>
+                            <label class="field" for="if-mgmt-dns">DNS server (optional)
+                                <input type="text" id="if-mgmt-dns" placeholder="192.168.1.1" size="16">
+                            </label>
+                        </div>
+                    </div>
+                    <p class="form-hint">IPv6 addresses come from your router's advertisements; there is nothing to set.</p>
+                </fieldset>
+            </div>
+            <div id="if-mgmt-errors" role="alert"></div>
+        </section>
+        <section class="card hidden" id="if-thread_bb">
+            <div class="iface-head">
+                <div>
+                    <div class="iface-title">
+                        <h3>Thread backbone</h3>
+                        <span class="chip" id="if-thread_bb-vlanchip">-</span>
+                        <span class="chip" id="if-thread_bb-linkchip">-</span>
+                    </div>
+                    <p class="iface-role">Thread backbone, REST API for Home Assistant, and mDNS.</p>
+                </div>
+                <button class="btn btn-outline" id="if-thread_bb-edit" type="button" aria-controls="if-thread_bb-editor">Edit</button>
+            </div>
+            <dl class="facts" id="if-thread_bb-live">
+                <dt>IPv4</dt><dd><span class="mono" id="if-thread_bb-ipv4">-</span> <span id="if-thread_bb-src"></span></dd>
+                <div class="hidden" id="if-thread_bb-confrow" style="display: contents">
+                    <dt>Configured</dt><dd class="mono" id="if-thread_bb-conf"></dd>
+                </div>
+                <dt>IPv6</dt><dd class="mono lines" id="if-thread_bb-ipv6">-</dd>
+            </dl>
+            <p class="iface-role hidden" id="if-thread_bb-summary"></p>
+            <div class="editor hidden" id="if-thread_bb-editor">
+                <fieldset>
+                    <legend>VLAN</legend>
+                    <div class="seg" role="group" aria-label="Thread backbone VLAN">
+                        <button type="button" id="if-thread_bb-untagged" aria-pressed="true">Untagged</button>
+                        <button type="button" id="if-thread_bb-tagged" aria-pressed="false">Tagged</button>
+                    </div>
+                    <label class="field hidden" id="if-thread_bb-vlanfield" for="if-thread_bb-vlan">VLAN ID (1–4094)
+                        <input type="text" inputmode="numeric" id="if-thread_bb-vlan" size="8">
+                    </label>
+                </fieldset>
+                <fieldset>
+                    <legend>IPv4 address</legend>
+                    <div class="seg" role="group" aria-label="Thread backbone IPv4">
+                        <button type="button" id="if-thread_bb-dhcp" aria-pressed="true">Automatic (DHCP)</button>
+                        <button type="button" id="if-thread_bb-staticbtn" aria-pressed="false">Static</button>
+                    </div>
+                    <div class="hidden" id="if-thread_bb-staticfields">
+                        <label class="field" for="if-thread_bb-cidr">Address and prefix length
+                            <input type="text" id="if-thread_bb-cidr" placeholder="192.168.1.10/24" size="20">
+                        </label>
+                        <div class="field-row mt-8">
+                            <label class="field" for="if-thread_bb-gw">Gateway (optional)
+                                <input type="text" id="if-thread_bb-gw" placeholder="192.168.1.1" size="16">
+                            </label>
+                            <label class="field" for="if-thread_bb-dns">DNS server (optional)
+                                <input type="text" id="if-thread_bb-dns" placeholder="192.168.1.1" size="16">
+                            </label>
+                        </div>
+                    </div>
+                    <p class="form-hint">IPv6 addresses come from your router's advertisements; there is nothing to set.</p>
+                </fieldset>
+            </div>
+            <div id="if-thread_bb-errors" role="alert"></div>
+        </section>
+        <div id="global-errors" role="alert"></div>
+    </div>
+
+    <div class="action-bar hidden" id="actionBar">
+        <span class="action-bar-text" id="barText"></span>
+        <button class="btn btn-outline" id="discardBtn" type="button">Discard changes</button>
+        <button class="btn btn-primary" id="reviewBtn" type="button">Review changes</button>
+    </div>
+
+    <section class="card review hidden" id="reviewSection" aria-labelledby="reviewTitle">
+        <h2 class="card-title" id="reviewTitle">Review and apply</h2>
+        <div class="table-wrap">
+            <table class="diff-table">
+                <thead><tr><th scope="col">Setting</th><th scope="col">Now</th><th scope="col">After apply</th></tr></thead>
+                <tbody id="diffBody"></tbody>
+            </table>
+        </div>
+        <h3 class="section-title mt-16">What happens when you apply</h3>
+        <ol class="steps">
+            <li>The board saves the new settings as a trial and reboots. This page loses its connection.</li>
+            <li>Open the device page again at <strong id="reachText">-</strong>.</li>
+            <li>Press <strong>Keep new settings</strong> within 5 minutes. If you don't, or the board can't be reached, it
+                goes back to the current settings by itself.</li>
+        </ol>
+        <label class="ack hidden" id="ackRow" for="ackBox">
+            <input type="checkbox" id="ackBox">
+            <span>The switch port this board is plugged into carries <strong id="vlanList">-</strong> as tagged VLANs.
+                Without that the board can't be reached until it goes back.</span>
+        </label>
+        <p class="form-hint">Locked out? Wait 5 minutes for the revert, or run <code>net reset</code> on the USB console
+            to go back to a single untagged port with DHCP.</p>
+        <div class="actions-end mt-16">
+            <button class="btn btn-outline" id="backBtn" type="button">Back to editing</button>
+            <button class="btn btn-danger" id="applyBtn" type="button">Apply and reboot</button>
+        </div>
+        <div class="form-hint" id="netMsg" role="status" aria-live="polite"></div>
+    </section>
+</div>
+<div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
+<script src="/static/api.js"></script>
+<script src="/static/device_common.js"></script>
+<script src="/static/ethernet.js"></script>
+</body>
+</html>
