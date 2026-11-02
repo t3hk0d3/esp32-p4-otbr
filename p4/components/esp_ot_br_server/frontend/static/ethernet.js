@@ -25,11 +25,17 @@ function ipv4Valid(text) {
   var parts = String(text).trim().split('.');
   if (parts.length !== 4)
     return false;
-  return parts.every(function(p) { return /^\d{1,3}$/.test(p) && Number(p) <= 255; });
+  return parts.every(function(p) { return /^(0|[1-9]\d{0,2})$/.test(p) && Number(p) <= 255; });
 }
 
 function ipv4ToNumber(text) {
   return String(text).trim().split('.').reduce(function(acc, p) { return acc * 256 + Number(p); }, 0);
+}
+
+/** Not 0.0.0.0, not loopback, not multicast or above: what the board accepts as an address (usable_unicast). */
+function usableUnicast(n) {
+  var first = n >>> 24;
+  return n !== 0 && first < 224 && first !== 127;
 }
 
 /** A netmask is valid when it is dotted-quad, not 0.0.0.0, and its one bits are contiguous. */
@@ -136,8 +142,8 @@ function draftFromConfig(cfg) {
       vlan : c.vlan ? String(c.vlan) : '',
       dhcp : !!v4.dhcp,
       cidr : v4.dhcp ? '' : v4.addr + (prefix === null ? '' : '/' + prefix),
-      gw : v4.gw || '',
-      dns : v4.dns || ''
+      gw : v4.gw && v4.gw !== '0.0.0.0' ? v4.gw : '',
+      dns : v4.dns && v4.dns !== '0.0.0.0' ? v4.dns : ''
     };
   });
   return d;
@@ -152,29 +158,64 @@ function ipText(i) {
   return 'Static ' + (String(i.cidr).trim() || '?') + (gw ? ', gateway ' + gw : '') + (dns ? ', DNS ' + dns : '');
 }
 
-/** Problems of the interfaces of the draft's mode: {ifaces: {id: [text]}, global: [text], count}. */
+/* The board's checks of a static interface (validate_iface): address, prefix, gateway and DNS server. */
+function staticProblems(i, e) {
+  var p = parseCidr(i.cidr), a = 0, m = 0, host = 0;
+  if (!p) {
+    e.push('Enter the address with its prefix length, for example 192.168.1.10/24.');
+  } else {
+    a = ipv4ToNumber(p.addr);
+    m = ipv4ToNumber(p.mask);
+    host = (~m) >>> 0;
+    if (!usableUnicast(a))
+      e.push('Use a normal unicast address (not 0.0.0.0, 127.x or multicast).');
+    else if (host <= 1)
+      e.push('Use a prefix length of 30 or shorter.');
+    else if ((a & host) >>> 0 === 0 || (a & host) >>> 0 === host)
+      e.push('This is the network or broadcast address of the subnet: pick another host address.');
+  }
+  var gw = String(i.gw).trim(), dns = String(i.dns).trim();
+  if (gw && !ipv4Valid(gw)) {
+    e.push('The gateway is not an IPv4 address.');
+  } else if (gw) {
+    var g = ipv4ToNumber(gw);
+    if (!usableUnicast(g) || (p && (g === a || ((g & m) >>> 0) !== ((a & m) >>> 0) || (g & host) >>> 0 === 0 ||
+                                    (g & host) >>> 0 === host)))
+      e.push('The gateway must be another host address in the same subnet.');
+  }
+  if (dns && !ipv4Valid(dns))
+    e.push('The DNS server is not an IPv4 address.');
+  else if (dns && !usableUnicast(ipv4ToNumber(dns)))
+    e.push('The DNS server is not a usable address.');
+}
+
+/*
+ * Problems of the interfaces of the draft's mode: {ifaces: {id: [text]}, global: [text], count}. The rules are the
+ * board's own (netcfg_validate, p4/components/netcfg/config.c), so Review is only offered for what the board accepts.
+ */
 function validate(d) {
   var out = {ifaces : {single : [], mgmt : [], thread_bb : []}, global : [], count : 0};
   ifaceIds(d.mode).forEach(function(id) {
     var i = d[id], e = out.ifaces[id];
     if (i.tagged && C.wholeNumber(i.vlan, 1, VLAN_MAX) === null)
       e.push('Enter a VLAN ID from 1 to 4094.');
-    if (!i.dhcp) {
-      if (!parseCidr(i.cidr))
-        e.push('Enter the address with its prefix length, for example 192.168.1.10/24.');
-      if (String(i.gw).trim() && !ipv4Valid(i.gw))
-        e.push('The gateway is not an IPv4 address.');
-      if (String(i.dns).trim() && !ipv4Valid(i.dns))
-        e.push('The DNS server is not an IPv4 address.');
-    }
+    if (!i.dhcp)
+      staticProblems(i, e);
     out.count += e.length;
   });
   if (d.mode === 'split') {
-    var a = d.mgmt, b = d.thread_bb;
-    if (!a.tagged && !b.tagged)
+    var a1 = d.mgmt, b1 = d.thread_bb;
+    var va = C.wholeNumber(a1.vlan, 1, VLAN_MAX), vb = C.wholeNumber(b1.vlan, 1, VLAN_MAX);
+    if (!a1.tagged && !b1.tagged)
       out.global.push('Only one of the two interfaces can be untagged.');
-    else if (a.tagged && b.tagged && String(a.vlan).trim() && String(a.vlan).trim() === String(b.vlan).trim())
+    else if (a1.tagged && b1.tagged && va !== null && va === vb)
       out.global.push('Management and Thread backbone need different VLAN IDs.');
+    var pa = !a1.dhcp && parseCidr(a1.cidr), pb = !b1.dhcp && parseCidr(b1.cidr);
+    if (pa && pb) {
+      var mask = (ipv4ToNumber(pa.mask) & ipv4ToNumber(pb.mask)) >>> 0; // the shorter prefix
+      if (((ipv4ToNumber(pa.addr) & mask) >>> 0) === ((ipv4ToNumber(pb.addr) & mask) >>> 0))
+        out.global.push('Management and Thread backbone cannot be in the same subnet.');
+    }
   }
   out.count += out.global.length;
   return out;
@@ -289,8 +330,12 @@ function setValue(id, v) {
     $(id).value = v;
 }
 
+/* Error lines of a box; rebuilt only when they change, so screen readers announce them once. */
 function messages(id, list) {
-  var box = $(id);
+  var box = $(id), key = list.join('\n');
+  if (box.getAttribute('data-shown') === key)
+    return;
+  box.setAttribute('data-shown', key);
   kit.clear(box);
   list.forEach(function(t) { box.appendChild(el('p', t, 'error-text')); });
 }
@@ -331,7 +376,7 @@ function renderIface(id, errors) {
   setValue(p + 'cidr', i.cidr);
   setValue(p + 'gw', i.gw);
   setValue(p + 'dns', i.dns);
-  messages(p + 'errors', ed ? errors : []);
+  messages(p + 'errors', errors);
 }
 
 function render() {
@@ -356,7 +401,7 @@ function render() {
   setText('barText', v.count ? 'Fix ' + v.count + (v.count === 1 ? ' problem' : ' problems') +
                                    ' before you review the changes.'
                              : n + (n === 1 ? ' change' : ' changes') + ' not applied yet.');
-  $('reviewBtn').disabled = !canReview;
+  $('reviewBtn').disabled = !canReview || kit.isBusy();
 
   show('reviewSection', review);
   var body = $('diffBody');
@@ -410,12 +455,15 @@ function refreshNetwork() {
   });
 }
 
+/* Every change of the draft goes through here: it ends the review and asks for the VLAN tick again. */
 function edit(fn) {
   return function(ev) {
-    if (!draft)
+    // While the board reboots into what was applied, the review and its instructions stay as they are.
+    if (!draft || kit.isBusy())
       return;
     fn(ev);
     review = false;
+    ack = false;
     render();
   };
 }

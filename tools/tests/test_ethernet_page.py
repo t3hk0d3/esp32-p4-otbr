@@ -624,3 +624,174 @@ class TestEthernetPage:
             + "t.page.init(); await t.advance(100); return t.calls.map((c) => c.url);"
         )
         assert r == ["/device/network"]
+
+
+@needs_node
+class TestBoardRules:
+    """validate mirrors netcfg_validate (config.c), so Review is refused for what the board would refuse"""
+
+    @staticmethod
+    def static_errors(**f):
+        d = draft(single={"dhcp": False, "cidr": "192.168.1.10/24"} | f)
+        return eth(f"L.validate({json.dumps(d)}).ifaces.single")
+
+    @pytest.mark.parametrize(
+        "cidr",
+        [
+            "192.168.1.10/31",
+            "192.168.1.10/32",
+            "192.168.1.0/24",
+            "192.168.1.255/24",
+            "127.0.0.5/8",
+            "224.0.0.5/24",
+            "0.0.0.0/8",
+            "192.168.01.5/24",
+        ],
+    )
+    def test_address_the_board_refuses_is_an_error(self, cidr):
+        # On /31, /32, network, broadcast, loopback, multicast, 0.0.0.0 or a leading zero: an error on the address.
+        assert self.static_errors(cidr=cidr)
+
+    @pytest.mark.parametrize(
+        "gw",
+        ["192.168.2.1", "192.168.1.10", "192.168.1.0", "192.168.1.255", "127.0.0.1"],
+    )
+    def test_gateway_the_board_refuses_is_an_error(self, gw):
+        # On a gateway outside the subnet, equal to the address, network, broadcast or loopback: an error.
+        assert any("gateway" in e for e in self.static_errors(gw=gw))
+
+    def test_gateway_in_the_subnet_is_accepted(self):
+        # On 192.168.1.1 for 192.168.1.10/24: no error.
+        assert self.static_errors(gw="192.168.1.1") == []
+
+    def test_multicast_dns_is_an_error(self):
+        # On DNS 224.0.0.1: an error.
+        assert any("DNS" in e for e in self.static_errors(dns="224.0.0.1"))
+
+    def test_both_static_in_one_subnet_is_a_global_error(self):
+        # On mgmt 10.0.0.2/24 and thread_bb 10.0.0.3/24: a global error.
+        d = draft(
+            "split",
+            mgmt={"dhcp": False, "cidr": "10.0.0.2/24"},
+            thread_bb={"dhcp": False, "cidr": "10.0.0.3/24"},
+        )
+        assert "subnet" in eth(f"L.validate({json.dumps(d)}).global[0]")
+
+    def test_vlan_ids_are_compared_as_numbers(self):
+        # On mgmt "010" and thread_bb "10": the different-VLAN error.
+        d = draft("split", mgmt={"vlan": "010"}, thread_bb={"vlan": "10"})
+        assert "different VLAN" in eth(f"L.validate({json.dumps(d)}).global[0]")
+
+    def test_unset_static_gateway_and_dns_from_the_board_are_empty(self):
+        # On the board's "0.0.0.0" for an unset gateway and DNS: empty fields, and no change against itself.
+        cfg = {
+            "mode": "single",
+            "single": {
+                "vlan": 0,
+                "ipv4": {
+                    "dhcp": False,
+                    "addr": "192.168.1.10",
+                    "mask": "255.255.255.0",
+                    "gw": "0.0.0.0",
+                    "dns": "0.0.0.0",
+                },
+            },
+        }
+        d = eth(f"L.draftFromConfig({json.dumps(cfg)}).single")
+        assert (d["gw"], d["dns"]) == ("", "")
+
+
+STATIC_NET = (
+    "Object.assign(H.fixture(H.NETWORK), {active: {mode: 'single', single: {vlan: 0, ipv4: {dhcp: false, addr: '192.168.1.10',"
+    " mask: '255.255.255.0', gw: '0.0.0.0', dns: '0.0.0.0'}}}})"
+)
+
+
+@needs_node
+class TestEthernetPageReview:
+    """findings of the whole-branch review"""
+
+    def test_unset_gateway_reads_as_none(self):
+        # On a static config with the board's 0.0.0.0 gateway and DNS: "no gateway or DNS server", no pending change.
+        r = scenario(
+            page("ethernet", routes(STATIC_NET))
+            + START
+            + "return [t.el('if-single-conf').textContent, t.el('actionBar').hidden()];"
+        )
+        assert r == ["no gateway or DNS server", True]
+
+    def test_changing_a_vlan_after_ticking_needs_a_new_tick(self):
+        # On tick, back to editing, VLAN 20 -> 30, review again: the box is clear and Apply disabled.
+        r = scenario(
+            page("ethernet", routes())
+            + START
+            + """
+            t.el('mode-split').click(); t.el('if-mgmt-vlan').type('10'); t.el('if-thread_bb-vlan').type('20');
+            t.el('reviewBtn').click(); t.el('ackBox').tick(true);
+            t.el('backBtn').click(); t.el('if-thread_bb-edit').click(); t.el('if-thread_bb-vlan').type('30');
+            t.el('reviewBtn').click();
+            return [t.el('vlanList').textContent, t.el('ackBox').checked, t.el('applyBtn').disabled];
+        """
+        )
+        assert r == ["VLAN 10 and VLAN 30", False, True]
+
+    def test_editing_is_ignored_while_the_board_reboots(self):
+        # On Apply, then clicks on Edit and a mode card during the wait: the review and its message stay.
+        r = scenario(
+            page("ethernet", routes())
+            + START
+            + """
+            t.el('if-single-edit').click(); t.el('if-single-staticbtn').click(); t.el('if-single-cidr').type('10.0.0.2/24');
+            t.el('reviewBtn').click(); await t.page.apply();
+            t.el('if-single-edit').click(); t.el('mode-split').click();
+            return [t.el('reviewSection').hidden(), t.el('netMsg').textContent.includes('Keep new settings'),
+                    t.el('mode-single').getAttribute('aria-pressed')];
+        """
+        )
+        assert r == [False, True, "true"]
+
+    def test_apply_answered_409_shows_busy_and_releases_the_buttons(self):
+        # On a 409 from PUT: the busy message, not busy afterwards.
+        r = scenario(
+            page(
+                "ethernet",
+                routes(
+                    put="{status: 409, body: {error: 'busy', detail: 'update running'}}"
+                ),
+            )
+            + START
+            + """
+            t.el('if-single-edit').click(); t.el('if-single-staticbtn').click(); t.el('if-single-cidr').type('10.0.0.2/24');
+            t.el('reviewBtn').click(); await t.page.apply();
+            return [t.el('netMsg').textContent, t.page.kit.isBusy()];
+        """
+        )
+        assert "busy" in r[0].lower() and "update running" in r[0]
+        assert r[1] is False
+
+    def test_errors_stay_visible_when_the_editor_is_closed(self):
+        # On a bad address and Done: the error is still shown on the card.
+        r = scenario(
+            page("ethernet", routes())
+            + START
+            + """
+            t.el('if-single-edit').click(); t.el('if-single-staticbtn').click(); t.el('if-single-cidr').type('10.0.0.2');
+            t.el('if-single-edit').click();
+            return [t.el('if-single-editor').hidden(), t.el('if-single-errors').allText()];
+        """
+        )
+        assert r[0] is True
+        assert "192.168.1.10/24" in r[1]
+
+    def test_error_messages_are_not_rebuilt_while_unchanged(self):
+        # On a poll that changes nothing: the error element is the same object (screen readers do not re-announce).
+        r = scenario(
+            page("ethernet", routes())
+            + START
+            + """
+            t.el('mode-split').click(); const first = t.el('if-mgmt-errors').children[0];
+            await t.page.refreshNetwork();
+            return t.el('if-mgmt-errors').children[0] === first;
+        """
+        )
+        assert r is True

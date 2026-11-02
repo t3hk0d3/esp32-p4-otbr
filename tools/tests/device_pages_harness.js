@@ -101,7 +101,11 @@ class Doc {
   createElement(tag) { return new El(this, tag); }
   createTextNode(t) { const e = new El(this, '#text'); e.textContent = t; return e; }
   addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); }
-  fire(t) { (this.listeners[t] || []).forEach((f) => f()); }
+  fire(t) {
+    const ev = {type: t, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }};
+    (this.listeners[t] || []).forEach((f) => f(ev));
+    return ev;
+  }
 }
 
 /*

@@ -375,7 +375,9 @@ function tickTrial() {
   var left = Math.max(0, Math.round((trialEnd - env.now()) / 1000));
   setText('trialRemaining', L.formatRemaining(left));
   if (left === 0) {
+    // The board reverts and reboots now: the banner and its button are stale until the next answer.
     trialEnd = 0;
+    show('trialBanner', false);
     env.setTimeout(opts.trial === false ? opts.refreshNetwork : refreshTrial, 3000);
   }
 }

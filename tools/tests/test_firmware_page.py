@@ -285,3 +285,16 @@ class TestFirmwarePage:
             + "t.page.init(); await t.advance(100); return [...new Set(t.calls.map((c) => c.url))].sort();"
         )
         assert r == ["/device/network", "/device/status"]
+
+
+@needs_node
+class TestFirmwarePageReview:
+    """findings of the whole-branch review"""
+
+    def test_file_dropped_beside_the_drop_zone_does_not_leave_the_page(self):
+        # On dragover and drop on the document: the browser default (open the file) is prevented.
+        r = scenario(
+            page("firmware", routes())
+            + "t.page.init(); await t.advance(100); return [t.doc.fire('dragover').defaultPrevented, t.doc.fire('drop').defaultPrevented];"
+        )
+        assert r == [True, True]

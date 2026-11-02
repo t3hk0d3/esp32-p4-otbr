@@ -235,6 +235,8 @@ function init() {
     $(card + 'Install').addEventListener('click', function() { install(card); });
     wireDrop(card);
   });
+  // A file dropped beside a drop zone would make the browser open it and leave the page.
+  [ 'dragover', 'drop' ].forEach(function(t) { env.document.addEventListener(t, function(ev) { ev.preventDefault(); }); });
   $('recoverBtn').addEventListener('click', recover);
   $('logBtn').addEventListener('click', showLog);
   kit.start();

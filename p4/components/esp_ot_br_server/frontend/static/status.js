@@ -141,10 +141,15 @@ function refreshStatus() {
   });
 }
 
+function diagDashes() {
+  [ 'h-uptime', 'h-reset', 't-cpu', 't-mem-int', 't-mem-psram' ].forEach(function(id) { setText(id, '-'); });
+  return false;
+}
+
 function refreshDiag() {
   return kit.request('GET', '/device/diag', {timeoutMs : 5000}).then(function(r) {
     if (r.status !== 200 || !r.body)
-      return false;
+      return diagDashes();
     var d = r.body;
     kit.noteUptime(d.uptime_s);
     setText('h-uptime', C.durationText(d.uptime_s));
@@ -156,7 +161,7 @@ function refreshDiag() {
     setText('t-mem-int', C.bytesText(mi.free) + ' (lowest ' + C.bytesText(mi.min_free) + ')');
     setText('t-mem-psram', C.bytesText(d.memory.psram.free));
     return true;
-  }, function() { return false; });
+  }, diagDashes);
 }
 
 function reboot() {

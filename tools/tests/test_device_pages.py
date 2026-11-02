@@ -166,6 +166,19 @@ class TestPages:
 class TestShared:
     """device_common.js and the frontend directory"""
 
+    def test_every_html_page_that_builds_the_nav_gets_it_from_api_js(self):
+        # On every page of the frontend: the nav is built by api.js only, so no page needs its own link.
+        for page in FRONTEND.glob("*.html"):
+            text = page.read_text()
+            if '<nav class="nav" id="nav">' in text:
+                assert "/static/api.js" in text, page.name
+
+    @pytest.mark.parametrize("name", sorted(PAGES))
+    def test_countdown_banner_is_not_a_live_region(self, name):
+        # On each page: the trial banner (its countdown ticks every second) carries no role or aria-live.
+        tag = re.search(r'<div[^>]*id="trialBanner"[^>]*>', html_of(name)).group(0)
+        assert "role=" not in tag and "aria-live" not in tag
+
     def test_common_names_the_endpoints_it_uses_and_they_are_registered(self):
         # On device_common.js: the trial and reboot-wait endpoints are quoted and registered.
         source, routes = js_of("device_common"), DEVICE_API.read_text()

@@ -235,3 +235,22 @@ class TestStatusPage:
             + "t.page.init(); await t.advance(100); return [...new Set(t.calls.map((c) => c.url))].sort();"
         )
         assert r == ["/device/diag", "/device/network", "/device/status"]
+
+
+@needs_node
+class TestStatusPageReview:
+    """findings of the whole-branch review"""
+
+    def test_diag_failure_after_a_success_shows_dashes(self):
+        # On a good diag then a failing one: uptime, reset and load go back to dashes.
+        r = scenario(
+            page(
+                "device",
+                "(u) => { if (t.fail) throw new Error('down'); return {status: 200, body: H.DIAG}; }",
+            )
+            + """
+            await t.page.refreshDiag(); t.fail = true; await t.page.refreshDiag();
+            return ['h-uptime','h-reset','t-cpu','t-mem-int','t-mem-psram'].map((i) => t.el(i).textContent);
+        """
+        )
+        assert r == ["-"] * 5

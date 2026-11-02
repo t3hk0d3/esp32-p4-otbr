@@ -394,3 +394,20 @@ class TestKit:
         )
         assert r[0] == "/device/network/confirm"
         assert "use mgmt" in r[1]
+
+
+@needs_node
+class TestKitReview:
+    """findings of the whole-branch review"""
+
+    def test_banner_hides_when_the_countdown_runs_out(self):
+        # On remaining_s 5 and 6 s passing: the banner is hidden (the board is rebooting back).
+        r = scenario(
+            kit("() => { throw new Error('rebooting'); }")
+            + f"""
+            t.kit.start(); t.kit.renderTrial(({NET})(5).body);
+            await t.advance(6000);
+            return t.el('trialBanner').hidden();
+        """
+        )
+        assert r is True
