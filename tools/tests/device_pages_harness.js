@@ -9,7 +9,7 @@ const path = require('path');
 
 const FRONTEND = path.join(__dirname, '..', '..', 'p4', 'components', 'esp_ot_br_server', 'frontend');
 const Common = require(path.join(FRONTEND, 'static', 'device_common.js'));
-const SCRIPTS = {device: 'status', ethernet: 'ethernet', firmware: 'firmware', capture: 'capture',
+const SCRIPTS = {index: 'status', ethernet: 'ethernet', firmware: 'firmware', capture: 'capture',
                  diagnostics: 'diagnostics'};
 
 class El {
@@ -218,7 +218,17 @@ const NETWORK = {
   fallback: false
 };
 
+/* GET /get_properties and /ipaddr of the Thread web GUI ({error, result, message}). */
+const PROPS = {error: 0, message: 'OK', result: {
+  'Network:Name': 'MyHome', 'Thread:Role': 'leader', 'RCP:Channel': '15', 'RCP:TxPower': '20 dBm',
+  'Network:PANID': '0x1234', 'Network:XPANID': 'dead00beef00cafe', 'Network:PartitionID': '1745592081',
+  'OpenThread:Version': 'openthread/1.4.0; esp32p4', 'RCP:EUI64': '1122334455667788',
+  'Network:BorderAgentID': '0123456789abcdef0123456789abcdef', 'OpenThread:PSKc': 'aabbccddeeff00112233445566778899'}};
+const IPADDR = {error: 0, message: 'OK', result: [
+  {address: 'fdde:ad00:beef:0:0:ff:fe00:fc00', prefixLength: 64, origin: 'thread', preferred: true, meshLocal: true, rloc: false},
+  {address: 'fd11:22::1', prefixLength: 64, origin: 'slaac', preferred: false, meshLocal: false, rloc: false}]};
+
 /* Deep copy of a fixture, with `patch` merged at the top level. */
 function fixture(obj, patch) { return Object.assign(JSON.parse(JSON.stringify(obj)), patch || {}); }
 
-module.exports = {makeEnv, STATUS, DIAG, NETWORK, fixture, Common};
+module.exports = {makeEnv, STATUS, DIAG, NETWORK, PROPS, IPADDR, fixture, Common};

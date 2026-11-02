@@ -36,7 +36,8 @@ still open, see `docs/phase0/RESULTS.md`).
 ## Web UI
 
 `http://<board>/` serves the upstream pages (Dashboard, Network to form or join, Commissioner, Addresses, Tools, Topology,
-About) plus five device pages under the "Device" menu: `/device.html` (status), `/ethernet.html` (single or split setup,
+About). The Dashboard (`/`) is the status page: mode, versions, radio, Ethernet, prefix delegation, load, and while the
+border router runs the Thread network, identifiers and Thread addresses. The "Device" menu holds `/ethernet.html` (single or split setup,
 VLANs and addresses, with a review step before the reboot), `/firmware.html` (P4 bundle and C6 radio firmware, radio
 recovery with the jumper), `/capture.html` (packet capture) and `/diagnostics.html`. Every device page shows the trial
 banner with **Keep new settings** while network settings are on trial. They use only `/device/*`, so they also work in

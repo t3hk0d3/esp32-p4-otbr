@@ -3,9 +3,10 @@ Hardware-gated: runs in the batched hardware pass. The page logic itself is cove
 (test_device_pages.py and one test_<page>_page.py per page).
 
 Manual check list (browser, board in BR_RUNNING, then repeat in SNIFFER and RADIO_FAULT):
-  1. Device menu: Status, Ethernet, Firmware, Packet capture, Diagnostics; "Device" is highlighted on each of them and
-     the menu opens from the keyboard (Tab onto "Device").
-  2. Status: the banner says "Border router running" (green); in SNIFFER "Capturing packets" with a link to Packet
+  1. Device menu: Ethernet, Firmware, Packet capture, Diagnostics; "Device" is highlighted on each of them and the menu
+     opens from the keyboard (Tab onto "Device"). "Dashboard" is highlighted on /.
+  2. Dashboard (/): the Thread network and Identifiers cards and the Thread address table fill in BR_RUNNING; the PSKc
+     shows only after Show; in SNIFFER the cards say they show while running. The banner says "Border router running" (green); in SNIFFER "Capturing packets" with a link to Packet
      capture; in RADIO_FAULT "Radio fault" with a link to Firmware. Tiles show versions, addresses and load.
   3. Switch to another tab for 10 s: /device/* requests stop (browser network tab) and resume on return.
   4. Firmware: jumper removed: the recovery card explains the jumper; fitted: Recover and Show C6 console, the log fills
@@ -63,7 +64,7 @@ def rcp_image():
 
 
 PAGES = {
-    "device": "status",
+    "index": "status",
     "ethernet": "ethernet",
     "firmware": "firmware",
     "capture": "capture",

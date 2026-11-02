@@ -11,165 +11,136 @@
     <link rel="stylesheet" href="/static/style.css">
     <link rel="icon" href="/favicon.ico">
 </head>
-<body>
+<body class="device-page">
 <nav class="nav" id="nav"></nav>
 <div class="container">
-    <div class="flex-between mb-16">
+    <div class="page-head">
         <div>
             <h1 class="page-title">Dashboard</h1>
-            <p class="page-desc" style="margin-bottom:0">Thread Border Router status overview</p>
-        </div>
-        <button class="btn btn-primary btn-sm" id="refreshBtn" onclick="refreshAll()">Refresh</button>
-    </div>
-
-    <div class="grid grid-2 section">
-        <div class="card">
-            <div class="card-header">Network Status</div>
-            <div class="info-row">
-                <span class="info-label">Name</span>
-                <span class="info-value" id="p-name">-</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Role</span>
-                <span class="info-value" id="p-role">-</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Channel</span>
-                <span class="info-value" id="p-ch">-</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">TX Power</span>
-                <span class="info-value" id="p-txpow">-</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">PAN ID</span>
-                <span class="info-value" id="p-panid">-</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Extended PAN ID</span>
-                <span class="info-value mono" id="p-xpanid">-</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Partition ID</span>
-                <span class="info-value" id="p-partid">-</span>
-            </div>
+            <p class="page-desc">What this border router and its Thread network are doing right now. Settings and tools are
+                in the Management and Device menus.</p>
         </div>
         <div>
-            <div class="card section">
-                <div class="card-header">System</div>
-                <div class="info-row">
-                    <span class="info-label">Uptime</span>
-                    <span class="info-value" id="p-uptime">-</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">Free Heap</span>
-                    <span class="info-value" id="p-heap">-</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">OT Version</span>
-                    <span class="info-value" id="p-otver">-</span>
-                </div>
-            </div>
-            <div class="card">
-                <div class="card-header">Identifiers</div>
-                <div class="info-row">
-                    <span class="info-label">IEEE EUI-64</span>
-                    <span class="info-value mono" id="p-eui64">-</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">Border Agent ID</span>
-                    <span class="info-value mono" id="p-baid">-</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">PSKc</span>
-                    <span class="info-value mono" id="p-pskc">-</span>
-                </div>
-            </div>
+            <button class="btn btn-outline-danger" id="rebootBtn" type="button">Reboot</button>
+            <div class="form-hint" id="rebootMsg" role="status" aria-live="polite"></div>
         </div>
     </div>
 
-    <div class="card section">
-        <div class="card-header">IPv6 Addresses</div>
-        <div id="addrList"><p class="text-muted" style="font-size:13px">Loading...</p></div>
+    <div class="disabled-banner hidden" id="trialBanner">
+        <strong>New network settings are on trial.</strong>
+        The board goes back to the previous settings in <span id="trialRemaining">-</span> unless you keep them from the
+        management interface. <a href="/ethernet.html">See the settings</a>
+        <button class="btn btn-primary btn-sm" id="confirmBtn" type="button">Keep new settings</button>
     </div>
+    <div class="form-hint" id="confirmMsg" role="status" aria-live="polite"></div>
+    <div class="disabled-banner hidden" id="s-offline" role="status" aria-live="polite"></div>
 
+    <div id="statusSection">
+        <section class="card hero" id="hero">
+            <div class="hero-main">
+                <span class="hero-dot" aria-hidden="true"></span>
+                <div>
+                    <h2 class="hero-title" id="h-title">-</h2>
+                    <p class="hero-text" id="h-text"></p>
+                    <p class="hero-text" id="h-role"></p>
+                    <a class="hidden" id="h-link" href="#">-</a>
+                </div>
+            </div>
+            <dl class="facts hero-facts">
+                <dt>Mode</dt><dd class="mono" id="h-mode">-</dd>
+                <dt>Uptime</dt><dd id="h-uptime">-</dd>
+                <dt>Last reset</dt><dd id="h-reset">-</dd>
+            </dl>
+        </section>
+
+        <div class="tile-grid">
+            <section class="card">
+                <div class="tile-head"><h2>Thread network</h2><a href="/network.html">Network</a></div>
+                <p class="form-hint hidden" id="t-net-off">Shown while the border router is running.</p>
+                <p class="hidden" id="t-net-none">This border router is not part of a Thread network yet.
+                    <a href="/network.html">Form or join one</a></p>
+                <dl class="facts">
+                    <dt>Name</dt><dd id="t-net-name">-</dd>
+                    <dt>Role</dt><dd id="t-net-role">-</dd>
+                    <dt>Channel</dt><dd id="t-net-channel">-</dd>
+                    <dt>TX power</dt><dd id="t-net-txpower">-</dd>
+                    <dt>PAN ID</dt><dd class="mono" id="t-net-panid">-</dd>
+                    <dt>Extended PAN ID</dt><dd class="mono" id="t-net-xpanid">-</dd>
+                    <dt>Partition ID</dt><dd class="mono" id="t-net-partition">-</dd>
+                </dl>
+            </section>
+            <section class="card">
+                <div class="tile-head"><h2>Identifiers</h2></div>
+                <dl class="facts">
+                    <dt>IEEE EUI-64</dt><dd class="mono" id="t-id-eui64">-</dd>
+                    <dt>Border Agent ID</dt><dd class="mono" id="t-id-baid">-</dd>
+                    <dt>PSKc</dt><dd><span class="mono" id="t-id-pskc">-</span>
+                        <button class="btn btn-outline btn-sm" id="pskcBtn" type="button" aria-controls="t-id-pskc">Show</button></dd>
+                    <dt>OpenThread</dt><dd class="mono" id="t-id-otver">-</dd>
+                </dl>
+            </section>
+            <section class="card">
+                <div class="tile-head"><h2>Board firmware</h2><a href="/firmware.html">Update</a></div>
+                <dl class="facts">
+                    <dt>Version</dt><dd class="mono" id="t-app">-</dd>
+                    <dt>Running from</dt><dd id="t-slot">-</dd>
+                    <dt>Settings storage</dt><dd id="t-storage">-</dd>
+                </dl>
+            </section>
+            <section class="card">
+                <div class="tile-head"><h2>Radio (C6)</h2><a href="/firmware.html">Update</a></div>
+                <dl class="facts">
+                    <dt>Radio firmware</dt><dd class="mono" id="t-rcp">-</dd>
+                    <dt>Matches this build</dt><dd id="t-compat">-</dd>
+                    <dt>Base image</dt><dd id="t-base">-</dd>
+                    <dt>Maintenance jumper</dt><dd id="t-jumper">-</dd>
+                </dl>
+            </section>
+            <section class="card">
+                <div class="tile-head"><h2>Ethernet</h2><a href="/ethernet.html">Settings</a></div>
+                <dl class="facts">
+                    <dt>IPv4</dt><dd class="mono" id="t-ipv4">-</dd>
+                    <dt>IPv6</dt><dd class="mono lines" id="t-ipv6">-</dd>
+                </dl>
+            </section>
+            <section class="card">
+                <div class="tile-head"><h2>IPv6 prefix delegation</h2></div>
+                <dl class="facts">
+                    <dt>Client</dt><dd id="t-pd-state">-</dd>
+                    <dt>Delegated prefix</dt><dd class="mono" id="t-pd-prefix">-</dd>
+                </dl>
+            </section>
+            <section class="card">
+                <div class="tile-head"><h2>Packet capture</h2><a href="/capture.html">Open</a></div>
+                <dl class="facts">
+                    <dt>State</dt><dd id="t-sniffer-state">-</dd>
+                    <dt>Frames</dt><dd id="t-sniffer-detail">-</dd>
+                </dl>
+            </section>
+            <section class="card">
+                <div class="tile-head"><h2>Load and memory</h2><a href="/diagnostics.html">Diagnostics</a></div>
+                <dl class="facts">
+                    <dt>CPU (10 s)</dt><dd id="t-cpu">-</dd>
+                    <dt>Internal RAM free</dt><dd id="t-mem-int">-</dd>
+                    <dt>PSRAM free</dt><dd id="t-mem-psram">-</dd>
+                </dl>
+            </section>
+        </div>
+
+        <section class="card">
+            <div class="tile-head"><h2>Thread addresses</h2><a href="/addresses.html">Manage</a></div>
+            <div class="table-wrap">
+                <table class="diff-table">
+                    <thead><tr><th scope="col">Address</th><th scope="col">Origin</th><th scope="col">State</th></tr></thead>
+                    <tbody id="addr-body"></tbody>
+                </table>
+            </div>
+        </section>
+    </div>
 </div>
-<div class="footer">Copyright &copy; 2026 Espressif Systems. All rights reserved.</div>
+<div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
 <script src="/static/api.js"></script>
-<script>
-function renderProperties(data) {
-    if (!data || data.error || !data.result) return;
-    var r = data.result;
-    document.getElementById('p-name').textContent = r['Network:Name'] || '-';
-    document.getElementById('p-role').textContent = r['Thread:Role'] || '-';
-    document.getElementById('p-ch').textContent = r['RCP:Channel'] || '-';
-    document.getElementById('p-txpow').textContent = r['RCP:TxPower'] || '-';
-    document.getElementById('p-panid').textContent = r['Network:PANID'] || '-';
-    document.getElementById('p-xpanid').textContent = r['Network:XPANID'] || '-';
-    document.getElementById('p-partid').textContent = r['Network:PartitionID'] || '-';
-    document.getElementById('p-uptime').textContent = r['System:Uptime'] || '-';
-    document.getElementById('p-heap').textContent = r['System:FreeHeap'] || '-';
-    document.getElementById('p-otver').textContent = r['OpenThread:Version'] || '-';
-    document.getElementById('p-eui64').textContent = r['RCP:EUI64'] || '-';
-    document.getElementById('p-baid').textContent = r['Network:BorderAgentID'] || '-';
-    document.getElementById('p-pskc').textContent = r['OpenThread:PSKc'] || '-';
-}
-
-function renderAddresses(data) {
-    var list = (data && data.result) ? data.result : [];
-    var el = document.getElementById('addrList');
-    if (!list.length) {
-        checkThreadState(function(role, connected) {
-            if (!connected) {
-                el.innerHTML = '<div class="disabled-banner">Thread network is not connected. <a href="/network.html">Go to Network</a> to join or form a network.</div>';
-            } else {
-                el.innerHTML = '<p class="text-muted" style="font-size:13px">No addresses</p>';
-            }
-        });
-        return;
-    }
-    var html = '<table><thead><tr><th>Address</th><th>Origin</th><th>Status</th></tr></thead><tbody>';
-    for (var i = 0; i < list.length; i++) {
-        var a = list[i];
-        var badge = 'badge-info';
-        if (a.origin === 'manual') badge = 'badge-success';
-        else if (a.origin === 'thread') badge = 'badge-warning';
-        var statusBadge = a.preferred ? '<span class="badge badge-success">preferred</span>'
-                                      : '<span class="badge badge-danger">deprecated</span>';
-        html += '<tr><td style="font-family:\'Courier New\',Consolas,monospace;font-size:12px">' +
-                escapeHtml(a.address) + '/' + escapeHtml(a.prefixLength) +
-                '</td><td><span class="badge ' + badge + '">' + escapeHtml(a.origin) + '</span></td><td>' + statusBadge + '</td></tr>';
-    }
-    html += '</tbody></table>';
-    el.innerHTML = html;
-}
-
-function loadProperties() {
-    return apiGet('/get_properties').then(renderProperties).catch(function() {
-        showToast('Failed to connect to device', 'error');
-    });
-}
-
-function loadAddresses() {
-    return apiGet('/ipaddr').then(renderAddresses).catch(function() {});
-}
-
-function refreshAll() {
-    var btn = document.getElementById('refreshBtn');
-    btn.disabled = true; btn.textContent = 'Loading...';
-    Promise.all([loadProperties(), loadAddresses()]).then(function() {
-        btn.disabled = false; btn.textContent = 'Refresh';
-        showToast('Dashboard refreshed', 'success');
-    }).catch(function() {
-        btn.disabled = false; btn.textContent = 'Refresh';
-    });
-}
-
-/* Render from cache instantly, then fetch live data */
-renderProperties(getCached('/get_properties'));
-renderAddresses(getCached('/ipaddr'));
-loadProperties();
-loadAddresses();
-</script>
+<script src="/static/device_common.js"></script>
+<script src="/static/status.js"></script>
 </body>
 </html>

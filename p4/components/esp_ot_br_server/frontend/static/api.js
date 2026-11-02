@@ -144,7 +144,6 @@ var pages = [
   {
     label : 'Device',
     children : [
-      {href : '/device.html', label : 'Status'},
       {href : '/ethernet.html', label : 'Ethernet'},
       {href : '/firmware.html', label : 'Firmware'},
       {href : '/capture.html', label : 'Packet capture'},

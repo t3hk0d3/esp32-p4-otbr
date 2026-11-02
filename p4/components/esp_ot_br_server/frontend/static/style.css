@@ -445,7 +445,7 @@ tr:hover td { background: var(--primary-light); }
 .text-center { text-align: center; }
 .text-muted { color: var(--text-muted); }
 
-/* Device pages (device.html, ethernet.html, firmware.html, capture.html, diagnostics.html) */
+/* Dashboard and device pages (index.html, ethernet.html, firmware.html, capture.html, diagnostics.html) */
 :root {
     --primary-text: #b35c00;   /* orange text and buttons with 4.5:1 contrast on white */
     --ok: #1e7e34;
@@ -474,7 +474,7 @@ tr:hover td { background: var(--primary-light); }
 .hero-fault { border-top-color: var(--danger); } .hero-fault .hero-dot { background: var(--danger); }
 
 .device-page .card { margin-bottom: 16px; }
-.tile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.tile-grid { margin-bottom: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
 .tile-grid .card { margin-bottom: 0; }
 .tile-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
 .tile-head h2 { font-size: 16px; font-weight: 600; }

@@ -36,11 +36,13 @@ reason, spec reference.
    (`thread_rest_send`), Web GUI `{"error","result","message"}` (`pack_response`, `error` = `OT_ERROR_INVALID_STATE`),
    resources `{"ErrorCode","ErrorMessage"}` (`resource_status`). Details: 409 `sniffer active`, 503
    `radio not available`. (spec 5.7, 5.8)
-3. Applied (Task 20; split into five pages 2026-11). `esp_ot_br_server`: device pages. New files `frontend/device.html`
-   (status), `frontend/ethernet.html`, `frontend/firmware.html`, `frontend/capture.html`, `frontend/diagnostics.html`, and
-   their scripts `frontend/static/status.js`, `ethernet.js`, `firmware.js`, `capture.js`, `diagnostics.js` on top of the
+3. Applied (Task 20; split into pages 2026-11). `esp_ot_br_server`: device pages. Rewritten upstream file
+   `frontend/index.html` (the Dashboard becomes the status page: our status cards plus the upstream Thread network,
+   identifiers and address table, read from `/get_properties` and `/ipaddr` only in BR_RUNNING; the PSKc is masked until
+   "Show"; the upstream inline script, Refresh button and copyright footer are gone). New files `frontend/ethernet.html`,
+   `frontend/firmware.html`, `frontend/capture.html`, `frontend/diagnostics.html`, and their scripts `frontend/static/status.js`, `ethernet.js`, `firmware.js`, `capture.js`, `diagnostics.js` on top of the
    shared `frontend/static/device_common.js` (pure logic exported for node, page code guarded by `typeof document`). Edits:
-   `frontend/static/api.js`, a "Device" dropdown with the five pages in the `pages` array that builds the navigation bar of
+   `frontend/static/api.js`, a "Device" dropdown with the four device pages in the `pages` array that builds the navigation bar of
    every page (no other page needs a change); `frontend/static/style.css`, new classes appended after the upstream rules
    (no upstream rule changed) and `:focus-within` on the nav dropdowns so they open from the keyboard. The pages only use
    `/device/*`, so they render in every mode, also where the Thread REST reads answer 503; they poll only while the tab is

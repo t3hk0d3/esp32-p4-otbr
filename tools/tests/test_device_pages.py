@@ -9,12 +9,14 @@ from device_js import FRONTEND, REPO, STATIC, needs_node
 
 API_JS = FRONTEND / "static" / "api.js"
 DEVICE_API = REPO / "p4" / "components" / "device_api" / "device_api.c"
+WEB_API = (
+    FRONTEND.parent / "private_include" / "esp_br_web_api.h"
+)  # Thread web GUI routes (/get_properties, ...)
 WEB_BUDGET_BYTES = (
     256 * 1024
 )  # of the 2 MB web partition; the whole frontend is well below it
 
 DEVICE_MENU = [
-    ["/device.html", "Status"],
     ["/ethernet.html", "Ethernet"],
     ["/firmware.html", "Firmware"],
     ["/capture.html", "Packet capture"],
@@ -23,7 +25,16 @@ DEVICE_MENU = [
 
 # page -> (script, endpoints its script names)
 PAGES = {
-    "device": ("status", ["/device/status", "/device/diag", "/device/reboot"]),
+    "index": (
+        "status",
+        [
+            "/device/status",
+            "/device/diag",
+            "/device/reboot",
+            "/get_properties",
+            "/ipaddr",
+        ],
+    ),
     "diagnostics": ("diagnostics", ["/device/diag"]),
     "ethernet": ("ethernet", ["/device/network"]),
     "firmware": (
@@ -75,17 +86,29 @@ def nav_html(pathname):
 class TestNav:
     """api.js nav"""
 
-    def test_device_is_a_dropdown_with_the_five_pages_in_order(self):
-        # On any page: the Device toggle is followed by its five entries in order.
+    def test_device_is_a_dropdown_with_the_four_pages_in_order(self):
+        # On any page: the Device toggle is followed by its four entries in order (the status is the Dashboard).
         html = nav_html("/index.html")
         menu = html.split('nav-dropdown-toggle">Device</a>', 1)[1].split("</ul>", 1)[0]
         assert [
             list(m) for m in re.findall(r'<a href="([^"]+)"[^>]*>([^<]+)</a>', menu)
         ] == DEVICE_MENU
 
+    @pytest.mark.parametrize("path", ["/", "/index.html"])
+    def test_dashboard_is_active_on_the_landing_page(self, path):
+        # On / and /index.html: the Dashboard entry is active, the Device toggle is not.
+        html = nav_html(path)
+        assert '<a href="/index.html" class="active">Dashboard</a>' in html
+        assert 'nav-dropdown-toggle">Device</a>' in html
+
+    def test_there_is_no_separate_status_page(self):
+        # On the frontend: no device.html (the Dashboard is the status page), and no nav entry for it.
+        assert not (FRONTEND / "device.html").exists()
+        assert "/device.html" not in API_JS.read_text()
+
     @pytest.mark.parametrize("path", [p for p, _ in DEVICE_MENU])
     def test_device_toggle_is_active_on_each_device_page(self, path):
-        # On each of the five paths: the Device toggle and that entry are marked active.
+        # On each of the four paths: the Device toggle and that entry are marked active.
         html = nav_html(path)
         assert 'nav-dropdown-toggle active">Device</a>' in html
         assert f'<a href="{path}" class="active">' in html
@@ -156,11 +179,13 @@ class TestPages:
             assert re.search(rf'id="{ident}"[^>]*aria-live="polite"', html), ident
 
     def test_each_endpoint_is_named_by_the_script_and_registered(self, name):
-        # On the endpoints of the page: quoted in its script and present in the device_api route table.
+        # On the endpoints of the page: quoted in its script and registered (device_api, or the Thread web GUI).
         source, routes = js_of(PAGES[name][0]), DEVICE_API.read_text()
         for endpoint in PAGES[name][1]:
             assert re.search(rf"['\"]{re.escape(endpoint)}['\"?]", source), endpoint
-            assert f'"{endpoint}"' in routes, endpoint
+            assert (
+                f'"{endpoint}"' in routes or f'"{endpoint}"' in WEB_API.read_text()
+            ), endpoint
 
 
 class TestShared:
@@ -210,7 +235,7 @@ class TestRouting:
 
     def test_registered_device_routes_are_exact_paths_under_device_slash(self):
         # On the route table: every URI is exact (no wildcard) and under /device/ or one of the allowed top-level
-        # paths, so the page files (/device.html, /ethernet.html, ...) reach the /* file handler.
+        # paths, so the page files (/index.html, /ethernet.html, ...) reach the /* file handler.
         uris = re.findall(r'\{"(/[^"]*)", HTTP_[A-Z]+, ', DEVICE_API.read_text())
         assert uris
         assert all("*" not in u for u in uris)

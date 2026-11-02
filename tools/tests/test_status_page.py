@@ -1,4 +1,4 @@
-"""Status page, device.html (BDD: StatusLogic, StatusPage). Runs static/status.js under node."""
+"""Dashboard, index.html: the status page (BDD: StatusLogic, StatusPage). Runs static/status.js under node."""
 
 import json
 
@@ -14,7 +14,11 @@ def status(**patch):
     return f"Object.assign(H.fixture(H.STATUS), {json.dumps(patch)})"
 
 
-ROUTES = "(u, o) => o.method === 'POST' ? ({status: 200, body: {status: 'rebooting'}}) : ({status: 200, body: u === '/device/diag' ? H.DIAG : u === '/device/network' ? H.NETWORK : (t.s || H.STATUS)})"
+ROUTES = (
+    "(u, o) => o.method === 'POST' ? ({status: 200, body: {status: 'rebooting'}}) : ({status: 200, body:"
+    " u === '/device/diag' ? H.DIAG : u === '/device/network' ? H.NETWORK : u === '/get_properties' ? (t.p || H.PROPS)"
+    " : u === '/ipaddr' ? (t.a || H.IPADDR) : (t.s || H.STATUS)})"
+)
 
 
 @needs_node
@@ -101,7 +105,7 @@ class TestStatusPage:
     def test_status_fills_the_hero_and_the_tiles(self):
         # On a status answer: hero, raw mode and each tile; offline line hidden.
         r = scenario(
-            page("device", ROUTES)
+            page("index", ROUTES)
             + """
             await t.page.refreshStatus();
             return ['h-title','h-mode','t-app','t-slot','t-storage','t-rcp','t-compat','t-base','t-jumper','t-ipv4',
@@ -134,7 +138,7 @@ class TestStatusPage:
     def test_fault_hero_links_the_firmware_page(self):
         # On RADIO_FAULT with no RCP firmware: hero-fault, its text and the link.
         r = scenario(
-            page("device", ROUTES)
+            page("index", ROUTES)
             + f"t.s = {status(mode='RADIO_FAULT', fault_reason='no rcp firmware')};"
             + "await t.page.refreshStatus(); return [t.el('hero').className, t.el('h-link').hidden(), t.el('h-link').getAttribute('href')];"
         )
@@ -143,7 +147,7 @@ class TestStatusPage:
     def test_base_image_mismatch_names_the_expected_one(self):
         # On a base image other than the expected one: both are named; without the jumper: a dash.
         r = scenario(
-            page("device", ROUTES)
+            page("index", ROUTES)
             + """
             t.s = H.fixture(H.STATUS); t.s.jumper.base_installed = 'b0'; await t.page.refreshStatus();
             const mismatch = t.el('t-base').textContent;
@@ -156,7 +160,7 @@ class TestStatusPage:
     def test_server_text_is_rendered_as_text(self):
         # On a fault reason with markup: it lands in textContent unchanged.
         r = scenario(
-            page("device", ROUTES)
+            page("index", ROUTES)
             + f"t.s = {status(mode='RADIO_FAULT', fault_reason='<img src=x>')};"
             + "await t.page.refreshStatus(); return t.el('h-text').textContent;"
         )
@@ -165,7 +169,7 @@ class TestStatusPage:
     def test_diag_fills_uptime_reset_and_load(self):
         # On a diag answer: uptime in words, reset reason, 10 s CPU per core, internal and PSRAM free.
         r = scenario(
-            page("device", ROUTES)
+            page("index", ROUTES)
             + "await t.page.refreshDiag(); return ['h-uptime','h-reset','t-cpu','t-mem-int','t-mem-psram'].map((i) => t.el(i).textContent);"
         )
         assert r == [
@@ -179,7 +183,7 @@ class TestStatusPage:
     def test_diag_failure_leaves_dashes(self):
         # On a failing diag: the uptime stays a dash.
         r = scenario(
-            page("device", "() => { throw new Error('down'); }")
+            page("index", "() => { throw new Error('down'); }")
             + "t.el('h-uptime').textContent = '-'; await t.page.refreshDiag(); return t.el('h-uptime').textContent;"
         )
         assert r == "-"
@@ -188,7 +192,7 @@ class TestStatusPage:
         # On failing status polls: the offline line with last-seen seconds; requests back off.
         r = scenario(
             page(
-                "device",
+                "index",
                 "(u) => { if (t.fail) throw new Error('down'); return {status: 200, body: u === '/device/diag' ? H.DIAG : u === '/device/network' ? H.NETWORK : H.STATUS}; }",
             )
             + """
@@ -205,7 +209,7 @@ class TestStatusPage:
     def test_reboot_asks_posts_and_waits_for_the_board(self):
         # On Reboot: a confirmation, POST /device/reboot, a message, busy with a waiter.
         r = scenario(
-            page("device", ROUTES)
+            page("index", ROUTES)
             + """
             await t.page.reboot();
             const c = t.calls.find((x) => x.method === 'POST');
@@ -220,7 +224,7 @@ class TestStatusPage:
         # On a 409 from reboot: the reason in rebootMsg, not busy.
         r = scenario(
             page(
-                "device",
+                "index",
                 "(u, o) => o.method === 'POST' ? ({status: 409, body: {error: 'busy', detail: 'update running'}}) : ({status: 200, body: H.STATUS})",
             )
             + "await t.page.reboot(); return [t.el('rebootMsg').textContent, t.page.kit.isBusy()];"
@@ -228,13 +232,19 @@ class TestStatusPage:
         assert "update running" in r[0]
         assert r[1] is False
 
-    def test_init_polls_status_diag_and_the_trial_banner(self):
-        # On init: GET /device/status, /device/diag and /device/network.
+    def test_init_polls_status_diag_thread_and_the_trial_banner(self):
+        # On init with a running border router: status, diag, network, and the Thread properties and addresses.
         r = scenario(
-            page("device", ROUTES)
+            page("index", ROUTES)
             + "t.page.init(); await t.advance(100); return [...new Set(t.calls.map((c) => c.url))].sort();"
         )
-        assert r == ["/device/diag", "/device/network", "/device/status"]
+        assert r == [
+            "/device/diag",
+            "/device/network",
+            "/device/status",
+            "/get_properties",
+            "/ipaddr",
+        ]
 
 
 @needs_node
@@ -245,7 +255,7 @@ class TestStatusPageReview:
         # On a good diag then a failing one: uptime, reset and load go back to dashes.
         r = scenario(
             page(
-                "device",
+                "index",
                 "(u) => { if (t.fail) throw new Error('down'); return {status: 200, body: H.DIAG}; }",
             )
             + """
@@ -254,3 +264,151 @@ class TestStatusPageReview:
         """
         )
         assert r == ["-"] * 5
+
+
+@needs_node
+class TestThreadLogic:
+    """StatusLogic: the Thread part of the dashboard"""
+
+    def test_thread_view_maps_the_properties(self):
+        # On /get_properties: the fields of the two cards, "-" for a missing one.
+        v = st(
+            "L.threadView({'Network:Name': 'MyHome', 'Thread:Role': 'leader', 'RCP:Channel': '15', 'RCP:TxPower': '20 dBm',"
+            " 'Network:PANID': '0x1234', 'Network:XPANID': 'dead', 'Network:PartitionID': '7', 'OpenThread:Version': 'ot',"
+            " 'RCP:EUI64': 'e', 'Network:BorderAgentID': 'b'})"
+        )
+        assert v == {
+            "name": "MyHome",
+            "role": "leader",
+            "channel": "15",
+            "txpower": "20 dBm",
+            "panid": "0x1234",
+            "xpanid": "dead",
+            "partition": "7",
+            "otver": "ot",
+            "eui64": "e",
+            "baid": "b",
+            "pskc": "-",
+            "joined": True,
+        }
+
+    @pytest.mark.parametrize("role", ["disabled", "detached", ""])
+    def test_no_network_when_disabled_detached_or_unknown(self, role):
+        # On role disabled / detached / missing: not joined.
+        assert st(f"L.threadView({{'Thread:Role': '{role}'}}).joined") is False
+
+    def test_role_line_names_role_network_and_channel(self):
+        # On leader of MyHome on 15: "Leader of MyHome on channel 15"; not joined: "".
+        assert (
+            st(
+                "L.roleLine({role: 'leader', name: 'MyHome', channel: '15', joined: true})"
+            )
+            == "Leader of MyHome on channel 15"
+        )
+        assert st("L.roleLine({role: 'disabled', joined: false})") == ""
+
+    def test_pskc_mask_hides_the_value_and_its_length(self):
+        # On a short or a 32-character PSKc: the same 8 dots; "-" stays "-".
+        masks = st(
+            "[L.maskSecret('abcd'), L.maskSecret('a'.repeat(32)), L.maskSecret('-')]"
+        )
+        assert masks == ["\u2022" * 8, "\u2022" * 8, "-"]
+
+    def test_address_rows_have_prefix_origin_and_state(self):
+        # On two addresses: "address/prefix", origin, preferred or deprecated.
+        rows = st(
+            "L.addressRows([{address: 'fd00::1', prefixLength: 64, origin: 'thread', preferred: true},"
+            " {address: 'fd11::2', prefixLength: 64, origin: 'slaac', preferred: false}])"
+        )
+        assert rows == [
+            {"address": "fd00::1/64", "origin": "thread", "state": "preferred"},
+            {"address": "fd11::2/64", "origin": "slaac", "state": "deprecated"},
+        ]
+
+
+@needs_node
+class TestThreadCards:
+    """status.js: the Thread cards of the dashboard"""
+
+    def test_thread_cards_and_banner_line_fill_from_the_properties(self):
+        # On a running border router: network and identifier fields, the banner line, PSKc hidden.
+        r = scenario(
+            page("index", ROUTES)
+            + """
+            await t.page.refreshStatus(); await t.page.refreshThread();
+            return ['t-net-name','t-net-role','t-net-channel','t-net-txpower','t-net-panid','t-net-xpanid','t-net-partition',
+                    't-id-eui64','t-id-baid','t-id-otver','h-role'].map((i) => t.el(i).textContent)
+                   .concat([t.el('t-id-pskc').textContent.includes('aabb'), t.el('t-net-off').hidden()]);
+        """
+        )
+        assert r == [
+            "MyHome",
+            "leader",
+            "15",
+            "20 dBm",
+            "0x1234",
+            "dead00beef00cafe",
+            "1745592081",
+            "1122334455667788",
+            "0123456789abcdef0123456789abcdef",
+            "openthread/1.4.0; esp32p4",
+            "Leader of MyHome on channel 15",
+            False,
+            True,
+        ]
+
+    def test_pskc_shows_only_after_show(self):
+        # On Show: the PSKc in clear and the button says Hide; on Hide: dots again.
+        r = scenario(
+            page("index", ROUTES)
+            + """
+            t.page.init(); await t.advance(100);
+            t.el('pskcBtn').click(); const shown = [t.el('t-id-pskc').textContent, t.el('pskcBtn').textContent];
+            t.el('pskcBtn').click();
+            return [shown, t.el('t-id-pskc').textContent.includes('aabb'), t.el('pskcBtn').textContent];
+        """
+        )
+        assert r == [["aabbccddeeff00112233445566778899", "Hide"], False, "Show"]
+
+    def test_address_table_lists_the_thread_addresses(self):
+        # On /ipaddr: one row per address with prefix, origin and state.
+        r = scenario(
+            page("index", ROUTES)
+            + "await t.page.refreshStatus(); await t.page.refreshThread(); return t.el('addr-body').children.map((tr) => tr.allText());"
+        )
+        assert r == [
+            "fdde:ad00:beef:0:0:ff:fe00:fc00/64 thread preferred",
+            "fd11:22::1/64 slaac deprecated",
+        ]
+
+    def test_no_network_yet_says_so(self):
+        # On role disabled and no addresses: the not-in-a-network line, no rows.
+        r = scenario(
+            page("index", ROUTES)
+            + """
+            t.p = {error: 0, message: 'OK', result: {'Thread:Role': 'disabled'}}; t.a = {error: 0, message: 'OK', result: []};
+            await t.page.refreshStatus(); await t.page.refreshThread();
+            return [t.el('t-net-none').hidden(), t.el('addr-body').children.length];
+        """
+        )
+        assert r == [False, 0]
+
+    def test_outside_br_running_the_thread_data_is_not_asked_for(self):
+        # On SNIFFER: no /get_properties or /ipaddr request; the cards say they show while running.
+        r = scenario(
+            page("index", ROUTES)
+            + f"t.s = {status(mode='SNIFFER', sniffer={'active': True, 'channel': 15, 'frames': 3, 'drops': 0})};"
+            + """
+            t.page.init(); await t.advance(25000);
+            return [t.calls.filter((c) => c.url === '/get_properties' || c.url === '/ipaddr').length, t.el('t-net-off').hidden()];
+        """
+        )
+        assert r == [0, False]
+
+    def test_network_name_is_rendered_as_text(self):
+        # On a network name with markup: it lands in textContent unchanged.
+        r = scenario(
+            page("index", ROUTES)
+            + "t.p = H.fixture(H.PROPS); t.p.result['Network:Name'] = '<b>x</b>'; await t.page.refreshStatus(); await t.page.refreshThread(); return t.el('t-net-name').textContent;"
+        )
+        assert r == "<b>x</b>"

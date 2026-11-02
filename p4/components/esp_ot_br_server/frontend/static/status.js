@@ -3,7 +3,8 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * ESP Thread Border Router - Device status page, device.html (/device/status, /device/diag, /device/reboot)
+ * ESP Thread Border Router - Dashboard, index.html: the status page (/device/status, /device/diag, /device/reboot,
+ * and the Thread web GUI's /get_properties and /ipaddr while the border router runs)
  *
  * StatusLogic is pure and runs under node too (tools/tests/test_status_page.py). StatusPage is the page.
  */
@@ -72,7 +73,54 @@ function pdText(pd) {
   };
 }
 
-return {heroFor : heroFor, snifferText : snifferText, pdText : pdText};
+var NOT_JOINED = {disabled : true, detached : true, '' : true};
+
+/** The Thread cards from the result of /get_properties; "-" for a field the answer lacks. */
+function threadView(r) {
+  function f(k) { return r[k] === undefined || r[k] === null || r[k] === '' ? '-' : String(r[k]); }
+  var role = r['Thread:Role'] === undefined ? '' : String(r['Thread:Role']);
+  return {
+    name : f('Network:Name'),
+    role : f('Thread:Role'),
+    channel : f('RCP:Channel'),
+    txpower : f('RCP:TxPower'),
+    panid : f('Network:PANID'),
+    xpanid : f('Network:XPANID'),
+    partition : f('Network:PartitionID'),
+    otver : f('OpenThread:Version'),
+    eui64 : f('RCP:EUI64'),
+    baid : f('Network:BorderAgentID'),
+    pskc : f('OpenThread:PSKc'),
+    joined : !NOT_JOINED[role]
+  };
+}
+
+/** The banner's Thread line: "Leader of MyHome on channel 15", or "" outside a network. */
+function roleLine(v) {
+  if (!v.joined)
+    return '';
+  return v.role.charAt(0).toUpperCase() + v.role.slice(1) + ' of ' + v.name + ' on channel ' + v.channel;
+}
+
+/** A secret shown as 8 dots, whatever its length ("-" stays). */
+function maskSecret(s) { return s === '-' ? s : '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'; }
+
+/** Rows of the Thread address table from the result of /ipaddr. */
+function addressRows(list) {
+  return list.map(function(a) {
+    return {address : a.address + '/' + a.prefixLength, origin : String(a.origin), state : a.preferred ? 'preferred' : 'deprecated'};
+  });
+}
+
+return {
+  heroFor : heroFor,
+  snifferText : snifferText,
+  pdText : pdText,
+  threadView : threadView,
+  roleLine : roleLine,
+  maskSecret : maskSecret,
+  addressRows : addressRows
+};
 })();
 
 function StatusPage(env) {
@@ -81,6 +129,10 @@ var L = StatusLogic;
 var kit = C.DeviceKit(env, {actionIds : [ 'rebootBtn' ]});
 var $ = kit.$, setText = kit.setText, show = kit.show, note = kit.note;
 var lastSeen = 0;
+var lastMode = null;   // mode of the last status answer: the Thread data is only asked for in BR_RUNNING
+var threadPoll = null;
+var pskc = '-';
+var pskcShown = false;
 
 function rcpText(installed) {
   if (installed === null || installed === undefined)
@@ -89,6 +141,12 @@ function rcpText(installed) {
 }
 
 function render(s) {
+  var wasRunning = lastMode === 'BR_RUNNING';
+  lastMode = s.mode;
+  if (s.mode === 'BR_RUNNING' && !wasRunning && threadPoll)
+    threadPoll.wake();
+  if (s.mode !== 'BR_RUNNING')
+    threadOff();
   lastSeen = env.now();
   show('s-offline', false);
   var h = L.heroFor(s);
@@ -164,6 +222,77 @@ function refreshDiag() {
   }, diagDashes);
 }
 
+/* ---- Thread network (the Thread web GUI answers {error, result, message}; 503 outside BR_RUNNING) ---- */
+
+function threadOff() {
+  show('t-net-off', true);
+  show('t-net-none', false);
+  setText('h-role', '');
+}
+
+function showPskc() {
+  setText('t-id-pskc', pskcShown ? pskc : L.maskSecret(pskc));
+  setText('pskcBtn', pskcShown ? 'Hide' : 'Show');
+  $('pskcBtn').setAttribute('aria-pressed', pskcShown ? 'true' : 'false');
+}
+
+function renderThread(r) {
+  var v = L.threadView(r);
+  show('t-net-off', false);
+  show('t-net-none', !v.joined);
+  setText('h-role', L.roleLine(v));
+  setText('t-net-name', v.name);
+  setText('t-net-role', v.role);
+  setText('t-net-channel', v.channel);
+  setText('t-net-txpower', v.txpower);
+  setText('t-net-panid', v.panid);
+  setText('t-net-xpanid', v.xpanid);
+  setText('t-net-partition', v.partition);
+  setText('t-id-eui64', v.eui64);
+  setText('t-id-baid', v.baid);
+  setText('t-id-otver', v.otver);
+  pskc = v.pskc;
+  showPskc();
+}
+
+function renderAddresses(list) {
+  var body = $('addr-body');
+  kit.clear(body);
+  L.addressRows(list).forEach(function(a) {
+    var tr = kit.el('tr');
+    var th = kit.el('th', a.address, 'mono');
+    th.setAttribute('scope', 'row');
+    tr.appendChild(th);
+    var origin = kit.el('td');
+    origin.appendChild(kit.el('span', a.origin, 'chip'));
+    tr.appendChild(origin);
+    var state = kit.el('td');
+    state.appendChild(kit.el('span', a.state, a.state === 'preferred' ? 'chip chip-ok' : 'chip chip-bad'));
+    tr.appendChild(state);
+    body.appendChild(tr);
+  });
+}
+
+function guiResult(url) {
+  return kit.request('GET', url, {timeoutMs : 5000}).then(function(r) {
+    return r.status === 200 && r.body && !r.body.error && r.body.result ? r.body.result : null;
+  }, function() { return null; });
+}
+
+function refreshThread() {
+  if (lastMode !== 'BR_RUNNING')
+    return Promise.resolve(true); // asked for again when the status says it runs
+  return guiResult('/get_properties').then(function(props) {
+    if (props)
+      renderThread(props);
+    return guiResult('/ipaddr').then(function(list) {
+      if (list)
+        renderAddresses(list);
+      return !!(props && list);
+    });
+  });
+}
+
 function reboot() {
   if (kit.isBusy() || !env.confirm('Reboot the board now?'))
     return Promise.resolve(null);
@@ -182,6 +311,10 @@ function reboot() {
 
 function init() {
   $('rebootBtn').addEventListener('click', reboot);
+  $('pskcBtn').addEventListener('click', function() {
+    pskcShown = !pskcShown;
+    showPskc();
+  });
   env.setInterval(function() {
     if (!$('s-offline').classList.contains('hidden'))
       showOffline();
@@ -189,9 +322,17 @@ function init() {
   kit.start();
   kit.poller(refreshStatus, 3000, 'statusSection');
   kit.poller(refreshDiag, 10000, 'statusSection');
+  threadPoll = kit.poller(refreshThread, 10000, 'statusSection');
 }
 
-return {init : init, refreshStatus : refreshStatus, refreshDiag : refreshDiag, reboot : reboot, kit : kit};
+return {
+  init : init,
+  refreshStatus : refreshStatus,
+  refreshDiag : refreshDiag,
+  refreshThread : refreshThread,
+  reboot : reboot,
+  kit : kit
+};
 }
 
 if (typeof module !== 'undefined' && module.exports) {
