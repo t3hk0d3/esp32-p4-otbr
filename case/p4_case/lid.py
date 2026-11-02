@@ -136,28 +136,32 @@ def _tab(side: int, end: int) -> Part:
     )
     tab += wedge - round_cut
 
-    # detent bump on the wall face, centred on the tab
-    zc = board_z(P.BUMP_Z)
-    flank = P.BUMP_H / math.tan(math.radians(P.BUMP_ANGLE))
-    tri = [
-        (xp(0.1), zc - flank - 0.06),
-        (xp(-P.BUMP_H), zc),
-        (xp(0.1), zc + flank + 0.06),
-    ]
-    bump = extrude(Plane.XZ * Polygon(*tri, align=None), P.BUMP_LEN / 2, both=True)
-    yc = tab_y_centres()[0 if end < 0 else 1]
-    tab += Pos(0, yc, 0) * bump
     return tab
 
 
+def _bump(side: int, end: int) -> Part:
+    """Detent bump on a tab's wall face, centred on the tab, reaching BUMP_H toward the wall."""
+    x_face = IX0 + P.TAB_CLEAR if side < 0 else IX1 - P.TAB_CLEAR
+    inward = -side
+    zc = board_z(P.BUMP_Z)
+    flank = P.BUMP_H / math.tan(math.radians(P.BUMP_ANGLE))
+    tri = [
+        (x_face + inward * 0.1, zc - flank - 0.06),
+        (x_face - inward * P.BUMP_H, zc),
+        (x_face + inward * 0.1, zc + flank + 0.06),
+    ]
+    bump = extrude(Plane.XZ * Polygon(*tri, align=None), P.BUMP_LEN / 2, both=True)
+    yc = tab_y_centres()[0 if end < 0 else 1]
+    return Pos(0, yc, 0) * bump
+
+
 def _tabs() -> Part:
+    # clip to the lid body's outline: its rounded corners are concentric with the wall's inner corners, TAB_CLEAR in
     bx0, bx1, by0, by1, br = _body_outline()
-    # clip to the lid body's rounded outline (the wall's inner corners are rounded), bumps excepted
-    clip = rounded_block(
-        bx0 - P.BUMP_H - 0.1, bx1 + P.BUMP_H + 0.1, by0, by1, TIP - 1, UNDER + EPS, br
-    )
-    tabs = [_tab(side, end) for side in (-1, 1) for end in (-1, 1)]
-    return (Part() + tabs) & clip
+    clip = rounded_block(bx0, bx1, by0, by1, TIP - 1, UNDER + EPS, br)
+    corners = [(side, end) for side in (-1, 1) for end in (-1, 1)]
+    tabs = (Part() + [_tab(s, e) for s, e in corners]) & clip
+    return tabs + [_bump(s, e) for s, e in corners]
 
 
 def build_lid() -> Part:

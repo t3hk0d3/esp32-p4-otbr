@@ -36,6 +36,7 @@ class TestBoardClearanceIntruding:
         r = checks.board_clearance(board, intruder, "fixture")
         assert not r.ok
         assert "too close" in r.detail and "at (" in r.detail
+        assert "nan" not in r.detail  # the reported point is a real violation
 
 
 class TestOpeningPathsDefault:
@@ -49,11 +50,11 @@ class TestOpeningPathsDefault:
 class TestOpeningPathsBlocked:
     """checks.opening_paths: With an opening blocked"""
 
-    def test_fails_naming_the_opening(self, base):
+    def test_fails_naming_the_opening(self, base, lid):
         plug = box(
             39.0, 52.0, P.OUTER[2] - 0.5, P.INNER[2], -1.0, 2.5
         )  # fills the microSD slot
-        r = checks.opening_paths(base + plug)
+        r = checks.opening_paths(base + plug, lid)
         assert not r.ok
         assert "microSD" in r.detail
 
@@ -124,11 +125,11 @@ class TestOpeningSizeDefault:
 class TestOpeningSizeWideCell:
     """checks.opening_size: With a 4 mm cell"""
 
-    def test_fails_naming_the_widest_opening(self, lid):
+    def test_fails_naming_the_widest_opening(self, base, lid):
         hole = Pos(27.5, 34.0, board_z(P.LID_UNDERSIDE) - 1) * Box(
             4.0, 4.0, 5.0, align=(Align.CENTER, Align.CENTER, Align.MIN)
         )
-        r = checks.opening_size(lid - hole)
+        r = checks.opening_size(base, lid - hole)
         assert not r.ok
         assert "widest lid opening" in r.detail
 
@@ -157,7 +158,7 @@ class TestPrintabilityLedge:
         ledge = box(5, 25, 0, 5, 8, 10)
         r = checks.printability(tower + ledge, "fixture", top_down=False)
         assert not r.ok
-        assert "bridge 20" in r.detail or "overhang" in r.detail
+        assert "20.0" in r.detail
 
 
 class TestRunAll:
@@ -168,4 +169,62 @@ class TestRunAll:
 
         board_facts = [n for n in results if n.startswith("board fact")]
         assert len(board_facts) == len(F) + 2
-        assert len(results) - len(board_facts) == 13
+        assert len(results) - len(board_facts) == 15
+
+
+class TestOpeningSizeTallSlot:
+    """checks.opening_size: With the header slot floor 1 mm lower"""
+
+    def test_fails_on_the_header_slot_passage(self, base, lid):
+        x0, x1 = P.HEADER_SLOT_X
+        floor = board_z(P.HEADER_SLOT_BOTTOM)
+        deeper = box(
+            x0, x1, P.INNER[3] - 0.01, P.OUTER[3] + 1, floor - 1.0, floor + 0.01
+        )
+        r = checks.opening_size(base - deeper, lid)
+        assert not r.ok
+        assert "header-slot passage" in r.detail
+
+
+class TestLidSeats:
+    """checks.lid_seats"""
+
+    def test_passes_for_the_default_parts(self, results):
+        r = results["lid seats on the base"]
+        assert r.ok, r.detail
+
+    def test_fails_when_the_lid_is_shifted_into_a_wall(self, base, lid):
+        r = checks.lid_seats(base, Pos(0.5, 0, 0) * lid)
+        assert not r.ok
+        assert "overlap" in r.detail
+
+
+class TestLedVisible:
+    """checks.led_visible"""
+
+    def test_passes_for_the_default_lid(self, results):
+        r = results["LED visible through the lid"]
+        assert r.ok, r.detail
+
+    def test_fails_when_the_cells_over_the_led_are_filled(self, lid):
+        led = FACTS["led"]
+        cover = box(
+            led.x0 - 3,
+            led.x1 + 3,
+            led.y0 - 6,
+            led.y1 + 6,
+            board_z(P.LID_UNDERSIDE),
+            board_z(P.TOP),
+        )
+        r = checks.led_visible(lid + cover)
+        assert not r.ok
+
+
+class TestPrintabilityCantilever:
+    """checks.printability: With a 10 x 10 mm cantilevered roof"""
+
+    def test_fails(self):
+        tower = box(0, 5, 0, 10, 0, 10)
+        roof = box(5, 15, 0, 10, 8, 10)
+        r = checks.printability(tower + roof, "fixture", top_down=False)
+        assert not r.ok
