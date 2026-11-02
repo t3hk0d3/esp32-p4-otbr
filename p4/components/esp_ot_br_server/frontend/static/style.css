@@ -459,11 +459,11 @@ tr:hover td { background: var(--primary-light); }
 .device-page .btn-outline { background: var(--card); color: var(--text); border: 1px solid #c9c9c9; }
 .device-page .btn-outline-danger { background: var(--card); color: var(--danger); border: 1px solid var(--danger); }
 .device-page .btn { min-height: 40px; font-size: 14px; }
-.device-page a:not(.btn):not(.nav-brand) { color: var(--primary-text); }
+.device-page .container a:not(.btn) { color: var(--primary-text); }
 .page-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 20px; }
 .page-head .page-desc { margin-bottom: 0; }
 
-.hero { border-top: 4px solid var(--text-muted); display: flex; flex-wrap: wrap; gap: 16px 40px; align-items: center; }
+.hero { margin-bottom: 16px; border-top: 4px solid var(--text-muted); display: flex; flex-wrap: wrap; gap: 16px 40px; align-items: center; }
 .hero-main { flex: 999 1 380px; display: flex; gap: 14px; align-items: flex-start; }
 .hero-dot { flex: none; width: 14px; height: 14px; margin-top: 8px; border-radius: 50%; background: var(--text-muted); }
 .hero-title { font-size: 22px; font-weight: 700; }
@@ -473,6 +473,7 @@ tr:hover td { background: var(--primary-light); }
 .hero-info { border-top-color: var(--info-text); } .hero-info .hero-dot { background: var(--info-text); }
 .hero-fault { border-top-color: var(--danger); } .hero-fault .hero-dot { background: var(--danger); }
 
+.device-page .card { margin-bottom: 16px; }
 .tile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
 .tile-grid .card { margin-bottom: 0; }
 .tile-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
@@ -520,9 +521,12 @@ tr:hover td { background: var(--primary-light); }
 .action-bar-text { flex: 1 1 260px; font-size: 14px; }
 .review { border-top: 4px solid var(--primary); }
 .diff-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-.diff-table th, .diff-table td { text-align: left; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--border); }
-.diff-table thead th { color: var(--text-light); font-weight: 600; }
-.diff-from { color: var(--text-light); text-decoration: line-through; }
+.diff-table th, .diff-table td { text-align: left; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.diff-table thead th { color: var(--text-light); font-weight: 600; font-size: 13px; text-transform: none; letter-spacing: normal; background: none; }
+.diff-table tbody th { color: var(--text); font-weight: 600; text-transform: none; letter-spacing: normal; background: none; }
+.diff-table tr:hover td { background: none; }
+.diff-table .num { text-align: right; }
+.diff-table .diff-from { color: var(--text-light); text-decoration: line-through; }
 .diff-to { font-weight: 600; }
 .steps { padding-left: 22px; font-size: 14px; max-width: 75ch; }
 .steps li { margin-bottom: 4px; }
@@ -536,7 +540,6 @@ tr:hover td { background: var(--primary-light); }
 .meter { margin-bottom: 12px; }
 .meter-head { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
 .stack-low { color: var(--danger); font-weight: 600; }
-.num { text-align: right; }
 
 .dropzone { display: flex; flex-direction: column; align-items: center; gap: 4px; border: 2px dashed #c9c9c9; border-radius: var(--radius); padding: 20px 16px; text-align: center; font-size: 14px; color: #4a4a4a; cursor: pointer; background: #fafafa; }
 .dropzone.dragging { border-color: var(--primary); background: #fffaf2; }

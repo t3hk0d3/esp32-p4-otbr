@@ -37,7 +37,7 @@
                 Devices reconnect when it ends.</div>
             <div class="field-row">
                 <label class="field" for="capChannel">Channel
-                    <input type="text" inputmode="numeric" id="capChannel" placeholder="network's" size="10">
+                    <input type="text" inputmode="numeric" id="capChannel" placeholder="auto" size="6" style="max-width: 120px">
                     <span class="form-hint">11 to 26. Leave empty for the Thread network's channel.</span>
                 </label>
                 <fieldset class="field" style="border: 0">
@@ -53,7 +53,7 @@
             </div>
             <div class="mt-16">
                 <a class="btn btn-primary" id="capStart" href="#" download="sniffer.pcap">Start capture</a>
-                <span class="form-hint">Your browser saves <code>sniffer.pcap</code> as the frames arrive.</span>
+                <p class="form-hint mt-8">Your browser saves <code>sniffer.pcap</code> as the frames arrive.</p>
             </div>
             <div class="form-hint hidden" id="cap-fault">The last capture was ended by a radio fault.</div>
         </section>
