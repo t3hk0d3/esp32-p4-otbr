@@ -40,13 +40,13 @@ Open the Thread panel: **Settings > Devices & services > Thread > Configure**.
 
 <table>
 <tr>
-<td width="33%"><img src="images/ha-other-network.jpg" alt="The Thread panel: the preferred network ha-thread-bbc1 says no border routers were found, and the board esp-otbr-d2cafc is listed under Other networks, in the network OpenThread"></td>
-<td width="33%"><img src="images/ha-add-to-preferred.jpg" alt="The dialog Reconfigure border router? Home Assistant will join an existing Thread network. Any devices currently joined to this Home Assistant Thread network will need to be re-joined. Cancel, OK"></td>
-<td width="33%"><img src="images/ha-preferred-network.jpg" alt="The preferred network ha-thread-bbc1 with 1 border router, esp-otbr-d2cafc"></td>
+<td width="40%"><img src="images/hass-add.png" alt="The Thread panel: the preferred network ha-thread-bbc1 says no border routers were found; the board esp-otbr-d2cafc is listed under Other networks, in the network OpenThread, and its menu offers Reset border router, Change channel and Add to preferred network"></td>
+<td width="30%"><img src="images/ha-add-to-preferred.jpg" alt="The dialog Reconfigure border router? Home Assistant will join an existing Thread network. Any devices currently joined to this Home Assistant Thread network will need to be re-joined. Cancel, OK"></td>
+<td width="30%"><img src="images/ha-preferred-network.jpg" alt="The preferred network ha-thread-bbc1 with 1 border router, esp-otbr-d2cafc"></td>
 </tr>
 <tr>
-<td>1. The board is on another network.</td>
-<td>2. ⋮ > <b>Add to preferred network</b>, then <b>OK</b>.</td>
+<td>1. The board is on another network: ⋮ > <b>Add to preferred network</b>.</td>
+<td>2. Confirm with <b>OK</b>.</td>
 <td>3. The board serves the preferred network.</td>
 </tr>
 </table>
