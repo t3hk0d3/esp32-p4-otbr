@@ -1,6 +1,7 @@
-"""Topology page (BDD: TopologyLogic). Runs static/topology.js under node."""
+"""Topology page (BDD: TopologyLogic, TopologyPage). Runs static/topology.js under node."""
 
-from device_js import logic, needs_node
+import pytest
+from device_js import logic, needs_node, page, scenario
 
 # The sketch mesh as a JS literal. R: this board 0x8800 is a router. B: the same mesh with this board as a child.
 FIXTURE = r"""
@@ -523,3 +524,478 @@ class TestTopologyLogic:
             "#c62828",
             "#5f5f5f",
         ]
+
+
+# ---- TopologyPage ----
+
+# Fake routes: GET /device/topology answers S.gets in turn (the last one repeats), POST answers S.post, /ping S.ping.
+PAGE_ROUTES = """(u, o) => {
+  if (u === '/device/topology')
+    return o.method === 'POST' ? S.post : {status: 200, body: S.gets.length > 1 ? S.gets.shift() : S.gets[0]};
+  if (u === '/ping')
+    return {status: 200, body: S.ping};
+  return {status: 200, body: H.NETWORK};
+}"""
+
+PRELUDE = (
+    "const L = t.Logic;"
+    + FIXTURE
+    + """
+const RF = {...R, partial: false};
+const RUNNING = (queried, routers) => ({state: 'running', progress: {routers, queried}});
+const DONE = (result, age) => ({state: 'done', age_s: age || 0, result});
+const S = {gets: [{state: 'idle'}], post: {status: 202, body: RUNNING(0, 0)},
+           ping: {error: 0, message: 'OK', result: {replies: [{rtt: 5}, {rtt: 7}, {rtt: 9}],
+                  statistics: {sent: 4, received: 3, loss_percent: 25, rtt_min: 5, rtt_avg: 7, rtt_max: 9}}}};
+const calls = (method, url) => t.calls.filter((c) => c.method === method && c.url === url);
+const vis = (id) => !t.el(id).hidden();
+const txt = (id) => t.el(id).allText();
+const node = (id) => t.el('t-map').findAll((e) => e.tag === 'g' && e.attrs['data-id'] === id)[0];
+const ring = (id) => node(id).findAll((e) => e.classes.has('t-ring'))[0];
+const row = (id) => t.el('t-rows').children.find((r) => r.attrs['data-id'] === id);
+const buttons = (root, label) => root.findAll((e) => e.tag === 'button' && e.textContent === label);
+const save = (ago, result) => {
+  t.storage.m['topology:last'] = JSON.stringify({saved_at: t.env.now() - ago, result: result || R});
+};
+const start = async () => { t.page.init(); await t.advance(0); };
+const loaded = async () => { save(60000); await start(); t.el('t-show-last').click(); await t.flush(); };
+const pick = async (id) => { row(id).children[0].children[0].click(); await t.flush(); };
+"""
+)
+
+
+def run(body):
+    """Run `body` (async JS) on the topology page with the fixture, the fake routes and the helpers in scope."""
+    return scenario(page("topology", PAGE_ROUTES) + PRELUDE + body)
+
+
+FAILED_STOPPED = "The scan stopped: the Thread network went down"
+NAMES_NOTE = "This browser can't save names. They last until the page is reloaded."
+NO_ROUTE = (
+    "No routable address yet. Hosts on your home network can't reach this device."
+)
+CLOSE_BY = {
+    "x": "t.el('t-d-x').click();",
+    "close": "t.el('t-d-close').click();",
+    "esc": "t.el('t-dialog').fire('cancel'); t.el('t-dialog').close();",
+    "backdrop": "t.el('t-dialog').click();",
+}
+
+
+@needs_node
+class TestTopologyPage:
+    """topology.js run against a fake DOM, fetch, clock, localStorage and clipboard"""
+
+    # init
+
+    def test_open_without_saved_result_shows_only_load_topology(self):
+        # On open with no saved result and board idle: the start view with only Load topology and the
+        # "No saved result" line; one GET, no POST.
+        r = run(
+            "await start(); return [vis('t-start'), vis('t-loading'), vis('t-loaded'), vis('t-show-last'),"
+            " vis('t-load'), txt('t-last-line'), calls('GET', '/device/topology').length,"
+            " calls('POST', '/device/topology').length];"
+        )
+        assert r == [
+            True,
+            False,
+            False,
+            False,
+            True,
+            "No saved result in this browser yet.",
+            1,
+            0,
+        ]
+
+    def test_open_with_saved_result_offers_show_last_result(self):
+        # On open with a saved result: Show last result and Load topology with the "Last result" line.
+        r = run(
+            "save(38 * 60000); await start(); return [vis('t-show-last'), vis('t-load'), txt('t-last-line'),"
+            " L.clockText(t.env.now() - 38 * 60000)];"
+        )
+        assert r[:2] == [True, True]
+        assert r[2] == f"Last result: {r[3]} (38 min ago), 6 routers and 7 end devices"
+
+    def test_open_while_running_shows_loading_and_polls_get(self):
+        # On open while the board is running: the loading view, then a GET every second.
+        r = run(
+            "S.gets = [RUNNING(0, 0), RUNNING(2, 5), RUNNING(2, 5)]; await start();"
+            " const a = [vis('t-loading'), vis('t-start'), txt('t-progress')]; await t.advance(1000);"
+            " a.push(txt('t-progress'), calls('GET', '/device/topology').length); await t.advance(1000);"
+            " a.push(calls('GET', '/device/topology').length); return a;"
+        )
+        assert r == [
+            True,
+            False,
+            "Finding routers…",
+            "Asking each router about its children: 2 of 5",
+            2,
+            3,
+        ]
+
+    def test_open_while_running_sends_no_post(self):
+        # On open while the board is running (RF4): no POST, only GETs, however long the scan runs.
+        r = run(
+            "S.gets = [RUNNING(1, 5)]; await start(); await t.advance(10000);"
+            " return [calls('POST', '/device/topology').length, calls('GET', '/device/topology').length];"
+        )
+        assert r[0] == 0
+        assert r[1] == 11
+
+    # Load topology
+
+    def test_load_posts_shows_loading_and_polls_every_second(self):
+        # On click: POST, the loading view, then a GET every second while running.
+        r = run(
+            "await start(); S.gets = [RUNNING(1, 5), RUNNING(3, 5)]; t.el('t-load').click(); await t.flush();"
+            " const gets = () => calls('GET', '/device/topology').length;"
+            " const a = [calls('POST', '/device/topology').length, vis('t-loading'), gets()];"
+            " await t.advance(999); a.push(gets()); await t.advance(1); a.push(gets(), txt('t-progress'));"
+            " await t.advance(1000); a.push(gets(), txt('t-progress')); return a;"
+        )
+        assert r == [
+            1,
+            True,
+            1,
+            1,
+            2,
+            "Asking each router about its children: 1 of 5",
+            3,
+            "Asking each router about its children: 3 of 5",
+        ]
+
+    def test_done_stores_the_result_and_shows_the_green_pill(self):
+        # On done: topology:last stored, the loaded view with the green pill "Loaded at HH:MM", polling stops.
+        r = run(
+            "await start(); S.gets = [DONE(RF, 0)]; t.el('t-load').click(); await t.advance(1000);"
+            " const s = JSON.parse(t.storage.m['topology:last']); const n = calls('GET', '/device/topology').length;"
+            " await t.advance(5000);"
+            " return [s.saved_at === t.env.now() - 5000, s.result.network.name, vis('t-loaded'), vis('t-loading'),"
+            " txt('t-pill'), t.el('t-pill').classes.has('t-pill-live'), txt('t-reload'),"
+            " calls('GET', '/device/topology').length - n, L.clockText(t.env.now() - 5000)];"
+        )
+        assert r[:4] == [True, "MyThread", True, False]
+        assert r[4] == f"Loaded at {r[8]}"
+        assert r[5:8] == [True, "Load again", 0]
+
+    def test_failed_scan_shows_its_error_and_keeps_the_last_result(self):
+        # On failed: the error in the start view; the last result stays.
+        r = run(
+            "save(60000); await start(); const before = t.storage.m['topology:last'];"
+            " S.gets = [{state: 'failed', error: 'stopped', age_s: 0}]; t.el('t-load').click(); await t.advance(1000);"
+            " return [vis('t-start'), txt('t-start-note'), vis('t-show-last'),"
+            " t.storage.m['topology:last'] === before];"
+        )
+        assert r == [True, FAILED_STOPPED, True, True]
+
+    def test_conflict_shows_conflicttext_in_the_start_view(self):
+        # On 409: conflictText in the start view, no polling.
+        r = run(
+            "await start(); S.post = {status: 409, body: {error: 'busy', detail: 'mode SNIFFER'}};"
+            " t.el('t-load').click(); await t.advance(3000);"
+            " return [vis('t-start'), vis('t-loading'), txt('t-start-note'), calls('GET', '/device/topology').length];"
+        )
+        assert r == [True, False, "The Thread network isn't running (mode SNIFFER)", 1]
+
+    # Show last result
+
+    def test_show_last_result_shows_the_amber_pill_without_a_request(self):
+        # On click: the loaded view with the amber pill "Saved result from HH:MM, N min ago"; no request.
+        r = run(
+            "save(38 * 60000, RF); await start(); const n = t.calls.length; t.el('t-show-last').click();"
+            " await t.flush(); return [vis('t-loaded'), txt('t-pill'), t.el('t-pill').classes.has('t-pill-saved'),"
+            " txt('t-reload'), t.calls.length - n, L.clockText(t.env.now() - 38 * 60000)];"
+        )
+        assert r[0] is True
+        assert r[1] == f"Saved result from {r[5]}, 38 min ago"
+        assert r[2:5] == [True, "Load fresh", 0]
+
+    # loaded view
+
+    def test_partial_result_says_some_routers_didnt_answer(self):
+        # On partial: the pill adds "some routers didn't answer".
+        assert run("await loaded(); return txt('t-pill');").endswith(
+            ", some routers didn't answer"
+        )
+
+    def test_summary_tiles_show_network_devices_leader_and_prefixes(self):
+        # On a result: network, device counts, the leader and the OMR prefixes with their kind.
+        r = run(
+            "await loaded(); return ['t-tile-network', 't-tile-devices', 't-tile-leader', 't-tile-prefixes']"
+            ".map(txt);"
+        )
+        assert r[0] == "Network MyThread Channel 15 · partition 0x4a1f2c07"
+        assert r[1] == "Devices 13 6 routers · 7 end devices, 5 of them sleepy"
+        assert r[2] == "Leader Unnamed 0x2400 0x2400"
+        assert (
+            r[3]
+            == "Routable prefixes 2001:db8:4a2:1::/64 global fd7a:91c3:22e0:1::/64 ULA"
+        )
+
+    def test_map_nodes_are_focusable_named_buttons(self):
+        # On the map: each node is a <g tabindex=0 role=button> with an accessible name; the board is
+        # "This border router".
+        r = run(
+            "await loaded(); return [node('r9').attrs, node('r34').attrs['aria-label'],"
+            " t.el('t-map').findAll((e) => e.tag === 'g' && e.attrs.role === 'button').length];"
+        )
+        assert r[0]["tabindex"] == "0" and r[0]["role"] == "button"
+        assert r[0]["aria-label"] == "Unnamed 0x2400, Router"
+        assert r[1] == "This border router, Border router"
+        assert r[2] == 13
+
+    def test_map_click_opens_the_dialog_for_that_device(self):
+        # On a device clicked on the map: the dialog opens for it.
+        r = run(
+            "await loaded(); node('r23').click(); return [t.el('t-dialog').open, txt('t-d-name')];"
+        )
+        assert r == [True, "Unnamed 0x5c00"]
+
+    def test_map_node_opens_with_enter_and_space(self):
+        # On Enter or Space on a focused node: the dialog opens; the key's default is prevented.
+        r = run(
+            "await loaded(); const a = []; for (const key of ['Enter', ' ']) { t.el('t-dialog').close();"
+            " const ev = node('r9').fire('keydown', {key}); a.push(t.el('t-dialog').open, ev.defaultPrevented); }"
+            " t.el('t-dialog').close(); node('r9').fire('keydown', {key: 'a'}); a.push(t.el('t-dialog').open);"
+            " return a;"
+        )
+        assert r == [True, True, True, True, False]
+
+    def test_table_name_opens_the_dialog_for_that_device(self):
+        # On its name clicked in the table: the dialog opens for it.
+        r = run(
+            "await loaded(); await pick('c34817'); return [t.el('t-dialog').open, txt('t-d-name')];"
+        )
+        assert r == [True, "Unnamed 0x8801"]
+
+    def test_open_dialog_dims_everything_outside_the_neighbourhood(self):
+        # On a device picked: everything but the device, its neighbours, parent and children is dimmed.
+        r = run(
+            "await loaded(); node('r23').click(); const dim = (id) => node(id).classes.has('t-dim');"
+            " return ['r23', 'r9', 'r34', 'c23553', 'c23554', 'r40', 'r53', 'c34817'].map(dim);"
+        )
+        assert r == [False, False, False, False, False, True, True, True]
+
+    def test_picked_device_row_is_tinted(self):
+        # On a device picked: its row is tinted, no other.
+        r = run(
+            "await loaded(); node('r23').click(); return t.el('t-rows').children"
+            ".filter((r) => r.classes.has('t-row-sel')).map((r) => r.attrs['data-id']);"
+        )
+        assert r == ["r23"]
+
+    def test_filter_chip_rerenders_the_rows(self):
+        # On a filter chip: only that kind is listed and the chip is pressed.
+        r = run(
+            "await loaded(); const chip = t.el('t-chips').children.find((c) => c.attrs['data-filter'] === 'sleepy');"
+            " chip.click(); const now = t.el('t-chips').children.find((c) => c.attrs['data-filter'] === 'sleepy');"
+            " return [t.el('t-rows').children.map((r) => r.attrs['data-id']), now.attrs['aria-pressed'],"
+            " t.el('t-chips').children.map((c) => c.allText())];"
+        )
+        assert r[0] == ["c34818", "c34819", "c9217", "c23554", "c40961"]
+        assert r[1] == "true"
+        assert r[2] == ["All 13", "Routers 6", "End devices 7", "Sleepy 5"]
+
+    def test_search_rerenders_the_rows_and_says_when_nothing_matches(self):
+        # On search input: the matching rows; with no match "No device matches '<q>'".
+        r = run(
+            "await loaded(); t.el('t-search').type('kitchen');"
+            " const a = [t.el('t-rows').children.map((r) => r.attrs['data-id']), vis('t-empty')];"
+            " t.el('t-search').type('zzz'); a.push(t.el('t-rows').children.length, vis('t-empty'), txt('t-empty'));"
+            " return a;"
+        )
+        assert r == [["c40961"], False, 0, True, "No device matches 'zzz'"]
+
+    def test_copy_writes_the_address_and_reads_copied(self):
+        # On Copy: the address goes to the clipboard and the button reads "Copied".
+        r = run(
+            "await loaded(); const b = buttons(row('c40961'), 'Copy')[0]; b.click(); await t.flush();"
+            " return [t.clipboard.written, b.textContent];"
+        )
+        assert r == [["2001:db8:4a2:1:2be4:6c19:a0f7:3381"], "Copied"]
+
+    def test_copy_failure_reads_copy_failed(self):
+        # On a clipboard that refuses: the button reads "Copy failed".
+        r = run(
+            "await loaded(); t.clipboard.fail = true; const b = buttons(row('c40961'), 'Copy')[0]; b.click();"
+            " await t.flush(); return b.textContent;"
+        )
+        assert r == "Copy failed"
+
+    # dialog
+
+    def test_neighbour_child_and_parent_links_switch_the_device(self):
+        # On a neighbour, child or parent link: the dialog switches to that device and the map follows.
+        r = run(
+            "await loaded(); node('r40').click(); const a = [];"
+            " buttons(t.el('t-d-neighbors'), 'Unnamed 0x2400')[0].click(); a.push(txt('t-d-name'));"
+            " buttons(t.el('t-d-children'), 'Unnamed 0x2401')[0].click();"
+            " a.push(txt('t-d-name'), node('r40').classes.has('t-dim'));"
+            " buttons(t.el('t-d-facts'), 'Unnamed 0x2400')[0].click();"
+            " a.push(txt('t-d-name'), node('r40').classes.has('t-dim'), t.el('t-dialog').open); return a;"
+        )
+        assert r == [
+            "Unnamed 0x2400",
+            "Unnamed 0x2401",
+            True,
+            "Unnamed 0x2400",
+            False,
+            True,
+        ]
+
+    def test_router_neighbours_show_both_link_directions(self):
+        # On a router: neighbours with "LQI 3" or "LQI <in> in / <out> out" in its own view.
+        r = run(
+            "await loaded(); node('r9').click(); return t.el('t-d-neighbors').children.map((c) => c.allText());"
+        )
+        assert r == [
+            "Unnamed 0x5c00 LQI 2",
+            "Unnamed 0x8800 LQI 3",
+            "Unnamed 0xa000 LQI 1 in / 3 out",
+        ]
+
+    def test_ping_posts_to_ping_and_shows_the_summary(self):
+        # On Ping: POST /ping {address, count: 4, size: 32}, then the pingSummary lines.
+        r = run(
+            "await loaded(); await pick('c40961'); buttons(t.el('t-d-addrs'), 'Ping')[0].click(); await t.flush();"
+            " const p = calls('POST', '/ping');"
+            " return [p.length, JSON.parse(p[0].body), p[0].headers['Content-Type'], txt('t-d-ping')];"
+        )
+        assert r[:3] == [
+            1,
+            {"address": "2001:db8:4a2:1:2be4:6c19:a0f7:3381", "count": 4, "size": 32},
+            "application/json",
+        ]
+        assert r[3] == (
+            "ping 2001:db8:4a2:1:2be4:6c19:a0f7:3381 3 of 4 replies Loss 25% min/avg/max 5/7/9 ms"
+            " Sleepy devices answer when they next wake up."
+        )
+
+    def test_rename_save_stores_the_nickname_and_updates_names_everywhere(self):
+        # On Rename then Save: the nickname is stored under the ext address; dialog, table and map show it.
+        r = run(
+            "await loaded(); await pick('r40'); t.el('t-d-rename').click(); t.el('t-d-name-input').value = ' Hall light ';"
+            " t.el('t-d-save').click(); return [JSON.parse(t.storage.m['topology:names']), txt('t-d-name'),"
+            " row('r40').children[0].children[0].textContent, node('r40').attrs['aria-label'],"
+            " row('c40961').children[2].textContent];"
+        )
+        assert r == [
+            {"dd0000000000a000": "Hall light"},
+            "Hall light",
+            "Hall light",
+            "Hall light, Router",
+            "Hall light",
+        ]
+
+    def test_rename_with_an_empty_name_removes_the_nickname(self):
+        # On Save with an empty name: the nickname is removed.
+        r = run(
+            "t.storage.m['topology:names'] = JSON.stringify({dd0000000000a000: 'Hall light'}); await loaded();"
+            " await pick('r40'); const a = [txt('t-d-name')]; t.el('t-d-rename').click();"
+            " a.push(t.el('t-d-name-input').value); t.el('t-d-name-input').value = ''; t.el('t-d-save').click();"
+            " a.push('topology:names' in t.storage.m, txt('t-d-name')); return a;"
+        )
+        assert r == ["Hall light", "Hall light", False, "Unnamed 0xa000"]
+
+    @pytest.mark.parametrize("how", sorted(CLOSE_BY))
+    def test_close_keeps_the_selection_ring_and_row_tint(self, how):
+        # On close (×, Close, Esc, backdrop): closed, nothing dimmed, the ring and the row tint stay.
+        r = run(
+            "await loaded(); node('r23').click();"
+            + CLOSE_BY[how]
+            + " return [t.el('t-dialog').open, t.el('t-map').findAll((e) => e.classes.has('t-dim')).length,"
+            " ring('r23').hidden(), ring('r9').hidden(), row('r23').classes.has('t-row-sel')];"
+        )
+        assert r == [False, 0, False, True, True]
+
+    def test_show_on_map_closes_and_scrolls_to_the_map(self):
+        # On Show on map: the dialog closes and the map card is scrolled into view.
+        r = run(
+            "await loaded(); node('r9').click(); t.el('t-d-showmap').click();"
+            " return [t.el('t-dialog').open, t.el('t-map-card').scrolled];"
+        )
+        assert r == [False, 1]
+
+    def test_child_without_detail_says_its_parent_didnt_answer(self):
+        # On a child whose parent gave no detail: "Details unavailable: its parent didn't answer", no detail rows.
+        r = run("await loaded(); await pick('c23553'); return txt('t-d-facts');")
+        assert "Details unavailable: its parent didn't answer" in r
+        assert "RSSI" not in r
+
+    def test_child_with_detail_lists_its_link_figures(self):
+        # On a child with detail: parent, LQI, RSSI, link margin, error rates and attach time.
+        r = run("await loaded(); await pick('c40961'); return txt('t-d-facts');")
+        assert "Parent Unnamed 0xa000" in r and "LQI 3" in r
+        assert "RSSI avg -61 dBm, last -63 dBm" in r and "Link margin 39 dB" in r
+        assert "Frame errors 0.4%" in r and "Message errors 0.0%" in r
+        assert "Attached for 1 d 0 h" in r
+        assert "Radio Off between polls, child timeout 240 s" in r
+        assert "SRP host kitchen-plug.default.service.arpa" in r
+        assert "Details unavailable" not in r
+
+    def test_missing_values_show_a_dash(self):
+        # On values the board left out (spec 3.3): "–".
+        r = run(
+            "await loaded(); await pick('r53'); const a = [txt('t-d-facts')]; await pick('r55');"
+            " a.push(txt('t-d-facts')); return a;"
+        )
+        assert "Thread version –" in r[0]
+        assert "Ext. address –" in r[1]
+
+    def test_no_routable_address_shows_the_amber_note(self):
+        # On no routable address: the amber "No routable address yet" note; hidden for a device with one.
+        r = run(
+            "await loaded(); await pick('c23554'); const a = [vis('t-d-noroute'), txt('t-d-noroute')];"
+            " node('c40961').click(); a.push(vis('t-d-noroute')); return a;"
+        )
+        assert r == [True, NO_ROUTE, False]
+
+    def test_internal_addresses_are_behind_the_toggle(self):
+        # On the toggle: mesh-local, RLOC and link-local addresses join the list; ALOC and multicast never do.
+        r = run(
+            "await loaded(); await pick('r9'); const list = () => t.el('t-d-addrs').children.map((c) => c.allText());"
+            " const a = [list(), txt('t-d-more')]; t.el('t-d-more').click(); a.push(list(), txt('t-d-more'));"
+            " return a;"
+        )
+        assert r[0] == []
+        assert r[1] == "Show internal addresses (mesh-local, RLOC, link-local)"
+        assert r[2] == [
+            "RLOC fdde:ad00:beef::ff:fe00:2400 Copy Ping",
+            "Link-local fe80::d41a:7c03:f4e2:b918 Copy Ping",
+        ]
+        assert r[3] == "Hide internal addresses"
+
+    # storage unavailable
+
+    def test_throwing_storage_works_without_saved_result_and_names(self):
+        # On a throwing localStorage: no saved result, a load still works, names work for the page's life and the
+        # dialog says names can't be saved.
+        r = run(
+            "t.storage.fail = true; await start(); const a = [vis('t-start'), vis('t-show-last'), txt('t-last-line')];"
+            " S.gets = [DONE(RF, 0)]; t.el('t-load').click(); await t.advance(1000); a.push(vis('t-loaded'));"
+            " await pick('r40'); t.el('t-d-rename').click(); a.push(txt('t-names-note'));"
+            " t.el('t-d-name-input').value = 'Hall'; t.el('t-d-save').click(); a.push(txt('t-d-name')); return a;"
+        )
+        assert r == [
+            True,
+            False,
+            "No saved result in this browser yet.",
+            True,
+            NAMES_NOTE,
+            "Hall",
+        ]
+
+    # review focus
+
+    def test_srp_name_with_markup_appears_only_as_text(self):
+        # On an SRP name <b>"x"</b> (RF1): shown verbatim as text in the table, dialog and map; no element made of it.
+        r = run(
+            "await loaded(); await pick('c34818');"
+            " const label = node('c34818').findAll((e) => e.tag === 'text').map((e) => e.textContent);"
+            " const made = ['t-map', 't-rows', 't-dialog'].map((id) => t.el(id).findAll((e) => e.tag === 'b').length);"
+            " return [row('c34818').children[0].children[0].textContent, txt('t-d-name'), label, made];"
+        )
+        assert r[0] == '↳ <b>"x"</b>'
+        assert r[1] == '<b>"x"</b>'
+        assert '<b>"x"</b>' in r[2]
+        assert r[3] == [0, 0, 0]

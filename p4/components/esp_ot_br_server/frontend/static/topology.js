@@ -517,9 +517,872 @@ return {
 };
 })();
 
-function TopologyPage(env) { return {}; }
+/*
+ * The page. `env` is DeviceEnv plus `localStorage` (may be null or throw) and `navigator` (for the clipboard).
+ * Views: start, loading and loaded. Everything from the board goes in through textContent or attribute setters.
+ */
+function TopologyPage(env) {
+var C = typeof DeviceCommon !== 'undefined' ? DeviceCommon : require('./device_common.js');
+var L = TopologyLogic;
+var kit = C.DeviceKit(env, {});
+var $ = kit.$, el = kit.el, clear = kit.clear, setText = kit.setText, show = kit.show;
+var doc = env.document;
+
+var SVG_NS = 'http://www.w3.org/2000/svg';
+var POLL_MS = 1000;
+var COPY_RESET_MS = 2000;
+var LABEL_MAX = 22;
+var BOARD_LABEL = 'This border router';
+var NO_SAVED = 'No saved result in this browser yet.';
+var NAMES_NOTE = "This browser can't save names. They last until the page is reloaded.";
+var NO_DETAIL = "Details unavailable: its parent didn't answer";
+var NO_ROUTE = "No routable address yet. Hosts on your home network can't reach this device.";
+var MORE_TEXT = 'Show internal addresses (mesh-local, RLOC, link-local)';
+var LESS_TEXT = 'Hide internal addresses';
+var TYPE_TEXT = {
+  br : 'Border router',
+  leader : 'Router',
+  router : 'Router',
+  stub : 'Router (no answer)',
+  med : 'End device',
+  sed : 'Sleepy end device'
+};
+var FAILED_TEXT = {
+  busy : 'Another mesh scan is running, try again in a few seconds',
+  stopped : 'The scan stopped: the Thread network went down',
+  no_memory : 'The board ran out of memory for the scan'
+};
+var ADDR_TAG = {global : 'Global', ula : 'ULA', mleid : 'Mesh-local', rloc : 'RLOC', linklocal : 'Link-local', other : 'Other'};
+var THREAD_VERSION = {2 : '1.1', 3 : '1.2', 4 : '1.3', 5 : '1.4'};
+var FILTERS = [ [ 'all', 'All' ], [ 'routers', 'Routers' ], [ 'end', 'End devices' ], [ 'sleepy', 'Sleepy' ] ];
+
+var storage = null;
+var storageOk = false;
+var names = {};
+var last = null;         /* the "last result": {savedAt, result} */
+var model = null;        /* the result on screen: {result, net, srp, devs, byId, links, lay} */
+var filter = 'all';
+var selected = null;     /* device id with the selection ring */
+var dialogOpen = false;
+var showInternal = false;
+var renaming = false;
+var pingSeq = 0;
+var scanning = false;    /* from Load (or joining a running scan) until the scan leaves `running` */
+var pollTimer = null;
+var pollFailures = 0;
+var scanStarted = 0;
+var dimmables = [];      /* map elements: {el, lit(focusId, near)} */
+var rings = {};          /* device id -> its selection ring on the map */
+var rowEls = {};         /* device id -> its table row */
+
+/* ---- small helpers ---- */
+
+function rlocText(n) { return '0x' + ('000' + Number(n).toString(16)).slice(-4); }
+
+function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+function orDash(v, unit) { return typeof v === 'number' ? v + (unit || '') : '–'; }
+
+function pctText(v) { return typeof v === 'number' ? v.toFixed(1) + '%' : '–'; }
+
+function button(text, cls, onClick) {
+  var b = el('button', text, cls);
+  b.setAttribute('type', 'button');
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function svg(tag, attrs, parent) {
+  var e = doc.createElementNS(SVG_NS, tag);
+  Object.keys(attrs).forEach(function(k) { e.setAttribute(k, String(attrs[k])); });
+  if (parent)
+    parent.appendChild(e);
+  return e;
+}
+
+function nameOf(d) { return L.displayName(d, names, model.srp); }
+
+function mapName(d) { return d.thisBoard ? BOARD_LABEL : nameOf(d); }
+
+function unnamed(d) { return !(d.ext && names[d.ext]) && !L.srpHostFor(d, model.srp); }
+
+function badgeText(d) { return d.thisBoard ? 'This board' : d.leader && d.parentId === null ? 'Leader' : ''; }
+
+function counts(devs) {
+  var routers = devs.filter(function(d) { return d.parentId === null; }).length;
+  return {
+    total : devs.length,
+    routers : routers,
+    end : devs.length - routers,
+    sleepy : devs.filter(function(d) { return d.sleepy; }).length
+  };
+}
+
+/* [{addr, cls}] without multicast and ALOC; routable (under an OMR prefix) or internal. */
+function addresses(d) {
+  return d.addrs.map(function(a) { return {addr : a, cls : L.addressClass(a, model.net)}; }).filter(function(x) {
+    return x.cls !== 'multicast' && x.cls !== 'aloc';
+  });
+}
+
+function isRoutable(x) { return x.cls === 'global' || x.cls === 'ula'; }
+
+/* ---- storage ---- */
+
+function probeStorage(s) {
+  try {
+    s.setItem('topology:probe', '1');
+    s.removeItem('topology:probe');
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/* ---- clipboard: the Clipboard API needs a secure context; the board serves plain http, so fall back ---- */
+
+function legacyCopy(text) {
+  try {
+    var host = dialogOpen ? $('t-dialog') : doc.body;
+    if (!doc.execCommand || !host)
+      return false;
+    var area = el('textarea', null, 't-offscreen');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    host.appendChild(area);
+    area.select();
+    var ok = doc.execCommand('copy');
+    host.removeChild(area);
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+function copyText(text) {
+  var clip = env.navigator && env.navigator.clipboard;
+  if (clip && clip.writeText)
+    return clip.writeText(text);
+  return legacyCopy(text) ? Promise.resolve() : Promise.reject(new Error('no clipboard'));
+}
+
+function copyButton(addr, cls) {
+  var b = button('Copy', cls, function() {
+    copyText(addr).then(function() { b.textContent = 'Copied'; }, function() { b.textContent = 'Copy failed'; })
+        .then(function() { env.setTimeout(function() { b.textContent = 'Copy'; }, COPY_RESET_MS); });
+  });
+  return b;
+}
+
+/* ---- views ---- */
+
+function view(name) {
+  show('t-start', name === 'start');
+  show('t-loading', name === 'loading');
+  show('t-loaded', name === 'loaded');
+  show('t-status', name === 'loaded');
+}
+
+function renderStart(noteText) {
+  if (last) {
+    var c = counts(L.devices(last.result));
+    setText('t-last-line', 'Last result: ' + L.clockText(last.savedAt) + ' (' + L.agoText(last.savedAt, env.now()) +
+                               '), ' + plural(c.routers, 'router') + ' and ' + plural(c.end, 'end device'));
+  } else {
+    setText('t-last-line', NO_SAVED);
+  }
+  show('t-show-last', last !== null);
+  kit.note('t-start-note', noteText || '', !!noteText);
+  view('start');
+}
+
+function renderProgress(state) {
+  var p = (state && state.progress) || {};
+  if (p.routers > 0) {
+    setText('t-progress', 'Asking each router about its children: ' + p.queried + ' of ' + p.routers);
+    $('t-progress-bar').style.width = Math.min(100, Math.round(100 * p.queried / p.routers)) + '%';
+  } else {
+    setText('t-progress', 'Finding routers…');
+  }
+  show('t-progress-track', p.routers > 0);
+  setText('t-elapsed', 'Elapsed: ' + Math.max(0, Math.round((env.now() - scanStarted) / 1000)) + ' s');
+  view('loading');
+}
+
+/* ---- scan: POST once, then GET every second while running ---- */
+
+function failedText(error) { return FAILED_TEXT[error] || 'The scan failed (' + (error || 'unknown') + ')'; }
+
+function follow(state) {
+  if (state && state.state === 'running') {
+    renderProgress(state);
+    schedulePoll(POLL_MS);
+    return;
+  }
+  scanning = false;
+  if (state && state.state === 'done' && state.result) {
+    var at = env.now() - (Number(state.age_s) || 0) * 1000;
+    last = {savedAt : at, result : state.result};
+    L.saveResult(storage, state.result, at);
+    showResult(last, true);
+  } else {
+    renderStart(state && state.state === 'failed' ? failedText(state.error) : '');
+  }
+}
+
+function schedulePoll(ms) {
+  if (pollTimer === null)
+    pollTimer = env.setTimeout(poll, ms);
+}
+
+function poll() {
+  pollTimer = null;
+  kit.request('GET', '/device/topology', {timeoutMs : 5000}).then(function(r) {
+    if (r.status === 200 && r.body) {
+      pollFailures = 0;
+      follow(r.body);
+    } else {
+      retry();
+    }
+  }, retry);
+}
+
+function retry() {
+  pollFailures++;
+  schedulePoll(C.nextDelay(POLL_MS, pollFailures));
+}
+
+function joinScan(state) {
+  scanning = true;
+  pollFailures = 0;
+  scanStarted = env.now();
+  follow(state);
+}
+
+function load() {
+  if (scanning)
+    return;
+  scanning = true;
+  scanStarted = env.now();
+  renderProgress(null);
+  kit.request('POST', '/device/topology', {timeoutMs : 5000}).then(function(r) {
+    if ((r.status === 202 || r.status === 200) && r.body) {
+      follow(r.body);
+    } else {
+      scanning = false;
+      renderStart(L.conflictText(r.status, r.body));
+    }
+  }, function(e) {
+    scanning = false;
+    renderStart(e.message);
+  });
+}
+
+/* ---- loaded view ---- */
+
+function showResult(rec, live) {
+  var devs = L.devices(rec.result);
+  var links = L.routerLinks(rec.result);
+  var byId = {};
+  devs.forEach(function(d) { byId[d.id] = d; });
+  model = {
+    rec : rec,
+    live : live,
+    result : rec.result,
+    net : rec.result.network || {},
+    srp : rec.result.srp_hosts || [],
+    devs : devs,
+    byId : byId,
+    links : links,
+    lay : L.layout(devs, links)
+  };
+  if (selected !== null && !byId[selected])
+    selected = null;
+  renderPill();
+  renderAll();
+  view('loaded');
+}
+
+function renderPill() {
+  var text = (model.live ? 'Loaded at ' + L.clockText(model.rec.savedAt)
+                         : 'Saved result from ' + L.clockText(model.rec.savedAt) + ', ' +
+                               L.agoText(model.rec.savedAt, env.now()));
+  if (model.result.partial)
+    text += ", some routers didn't answer";
+  setText('t-pill', text);
+  $('t-pill').classList.toggle('t-pill-live', model.live);
+  $('t-pill').classList.toggle('t-pill-saved', !model.live);
+  setText('t-reload', model.live ? 'Load again' : 'Load fresh');
+}
+
+/* Everything that shows names: after a load and after a rename. */
+function renderAll() {
+  renderTiles();
+  renderMap();
+  renderChips();
+  renderRows();
+  if (dialogOpen)
+    renderDialog();
+  applyFocus();
+}
+
+function tile(id, label, value, sub) {
+  var t = $(id);
+  clear(t);
+  t.appendChild(el('div', label, 't-tile-label'));
+  if (value !== null)
+    t.appendChild(el('div', value, 't-tile-value'));
+  (sub || []).forEach(function(n) { t.appendChild(n); });
+}
+
+function renderTiles() {
+  var net = model.net;
+  var c = counts(model.devs);
+  var partition = typeof net.partition_id === 'number'
+                      ? '0x' + ('0000000' + (net.partition_id >>> 0).toString(16)).slice(-8)
+                      : '–';
+  var networkSub = 'Channel ' + orDash(net.channel) + ' · partition ' + partition;
+  tile('t-tile-network', 'Network', net.name || '–', [ el('div', networkSub, 't-tile-sub') ]);
+  var devicesSub = plural(c.routers, 'router') + ' · ' + plural(c.end, 'end device') + ', ' + c.sleepy +
+                   ' of them sleepy';
+  tile('t-tile-devices', 'Devices', String(c.total), [ el('div', devicesSub, 't-tile-sub') ]);
+  var leader = model.devs.filter(function(d) { return d.leader && d.parentId === null; })[0];
+  tile('t-tile-leader', 'Leader', leader ? nameOf(leader) : '–',
+       leader ? [ el('div', rlocText(leader.rloc16), 't-tile-sub t-mono') ] : []);
+  var prefixes = (net.omr_prefixes || []).map(function(p) {
+    var line = el('div', null, 't-tile-prefix t-mono');
+    line.appendChild(el('span', p));
+    var cls = L.addressClass(String(p).split('/')[0], net);
+    if (cls === 'global' || cls === 'ula')
+      line.appendChild(el('span', cls === 'global' ? 'global' : 'ULA', 't-tile-kind'));
+    return line;
+  });
+  tile('t-tile-prefixes', 'Routable prefixes', prefixes.length ? null : 'None', prefixes);
+}
+
+/* ---- map ---- */
+
+function neighbourhood(id) {
+  var near = {};
+  if (id === null)
+    return near;
+  near[id] = true;
+  model.links.forEach(function(l) {
+    if (l.a === id)
+      near[l.b] = true;
+    if (l.b === id)
+      near[l.a] = true;
+  });
+  model.devs.forEach(function(d) {
+    if (d.parentId === id)
+      near[d.id] = true;
+  });
+  var dev = model.byId[id];
+  if (dev && dev.parentId)
+    near[dev.parentId] = true;
+  return near;
+}
+
+function shortLabel(text) { return text.length > LABEL_MAX ? text.slice(0, LABEL_MAX - 1) + '…' : text; }
+
+/* Draws the node shape at the origin of `g`; returns its half height. */
+function drawShape(g, d) {
+  if (d.kind === 'br' && d.parentId === null) {
+    svg('rect', {x : -20, y : -20, width : 40, height : 40, rx : 10, fill : '#b35c00', stroke : '#8a4700', 'stroke-width' : 2}, g);
+    svg('text', {'class' : 't-node-br', 'text-anchor' : 'middle', 'dominant-baseline' : 'central'}, g).textContent = 'BR';
+    return 20;
+  }
+  if (d.kind === 'br') {
+    svg('rect', {x : -9, y : -9, width : 18, height : 18, rx : 4, fill : '#b35c00', stroke : '#8a4700', 'stroke-width' : 2}, g);
+    return 9;
+  }
+  if (d.parentId !== null) {
+    var ring = {r : 9, fill : '#fff', stroke : '#1f5f99', 'stroke-width' : 2.5};
+    if (d.sleepy)
+      ring['stroke-dasharray'] = '3 2';
+    svg('circle', ring, g);
+    return 9;
+  }
+  var stub = d.kind === 'stub';
+  svg('circle', {r : 16, fill : stub ? '#9a9a9a' : '#1f5f99', stroke : stub ? '#7a7a7a' : '#174a77', 'stroke-width' : 2}, g);
+  if (d.leader) {
+    svg('circle', {r : 21, fill : 'none', stroke : stub ? '#9a9a9a' : '#1f5f99', 'stroke-width' : 2}, g);
+    return 21;
+  }
+  return 16;
+}
+
+function drawNode(layer, d, p) {
+  var g = svg('g', {'class' : 't-node', tabindex : 0, role : 'button', 'data-id' : d.id,
+                    transform : 'translate(' + p.x + ',' + p.y + ')'},
+              layer);
+  g.setAttribute('aria-label', mapName(d) + ', ' + TYPE_TEXT[d.kind]);
+  var half = drawShape(g, d);
+  var ring = d.kind === 'br' && d.parentId === null
+                 ? svg('rect', {x : -26, y : -26, width : 52, height : 52, rx : 14, 'class' : 't-ring hidden'}, g)
+                 : svg('circle', {r : half + 6, 'class' : 't-ring hidden'}, g);
+  rings[d.id] = ring;
+  var label = svg('text', {'class' : d.parentId === null ? 't-label t-label-router' : 't-label', y : half + 16,
+                           'text-anchor' : 'middle'},
+                  g);
+  label.textContent = shortLabel(mapName(d));
+  if (d.kind === 'stub') {
+    svg('text', {'class' : 't-label t-label-note', y : half + 30, 'text-anchor' : 'middle'}, g).textContent =
+        "didn't answer";
+  }
+  g.addEventListener('click', function() { openDevice(d.id); });
+  g.addEventListener('keydown', function(ev) {
+    if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Spacebar') {
+      ev.preventDefault();
+      openDevice(d.id);
+    }
+  });
+  dimmables.push({el : g, lit : function(f, near) { return near[d.id] === true; }});
+}
+
+function drawLink(layer, l, pos) {
+  var a = pos[l.a], b = pos[l.b];
+  var q = Math.min(l.lqAB, l.lqBA);
+  var color = L.lqColor(q);
+  var g = svg('g', {'class' : 't-link-edge'}, layer);
+  var line = {x1 : a.x, y1 : a.y, x2 : b.x, y2 : b.y, stroke : color, 'stroke-width' : q >= 3 ? 3 : 2};
+  if (q <= 1)
+    line['stroke-dasharray'] = '6 4';
+  svg('line', line, g);
+  var text = L.linkText(l);
+  var w = 10 + 7 * text.length;
+  var mx = Math.round((a.x + b.x) / 2), my = Math.round((a.y + b.y) / 2);
+  svg('rect', {x : mx - w / 2, y : my - 8, width : w, height : 16, rx : 8, fill : '#fff', stroke : '#e0e0e0'}, g);
+  svg('text', {'class' : 't-badge-text', x : mx, y : my, fill : color, 'text-anchor' : 'middle',
+               'dominant-baseline' : 'central'},
+      g)
+      .textContent = text;
+  dimmables.push({el : g, lit : function(f) { return f === l.a || f === l.b; }});
+}
+
+/* The dashed line from this board to the "Home network · Ethernet" box below it. */
+function drawUplink(layer, board, p, lay) {
+  var g = svg('g', {'class' : 't-uplink'}, layer);
+  var cx = Math.min(Math.max(p.x, 92), lay.width - 92);
+  var cy = board.parentId === null ? lay.height - 28 : Math.min(lay.height - 16, p.y + 60);
+  svg('line', {x1 : p.x, y1 : p.y, x2 : cx, y2 : cy - 13, stroke : '#b35c00', 'stroke-width' : 2, 'stroke-dasharray' : '6 4'}, g);
+  svg('rect', {x : cx - 90, y : cy - 13, width : 180, height : 26, rx : 6, fill : '#fff8f0', stroke : '#b35c00',
+               'stroke-dasharray' : '4 3'},
+      g);
+  svg('text', {'class' : 't-uplink-text', x : cx, y : cy, 'text-anchor' : 'middle', 'dominant-baseline' : 'central'}, g)
+      .textContent = 'Home network · Ethernet';
+  dimmables.push({el : g, lit : function(f) { return f === board.id; }});
+}
+
+function renderMap() {
+  var map = $('t-map');
+  var lay = model.lay, pos = lay.pos;
+  clear(map);
+  dimmables = [];
+  rings = {};
+  map.setAttribute('width', lay.width);
+  map.setAttribute('height', lay.height);
+  map.setAttribute('viewBox', '0 0 ' + lay.width + ' ' + lay.height);
+  var edges = svg('g', {}, map), nodes = svg('g', {}, map);
+  var board = model.devs.filter(function(d) { return d.thisBoard; })[0];
+  if (board && pos[board.id])
+    drawUplink(edges, board, pos[board.id], lay);
+  model.devs.forEach(function(d) {
+    if (d.parentId === null || !pos[d.id] || !pos[d.parentId])
+      return;
+    var line = svg('line', {x1 : pos[d.parentId].x, y1 : pos[d.parentId].y, x2 : pos[d.id].x, y2 : pos[d.id].y,
+                            stroke : '#9a9a9a', 'stroke-width' : 1.5},
+                   edges);
+    dimmables.push({el : line, lit : function(f) { return f === d.id || f === d.parentId; }});
+  });
+  model.links.forEach(function(l) {
+    if (pos[l.a] && pos[l.b])
+      drawLink(edges, l, pos);
+  });
+  model.devs.forEach(function(d) {
+    if (pos[d.id])
+      drawNode(nodes, d, pos[d.id]);
+  });
+}
+
+/* Dims what lies outside the open device's neighbourhood; the ring and the row tint follow the selection. */
+function applyFocus() {
+  if (model === null)
+    return;
+  var focus = dialogOpen ? selected : null;
+  var near = neighbourhood(focus);
+  dimmables.forEach(function(x) { x.el.classList.toggle('t-dim', focus !== null && !x.lit(focus, near)); });
+  Object.keys(rings).forEach(function(id) { rings[id].classList.toggle('hidden', id !== selected); });
+  Object.keys(rowEls).forEach(function(id) { rowEls[id].classList.toggle('t-row-sel', id === selected); });
+}
+
+/* ---- table ---- */
+
+function renderChips() {
+  var box = $('t-chips');
+  clear(box);
+  FILTERS.forEach(function(f) {
+    var n = L.rows(model.devs, f[0], '', names, model.srp).length;
+    var chip = button(null, 't-chip', function() {
+      filter = f[0];
+      renderChips();
+      renderRows();
+    });
+    chip.setAttribute('aria-pressed', filter === f[0] ? 'true' : 'false');
+    chip.setAttribute('data-filter', f[0]);
+    chip.appendChild(el('span', f[1]));
+    chip.appendChild(el('span', String(n), 't-chip-count'));
+    box.appendChild(chip);
+  });
+}
+
+function viaText(d) {
+  if (d.parentId !== null)
+    return nameOf(model.byId[d.parentId]);
+  var n = model.links.filter(function(l) { return l.a === d.id || l.b === d.id; }).length;
+  return plural(n, 'router neighbor');
+}
+
+function addressCell(d) {
+  var td = el('td', null, 't-cell-addrs');
+  var routable = addresses(d).filter(isRoutable);
+  routable.forEach(function(x) {
+    var line = el('div', null, 't-addr');
+    line.appendChild(el('span', ADDR_TAG[x.cls], 't-tag'));
+    line.appendChild(el('span', x.addr, 't-mono t-addr-text'));
+    line.appendChild(copyButton(x.addr, 't-small-btn'));
+    td.appendChild(line);
+  });
+  if (routable.length === 0)
+    td.appendChild(el('span', 'None yet', 't-none'));
+  return td;
+}
+
+function rowFor(d) {
+  var tr = el('tr');
+  tr.setAttribute('data-id', d.id);
+  var dev = el('td', null, d.parentId !== null ? 't-cell-dev t-child' : 't-cell-dev');
+  dev.appendChild(button((d.parentId !== null ? '↳ ' : '') + nameOf(d), unnamed(d) ? 't-name t-unnamed' : 't-name',
+                         function() { openDevice(d.id); }));
+  var badge = badgeText(d);
+  if (badge)
+    dev.appendChild(el('span', badge, 'chip chip-warn t-badge'));
+  dev.appendChild(el('div', rlocText(d.rloc16) + ' · ' + (d.ext || '–'), 't-mono t-sub'));
+  tr.appendChild(dev);
+  tr.appendChild(el('td', TYPE_TEXT[d.kind]));
+  tr.appendChild(el('td', viaText(d)));
+  var lq = d.child && typeof d.child.lq_in === 'number' ? d.child.lq_in : null;
+  var lqCell = el('td', lq === null ? '–' : String(lq), 't-lq');
+  if (lq !== null)
+    lqCell.style.color = L.lqColor(lq);
+  tr.appendChild(lqCell);
+  tr.appendChild(addressCell(d));
+  rowEls[d.id] = tr;
+  return tr;
+}
+
+function renderRows() {
+  var body = $('t-rows');
+  var query = String($('t-search').value || '').trim();
+  clear(body);
+  rowEls = {};
+  var list = L.rows(model.devs, filter, query, names, model.srp);
+  list.forEach(function(d) { body.appendChild(rowFor(d)); });
+  setText('t-empty', query ? "No device matches '" + query + "'" : 'No devices of this kind.');
+  show('t-empty', list.length === 0);
+  applyFocus();
+}
+
+/* ---- dialog ---- */
+
+function openDevice(id) {
+  if (!model.byId[id])
+    return;
+  if (selected !== id || !dialogOpen) {
+    selected = id;
+    showInternal = false;
+    renaming = false;
+    clearPing();
+  }
+  dialogOpen = true;
+  renderDialog();
+  var dlg = $('t-dialog');
+  if (!dlg.open)
+    dlg.showModal();
+  applyFocus();
+}
+
+function onDialogClosed() {
+  dialogOpen = false;
+  renaming = false;
+  clearPing();
+  applyFocus();
+}
+
+function linkButton(d) {
+  return button(nameOf(d), 't-link', function() { openDevice(d.id); });
+}
+
+function radioText(d) {
+  if (d.parentId === null)
+    return 'Full Thread device, always on';
+  if (!d.mode)
+    return '–';
+  if (!d.sleepy)
+    return 'Always on, child of a router';
+  var timeout = d.child && d.child.timeout_s;
+  return typeof timeout === 'number' ? 'Off between polls, child timeout ' + timeout + ' s' : 'Off between polls';
+}
+
+function versionText(v) {
+  if (typeof v !== 'number')
+    return '–';
+  return THREAD_VERSION[v] || String(v);
+}
+
+function fact(dl, label, value, cls) {
+  dl.appendChild(el('dt', label));
+  var dd = el('dd', typeof value === 'string' ? value : null, cls);
+  if (typeof value !== 'string')
+    dd.appendChild(value);
+  dl.appendChild(dd);
+}
+
+function renderFacts(d) {
+  var box = $('t-d-facts');
+  clear(box);
+  var dl = el('dl', null, 'facts');
+  fact(dl, 'RLOC16', rlocText(d.rloc16), 't-mono');
+  fact(dl, 'Ext. address', d.ext || '–', 't-mono');
+  var host = L.srpHostFor(d, model.srp);
+  fact(dl, 'SRP host', host ? host.name + '.default.service.arpa' : 'Not registered', host ? 't-mono' : '');
+  if (host && host.services && host.services.length) {
+    fact(dl, 'Services', host.services.map(function(s) { return s.instance + ' (' + s.type + ')'; }).join(', '));
+  }
+  fact(dl, 'Radio', radioText(d));
+  fact(dl, 'Thread version', versionText(d.version));
+  box.appendChild(dl);
+  if (d.parentId === null)
+    return;
+  fact(dl, 'Parent', linkButton(model.byId[d.parentId]));
+  var lq = d.child && typeof d.child.lq_in === 'number' ? d.child.lq_in : null;
+  var lqText = el('span', lq === null ? '–' : String(lq), 't-lq');
+  if (lq !== null)
+    lqText.style.color = L.lqColor(lq);
+  fact(dl, 'LQI', lqText);
+  if (!d.detail) {
+    box.appendChild(el('p', NO_DETAIL, 't-warn'));
+    return;
+  }
+  var c = d.child;
+  fact(dl, 'RSSI', 'avg ' + orDash(c.rssi_avg, ' dBm') + ', last ' + orDash(c.rssi_last, ' dBm'));
+  fact(dl, 'Link margin', orDash(c.link_margin_db, ' dB'));
+  fact(dl, 'Frame errors', pctText(c.frame_error_pct));
+  fact(dl, 'Message errors', pctText(c.message_error_pct));
+  fact(dl, 'Attached for', typeof c.connected_s === 'number' ? C.durationText(c.connected_s) : '–');
+}
+
+function renderRouterColumn(d) {
+  show('t-d-router', d.parentId === null);
+  var nbBox = $('t-d-neighbors'), kidBox = $('t-d-children');
+  clear(nbBox);
+  clear(kidBox);
+  if (d.parentId !== null)
+    return;
+  model.links.forEach(function(l) {
+    if (l.a !== d.id && l.b !== d.id)
+      return;
+    var mine = l.a === d.id;
+    var other = model.byId[mine ? l.b : l.a];
+    var qin = mine ? l.lqBA : l.lqAB, qout = mine ? l.lqAB : l.lqBA;
+    var line = el('div', null, 't-d-item');
+    line.appendChild(linkButton(other));
+    var q = el('span', qin === qout ? 'LQI ' + qin : 'LQI ' + qin + ' in / ' + qout + ' out');
+    q.style.color = L.lqColor(Math.min(qin, qout));
+    line.appendChild(q);
+    nbBox.appendChild(line);
+  });
+  model.devs.forEach(function(c) {
+    if (c.parentId !== d.id)
+      return;
+    var line = el('div', null, 't-d-item');
+    line.appendChild(linkButton(c));
+    line.appendChild(el('span', c.sleepy ? 'Sleepy' : 'Always on', 't-muted'));
+    kidBox.appendChild(line);
+  });
+  if (!nbBox.firstChild)
+    nbBox.appendChild(el('span', 'None', 't-muted'));
+  if (!kidBox.firstChild)
+    kidBox.appendChild(el('span', 'None', 't-muted'));
+}
+
+function renderAddresses(d) {
+  var all = addresses(d);
+  var routable = all.filter(isRoutable);
+  var internal = all.filter(function(x) { return !isRoutable(x); });
+  var box = $('t-d-addrs');
+  clear(box);
+  routable.concat(showInternal ? internal : []).forEach(function(x) {
+    var line = el('div', null, 't-d-addr');
+    line.appendChild(el('span', ADDR_TAG[x.cls], isRoutable(x) ? 't-tag' : 't-tag t-tag-internal'));
+    line.appendChild(el('span', x.addr, 't-mono t-addr-text'));
+    line.appendChild(copyButton(x.addr, 't-small-btn'));
+    line.appendChild(button('Ping', 't-small-btn', function() { ping(x.addr, d); }));
+    box.appendChild(line);
+  });
+  setText('t-d-noroute', routable.length === 0 ? NO_ROUTE : '');
+  show('t-d-noroute', routable.length === 0);
+  show('t-d-more', internal.length > 0);
+  setText('t-d-more', showInternal ? LESS_TEXT : MORE_TEXT);
+}
+
+function renderDialog() {
+  var d = model.byId[selected];
+  setText('t-d-name', nameOf(d));
+  $('t-d-name').classList.toggle('t-unnamed', unnamed(d));
+  show('t-d-rename', !!d.ext && !renaming);
+  show('t-d-rename-form', renaming);
+  setText('t-names-note', storageOk ? '' : NAMES_NOTE);
+  var chips = $('t-d-chips');
+  clear(chips);
+  chips.appendChild(el('span', TYPE_TEXT[d.kind], 'chip t-chip-type'));
+  if (badgeText(d))
+    chips.appendChild(el('span', badgeText(d), 'chip chip-warn'));
+  renderFacts(d);
+  renderRouterColumn(d);
+  renderAddresses(d);
+}
+
+function startRename() {
+  var d = model.byId[selected];
+  renaming = true;
+  $('t-d-name-input').value = names[d.ext] || '';
+  renderDialog();
+  $('t-d-name-input').focus();
+}
+
+function saveRename() {
+  var d = model.byId[selected];
+  var clean = String($('t-d-name-input').value || '').trim();
+  L.saveName(storage, d.ext, clean);
+  /* Kept in memory too, so a rename works for the page's life when the browser can't store it. */
+  if (clean === '')
+    delete names[d.ext];
+  else
+    names[d.ext] = clean;
+  renaming = false;
+  renderAll();
+}
+
+/* ---- ping ---- */
+
+function clearPing() {
+  pingSeq++;
+  show('t-d-ping', false);
+  clear($('t-d-ping'));
+}
+
+function ping(addr, d) {
+  var seq = ++pingSeq;
+  var box = $('t-d-ping');
+  clear(box);
+  box.appendChild(el('div', 'ping ' + addr, 't-mono t-ping-addr'));
+  var out = el('div', null, 't-ping-out');
+  out.appendChild(el('div', 'Pinging…'));
+  box.appendChild(out);
+  show('t-d-ping', true);
+  kit.request('POST', '/ping', {
+       headers : {'Content-Type' : 'application/json'},
+       body : JSON.stringify({address : addr, count : 4, size : 32}),
+       timeoutMs : 20000
+     })
+      .then(function(r) {
+        var b = r.body;
+        if (r.status === 200 && b && b.error === 0 && b.result)
+          return L.pingSummary(b.result, d.sleepy);
+        return [ (b && b.message) || 'Ping failed (' + r.status + ')' ];
+      }, function(e) { return [ e.message ]; })
+      .then(function(lines) {
+        if (seq !== pingSeq)
+          return;
+        clear(out);
+        lines.forEach(function(t) { out.appendChild(el('div', t)); });
+      });
+}
+
+/* ---- start ---- */
+
+function wire() {
+  $('t-load').addEventListener('click', load);
+  $('t-reload').addEventListener('click', load);
+  $('t-show-last').addEventListener('click', function() {
+    if (last)
+      showResult(last, false);
+  });
+  $('t-search').addEventListener('input', renderRows);
+  var dlg = $('t-dialog');
+  dlg.addEventListener('close', onDialogClosed);
+  /* A click on the dialog element itself is a click on the backdrop: the content sits in .t-d-body. */
+  dlg.addEventListener('click', function(ev) {
+    if (ev.target === dlg)
+      dlg.close();
+  });
+  $('t-d-x').addEventListener('click', function() { dlg.close(); });
+  $('t-d-close').addEventListener('click', function() { dlg.close(); });
+  $('t-d-showmap').addEventListener('click', function() {
+    dlg.close();
+    $('t-map-card').scrollIntoView({behavior : 'smooth', block : 'start'});
+  });
+  $('t-d-rename').addEventListener('click', startRename);
+  $('t-d-save').addEventListener('click', saveRename);
+  $('t-d-name-input').addEventListener('keydown', function(ev) {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      saveRename();
+    }
+  });
+  $('t-d-more').addEventListener('click', function() {
+    showInternal = !showInternal;
+    renderAddresses(model.byId[selected]);
+  });
+}
+
+function init() {
+  kit.start();
+  storage = env.localStorage || null;
+  storageOk = probeStorage(storage);
+  names = L.loadNames(storage);
+  var saved = L.savedResult(storage);
+  wire();
+  /* One GET: it never starts mesh traffic. A running scan is joined, never restarted. */
+  kit.request('GET', '/device/topology', {timeoutMs : 5000}).then(function(r) {
+    var board = r.status === 200 ? r.body : null;
+    last = L.pickLast(saved, board, env.now());
+    if (board && board.state === 'running')
+      joinScan(board);
+    else
+      renderStart('');
+  }, function() {
+    last = saved;
+    renderStart('');
+  });
+}
+
+return {init : init, kit : kit};
+}
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = TopologyLogic;
   module.exports.Page = TopologyPage;
+}
+
+if (typeof document !== 'undefined') {
+  var topologyEnv = DeviceCommon.DeviceEnv();
+  try {
+    topologyEnv.localStorage = window.localStorage;
+  } catch (e) {
+    topologyEnv.localStorage = null;
+  }
+  topologyEnv.navigator = navigator;
+  TopologyPage(topologyEnv).init();
 }

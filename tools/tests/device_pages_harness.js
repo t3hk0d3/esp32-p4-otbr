@@ -30,8 +30,20 @@ class El {
     this.disabled = false;
     this.files = [];
     this._id = '';
+    this.scrolled = 0;
     if (id)
       this.id = id;
+    if (tag === 'dialog') {
+      /* A native <dialog>: showModal opens it, close closes it and fires "close" (as Esc does after "cancel"). */
+      this.open = false;
+      this.showModal = () => { this.open = true; };
+      this.close = () => {
+        if (!this.open)
+          return;
+        this.open = false;
+        this.fire('close');
+      };
+    }
     const self = this;
     this.classList = {
       toggle(c, force) {
@@ -54,8 +66,19 @@ class El {
   get firstChild() { return this.children[0] || null; }
   appendChild(c) { this.children.push(c); return c; }
   removeChild(c) { this.children = this.children.filter((x) => x !== c); return c; }
-  setAttribute(k, v) { this.attrs[k] = String(v); }
+  setAttribute(k, v) {
+    if (k === 'class')
+      this.className = v;
+    this.attrs[k] = String(v);
+  }
   getAttribute(k) { return this.attrs[k]; }
+  removeAttribute(k) { delete this.attrs[k]; }
+  scrollIntoView() { this.scrolled++; }
+  focus() { this.doc.activeElement = this; }
+  /* Depth-first list of this element and its children that pass `test`. */
+  findAll(test) {
+    return (test(this) ? [this] : []).concat(...this.children.map((c) => c.findAll(test)));
+  }
   addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); }
   fire(type, extra) {
     const ev = Object.assign({type, target: this, defaultPrevented: false,
@@ -78,6 +101,7 @@ class Doc {
     this.absent = new Set();
     this.hidden = false;
     this.listeners = {};
+    this.activeElement = null;
     const tagRe = /<(\w+)([^>]*)>/g;
     let m;
     while ((m = tagRe.exec(html))) {
@@ -105,6 +129,7 @@ class Doc {
     return this.byId[id];
   }
   createElement(tag) { return new El(this, tag); }
+  createElementNS(ns, tag) { const e = new El(this, tag); e.ns = ns; return e; }
   createTextNode(t) { const e = new El(this, '#text'); e.textContent = t; return e; }
   addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); }
   fire(t) {
@@ -112,6 +137,37 @@ class Doc {
     (this.listeners[t] || []).forEach((f) => f(ev));
     return ev;
   }
+}
+
+/* localStorage stand-in: `m` holds the items; with `fail` set every call throws, as in a locked-down browser. */
+function fakeStorage() {
+  const s = {
+    m: {},
+    fail: false,
+    check() {
+      if (s.fail)
+        throw new Error('SecurityError: storage is disabled');
+    },
+    getItem(k) { s.check(); return Object.prototype.hasOwnProperty.call(s.m, k) ? s.m[k] : null; },
+    setItem(k, v) { s.check(); s.m[k] = String(v); },
+    removeItem(k) { s.check(); delete s.m[k]; }
+  };
+  return s;
+}
+
+/* navigator.clipboard stand-in: records what was written; with `fail` set writeText rejects. */
+function fakeClipboard() {
+  const c = {
+    written: [],
+    fail: false,
+    writeText(text) {
+      if (c.fail)
+        return Promise.reject(new Error('NotAllowedError'));
+      c.written.push(text);
+      return Promise.resolve();
+    }
+  };
+  return c;
 }
 
 /*
@@ -133,6 +189,8 @@ function makeEnv(page, routes) {
   let maxInFlight = 0;
   let confirms = [];
   const navigations = [];
+  const storage = fakeStorage();
+  const clipboard = fakeClipboard();
   const env = {
     document: doc,
     location: {host: 'board.lan'},
@@ -163,7 +221,9 @@ function makeEnv(page, routes) {
     reload() { reloads++; },
     navigate(url) { navigations.push(url); },
     AbortController: function() { this.signal = {}; this.abort = function() {}; },
-    IntersectionObserver: null
+    IntersectionObserver: null,
+    localStorage: storage,
+    navigator: {clipboard}
   };
   let page_ = null, kit = null, Logic = null;
   const handle = {};
@@ -193,7 +253,7 @@ function makeEnv(page, routes) {
     now = end;
     await flush();
   };
-  return Object.assign(handle, {env, page: page_, kit, Logic, Common, doc, calls, flush, advance,
+  return Object.assign(handle, {env, page: page_, kit, Logic, Common, doc, calls, flush, advance, storage, clipboard,
                                 el: (id) => doc.getElementById(id), reloads: () => reloads, maxInFlight: () => maxInFlight,
                                 confirms: () => confirms, navigations: () => navigations});
 }

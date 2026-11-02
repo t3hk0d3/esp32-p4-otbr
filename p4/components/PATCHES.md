@@ -184,6 +184,14 @@ reason, spec reference.
    it runs), `GET /node/state`, and `PUT /node/state "enable"` only when Thread is `disabled` (enabling a running Thread
    starts a fresh attach), then polls the role for up to 60 s like the Form flow. 403 (management address), 409
    (sniffer) and 503 (radio) are shown as readable messages. Host tests: `tools/tests/test_network_page.py`.
+16. Applied. `esp_ot_br_server` frontend: topology page redesign (spec 2026-11-02,
+   docs/superpowers/specs/2026-11-02-topology-page-design.md). `frontend/topology.html` rewritten and
+   `frontend/static/topology.js` added (pure `TopologyLogic` exported for node, page code guarded by `typeof document`,
+   text only through `textContent`, the map an inline SVG built with `createElementNS`, the device details a native
+   `<dialog>`); new classes appended to `frontend/static/style.css`. The page reads `GET`/`POST /device/topology`
+   (device_api) and pings through the existing `POST /ping`; `/topology` is no longer used by the page. The last result
+   and nicknames live in `localStorage` (`topology:last`, `topology:names`). Host tests:
+   `tools/tests/test_topology_page.py`.
 
 ### REST guard classification (patches 2 and 9)
 

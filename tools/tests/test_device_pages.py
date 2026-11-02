@@ -14,8 +14,8 @@ WEB_API = (
     FRONTEND.parent / "private_include" / "esp_br_web_api.h"
 )  # Thread web GUI routes (/get_properties, ...)
 WEB_BUDGET_BYTES = (
-    256 * 1024
-)  # of the 2 MB web partition; the whole frontend is well below it
+    320 * 1024
+)  # of the 2 MB web partition; raised from 256 KB for the topology page (about 265 KB in all)
 
 DEVICE_MENU = [
     ["/ethernet.html", "Ethernet"],
@@ -40,6 +40,8 @@ PAGES = {
         ],
     ),
     "diagnostics": ("diagnostics", ["/device/diag"]),
+    # /ping is the Thread web GUI's, registered in esp_br_web_api.h like /get_properties above.
+    "topology": ("topology", ["/device/topology", "/ping"]),
     "ethernet": ("ethernet", ["/device/network", "/device/names"]),
     "firmware": (
         "firmware",
