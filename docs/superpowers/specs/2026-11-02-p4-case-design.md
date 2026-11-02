@@ -264,11 +264,12 @@ These are automated checks, run against the vendor STEP:
 - Every opening (USB-C, USB-A, RJ45, microSD, both buttons, header slot, SMA hole) has an unobstructed straight path from
   outside to the part it serves.
 - **Fitting motion:**
-  - The board starts tilted, with the header end raised (rotation about the X axis), and the USB and RJ45 already inside
-    their openings by their final depth.
-  - The header end is then lowered to the flat position.
-  - Sampled every 1° from the start tilt down to 0°, the board never intersects the base.
-  - The start tilt is the smallest angle at which the board's header end clears the wall tops, and it's reported.
+  - The board (rounded PCB plus the boxes of the parts above it) is tilted header-end up about its bottom front edge.
+  - **Drop in:** the start tilt is the smallest whole angle at which the tilted board, held back so its connector fronts
+    are just inside the cable wall, drops in between the walls.
+  - **Slide:** at that tilt it slides forward until the connectors are at their final depth, checked every 0.5 mm.
+  - **Swing down:** it rotates to flat, checked every 1°.
+  - The board never intersects the base, and the start tilt is reported. The model gives 5°.
   - If no such motion exists with the margins in 5.2, stop and report back. Don't open up the cable-wall holes without
     asking.
 - A ribbon-plug block (55.9 × 9 × 9 mm, seated on the header body, centred on it) fits with at least 0.5 mm clearance to

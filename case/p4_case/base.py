@@ -142,11 +142,29 @@ def _ribbon_recesses() -> Part:
     r = P.RIBBON_RECESS
     ix0, ix1, _, iy1 = P.INNER
     z0, z1 = 0.0, P.RIBBON_RECESS_TOP
-    return Part() + [
-        block(ix0 - r, ix0 + EPS, P.RIBBON_RECESS_Y0, iy1 + r, z0, z1),
-        block(ix1 - EPS, ix1 + r, P.RIBBON_RECESS_Y0, iy1 + r, z0, z1),
-        block(ix0 - r, ix1 + r, iy1 - EPS, iy1 + r, z0, z1),
-    ]
+    rise = (
+        z1 + P.RECESS_CHAMFER_RISE * r
+    )  # the ceiling slopes back to the wall face: prints without support
+    y0, y1 = P.RIBBON_RECESS_Y0, iy1 + r
+    cuts = []
+    for face_x, out in ((ix0, -1), (ix1, 1)):
+        pts = [
+            (face_x - out * EPS, z0),
+            (face_x + out * r, z0),
+            (face_x + out * r, z1),
+            (face_x - out * EPS, rise),
+        ]
+        prism = extrude(Plane.XZ * Polygon(*pts, align=None), (y1 - y0) / 2, both=True)
+        cuts.append(Pos(0, (y0 + y1) / 2, 0) * prism)
+    pts = [(iy1 - EPS, z0), (iy1 + r, z0), (iy1 + r, z1), (iy1 - EPS, rise)]
+    x0, x1 = ix0 - r, ix1 + r
+    prism = extrude(Plane.YZ * Polygon(*pts, align=None), (x1 - x0) / 2, both=True)
+    cuts.append(Pos((x0 + x1) / 2, 0, 0) * prism)
+    # the cavity's rounded inner corners at the header end would still cut into the plug's room
+    c = P.INNER_R
+    cuts.append(block(ix0 - r, ix0 + c, iy1 - c, iy1 + r, z0, z1))
+    cuts.append(block(ix1 - c, ix1 + r, iy1 - c, iy1 + r, z0, z1))
+    return Part() + cuts
 
 
 def _buttons() -> Part:
