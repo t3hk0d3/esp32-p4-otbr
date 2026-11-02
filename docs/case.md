@@ -36,7 +36,7 @@ make case-test    # the model's tests (about 1.5 min)
 - the board facts still match the vendor model;
 - clearance to the board is at least 0.3 mm;
 - every opening has a clear path to its part;
-- the board can be fitted (start tilt 5°);
+- the board can be fitted (drop in, slide forward, settle);
 - the lid clears the SMA, a ribbon plug and its ribbon;
 - the screw heads have room behind the keyholes, and the board-screw nuts have room on top;
 - the lid seats on the base without overlap, and the LED shows through it;
@@ -65,8 +65,9 @@ make case-test    # the model's tests (about 1.5 min)
 
 ## Assembly
 
-1. **Board:** tilt the board header end up, slide the USB and RJ45 into their holes in the cable wall, and lower the
-   header end onto the standoffs. Push the four countersunk screws in from the back through the standoffs and the board,
+1. **Board:** lower the board flat into the base, pushed toward the header end (there's 2 mm of room there). Lift it
+   slightly and slide it toward the cable wall so the USB and RJ45 go into their holes, then let it settle onto the
+   standoffs. Push the four countersunk screws in from the back through the standoffs and the board,
    and tighten a nut on each from the top.
 2. **SMA:** clip the pigtail onto the board's antenna socket. Push the SMA bulkhead out through the D-hole in the right
    wall from inside, and tighten its nut on the outside.

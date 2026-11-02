@@ -90,7 +90,7 @@ the result.
 | Lid fixing | four corner tabs hang into the inner corners of the base and guide the lid into place; a bump on each, ramped 45° on both sides, clicks into a dent in the side wall: push to close, lever up to open |
 | Opening the lid | lever it up through the grille with a small flat screwdriver; no pry cut-outs in this revision |
 | Board fixing | four M2.5 countersunk (flat-head) screws from the back: through a countersunk hole in the back plate, up through a Ø6 × 5 mm standoff and the board's hole, held by an M2.5 nut on top of the board; the heads sit flush with the back, so the case still lies flat on the wall |
-| Board fitting | the board goes in from the open top, tilted, connectors first into the cable-wall holes, then the header end is lowered onto the standoffs |
+| Board fitting | the board drops straight in from the open top, about 1.7 mm toward the header end, then slides forward (lifted 0.5 mm) so the USB and RJ45 go into their cable-wall holes, and settles onto the standoffs |
 | SMA | D-hole in the right (X = 55) wall; fitted after the board: the pigtail clips onto the board, the bulkhead goes out through the wall from inside, nut tightened outside |
 | 40-pin header | wiring (jumpers or a ribbon cable) leaves through a slot along the top of the header-end wall; no opening in the lid over the header |
 | Wall mounting | two L-shaped keyholes in the flat back plate, 32 mm apart, for either orientation |
@@ -100,7 +100,7 @@ the result.
 | Wall / plate thickness | 2.0 mm; lid plate 2.0 mm |
 | Clearance board ↔ inner wall | 0.5 mm, with a local recess at the buttons (see 5.2) |
 | Clearance over the tallest part | 1.0 mm (lid underside at board Z 17.0); the extra 0.5 mm leaves 1 mm of wall above the USB opening |
-| Outer size | about 60 × 73 × 27.6 mm |
+| Outer size | about 60 × 75 × 27.6 mm |
 | Printing | FDM, 0.4 mm nozzle, PETG recommended (the tabs flex), PLA acceptable; no supports; base prints back-plate down, lid prints top-face down |
 
 ## 5. Geometry
@@ -117,7 +117,8 @@ Heights are given in *case Z*. Case Z = 0 is the outer back face, and the board 
 | Rebate floor (lid flange rests here) | 26.6 |
 | Wall tops and lid top (flush) | 27.6 |
 
-In plan view, the inner outline is the PCB outline plus 0.5 mm all round, and the outer outline adds 2 mm of wall. The
+In plan view, the inner outline is the PCB outline plus 0.5 mm on three sides and 2.5 mm at the header end (room to
+drop the board in shifted back before sliding its connectors home), and the outer outline adds 2 mm of wall. The
 outer vertical edges are rounded.
 
 ### 5.1 Base: back plate and keyholes
@@ -157,8 +158,8 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 
 - **Cable wall (Y = 0 edge):**
   - **Openings:** one for the USB stack (USB-C and USB-A together), one for the RJ45 and one slot for the microSD.
-    - Each is the connector envelope plus 0.5 mm, except the top edge of the USB and RJ45 openings, which gets 1 mm so
-      the board can tilt in.
+    - Each is the connector envelope plus 0.5 mm, except the top edge of the USB and RJ45 openings, which gets 1 mm of
+      extra room.
     - The USB opening's top edge (case Z ≈ 25.6) leaves 1 mm of wall below the rebate floor (26.6).
   - **microSD:** the slot runs from 0.6 mm below the board's top face to 2 mm above it, across X 39.2–51.4. It has a
     thumb scoop in the outer face below it, so a fingernail or pencil can push the card in and out.
@@ -178,7 +179,7 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 - **Left wall (X = 0 edge, buttons):**
   - Two Ø2.5 pin-holes on the plunger axes (Y 5.65 and 12.35 and the plunger's Z, taken from the model).
   - The plungers sit only 0.15 mm from the inner face, so the inner face gets a shallow local recess around both buttons
-    to keep ≥ 0.3 mm clearance and let the board tilt in. There are no guide tubes.
+    to keep ≥ 0.3 mm clearance as the board slides in. There are no guide tubes.
 - **Right wall (X = 55 edge, SMA):**
   - A D-shaped hole, Ø6.5 with a flat at 5.9, at board Y ≈ 52 and case Z ≈ 17.6.
   - The builder checks clearance inside: a 5 mm radius around the axis, out to 12 mm from the wall, must miss the board,
@@ -265,12 +266,14 @@ These are automated checks, run against the vendor STEP:
 - Every opening (USB-C, USB-A, RJ45, microSD, both buttons, header slot, SMA hole) has an unobstructed straight path from
   outside to the part it serves.
 - **Fitting motion:**
-  - The board (rounded PCB plus the boxes of the parts above it) is tilted header-end up about its bottom front edge.
-  - **Drop in:** the start tilt is the smallest whole angle at which the tilted board, held back so its connector fronts
-    are just inside the cable wall, drops in between the walls.
-  - **Slide:** at that tilt it slides forward until the connectors are at their final depth, checked every 0.5 mm.
-  - **Swing down:** it rotates to flat, checked every 1°.
-  - The board never intersects the base, and the start tilt is reported. The model gives 5°.
+  - The board (rounded PCB plus the boxes of the parts above it) moves flat; it is never tilted.
+  - **Drop:** shifted toward the header end until its connector fronts are 0.2 mm inside the cable wall's inner face
+    (1.69 mm) and 0.5 mm above the standoffs, its volume swept straight down from above the wall tops is clear of the
+    base.
+  - **Slide:** at that height it slides forward to home, checked every 0.25 mm. Underside parts that cross a standoff top
+    on the way hang less than the 0.5 mm lift (the deepest is about 0.3 mm).
+  - **Settle:** at home it lowers onto the standoffs.
+  - The 73 mm case of the first draft fails this check; that is why the case is 75 mm long.
   - If no such motion exists with the margins in 5.2, stop and report back. Don't open up the cable-wall holes without
     asking.
 - A ribbon-plug block (55.9 × 9 × 9 mm, seated on the header body, centred on it) fits with at least 0.5 mm clearance to
