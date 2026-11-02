@@ -1,0 +1,88 @@
+<!--
+  SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Thread Border Router - Packet capture</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="/favicon.ico">
+</head>
+<body class="device-page">
+<nav class="nav" id="nav"></nav>
+<div class="container">
+    <div class="page-head">
+        <div>
+            <h1 class="page-title">Packet capture</h1>
+            <p class="page-desc">Records the 802.15.4 frames on one channel into a pcap file you can open in Wireshark.</p>
+        </div>
+    </div>
+
+    <div class="disabled-banner hidden" id="trialBanner" role="status">
+        <strong>New network settings are on trial.</strong>
+        The board goes back to the previous settings in <span id="trialRemaining">-</span> unless you keep them from the
+        management interface.
+        <button class="btn btn-primary btn-sm" id="confirmBtn" type="button">Keep new settings</button>
+    </div>
+    <div class="form-hint" id="confirmMsg" role="status" aria-live="polite"></div>
+
+    <div id="captureSection">
+        <div class="form-hint hidden" id="cap-stale" role="status" aria-live="polite"></div>
+
+        <section class="card" id="cap-idle">
+            <div class="disabled-banner">The Thread network stops while a capture runs, because the radio only listens.
+                Devices reconnect when it ends.</div>
+            <div class="field-row">
+                <label class="field" for="capChannel">Channel
+                    <input type="text" inputmode="numeric" id="capChannel" placeholder="network's" size="10">
+                    <span class="form-hint">11 to 26. Leave empty for the Thread network's channel.</span>
+                </label>
+                <fieldset class="field" style="border: 0">
+                    <legend>Length</legend>
+                    <div class="seg" role="group" aria-label="Length">
+                        <button type="button" id="len-30" aria-pressed="false">30 s</button>
+                        <button type="button" id="len-60" aria-pressed="true">1 min</button>
+                        <button type="button" id="len-600" aria-pressed="false">10 min</button>
+                        <button type="button" id="len-3600" aria-pressed="false">1 h</button>
+                    </div>
+                    <span class="form-hint">You can stop it early.</span>
+                </fieldset>
+            </div>
+            <div class="mt-16">
+                <a class="btn btn-primary" id="capStart" href="#" download="sniffer.pcap">Start capture</a>
+                <span class="form-hint">Your browser saves <code>sniffer.pcap</code> as the frames arrive.</span>
+            </div>
+            <div class="form-hint hidden" id="cap-fault">The last capture was ended by a radio fault.</div>
+        </section>
+
+        <section class="card hero hero-info hidden" id="cap-active">
+            <div class="tile-head" style="width: 100%">
+                <h2 class="hero-title" id="cap-a-title">-</h2>
+                <button class="btn btn-outline-danger" id="capStop" type="button">Stop capture</button>
+            </div>
+            <span class="bar bar-info" style="width: 100%"><span class="bar-fill" id="cap-a-fill"></span></span>
+            <dl class="stats" style="width: 100%">
+                <div><dt>Time left</dt><dd id="cap-a-left">-</dd></div>
+                <div><dt>Frames</dt><dd id="cap-a-frames">-</dd></div>
+                <div><dt>Dropped</dt><dd id="cap-a-drops">-</dd></div>
+            </dl>
+        </section>
+        <div class="form-hint" id="capMsg" role="status" aria-live="polite"></div>
+    </div>
+
+    <section class="card mt-16">
+        <h2 class="card-title">Watch live in Wireshark</h2>
+        <p class="card-sub">Stream the capture straight into Wireshark from a terminal instead of saving a file. The
+            command uses the channel and length chosen above.</p>
+        <pre class="console" id="cap-cmd"></pre>
+    </section>
+</div>
+<div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
+<script src="/static/api.js"></script>
+<script src="/static/device_common.js"></script>
+<script src="/static/capture.js"></script>
+</body>
+</html>

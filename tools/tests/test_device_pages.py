@@ -23,6 +23,7 @@ DEVICE_MENU = [
 # page -> (script, endpoints its script names)
 PAGES = {
     "diagnostics": ("diagnostics", ["/device/diag"]),
+    "capture": ("capture", ["/device/sniffer.pcap", "/device/sniffer", "/device/status"]),
 }
 
 KIT_IDS = ["trialBanner", "trialRemaining", "confirmBtn", "confirmMsg"]
@@ -107,7 +108,8 @@ class TestPages:
 
     def test_every_id_the_script_names_exists_in_the_page(self, name):
         # On the script: each id given to $, setText, show or note is an element of the page.
-        used = set(re.findall(r"(?:\$|setText|show|note)\('([A-Za-z0-9_-]+)'", js_of(PAGES[name][0])))
+        # A whole quoted id only: an id built from a prefix ('len-' + s) is checked by the page's own tests.
+        used = set(re.findall(r"(?:\$|setText|show|note)\('([A-Za-z0-9_-]+)'\s*[,)]", js_of(PAGES[name][0])))
         present = set(re.findall(r'id="([^"]+)"', html_of(name)))
         assert used
         assert used <= present, used - present
