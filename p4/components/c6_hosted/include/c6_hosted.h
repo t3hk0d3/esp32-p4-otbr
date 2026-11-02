@@ -13,11 +13,12 @@
 extern "C" {
 #endif
 
-/** One piece of the image sent through the OTA. data NULL: `len` bytes of 0xFF (padding). */
+/** The image sent through the OTA: `read` delivers bytes sequentially, offsets ascend without gaps. */
 typedef struct {
-    const uint8_t *data;
-    size_t len;
-} c6_hosted_segment_t;
+    size_t total_size;
+    esp_err_t (*read)(void *ctx, size_t offset, void *buf, size_t len);
+    void *ctx;
+} c6_hosted_source_t;
 
 /**
  * Reset the C6 into its normal boot (GPIO6 high) and see whether ESP-Hosted answers on SDIO: present is true when it sent
@@ -28,12 +29,12 @@ typedef struct {
 esp_err_t c6_hosted_detect(bool *present);
 
 /**
- * Send the segments back to back as one image through the ESP-Hosted OTA. The C6 erases its other app slot (seconds),
- * stores the image, checks it, selects it to boot and restarts by itself about 5 s after the reply to OTAEnd. On failure
- * err_detail (may be NULL) names the step, e.g. "no ESP-Hosted answer" or "OTAWrite refused (-1)". The bus is released on
- * every path. Blocks for up to about a minute.
+ * Send the source unchanged as one image through the ESP-Hosted OTA. The C6 erases its other app slot (seconds), stores the
+ * image, checks it, selects it to boot and restarts by itself about 5 s after the reply to OTAEnd. On failure err_detail
+ * (may be NULL) names the step, e.g. "no ESP-Hosted answer" or "OTAWrite refused (-1)". The bus is released on every path.
+ * Blocks for up to about a minute.
  */
-esp_err_t c6_hosted_install(const c6_hosted_segment_t *segs, size_t count, char *err_detail, size_t err_cap);
+esp_err_t c6_hosted_ota(const c6_hosted_source_t *source, char *err_detail, size_t err_cap);
 
 #ifdef __cplusplus
 }
