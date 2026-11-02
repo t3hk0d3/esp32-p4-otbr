@@ -48,7 +48,7 @@ OpenMetrics format.
   existing 32-bit deltas, so the totals survive the runtime counter wrapping. A task that disappears drops out; a new task
   with a reused name starts again from 0 (a counter reset to Prometheus).
 - `diag` lock wrapper adds `hold_us_total` and `wait_us_total` (64-bit) since boot to `diag_lock_stats_t` and the view.
-- The status figures (mode, versions, jumper, storage, sniffer, PD state, Ethernet, trial) come from the same sources
+- The status figures (mode, versions, storage, sniffer, PD state, Ethernet, trial) come from the same sources
   `/device/status` and `/device/network` use, without their OpenThread lock read: PD state comes from the collector.
 - `app_main.c` calls `metrics_start()` after `diag_start()`. A failure is logged and the boot goes on; `/metrics` then
   serves device metrics only.
@@ -78,7 +78,6 @@ out entirely (no `HELP`/`TYPE` either).
 | `br_ot_lock_wait_seconds_total` | counter | | diag |
 | `br_ot_lock_hold_max_seconds` | gauge | `window` = boot/60s | diag |
 | `br_ot_lock_wait_max_seconds` | gauge | `window` = boot/60s | diag |
-| `br_jumper_present` | gauge 0/1 | | status |
 | `br_storage_ok` | gauge 0/1 | | status |
 | `br_sniffer_active` | gauge 0/1 | | sniffer |
 | `br_sniffer_frames_total` | counter (per capture) | | sniffer |
