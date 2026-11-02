@@ -75,7 +75,7 @@ the result.
 | Buttons (`SWITCHER-4_5X3_3XH3_4`, ×2) | X −0.35–3.65; Y 3.35–7.95 and 10.05–14.65; Z −0.5–3.3 | side-actuated; plungers face the −X direction; which is BOOT comes from the model or silkscreen |
 | LED (`LED1_ASM`) | X 0.30–1.62, Y 17.35–19.10, Z 0–0.5 | top-emitting 0603; visible through the grille |
 | 40-pin header | X 2.10–52.90, Y 61.46–66.54, Z up to 8.30 | pins also stick out 3 mm below the board |
-| Big capacitors | about X 47–54, Y 30–45, Z up to 7 | the reason the SMA sits at Y ≥ 50 |
+| Big capacitors | about X 47–54, Y 30–45, Z up to 7.8 | the reason the SMA sits at Y ≥ 50 |
 | PoE transformer (`T1_ASM`) | X 33.75–47.05, Y 27.65–44.42, Z up to 12.0 | the main heat source |
 | Antenna socket | about (30.3, 26.6), on the radio module | IPEX/u.FL type; the user's pigtail is about 8 cm long |
 | Underside | deepest part 3.3 below the PCB bottom (2-pin socket near (28, 57)) | the rest mostly under 2.3 |
