@@ -221,8 +221,10 @@ function recover() {
 
 function showLog() {
   return kit.request('GET', '/device/radio/log').then(function(r) {
-    if (r.status === 200)
+    if (r.status === 200) {
       setText('c6Log', r.text || '(empty)');
+      show('c6Log', true);
+    }
     else
       note('recoverMsg', kit.failure(r), true);
   }, function(e) { note('recoverMsg', e.message, true); });

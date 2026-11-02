@@ -80,7 +80,8 @@ class TestServing:
         response = requests.get(f"{base_url}/{name}.html", timeout=REQUEST_TIMEOUT_S)
         assert response.status_code == requests.codes.ok
         assert response.headers["Content-Type"].startswith("text/html")
-        assert response.text == (FRONTEND / f"{name}.html").read_text()
+        # Bytes, not text: the board sends no charset, so requests would decode UTF-8 (the en dash) as Latin-1.
+        assert response.content == (FRONTEND / f"{name}.html").read_bytes()
 
     @pytest.mark.parametrize("script", sorted(set(PAGES.values()) | {"device_common"}))
     def test_script_is_served_from_web_as_javascript(self, base_url, script):
@@ -90,7 +91,7 @@ class TestServing:
         )
         assert response.status_code == requests.codes.ok
         assert "javascript" in response.headers["Content-Type"]
-        assert response.text == (FRONTEND / "static" / f"{script}.js").read_text()
+        assert response.content == (FRONTEND / "static" / f"{script}.js").read_bytes()
 
     def test_scripts_reference_each_device_endpoint(self, base_url):
         # On the served scripts together: every endpoint of the API appears in one of them.

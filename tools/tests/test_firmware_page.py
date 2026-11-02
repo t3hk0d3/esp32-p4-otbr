@@ -298,3 +298,11 @@ class TestFirmwarePageReview:
             + "t.page.init(); await t.advance(100); return [t.doc.fire('dragover').defaultPrevented, t.doc.fire('drop').defaultPrevented];"
         )
         assert r == [True, True]
+
+    def test_console_box_is_hidden_until_the_log_is_shown(self):
+        # On the page: the empty console box is hidden; after Show C6 console it is shown.
+        r = scenario(
+            page("firmware", "(u) => ({status: 200, body: 'boot'})")
+            + "const before = t.el('c6Log').hidden(); await t.page.showLog(); return [before, t.el('c6Log').hidden()];"
+        )
+        assert r == [True, False]
