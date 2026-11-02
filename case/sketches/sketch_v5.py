@@ -25,7 +25,9 @@ from sketch_v3 import (
 )
 from sketch_v4 import CELL, FRAME, LID_C, RIB, SMA, grille
 
-TABS_Y = (10.0, 40.0)
+TABS_Y = (3.0, 65.0)  # label positions
+# corner tabs: (y_lo, y_hi, drop below lid underside, end-leg along the cable wall?)
+CORNER_TABS = ((-0.5, 6.5, 6.5, True), (61.5, 68.5, 3.5, False))
 TAB_W = 7.0
 TAB_DROP = 6.5
 PRY_Y = ()  # pry cut-outs dropped: deferred to a later revision
@@ -36,7 +38,7 @@ PRY_D = 3.0
 def legend(svg):
     rows = (
         (BASE_C, "BASE (one part): back plate + all four walls + standoffs"),
-        (LID_C, "LID: honeycomb grille plate, 4 tabs inside the walls"),
+        (LID_C, "LID: honeycomb grille plate, 4 corner tabs"),
     )
     for i, (c, t) in enumerate(rows):
         svg.rect(60, 62 + i * 20 - 11, 22, 13, "#374151", fill=c, sw=1)
@@ -49,7 +51,7 @@ def front(svg):
         60,
         130,
         "A. Front (as seen on the wall)",
-        "outside is clean: no wings; dashed = tabs under the lid",
+        "shaded = corner tabs under the lid (snaps + guide pins)",
     )
     v = View(svg, 120, 175, X0 - 6, Y1 + 4)
     v.rect(X0, Y0, X1, Y1, "#374151", fill=BASE_C, sw=2, rx=8)
@@ -57,11 +59,13 @@ def front(svg):
     v.rect(lx0, ly0, lx1, ly1, "#374151", fill=LID_C, sw=1.5, rx=6)
     grille(v, lx0 + FRAME, ly0 + FRAME, lx1 - FRAME, ly1 - FRAME, "hex")
     v.rect(lx0 + FRAME, 33.1, lx1 - FRAME, 34.9, "#374151", fill=LID_C, sw=0.8)
-    for y in TABS_Y:
+    for ylo, yhi, _, end_leg in CORNER_TABS:
         for x, d in ((X0 + W, 1), (X1 - W, -1)):
-            v.rect(
-                x, y - TAB_W / 2, x + d * 1.2, y + TAB_W / 2, "#111", dash="2,1.5", sw=1
-            )
+            v.rect(x, ylo, x + d * 1.2, yhi, "#111", fill="#111", op=0.35, sw=1)
+            if end_leg:
+                v.rect(
+                    x, ylo, x + d * 3.5, ylo + 1.2, "#111", fill="#111", op=0.35, sw=1
+                )
     for y in PRY_Y:
         for x, d in ((X0, 1), (X1, -1)):
             v.rect(
@@ -74,8 +78,8 @@ def front(svg):
                 sw=1.5,
                 rx=2,
             )
-    v.text(X1 + 2, TABS_Y[1] - 1, "tab (inside)", size=10)
-    v.text(X1 + 2, TABS_Y[0] - 1, "tab (inside)", size=10)
+    v.text(X1 + 2, TABS_Y[1] - 1, "corner tab (short)", size=10)
+    v.text(X1 + 2, TABS_Y[0] - 1, "corner tab (L)", size=10)
     v.rect(X1, SMA[0] - 3.5, X1 + 4, SMA[0] + 3.5, "#374151", fill="#fbbf24", sw=1.5)
     v.text(X1 + 5, SMA[0] - 6, "SMA", size=11, weight="bold")
     v.hdim(X0, X1, Y1 + 2.0, f"{X1 - X0:.0f}")
@@ -98,16 +102,8 @@ def side(svg, ox, oy, which):
             sw=1.5,
             rx=2,
         )
-    for y in TABS_Y:
-        s.rect(
-            y - TAB_W / 2,
-            TOP - TAB_DROP,
-            y + TAB_W / 2,
-            TOP,
-            "#111",
-            dash="2,1.5",
-            sw=1,
-        )
+    for ylo, yhi, drop, _ in CORNER_TABS:
+        s.rect(ylo, TOP - drop, yhi, TOP, "#111", dash="2,1.5", sw=1)
     s.rect(0, PCB0, 68, PCB1, C["board"], dash="3,3", sw=1)
     if which == "left":
         for yb, lab, dx, anc in (
@@ -139,7 +135,7 @@ def end_view(svg, ox, oy, which):
         e.rect(41.5, PCB1 - 3.0, 49.0, PCB1 - 0.6, C["cut"], dash="2,2", sw=1)
     else:
         e.rect(0.5, TOP - 4.0, 54.5, TOP, C["cut"], fill="white", sw=2)
-        e.text(27.5, TOP - 2.8, "40-pin cable slot 54 × 4", size=10, anchor="middle")
+        e.text(27.5, TOP - 2.8, "40-pin cable slot 54 × 3.5", size=10, anchor="middle")
         e.rect(2.1, PCB1, 52.9, PCB1 + 8.3, C["part"], dash="3,3", sw=1)
         e.text(
             27.5,
@@ -227,7 +223,7 @@ def sheet_detail(path):
         color=C["note"],
     )
 
-    title(svg, 60, 100, "E. Section across the case through a tab")
+    title(svg, 60, 100, "E. Section across the case through the cable-end corner tabs")
     v = View(svg, 100, 130, X0 - 4, ZMAX + 3)
     v.rect(X0, 0, X1, FLOOR, "#374151", fill=BASE_C)
     v.rect(X0, FLOOR, X0 + W, ZMAX, "#374151", fill=BASE_C)
@@ -241,7 +237,7 @@ def sheet_detail(path):
     v.rect(47, PCB1, 54, PCB1 + 7, C["part"], fill=C["part"], op=0.15, sw=1)
     v.text(50.5, PCB1 + 3, "caps", size=9, anchor="middle")
     v.text(
-        36, PCB1 + 12, "tab bottom ≈ 9.5 mm above the board:", size=10, anchor="middle"
+        36, PCB1 + 12, "tab tip ≈ 10.5 mm above the board:", size=10, anchor="middle"
     )
     v.text(
         36, PCB1 + 9.8, "clears buttons (3.3) and caps (7)", size=10, anchor="middle"

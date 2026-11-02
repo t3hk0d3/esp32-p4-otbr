@@ -48,7 +48,7 @@ Anti-goals: the build fails if
   - The zip is about 5 MB and the STEP is 28 MB, so neither is committed. A script fetches them and checks the hashes.
 - **Sketches agreed during brainstorming:**
   - `docs/images/case/v5-views.svg`: front, both ends, both sides, back.
-  - `docs/images/case/v5-detail.svg`: lid-tab section and close-up.
+  - `docs/images/case/v5-detail.svg`: section through the cable-end corner tabs, and a close-up of a tab bump.
   - `docs/images/case/v4-lid.svg`: the grille patterns that were compared; honeycomb was chosen. The wings on that
     sheet are superseded by the inside tabs.
   - `case/sketches/` holds the throwaway scripts that draw the sketches. They are not the model.
@@ -87,7 +87,7 @@ the result.
 | Parts | two printed parts: **base** and **lid** |
 | Base | one part: flat back plate, all four walls, four board standoffs |
 | Lid | flat honeycomb grille plate with four tabs; sits flush in a rebate on the wall tops |
-| Lid fixing | four tabs hang inside the side walls; a bump on each, ramped 45° on both sides, clicks into a dent in the wall: push to close, lever up to open |
+| Lid fixing | four corner tabs hang into the inner corners of the base and guide the lid into place; a bump on each, ramped 45° on both sides, clicks into a dent in the side wall: push to close, lever up to open |
 | Opening the lid | lever it up through the grille with a small flat screwdriver; no pry cut-outs in this revision |
 | Board fixing | four M2.5 self-tapping screws through the board's holes into Ø6 × 5 mm standoffs with printed Ø2.2 pilot holes |
 | Board fitting | the board goes in from the open top, tilted, connectors first into the cable-wall holes, then the header end is lowered onto the standoffs |
@@ -169,8 +169,9 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
   - A D-shaped hole, Ø6.5 with a flat at 5.9, at board Y ≈ 52 and case Z ≈ 17.6.
   - The builder checks clearance inside: a 5 mm radius around the axis, out to 12 mm from the wall, must miss the board,
     the capacitors and the lid tabs.
-- **Tab dents:** each side wall has two dents in its inner face, at board Y 10 and 40, sized for the tab bumps (5.3). Their
-  upper and lower faces are at 45°, so they print without supports.
+- **Tab dents:** each side wall has two dents in its inner face, one near each end, on the axis of the corner tabs' side
+  legs (5.3). Their upper and lower faces are at 45°, so they print without supports. At the header end the dent sits
+  above the ribbon-plug recess, where the wall is full thickness.
 
 ### 5.3 Lid
 
@@ -180,12 +181,21 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
   - Honeycomb inside the frame, holes 3.5 mm across flats, 1 mm walls (about 60% open).
   - One cross rib about 1.8 mm wide across the middle (around board Y 34) stiffens it.
   - The grille sits flat on the build plate when printing, so it has no bridges.
-- **Tabs:**
-  - Four, hanging from the frame's underside just inside the side walls, at board Y 10 and 40.
-  - Each is 7 mm wide, 1.2 mm thick, and reaches 6.5 mm below the lid's underside, so its tip sits about 9.5 mm above
-    the board. That clears the buttons (3.3), the capacitors (7) and the SMA body.
-  - Each carries a bump on its outer face, about 0.6 mm high and ramped 45° on both faces, so a firm lever pops it out.
-  - Bump height and the dent fit go into named constants, so they can be tuned after a test print.
+- **Corner tabs (snaps and guide pins):**
+  - Four, hanging from the frame's underside into the four inner corners of the base. As the lid goes down, they find the
+    corners first and steer it into the rebate. Their tips are chamfered to help with that.
+  - All are 1.2 mm thick, with 0.2 mm clearance to the walls.
+  - **Cable-end corners:**
+    - L-shaped: a 7 mm leg along the side wall and a 3.5 mm leg along the cable wall. They locate the lid in X and Y.
+    - They reach 6.5 mm below the lid's underside, to about 10.5 mm above the board. That clears the buttons (3.3), the
+      USB stack (starts at X 4.26, so the 3.5 mm leg ends before it), the microSD socket and the RJ45.
+  - **Header-end corners:**
+    - A straight 7 mm leg along the side wall only. A leg along the header-end wall would block the cable slot.
+    - They are shorter, reaching 3.5 mm below the lid's underside, to about 13.5 mm above the board. That stays clear of a
+      ribbon plug (top about 11.5 above the board) and of the ribbon, which runs between X 2.1 and 52.9.
+  - Each side-wall leg carries a bump on its outer face, about 0.6 mm high and ramped 45° on both faces, so a firm lever
+    pops it out.
+  - Bump height, dent fit and tab lengths go into named constants, so they can be tuned after a test print.
 - **LED:** the LED (board X 0.3–1.6, Y 17.4–19.1) sits under the solid frame. The frame narrows locally there, so two or
   three honeycomb cells (3.5 mm or less) sit directly over it. There's no separate window.
 
@@ -196,7 +206,7 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 2. Clip the pigtail onto the antenna socket, push the SMA bulkhead out through the right wall from inside, and tighten
    its nut on the outside.
 3. Optional: plug wiring onto the 40-pin header and lead it out through the header-end slot.
-4. Press the lid into the rebate until the four tabs click.
+4. Set the lid on so the corner tabs drop into the corners, and press until the four tabs click.
 5. To open: lever the lid up through the grille with a small flat screwdriver, near a tab.
 
 ## 7. Repository layout and tooling
@@ -236,7 +246,8 @@ These are automated checks, run against the vendor STEP:
 - A ribbon-plug block (55.9 × 9 × 9 mm, seated on the header body, centred on it) fits with at least 0.5 mm clearance to
   the base walls. With the lid on, there's at least 1.3 mm between the top of the block and the lid underside for the
   ribbon.
-- Lid on: the tabs, bumps and grille don't touch the board, its parts or the SMA envelope.
+- Lid on: the tabs, bumps and grille don't touch the board, its parts, the SMA envelope, the ribbon-plug block or the
+  ribbon path (X 2.1–52.9, from the top of the block up into the header slot).
 - Both keyhole head volumes (the L sweep plus the head radius, 2.5 mm tall) are free of the board and its underside parts.
 - From straight above the lid, the LED's top face is visible through at least one grille cell.
 - No lid opening, and no gap in the header-end slot, is wider than 3.5 mm.
