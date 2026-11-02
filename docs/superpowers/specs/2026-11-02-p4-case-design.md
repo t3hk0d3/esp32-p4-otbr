@@ -182,31 +182,25 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
   - One cross rib about 1.8 mm wide across the middle (around board Y 34) stiffens it.
   - The grille sits flat on the build plate when printing, so it has no bridges.
 - **Corner tabs (snaps and guide pins):**
-  - Four, hanging from the frame's underside into the four inner corners of the base. As the lid goes down, they find the
-    corners first and steer it into the rebate. Their tips are chamfered to help with that.
-  - All are wedged on both faces, so the lid glides into place:
+  - Four identical tabs, hanging from the frame's underside into the four inner corners of the base, against the side
+    walls. Each is 7 mm long along the side wall and reaches 3.5 mm below the lid's underside, to about 13.5 mm above the
+    board.
+  - As the lid goes down they find the corners first and steer it into the rebate. Each tab's end sits 0.2 mm from the end
+    wall, so the four of them locate the lid along the case as well as across it.
+  - At that length they stay clear of everything: the USB stack (X 4.26 and up), the buttons, a ribbon plug on the header
+    (top about 11.5 above the board) and the ribbon itself (X 2.1–52.9). No tab runs along an end wall, so the header
+    slot stays fully open.
+  - Every tab is wedged so the lid glides into place:
     - **Inner face:** tapers from 2.0 mm thick at the root to 1.6 mm at the tip.
-    - **Outer face:** flat and parallel to the wall (0.2 mm clearance) for the first 3 mm below the lid. That is where the
-      snap bump sits. Below that it tapers 0.5 mm inward to the tip, a lead-in that slides off the wall edge and centres
-      the lid.
-    - The tip is about 1.1 mm thick. The thick root makes the tabs stiff guides; the thinner lower part flexes for the
-      snap.
-    - The dents in the walls sit level with the bumps, about 2 mm below the rebate floor.
-    - **Faces toward the end walls:** the same flat-then-lead-in profile. That covers the cable-wall leg of each L tab and
-      the end of each straight header-end tab that faces the header-end wall (0.2 mm clearance there). Each tab therefore
-      narrows toward its tip in both directions and steers the lid along the case as well as across it. The tips' outer
-      corners are rounded.
-  - **Cable-end corners:**
-    - L-shaped: a 7 mm leg along the side wall and a 3.5 mm leg along the cable wall. They locate the lid in X and Y.
-    - They reach 6.5 mm below the lid's underside, to about 10.5 mm above the board. That clears the buttons (3.3), the
-      USB stack (starts at X 4.26, so the 3.5 mm leg ends before it), the microSD socket and the RJ45.
-  - **Header-end corners:**
-    - A straight 7 mm leg along the side wall only. A leg along the header-end wall would block the cable slot.
-    - They are shorter, reaching 3.5 mm below the lid's underside, to about 13.5 mm above the board. That stays clear of a
-      ribbon plug (top about 11.5 above the board) and of the ribbon, which runs between X 2.1 and 52.9.
-  - Each side-wall leg carries a bump on its outer face, about 0.6 mm high and ramped 45° on both faces, so a firm lever
-    pops it out.
-  - Bump height, dent fit, tab lengths and wedge thicknesses go into named constants, so they can be tuned after a test print.
+    - **Face toward the side wall:** flat and parallel to the wall (0.2 mm clearance) for the first 2 mm below the lid,
+      where the snap bump sits. Below that it tapers 0.5 mm inward to the tip.
+    - **End face toward the end wall:** the same flat-then-lead-in profile, so each tip narrows in both directions.
+    - The tip is about 1.1 mm thick, and its outer corner is rounded.
+  - Each tab carries a bump on its side-wall face, about 0.5 mm high and ramped 45° on both faces, centred 1 mm below the
+    lid. A firm lever pops it out. The dents in the side walls sit level with the bumps, about 1 mm below the rebate floor.
+    At the header end that's above the ribbon-plug recess, where the wall is full thickness.
+  - Bump height, dent fit, tab length and drop, and the wedge thicknesses go into named constants, so they can be tuned
+    after a test print.
 - **LED:** the LED (board X 0.3–1.6, Y 17.4–19.1) sits under the solid frame. The frame narrows locally there, so two or
   three honeycomb cells (3.5 mm or less) sit directly over it. There's no separate window.
 

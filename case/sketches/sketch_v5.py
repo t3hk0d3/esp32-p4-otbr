@@ -27,12 +27,12 @@ from sketch_v4 import CELL, FRAME, LID_C, RIB, SMA, grille
 
 TABS_Y = (3.0, 65.0)  # label positions
 # corner tabs: (y_lo, y_hi, drop below lid underside, end-leg along the cable wall?)
-CORNER_TABS = ((-0.5, 6.5, 6.5, True), (61.5, 68.5, 3.5, False))
+CORNER_TABS = ((-0.5, 6.5, 3.5, False), (61.5, 68.5, 3.5, False))
 TAB_W = 7.0
-TAB_DROP = 6.5
+TAB_DROP = 3.5
 TAB_ROOT = 2.0  # wedge-shaped tab: thickness at the lid
 TAB_TIP = 1.6  # inner face tapers from TAB_ROOT to this at the tip
-TAB_FLAT = 3.0  # outer face stays flat this far below the lid (bump zone)
+TAB_FLAT = 2.0  # outer face stays flat this far below the lid (bump zone)
 TAB_LEAD = 0.5  # then the outer face tapers in by this much to the tip
 PRY_Y = ()  # pry cut-outs dropped: deferred to a later revision
 PRY_W = 10.0
@@ -250,7 +250,7 @@ def sheet_detail(path):
         color=C["note"],
     )
 
-    title(svg, 60, 100, "E. Section across the case through the cable-end corner tabs")
+    title(svg, 60, 100, "E. Section across the case through two corner tabs")
     v = View(svg, 100, 130, X0 - 4, ZMAX + 3)
     v.rect(X0, 0, X1, FLOOR, "#374151", fill=BASE_C)
     v.rect(X0, FLOOR, X0 + W, ZMAX, "#374151", fill=BASE_C)
@@ -275,10 +275,14 @@ def sheet_detail(path):
     v.rect(47, PCB1, 54, PCB1 + 7, C["part"], fill=C["part"], op=0.15, sw=1)
     v.text(50.5, PCB1 + 3, "caps", size=9, anchor="middle")
     v.text(
-        36, PCB1 + 12, "tab tip ≈ 10.5 mm above the board:", size=10, anchor="middle"
+        36, PCB1 + 12, "tab tip ≈ 13.5 mm above the board:", size=10, anchor="middle"
     )
     v.text(
-        36, PCB1 + 9.8, "clears buttons (3.3) and caps (7)", size=10, anchor="middle"
+        36,
+        PCB1 + 9.8,
+        "clears USB, buttons, caps, ribbon plug",
+        size=10,
+        anchor="middle",
     )
 
     title(svg, 520, 100, "F. Tab close-up (in the wall's inner face)")
@@ -296,8 +300,8 @@ def sheet_detail(path):
     tab = [
         (-4, -1),
         (-4 + TAB_ROOT, -1),
-        (-4 + TAB_TIP, -7.5),
-        (-4 + TAB_LEAD, -7.5),
+        (-4 + TAB_TIP, -1 - TAB_DROP),
+        (-4 + TAB_LEAD, -1 - TAB_DROP),
         (-4, -1 - TAB_FLAT),
     ]
     svg.el.append(
@@ -311,7 +315,7 @@ def sheet_detail(path):
         f"wedge both sides: {TAB_ROOT} mm root, {TAB_TIP - TAB_LEAD:.1f} mm tip",
         size=11,
     )
-    pts = [z.p(-4 * k, -3.2 * k), z.p(-4.6 * k, -2.6 * k), z.p(-4 * k, -2.0 * k)]
+    pts = [z.p(-4 * k, -2.5 * k), z.p(-4.5 * k, -2.0 * k), z.p(-4 * k, -1.5 * k)]
     svg.el.append(
         '<polygon points="'
         + " ".join(f"{a:.1f},{b:.1f}" for a, b in pts)
@@ -330,7 +334,13 @@ def sheet_detail(path):
     g.rect(
         -3 * kk, -9 * kk, -1 * kk, 1 * kk, "#374151", fill=BASE_C
     )  # cable wall (end wall)
-    tab = [(-0.8, 0), (7.0, 0), (7.0, -6.5), (-0.8 + TAB_LEAD, -6.5), (-0.8, -TAB_FLAT)]
+    tab = [
+        (-0.8, 0),
+        (7.0, 0),
+        (7.0, -TAB_DROP),
+        (-0.8 + TAB_LEAD, -TAB_DROP),
+        (-0.8, -TAB_FLAT),
+    ]
     svg.el.append(
         '<polygon points="'
         + " ".join(f"{a:.1f},{b:.1f}" for a, b in (g.p(u * kk, w * kk) for u, w in tab))
