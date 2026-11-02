@@ -15,7 +15,7 @@
 ## Build
 
 ```
-make build         # c6_updater, c6_rcp, p4, in that order; stops at the first failure
+make build         # c6_updater, c6_rcp, c6_installer, p4, in that order; stops at the first failure
 make build-test    # the same with the test-only console commands (OTBR_TEST_BUILD=1); never ship it
 ```
 
@@ -26,7 +26,8 @@ The P4 build embeds the C6 updater, bootloader and partition table (used by the 
 | `p4/build/p4.bin` | P4 application image |
 | `p4/build/web_0.bin` | web UI image (the vendored `frontend/` directory) |
 | `c6_rcp/build/c6_rcp.bin` | C6 radio firmware, a separate release artifact |
-| `c6_updater/build/` | C6 bootloader, partition table and updater (only needed for the no-jumper first install) |
+| `c6_updater/build/` | C6 bootloader, partition table and updater (only needed for the USB-UART first install) |
+| `c6_installer/build/c6_installer.bin` | one-time C6 installer for a factory C6 (ESP-Hosted): carries the three `c6_updater` images; its version is the C6 base version |
 
 `make bundle` packs the web UI and the P4 app into `dist/otbr.bundle` for an OTA update; `make package` collects every
 release file into `dist/` (see [Development](development.md#ci-and-releases)).

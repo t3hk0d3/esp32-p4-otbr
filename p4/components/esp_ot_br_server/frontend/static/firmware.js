@@ -33,6 +33,11 @@ function checkUpdateUrl(url) {
 function faultHint(reason) {
   if (reason === 'no rcp firmware')
     return {highlight : true, text : 'The C6 has no valid radio firmware. Install c6_rcp.bin below.'};
+  if (reason === 'esp-hosted firmware')
+    return {
+      highlight : true,
+      text : 'The C6 still runs its factory ESP-Hosted firmware. Install c6_installer.bin below first (once), then c6_rcp.bin.'
+    };
   if (reason === 'rcp incompatible')
     return {
       highlight : true,

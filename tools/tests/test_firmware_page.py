@@ -43,12 +43,19 @@ class TestFirmwareLogic:
         # On an empty URL: a message.
         assert fw("L.checkUpdateUrl('  ')")
 
-    @pytest.mark.parametrize("reason", ["'no rcp firmware'", "'rcp incompatible'"])
+    @pytest.mark.parametrize(
+        "reason", ["'no rcp firmware'", "'rcp incompatible'", "'esp-hosted firmware'"]
+    )
     def test_radio_firmware_faults_highlight_the_radio_card(self, reason):
-        # On "no rcp firmware" / "rcp incompatible": highlight with a text.
+        # On "no rcp firmware" / "rcp incompatible" / "esp-hosted firmware": highlight with a text.
         hint = fw(f"L.faultHint({reason})")
         assert hint["highlight"] is True
         assert hint["text"]
+
+    def test_esp_hosted_fault_asks_for_the_installer_first(self):
+        # On "esp-hosted firmware": the text names c6_installer.bin before c6_rcp.bin.
+        text = fw("L.faultHint('esp-hosted firmware')")["text"]
+        assert text.index("c6_installer.bin") < text.index("c6_rcp.bin")
 
     @pytest.mark.parametrize("reason", ["null", "'other'"])
     def test_other_fault_reasons_do_not_highlight(self, reason):

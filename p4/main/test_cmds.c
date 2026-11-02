@@ -10,6 +10,8 @@
 #include "esp_check.h"
 #include "esp_br_http_ota.h"
 #include "esp_console.h"
+#include "esp_heap_caps.h"
+#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_spiffs.h"
@@ -162,6 +164,19 @@ static int cmd_c6_hold(int argc, char **argv)
     }
     esp_err_t err = br_core_test_set_c6_hold(atoi(argv[1]) != 0);
     printf("c6_hold: %s\n", err == ESP_OK ? "ok" : esp_err_to_name(err));
+    return err == ESP_OK ? 0 : 1;
+}
+
+// c6_jumper_ignore <0|1>: the probe and the push treat the maintenance jumper as absent (persisted; the first install
+// through ESP-Hosted can then be tested with the jumper still fitted).
+static int cmd_c6_jumper_ignore(int argc, char **argv)
+{
+    if (argc != 2) {
+        printf("usage: c6_jumper_ignore <0|1>\n");
+        return 1;
+    }
+    esp_err_t err = rcp_sync_test_set_jumper_ignore(atoi(argv[1]) != 0);
+    printf("c6_jumper_ignore: %s\n", err == ESP_OK ? "ok" : esp_err_to_name(err));
     return err == ESP_OK ? 0 : 1;
 }
 
@@ -388,6 +403,129 @@ static int cmd_c6_erase(int argc, char **argv)
     return 1;
 }
 
+#define RESTORE_TASK_STACK 8192
+#define RESTORE_MAX_FILE   (2 * 1024 * 1024)
+#define RESTORE_MAX_IMAGES 4
+
+typedef struct {
+    char base[160];
+    esp_err_t result;
+    SemaphoreHandle_t done;
+} restore_job_t;
+
+// GET url into a PSRAM buffer (*out, *len; free with heap_caps_free).
+static esp_err_t http_get(const char *url, uint8_t **out, size_t *len)
+{
+    esp_http_client_config_t config = {.url = url, .timeout_ms = OTA_HTTP_TIMEOUT_MS};
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    ESP_RETURN_ON_FALSE(client, ESP_ERR_NO_MEM, TAG, "http client");
+    esp_err_t err = esp_http_client_open(client, 0);
+    const int64_t length = err == ESP_OK ? esp_http_client_fetch_headers(client) : -1;
+    const int status = esp_http_client_get_status_code(client);
+    uint8_t *buf = NULL;
+    if (err == ESP_OK && (status != 200 || length <= 0 || length > RESTORE_MAX_FILE)) {
+        ESP_LOGE(TAG, "GET %s: status %d, length %lld", url, status, (long long)length);
+        err = ESP_ERR_INVALID_RESPONSE;
+    }
+    if (err == ESP_OK) {
+        buf = heap_caps_malloc((size_t)length + 1, MALLOC_CAP_SPIRAM);
+        err = buf ? ESP_OK : ESP_ERR_NO_MEM;
+    }
+    size_t got = 0;
+    while (err == ESP_OK && got < (size_t)length) {
+        const int r = esp_http_client_read(client, (char *)buf + got, (int)((size_t)length - got));
+        if (r <= 0) {
+            err = ESP_FAIL;
+        } else {
+            got += (size_t)r;
+        }
+    }
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    if (err != ESP_OK) {
+        heap_caps_free(buf);
+        return err;
+    }
+    buf[got] = '\0'; // flash_args is parsed as text
+    *out = buf;
+    *len = got;
+    return ESP_OK;
+}
+
+// flash_args of an IDF build ("--flash_mode ..." then "<offset> <path>" lines): fetch every image, write them all over the jumper.
+static esp_err_t stock_restore(const char *base)
+{
+    char url[256];
+    uint8_t *args = NULL;
+    size_t args_len = 0;
+    rcp_sync_test_image_t images[RESTORE_MAX_IMAGES] = {0};
+    char names[RESTORE_MAX_IMAGES][64];
+    size_t count = 0;
+
+    snprintf(url, sizeof(url), "%s/flash_args", base);
+    ESP_RETURN_ON_ERROR(http_get(url, &args, &args_len), TAG, "flash_args");
+    esp_err_t err = ESP_OK;
+    char *save = NULL;
+    for (char *line = strtok_r((char *)args, "\n", &save); line && err == ESP_OK; line = strtok_r(NULL, "\n", &save)) {
+        unsigned long offset = 0;
+        char path[64];
+        if (line[0] == '-' || sscanf(line, "%lx %63s", &offset, path) != 2) {
+            continue;
+        }
+        if (count == RESTORE_MAX_IMAGES) {
+            err = ESP_ERR_INVALID_SIZE;
+            break;
+        }
+        snprintf(url, sizeof(url), "%s/%s", base, path);
+        strlcpy(names[count], path, sizeof(names[count]));
+        images[count].name = names[count];
+        images[count].offset = (uint32_t)offset;
+        err = http_get(url, (uint8_t **)&images[count].data, &images[count].len);
+        printf("c6_stock_restore: %s at 0x%lx, %u bytes: %s\n", path, offset, (unsigned)images[count].len, esp_err_to_name(err));
+        count += err == ESP_OK;
+    }
+    if (err == ESP_OK) {
+        err = count ? rcp_sync_test_c6_write(images, count) : ESP_ERR_NOT_FOUND;
+    }
+    for (size_t i = 0; i < count; i++) {
+        heap_caps_free((void *)images[i].data);
+    }
+    heap_caps_free(args);
+    return err;
+}
+
+static void restore_task(void *arg)
+{
+    restore_job_t *job = arg;
+    job->result = stock_restore(job->base);
+    xSemaphoreGive(job->done);
+    vTaskDelete(NULL);
+}
+
+// c6_stock_restore <http base url>: write the images of an IDF build exactly as its flash_args says (the factory ESP-Hosted
+// stand-in), over the jumper, then reset the C6. Does not stop OpenThread: reboot the P4 afterwards.
+static int cmd_c6_stock_restore(int argc, char **argv)
+{
+    restore_job_t job = {.done = xSemaphoreCreateBinary()};
+    if (argc != 2 || strlen(argv[1]) >= sizeof(job.base) || !job.done) {
+        printf("usage: c6_stock_restore <http base url of a build directory>\n");
+        if (job.done) {
+            vSemaphoreDelete(job.done);
+        }
+        return 1;
+    }
+    strcpy(job.base, argv[1]);
+    if (xTaskCreate(restore_task, "c6_restore", RESTORE_TASK_STACK, &job, 5, NULL) != pdPASS) {
+        vSemaphoreDelete(job.done);
+        printf("c6_stock_restore: ESP_ERR_NO_MEM\n");
+        return 1;
+    }
+    xSemaphoreTake(job.done, portMAX_DELAY);
+    vSemaphoreDelete(job.done);
+    printf("c6_stock_restore: %s\n", job.result == ESP_OK ? "ok" : esp_err_to_name(job.result));
+    return job.result == ESP_OK ? 0 : 1;
+}
+
 #define BUSY_TASK_STACK 2048
 #define BUSY_MAX_SECONDS 3 // the idle task of that core is starved meanwhile; its watchdog fires after 5 s
 #define BUSY_PRIORITY 1    // application minimum: shares the core with the diag sampler instead of starving it
@@ -447,6 +585,8 @@ esp_err_t test_cmds_register(void)
     ESP_RETURN_ON_ERROR(register_command("ota_state", "running slot and rollback state", cmd_ota_state), TAG, "ota_state");
     ESP_RETURN_ON_ERROR(register_command("crash", "abort (panic)", cmd_crash), TAG, "crash");
     ESP_RETURN_ON_ERROR(register_command("c6_hold", "hold the C6 in reset from the next boot (0 clears)", cmd_c6_hold), TAG, "c6_hold");
+    ESP_RETURN_ON_ERROR(register_command("c6_jumper_ignore", "treat the maintenance jumper as absent (0 clears)", cmd_c6_jumper_ignore),
+                        TAG, "c6_jumper_ignore");
     ESP_RETURN_ON_ERROR(register_command("busy", "spin a task on a core for 1..3 s", cmd_busy), TAG, "busy");
     ESP_RETURN_ON_ERROR(register_command("br_status", "br_core mode, dataset and DHCPv6-PD state", cmd_br_status), TAG, "br_status");
     ESP_RETURN_ON_ERROR(register_command("rcp_probe_override", "force the next boot's probe: real, empty or fail", cmd_rcp_probe_override), TAG, "rcp_probe_override");
@@ -458,6 +598,8 @@ esp_err_t test_cmds_register(void)
     ESP_RETURN_ON_ERROR(register_command("ota_probe", "begin and abort an update: shows if one is running", cmd_ota_probe), TAG, "ota_probe");
     ESP_RETURN_ON_ERROR(register_command("ota_commit_delay", "ota_commit_delay <ms>: wait before the boot partition is set", cmd_ota_commit_delay), TAG, "ota_commit_delay");
     ESP_RETURN_ON_ERROR(register_command("ota_boot", "boot and running slot", cmd_ota_boot), TAG, "ota_boot");
+    ESP_RETURN_ON_ERROR(register_command("c6_stock_restore", "c6_stock_restore <url>: write a build's flash_args images to the C6 over the jumper",
+                                         cmd_c6_stock_restore), TAG, "c6_stock_restore");
     ESP_RETURN_ON_ERROR(register_command("c6_erase", "c6_erase <bootloader|ptable|otadata|test|ota0|ota1>: erase a C6 flash region over the jumper", cmd_c6_erase), TAG, "c6_erase");
     return br_core_test_ot_command_register();
 }

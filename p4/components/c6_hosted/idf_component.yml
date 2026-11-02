@@ -1,0 +1,6 @@
+dependencies:
+  # SDIO host side of the ESP slave link (SLCHOST registers, CMD53 window): exactly what ESP-Hosted's own host driver does.
+  espressif/esp_serial_slave_link:
+    version: "==1.1.2"
+    rules:
+      - if: "target != linux"

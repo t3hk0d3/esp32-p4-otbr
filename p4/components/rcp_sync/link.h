@@ -28,6 +28,15 @@ typedef struct {
     esp_err_t (*rom_recover)(void);
     /** Version text of the embedded C6 base image, NUL-terminated; NULL or "" when none is embedded. */
     const char *(*base_version)(void);
+    /**
+     * The factory ESP-Hosted firmware answers on SDIO (c6_hosted_detect): resets the C6 into its normal boot, writes
+     * nothing. Called with the SPI link released. NULL: never checked (the three ops below go together).
+     */
+    esp_err_t (*hosted_detect)(bool *present);
+    /** Send the source unchanged through the ESP-Hosted OTA (c6_hosted_ota). The C6 restarts into it by itself. */
+    esp_err_t (*hosted_ota)(const rcp_fw_source_t *source, char *detail, size_t cap);
+    /** Bring the SPI link up with GPIO6 low WITHOUT resetting the C6: it may be busy installing; its next boot enters the updater. */
+    esp_err_t (*attach_updater)(void);
 } rcp_sync_link_t;
 
 /** rcp_sync_probe on an explicit link; stores the result for rcp_sync_get_last_probe(). */
@@ -35,7 +44,7 @@ esp_err_t rcp_sync_probe_with(const rcp_sync_link_t *link, rcp_sync_probe_result
 
 /** rcp_sync_push_firmware on an explicit link. */
 esp_err_t rcp_sync_push_firmware_with(const rcp_sync_link_t *link, const rcp_fw_source_t *source, char *err_detail,
-                                      size_t err_cap);
+                                      size_t err_cap, bool *base_only);
 
 /** rcp_sync_rom_recover on an explicit link: releases the link, then runs link->rom_recover. ESP_ERR_NOT_SUPPORTED without one. */
 esp_err_t rcp_sync_rom_recover_with(const rcp_sync_link_t *link);

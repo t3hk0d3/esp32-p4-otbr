@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "board.h"
 #include "base_image.h"
+#include "c6_hosted.h"
 #include "jumper.h"
 #include "link.h"
 #include "rcp_sync_proto.h"
@@ -89,18 +90,9 @@ static void link_release(void)
     gpio_reset_pin(P4_PIN_RCP_INT);
 }
 
-static esp_err_t link_enter_updater(void)
+/* Bring up the SPI bus to the updater; GPIO6 is low already. */
+static esp_err_t bus_up(void)
 {
-    link_release();
-    ESP_RETURN_ON_ERROR(ctl_init(), TAG, "ctl init");
-    // The jumper receiver listens during the reset below: the C6 ROM banner it sees shows that the wire is fitted.
-    if (jumper_start() != ESP_OK) {
-        ESP_LOGW(TAG, "jumper receiver not available, detection skipped");
-    }
-    gpio_set_level(P4_PIN_C6_UPDATE, 0);
-    pulse_reset();
-    vTaskDelay(pdMS_TO_TICKS(UPDATER_BOOT_MS));
-
     const gpio_config_t in = {
         .pin_bit_mask = 1ULL << P4_PIN_RCP_INT,
                              .mode = GPIO_MODE_INPUT,
@@ -134,6 +126,78 @@ static esp_err_t link_enter_updater(void)
         link_release();
     }
     return err;
+}
+
+static esp_err_t link_enter_updater(void)
+{
+    link_release();
+    ESP_RETURN_ON_ERROR(ctl_init(), TAG, "ctl init");
+    // The jumper receiver listens during the reset below: the C6 ROM banner it sees shows that the wire is fitted.
+    if (jumper_start() != ESP_OK) {
+        ESP_LOGW(TAG, "jumper receiver not available, detection skipped");
+    }
+    gpio_set_level(P4_PIN_C6_UPDATE, 0);
+    pulse_reset();
+    vTaskDelay(pdMS_TO_TICKS(UPDATER_BOOT_MS));
+    return bus_up();
+}
+
+static esp_err_t link_attach_updater(void)
+{
+    link_release();
+    ESP_RETURN_ON_ERROR(ctl_init(), TAG, "ctl init");
+    gpio_set_level(P4_PIN_C6_UPDATE, 0); // no reset: the C6 may be writing its bootloader right now
+    return bus_up();
+}
+
+#ifdef OTBR_TEST_BUILD
+#include "nvs.h"
+
+#define TEST_NVS_NAMESPACE   "otbr_dev"
+#define TEST_KEY_JUMPER_IGN  "test_jmp_ign"
+
+static bool jumper_ignored(void)
+{
+    nvs_handle_t handle;
+    uint8_t value = 0;
+
+    if (nvs_open(TEST_NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        return false;
+    }
+    nvs_get_u8(handle, TEST_KEY_JUMPER_IGN, &value);
+    nvs_close(handle);
+    return value != 0;
+}
+
+esp_err_t rcp_sync_test_set_jumper_ignore(bool ignore)
+{
+    nvs_handle_t handle;
+
+    ESP_RETURN_ON_ERROR(nvs_open(TEST_NVS_NAMESPACE, NVS_READWRITE, &handle), TAG, "nvs_open");
+    esp_err_t err = nvs_set_u8(handle, TEST_KEY_JUMPER_IGN, ignore ? 1 : 0);
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return err;
+}
+#endif
+
+/* What the probe and the push see of the jumper. Test builds can hide it (c6_jumper_ignore) to run the wireless paths. */
+static bool link_jumper_present(void)
+{
+#ifdef OTBR_TEST_BUILD
+    if (jumper_ignored()) {
+        return false;
+    }
+#endif
+    return rcp_sync_jumper_present();
+}
+
+static esp_err_t link_hosted_ota(const rcp_fw_source_t *source, char *detail, size_t cap)
+{
+    const c6_hosted_source_t src = {.total_size = source->total_size, .read = source->read, .ctx = source->ctx};
+    return c6_hosted_ota(&src, detail, cap);
 }
 
 /* Wait until INT reads `level`. Spins briefly (reply phases are short), then yields. */
@@ -197,7 +261,10 @@ const rcp_sync_link_t rcp_sync_link_spi = {
     .enter_updater = link_enter_updater,
     .transact = link_transact,
     .release = link_release,
-    .jumper_present = rcp_sync_jumper_present,
+    .jumper_present = link_jumper_present,
     .rom_recover = rcp_sync_rom_recover,
     .base_version = rcp_sync_base_image_version,
+    .hosted_detect = c6_hosted_detect,
+    .hosted_ota = link_hosted_ota,
+    .attach_updater = link_attach_updater,
 };
