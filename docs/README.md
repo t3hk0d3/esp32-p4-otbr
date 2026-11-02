@@ -9,6 +9,7 @@ Setting up:
 Running it:
 
 - [Updates](updates.md): P4 firmware and web UI over the network, C6 radio firmware, compatibility.
+- [Home Assistant](home-assistant.md): add the board, move it onto the preferred network, phones and Matter.
 - [HTTP API and web UI](api.md): the `/device/*` API, the Thread REST API, the web pages, creating a network.
 - [Network modes, VLANs and prefix delegation](networking.md): single and split mode, confirm-or-revert, DHCPv6-PD.
 - [Sniffer](sniffer.md): 802.15.4 captures into Wireshark.

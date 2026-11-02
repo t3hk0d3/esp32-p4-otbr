@@ -74,7 +74,7 @@ You need [the board](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.htm), a 2.
 2. Flash the P4 over USB-C: unpack `p4-flash.zip` and run `esptool --chip esp32p4 write-flash @flash_args` in it, or
    run `make flash` from a checkout.
 3. Upload the radio firmware on the Firmware page at `http://<board>/firmware.html`.
-4. Add the board to Home Assistant, or form a network in its web UI.
+4. Add the board to Home Assistant ([how](docs/home-assistant.md)), or form a network in its web UI.
 
 A new board's C6 still has its factory firmware. With the maintenance jumper fitted, the P4 replaces it by itself;
 without the jumper, you write it once over a USB-UART adapter. [First install](docs/first-install.md) walks through both
@@ -82,7 +82,7 @@ paths.
 
 ## Documentation
 
-Everything is in [`docs/`](docs/README.md): [building](docs/building.md), [updates](docs/updates.md),
+Everything is in [`docs/`](docs/README.md): [Home Assistant](docs/home-assistant.md), [building](docs/building.md), [updates](docs/updates.md),
 [API and web UI](docs/api.md), [networking and VLANs](docs/networking.md), [sniffer](docs/sniffer.md),
 [maintenance jumper](docs/maintenance-jumper.md), [diagnostics](docs/diagnostics.md), [Prometheus metrics](docs/metrics.md),
 [troubleshooting and limitations](docs/troubleshooting.md) and [development](docs/development.md). Run `make help`

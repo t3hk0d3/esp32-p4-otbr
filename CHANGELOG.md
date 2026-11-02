@@ -7,6 +7,11 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+### Added
+
+- `docs/home-assistant.md`: adding the board to Home Assistant, moving it onto the preferred Thread network, phones and
+  Matter, several boards, troubleshooting.
+
 ## [0.2.1] - 2026-11-02
 
 ### Fixed

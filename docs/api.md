@@ -33,8 +33,7 @@ is accepted while Thread runs (ot-br-posix answers 409): the board stops Thread,
 it (the old network's pending dataset is deleted); the dataset it already has is accepted without a restart. A partial dataset (e.g. only `channel`) still answers 409
 while Thread runs: use `/node/dataset/pending` to change a running network. The mode, fault reason
 and version information are in `/device/status`, which works in every mode. Home Assistant's OpenThread Border Router integration
-connects to `http://<board>` (verified with `python-otbr-api` by `tools/otbr_compat.py`; a run against a real Home Assistant is
-still open, see `docs/phase0/RESULTS.md`).
+connects to `http://<board>` (every call it makes is checked by `tools/otbr_compat.py`); see [Home Assistant](home-assistant.md).
 
 ## Web UI
 

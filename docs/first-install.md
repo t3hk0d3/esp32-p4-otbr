@@ -141,7 +141,8 @@ The board needs a dataset before it does anything. Either:
 
 - Web UI: `http://<board>/network.html`, "Form" a new network, "Join" a scanned one, or "Join with Dataset" with the
   active dataset TLVs (hex) of an existing network; then check the dashboard.
-- Home Assistant: add the OpenThread Border Router integration with the URL `http://<board>`; it creates or imports the dataset.
+- Home Assistant: add the OpenThread Border Router integration with the URL `http://<board>`; it creates or imports the
+  dataset. See [Home Assistant](home-assistant.md).
 - `python-otbr-api` (`pip install python-otbr-api aiohttp`):
 
   ```
