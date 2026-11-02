@@ -23,6 +23,7 @@ DEVICE_MENU = [
 # page -> (script, endpoints its script names)
 PAGES = {
     "diagnostics": ("diagnostics", ["/device/diag"]),
+    "ethernet": ("ethernet", ["/device/network"]),
     "firmware": (
         "firmware",
         ["/device/status", "/device/ota", "/device/ota/url", "/device/radio/firmware", "/device/radio/recover", "/device/radio/log"],
