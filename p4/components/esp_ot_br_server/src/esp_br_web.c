@@ -711,8 +711,9 @@ static int guard_lock(void)
     return status;
 }
 
-/* For handlers that wait with the lock released (scan, join, ping, mesh diagnostics): check under the lock, then let
- * go. The operation takes the lock again; esp_br_web_api.c re-checks wherever it changes state. */
+/* For handlers whose upstream code takes the lock itself (scan, join, ping, mesh diagnostics, GUARD_CHECKED_CALL):
+ * check under the lock, then let go. The operation takes the lock again; join re-checks wherever it changes state, the
+ * others accept that a capture started in between is interrupted. */
 static int guard_check_thread_op(void)
 {
     int status = guard_lock();
@@ -755,16 +756,18 @@ static esp_err_t guard_refuse_resource(httpd_req_t *req, int status)
         }                                      \
     } while (0)
 
-/* Run `call` (the OpenThread access, a declaration or statement) under the OpenThread lock. On refusal `cleanup`
- * runs, the refusal is sent and the handler returns; `call` does not run. */
-#define GUARD_LOCKED_CALL(req, refuse, cleanup, call) \
-    int guard_ = guard_lock();                        \
-    if (guard_) {                                     \
-        cleanup;                                      \
-        return refuse(req, guard_);                   \
-    }                                                 \
-    call;                                             \
-    esp_openthread_lock_release()
+/* Check under the OpenThread lock, then run `call` (the OpenThread access, a declaration or statement) without it: the
+ * upstream handle_* functions take the lock themselves. Holding it here as well would hold it twice, and ESP-IDF's
+ * otPlatUdpSocket (Thread up in Form network) gives the task switching lock back only once while it waits for the lwIP
+ * thread, which then deadlocks with this one. On refusal `cleanup` runs, the refusal is sent and the handler returns;
+ * `call` does not run. */
+#define GUARD_CHECKED_CALL(req, refuse, cleanup, call) \
+    int guard_ = guard_check_thread_op();              \
+    if (guard_) {                                      \
+        cleanup;                                       \
+        return refuse(req, guard_);                    \
+    }                                                  \
+    call
 
 /*-----------------------------------------------------
 Note: Openthread resource API implement
@@ -1003,7 +1006,7 @@ static esp_err_t esp_otbr_network_form_post_handler(httpd_req_t *req)
     ESP_RETURN_ON_FALSE(request, ESP_FAIL, WEB_TAG, "Failed to parse the FORM package");
 
     cJSON *form_log = cJSON_CreateString("Known");
-    GUARD_LOCKED_CALL(req, guard_refuse_gui, (cJSON_Delete(request), cJSON_Delete(form_log)),
+    GUARD_CHECKED_CALL(req, guard_refuse_gui, (cJSON_Delete(request), cJSON_Delete(form_log)),
                       otError err = handle_openthread_form_network_request(request, form_log));
     cJSON *error = cJSON_CreateNumber((double)err);
     cJSON *result = err ? cJSON_CreateString("failed") : cJSON_CreateString("successful");
@@ -1038,7 +1041,7 @@ static esp_err_t esp_otbr_add_network_prefix_post_handler(httpd_req_t *req)
     esp_err_t ret = ESP_OK;
     cJSON *request = httpd_request_convert2_json(req, cJSON_Object);
     ESP_RETURN_ON_FALSE(request, ESP_FAIL, WEB_TAG, "Failed to parse the add prefix package");
-    GUARD_LOCKED_CALL(req, guard_refuse_gui, cJSON_Delete(request),
+    GUARD_CHECKED_CALL(req, guard_refuse_gui, cJSON_Delete(request),
                       otError err = handle_openthread_add_network_prefix_request(request));
     cJSON *error = cJSON_CreateNumber((double)err);
     cJSON *result = err ? cJSON_CreateString("failed") : cJSON_CreateString("successful");
@@ -1075,7 +1078,7 @@ static esp_err_t esp_otbr_delete_network_prefix_post_handler(httpd_req_t *req)
     cJSON *request = httpd_request_convert2_json(req, cJSON_Object);
     ESP_RETURN_ON_FALSE(request, ESP_FAIL, WEB_TAG, "Failed to parse the delete prefix package");
 
-    GUARD_LOCKED_CALL(req, guard_refuse_gui, cJSON_Delete(request),
+    GUARD_CHECKED_CALL(req, guard_refuse_gui, cJSON_Delete(request),
                       otError err = handle_openthread_delete_network_prefix_request(request));
     cJSON *error = cJSON_CreateNumber((double)err);
     cJSON *result = err ? cJSON_CreateString("failed") : cJSON_CreateString("successful");
@@ -1101,7 +1104,7 @@ static esp_err_t esp_otbr_network_commission_post_handler(httpd_req_t *req)
     cJSON *request = httpd_request_convert2_json(req, cJSON_Object);
     ESP_RETURN_ON_FALSE(request, ESP_FAIL, WEB_TAG, "Failed to parse the add prefix package");
 
-    GUARD_LOCKED_CALL(req, guard_refuse_gui, cJSON_Delete(request),
+    GUARD_CHECKED_CALL(req, guard_refuse_gui, cJSON_Delete(request),
                       otError err = handle_openthread_network_commission_request(request));
     cJSON *error = err ? cJSON_CreateNumber((double)err) : cJSON_CreateNumber((double)err);
     cJSON *result = err ? cJSON_CreateString("failed") : cJSON_CreateString("successful");
@@ -1178,7 +1181,7 @@ static esp_err_t esp_otbr_add_ipaddr_post_handler(httpd_req_t *req)
     cJSON *request = httpd_request_convert2_json(req, cJSON_Object);
     ESP_RETURN_ON_FALSE(request, ESP_FAIL, WEB_TAG, "Failed to parse ipaddr add request");
 
-    GUARD_LOCKED_CALL(req, guard_refuse_gui, cJSON_Delete(request),
+    GUARD_CHECKED_CALL(req, guard_refuse_gui, cJSON_Delete(request),
                       cJSON *result = handle_openthread_add_ipaddr_request(request));
     cJSON *status = cJSON_GetObjectItem(result, "status");
     bool ok = status && status->valuestring && strcmp(status->valuestring, "ok") == 0;
@@ -1200,7 +1203,7 @@ static esp_err_t esp_otbr_delete_ipaddr_post_handler(httpd_req_t *req)
     cJSON *request = httpd_request_convert2_json(req, cJSON_Object);
     ESP_RETURN_ON_FALSE(request, ESP_FAIL, WEB_TAG, "Failed to parse ipaddr delete request");
 
-    GUARD_LOCKED_CALL(req, guard_refuse_gui, cJSON_Delete(request),
+    GUARD_CHECKED_CALL(req, guard_refuse_gui, cJSON_Delete(request),
                       cJSON *result = handle_openthread_delete_ipaddr_request(request));
     cJSON *status = cJSON_GetObjectItem(result, "status");
     bool ok = status && status->valuestring && strcmp(status->valuestring, "ok") == 0;

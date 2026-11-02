@@ -13,14 +13,22 @@ release's `versions.txt`.
   `esp-hosted firmware`, and uploading the new release file `c6_installer.bin` sends it through ESP-Hosted's own update
   over the P4-C6 SDIO lines; it installs the C6 bootloader, partition table and updater, after which `c6_rcp.bin` is
   uploaded as usual. Nothing is written to the C6 without that upload. Tested on the board with an ESP-Hosted 0.0.27
-  stand-in, not yet on an untouched factory C6. See
-  `docs/first-install.md`, Path 1.
+  stand-in, not yet on an untouched factory C6. See `docs/first-install.md`, Path 1.
 
 ### Changed
 
 - `POST /device/radio/firmware` refuses `c6_installer.bin` on a C6 that already runs the updater (400 `invalid_image`),
   before anything is erased.
 - `docs/first-install.md`: the jumper path is now Path 2 and the USB-UART path Path 3.
+
+## [0.2.1] - 2026-11-02
+
+### Fixed
+
+- Web UI "Form Network" froze the board until it was power-cycled: the web server held the OpenThread lock twice,
+  and bringing Thread up deadlocked with the lwIP thread (no Ethernet, no web UI, no Thread, no watchdog reset). Adding
+  or removing an on-mesh prefix or a Thread address, and starting the commissioner, held the lock the same way and are
+  fixed too.
 
 ## [0.2.0] - 2026-11-02
 
@@ -90,6 +98,7 @@ on-board ESP32-C6 as the radio co-processor over SPI.
 
 See `docs/troubleshooting.md` for the full list.
 
-[Unreleased]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/t3hk0d3/esp32-p4-otbr/releases/tag/v0.1.0
