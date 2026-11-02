@@ -23,10 +23,10 @@ class TestDefaultBase:
         assert len(base.solids()) == 1
         assert base.is_valid
 
-    def test_has_the_outer_size_60_by_73_by_27_6(self, base):
+    def test_has_the_outer_size_60_by_75_by_27_6(self, base):
         bb = base.bounding_box()
         assert bb.size.X == pytest.approx(60.0, abs=0.1)
-        assert bb.size.Y == pytest.approx(73.0, abs=0.1)
+        assert bb.size.Y == pytest.approx(75.0, abs=0.1)
         assert bb.size.Z == pytest.approx(27.6, abs=0.1)
         assert bb.min.Z == pytest.approx(board_z(0.0), abs=0.01)
 

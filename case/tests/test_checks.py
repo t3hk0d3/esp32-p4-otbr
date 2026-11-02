@@ -62,23 +62,23 @@ class TestOpeningPathsBlocked:
 class TestFittingMotionDefault:
     """checks.fitting_motion: On the default base"""
 
-    def test_passes_and_reports_the_start_angle(self, results):
+    def test_passes_and_reports_the_drop_offset(self, results):
         r = results["board fits in"]
         assert r.ok, r.detail
-        assert "start tilt" in r.detail
+        assert "drop in" in r.detail
 
 
 class TestFittingMotionNoTopMargin:
     """checks.fitting_motion: With the USB opening's top cut 0.3 mm into the connector"""
 
-    def test_fails_and_reports_the_first_failing_angle(self, base):
+    def test_fails_and_reports_where(self, base):
         usb = FACTS["usb"]
         lintel = box(
             usb.x0 - 1, usb.x1 + 1, P.OUTER[2], P.INNER[2], usb.z1 - 0.3, usb.z1 + 1.2
         )
         r = checks.fitting_motion(base + lintel)
         assert not r.ok
-        assert "°" in r.detail
+        assert "collides" in r.detail or "hits" in r.detail
 
 
 class TestLidClearance:
