@@ -41,6 +41,12 @@ square pad, is TXD). The header pins are in the row along the board edge.
 Board photo: Waveshare ([ESP32-P4-WIFI6-POE-ETH documentation](https://docs.waveshare.com/ESP32-P4-WIFI6-POE-ETH)),
 dimension lines removed and wiring drawn on.
 
+The easiest way: solder a 4-pin 2.54 mm pin header into H7 and use female-to-female Dupont jumper wires. TXD and RXD sit
+next to each other on both ends (H7 pads 1 and 2, header pins 18 and 16), so a two-pin Dupont housing fits there; IO9 to
+pin 12 is a single wire, and H7 pad 3 and header pin 14 stay free:
+
+![As built: a pin header soldered into H7, Dupont wires to header pins 12, 16 and 18](images/jumper-as-built.jpg)
+
 Leave header pins 15 (GPIO6) and 32 (GPIO54) alone: they are already wired to the C6 on the board (update select and reset).
 The pins are fixed in `p4/main/board.h`. The firmware detects the jumper by itself at boot.
 
