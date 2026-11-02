@@ -99,3 +99,13 @@ class TestDefaultLid:
                 x = TAB_X[side] + side * (P.BUMP_H - 0.1)
                 assert solid(lid, x, yc, P.BUMP_Z)
                 assert not solid(lid, x, yc, P.BUMP_Z + 1.0)
+
+
+class TestLidOnBase:
+    """lid.build_lid: Fitted on the default base"""
+
+    def test_does_not_overlap_the_base(self, base, lid):
+        from p4_case.checks import lid_seats
+
+        r = lid_seats(base, lid)
+        assert r.ok, r.detail

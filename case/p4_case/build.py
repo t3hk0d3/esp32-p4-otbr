@@ -17,7 +17,7 @@ from build123d import Part, Pos, export_step
 from p4_case import params as P
 from p4_case.base import build_base
 from p4_case.board import MAKE_HINT, load_board
-from p4_case.checks import _board_bodies, print_pose, run_all, to_mesh
+from p4_case.checks import board_bodies, print_pose, run_all, to_mesh
 from p4_case.lid import build_lid
 from p4_case.render import render
 
@@ -37,7 +37,7 @@ def write_outputs(base: Part, lid: Part, out: Path) -> list[Path]:
         written += [stl, step]
 
     base_m, lid_m = to_mesh(base), to_mesh(lid)
-    board_m = trimesh.util.concatenate([to_mesh(b) for b in _board_bodies()])
+    board_m = trimesh.util.concatenate([to_mesh(b) for b in board_bodies()])
     lifted = lid_m.copy()
     lifted.apply_translation((0, 0, LID_LIFT))
     scenes = {

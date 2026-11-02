@@ -38,7 +38,8 @@ make case-test    # the model's tests (about 1.5 min)
 - every opening has a clear path to its part;
 - the board can be fitted (start tilt 5°);
 - the lid clears the SMA, a ribbon plug and its ribbon;
-- the screw heads have room behind the keyholes;
+- the screw heads have room behind the keyholes, and the board-screw nuts have room on top;
+- the lid seats on the base without overlap, and the LED shows through it;
 - no opening is wider than 3.5 mm;
 - both parts are closed solids;
 - both parts print without supports (bridges up to 18 mm).
@@ -70,7 +71,7 @@ make case-test    # the model's tests (about 1.5 min)
 2. **SMA:** clip the pigtail onto the board's antenna socket. Push the SMA bulkhead out through the D-hole in the right
    wall from inside, and tighten its nut on the outside.
 3. **Header wiring (optional):** plug jumper wires or a 2×20 ribbon plug onto the 40-pin header and lead the wires out
-   through the slot in the header-end wall. The slot is 3.5 mm tall.
+   through the slot in the header-end wall. The way in under the lid is 3.5 mm tall.
 4. **Lid:** set it on so the four corner tabs drop into the corners, and press until it clicks.
 5. **Opening:** lever the lid up through the grille with a small flat screwdriver, close to a corner.
 

@@ -165,9 +165,10 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
   - The connector faces end up 0.5–0.8 mm behind the outer face.
   - The tops of these openings print as bridges up to about 17 mm. That's accepted (see section 8).
 - **Header-end wall (Y = 68 edge):**
-  - A cable slot 54 mm wide (X 0.5–54.5), cut from case Z 23.1 up through the top of the wall so it needs no bridge.
-    The lid's flange closes it from above, leaving 3.5 mm of clear height under the flange (case Z 23.1–26.6), the
-    narrowest point of the path into the case.
+  - A cable slot 54 mm wide (X 0.5–54.5), cut from case Z 22.1 up through the top of the wall so it needs no bridge.
+    The lid closes it from above. The narrowest point of the path into the case is at the wall's inner face, between
+    the slot floor and the lid body's underside: 3.5 mm (case Z 22.1–25.6). Within the wall's thickness it is taller,
+    up to the flange.
   - 3.5 mm keeps to the "nothing wider than 3.5 mm falls in" rule when this end faces up on the wall. Ribbon cable
     (about 1.3 mm) and Dupont housings (2.5 mm) pass.
   - A real 2×20 IDC ribbon plug (about 55.9 × 9 × 9 mm, seated on the header body) must fit with 0.5 mm clearance. The
@@ -183,7 +184,7 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
   - The builder checks clearance inside: a 5 mm radius around the axis, out to 12 mm from the wall, must miss the board,
     the capacitors and the lid tabs.
 - **Tab dents:** each side wall has two dents in its inner face, one near each end, on the axis of the corner tabs' side
-  legs (5.3). Their upper and lower faces are at 45°, so they print without supports. At the header end the dent sits
+  legs (5.3). Their upper and lower faces match the bump's 30° ramps (60° from horizontal), so they print without supports. At the header end the dent sits
   above the ribbon-plug recess, where the wall is full thickness.
 
 ### 5.3 Lid
@@ -216,10 +217,10 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
     - **Face toward the side wall:** flat and parallel to the wall (0.2 mm clearance) for the first 2 mm below the lid,
       where the snap bump sits. Below that it tapers 0.5 mm inward to the tip.
     - **End face toward the end wall:** the same flat-then-lead-in profile, so each tip narrows in both directions.
-    - The tip is about 1.4 mm thick, and its outer corner is rounded.
+    - The tip is about 1.4 mm thick. Its vertical outer corner follows the wall's rounded inner corner, 0.2 mm clear.
   - **Snap bump:** each tab carries a bump on its side-wall face, about 0.4 mm high with 30° ramps on both faces, centred
     1 mm below the lid. It works as a detent rather than a hook: a firm lever pops it out without bending the tab much. The
-    dents in the side walls sit level with the bumps, about 1 mm below the rebate floor. At the header end that's above the
+    dents in the side walls sit level with the bumps, 1 mm below the lid's underside. At the header end that's above the
     ribbon-plug recess, where the wall is full thickness.
   - Bump height and angle, dent fit, tab length and drop, wedge thicknesses and the root fillet go into named constants, so
     they can be tuned after a test print.
@@ -281,6 +282,7 @@ These are automated checks, run against the vendor STEP:
 - Both keyhole head volumes (the L sweep plus the head radius, 2.5 mm tall) are free of the board and its underside parts.
 - From straight above the lid, the LED's top face is visible through at least one grille cell.
 - No lid opening, and no gap in the header-end slot, is wider than 3.5 mm.
+- With the lid fitted, the lid and the base do not overlap anywhere.
 - Both parts are watertight solids.
 - Printability: with the stated print orientations, there are no unsupported overhangs past 45°, except bridges of
   18 mm or less (the cable-wall openings).

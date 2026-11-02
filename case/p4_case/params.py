@@ -62,8 +62,9 @@ SCOOP_DEPTH = 1.5  # into the cable wall's outer face, at the slot's bottom edge
 # --- header-end slot and ribbon-plug room (5.2) ---
 HEADER_SLOT_X = (0.5, 54.5)
 HEADER_SLOT_CLEAR = 3.5  # clear height under the lid flange
-# case Z 23.1; the slot is cut open to the wall top (no bridge)
-HEADER_SLOT_BOTTOM = REBATE_FLOOR - HEADER_SLOT_CLEAR
+# case Z 22.1: 3.5 mm under the lid body, which overhangs the slot floor by TAB/LID clearance only; the slot is cut
+# open to the wall top (no bridge), so inside the wall it is 4.5 mm tall up to the lid flange
+HEADER_SLOT_BOTTOM = LID_UNDERSIDE - HEADER_SLOT_CLEAR
 # length (X), depth (Y), height; seated on the header body
 RIBBON_PLUG = (55.9, 9.0, 9.0)
 HEADER_BODY_TOP = 2.5  # board Z where a plug seats (top of the header's plastic body)
