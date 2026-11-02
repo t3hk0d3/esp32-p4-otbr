@@ -28,9 +28,11 @@ Dropped:
 - The P4 embedding of the migrator (`p4/CMakeLists.txt`, `p4/main/CMakeLists.txt`, `c6_base_image.h`, `app_main.c`,
   `rcp_sync_base_image_t.migrator_*`, `base_image.c` check). The installer is a release file the user uploads.
 - PSRAM buffering of the source, segment lists, bundle header building, RCP version check after install.
-- Test-build commands `c6_stock_restore` / `c6_hosted_ota`: stock restore stays a host-side esptool step over the jumper
-  (the stand-in build script stays a session file, never in the repo). `c6_jumper_ignore` stays (needed to test without
-  removing wires).
+- Test-build command `c6_hosted_ota` (dropped). `c6_stock_restore` was first dropped here in favour of a host-side esptool
+  step, then brought back during the hardware pass: no host serial line reaches the board's C6, so the stand-in is
+  written through the P4 over the jumper. It stays (`p4/main/test_cmds.c`, used by `p4/pytest/test_hosted_install.py`).
+  The stand-in build itself stays out of the repository. `c6_jumper_ignore` stays too (needed to test without removing
+  wires).
 
 ## Approach
 

@@ -32,7 +32,8 @@ esp_err_t c6_hosted_detect(bool *present);
  * Send the source unchanged as one image through the ESP-Hosted OTA. The C6 erases its other app slot (seconds), stores the
  * image, checks it, selects it to boot and restarts by itself about 5 s after the reply to OTAEnd. On failure err_detail
  * (may be NULL) names the step, e.g. "no ESP-Hosted answer" or "OTAWrite refused (-1)". The bus is released on every path.
- * Blocks for up to about a minute.
+ * Each request has its own deadline (OTABegin and OTAEnd 30 s, each 1400-byte OTAWrite 5 s), none for the whole image: a
+ * healthy 400 KB installer takes about 10 s, but a C6 that answers every write just in time could stretch it far beyond.
  */
 esp_err_t c6_hosted_ota(const c6_hosted_source_t *source, char *err_detail, size_t err_cap);
 

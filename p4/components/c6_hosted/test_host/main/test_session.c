@@ -60,6 +60,14 @@ static void queue_packet(uint8_t if_type, uint8_t pkt_type, const uint8_t *paylo
     const size_t n = hosted_frame_encode(if_type, 0, payload, len, buf, HOSTED_RX_BUF);
     TEST_ASSERT_TRUE(n > 0);
     buf[11] = pkt_type;
+    /* Byte 11 is covered by the checksum: recompute it as hosted_frame_encode does (u16 byte sum, field zeroed). */
+    buf[6] = buf[7] = 0;
+    uint16_t sum = 0;
+    for (size_t i = 0; i < n; i++) {
+        sum += buf[i];
+    }
+    buf[6] = (uint8_t)sum;
+    buf[7] = (uint8_t)(sum >> 8);
     sl.rxq_len[sl.rxq_tail++] = sl.short_pad ? n + 4 : (n < 512 ? 512 : n);
 }
 

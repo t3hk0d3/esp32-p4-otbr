@@ -279,6 +279,16 @@ TEST_CASE("On regions already holding the right content (repeat after a power cu
     TEST_ASSERT_EQUAL(-1, first_erase_of(C6_FLASH_PTABLE_OFFSET));
 }
 
+TEST_CASE("On an updater already in place that fails its image verification: it is rewritten", "[installer]")
+{
+    reset_flash();
+    memcpy(s_flash + C6_FLASH_TEST_OFFSET, s_updater, sizeof(s_updater));
+    s_verify_image_result = ESP_ERR_INVALID_STATE;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, installer_install(&s_ops, &s_images));
+    TEST_ASSERT_TRUE(first_erase_of(C6_FLASH_TEST_OFFSET) >= 0);
+    TEST_ASSERT_EQUAL(-1, first_erase_of(C6_FLASH_BOOTLOADER_OFFSET));
+}
+
 TEST_CASE("On a power cut after the updater: the next run writes only what is still missing", "[installer]")
 {
     reset_flash();

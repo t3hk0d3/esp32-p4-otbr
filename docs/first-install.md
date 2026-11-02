@@ -23,8 +23,8 @@ Every path needs an antenna and ends with the RCP firmware upload.
 - Build everything with `make build` ([Building](building.md)): you need `p4/build/` (P4 firmware),
   `c6_rcp/build/c6_rcp.bin` (radio firmware), for Path 1 `c6_installer/build/c6_installer.bin` and for Path 3
   `c6_updater/build/`. Without a checkout, take `p4-flash.zip`, `c6_rcp.bin` and, for Path 1, `c6_installer.bin` or, for
-  Path 3, `c6-updater-flash.zip` from a GitHub release. `c6_installer.bin` must come from the same build or release as
-  the P4 firmware.
+  Path 3, `c6-updater-flash.zip` from a GitHub release. `c6_installer.bin` must carry the same C6 base version as
+  the P4 firmware: take it from the same build or release.
 - Tools: ESP-IDF (the Makefile activates it; it also provides `esptool`), `curl`.
 - The board's USB-C port shows up as a serial port (`/dev/ttyACM0` below).
 
@@ -60,7 +60,7 @@ any other board.
    with `jumper.base_installed` equal to `jumper.base_expected`.
 
    Refusals, nothing written: 400 `invalid_image` when the file is not `c6_installer.bin` (`c6_rcp.bin` cannot be sent
-   to ESP-Hosted) or when it comes from another build (the detail names both versions). 502 `install_failed` when the
+   to ESP-Hosted) or when its C6 base version differs from the P4's (another release; the detail names both versions). 502 `install_failed` when the
    transfer to ESP-Hosted failed (the detail names the step); the C6 then still runs ESP-Hosted, retry the upload.
 4. Upload the radio firmware as in Path 2 step 4. The border router starts and the mode becomes `BR_RUNNING`.
 

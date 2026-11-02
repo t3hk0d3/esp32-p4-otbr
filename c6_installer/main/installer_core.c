@@ -85,8 +85,9 @@ bool installer_ptable_is_ours(const installer_flash_t *flash, const installer_im
 
 static esp_err_t place(const installer_flash_t *flash, uint32_t dst, const installer_blob_t *blob, uint32_t image_room)
 {
-    if (compare_mem(flash, dst, blob->data, blob->len) == ESP_OK) {
-        return ESP_OK; // already in place (a repeat after a power cut)
+    if (compare_mem(flash, dst, blob->data, blob->len) == ESP_OK &&
+            (!image_room || flash->verify_image(dst, image_room) == ESP_OK)) {
+        return ESP_OK; // already in place (a repeat after a power cut), and a valid image where one is expected
     }
     esp_err_t err = ESP_FAIL;
     for (int attempt = 0; attempt < REGION_ATTEMPTS; attempt++) {
