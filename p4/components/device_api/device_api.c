@@ -32,6 +32,7 @@
 #endif
 #include "device_api_priv.h"
 #include "diag_handler.h"
+#include "metrics.h"
 #include "esp_br_http_ota.h"
 #include "netcfg.h"
 #include "rcp_sync.h"
@@ -1110,6 +1111,7 @@ esp_err_t device_api_register(httpd_handle_t server)
         {"/device/network", HTTP_GET, network_get_handler},
         {"/device/network", HTTP_PUT, network_put_handler},
         {"/device/network/confirm", HTTP_POST, network_confirm_post_handler},
+        {"/metrics", HTTP_GET, metrics_get_handler},
     };
 
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {

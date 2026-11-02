@@ -67,6 +67,9 @@ bool br_core_thread_ops_allowed(void);
 /** Snapshot of the mode and, when OpenThread is up, of the dataset and DHCPv6-PD state (ot_state_valid says whether they were read). Never blocks long. */
 void br_core_get_status(br_core_status_t *out);
 
+/** Like br_core_get_status but never takes the OpenThread lock: ot_state_valid is false, channel and pd_* are not read. */
+void br_core_get_status_brief(br_core_status_t *out);
+
 /**
  * BR_RUNNING to SNIFFER (spec 5.4): Thread stops, the OpenThread netif goes down (Ethernet stays up), the raw link
  * receives promiscuously on `channel`. `receive_cb` runs in the OpenThread task for every frame.

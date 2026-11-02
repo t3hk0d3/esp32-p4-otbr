@@ -11,7 +11,7 @@ idf_component_register(SRCS "device_api.c" "diag_handler.c" "json_out.c" "json_e
                        INCLUDE_DIRS "include"
                        PRIV_INCLUDE_DIRS "."
                        REQUIRES esp_http_server
-                       PRIV_REQUIRES board_cores br_core netcfg rcp_sync sniffer diag esp_br_http_ota esp_http_client
+                       PRIV_REQUIRES board_cores br_core netcfg rcp_sync sniffer diag metrics esp_br_http_ota esp_http_client
                                      esp_netif esp_timer esp_partition c6_board app_update esp_app_format esp_system esp_driver_gpio lwip openthread log)
 # board.h (test builds only: the C6 reset pin) lives in main, which depends on this component; include it by path.
 target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../main")

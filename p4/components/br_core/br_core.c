@@ -543,12 +543,15 @@ bool br_core_thread_ops_allowed(void)
     return mode_fsm_thread_ops_allowed(&s_fsm);
 }
 
-void br_core_get_status(br_core_status_t *out)
+// Everything br_core_get_status reports without OpenThread. Sets *ot_ready and *border_router for the caller.
+static void get_status_brief(br_core_status_t *out, bool *ot_ready, bool *border_router)
 {
     memset(out, 0, sizeof(*out));
     out->mode = br_core_get_mode();
     out->pd_state = -1;
     out->storage_degraded = s_storage_degraded;
+    *ot_ready = false;
+    *border_router = false;
     if (!s_core.started) {
         return;
     }
@@ -558,9 +561,23 @@ void br_core_get_status(br_core_status_t *out)
     out->rcp_compatible = s_core.rcp_compatible;
     out->rom_recovery_failed = s_core.rom_recovery_failed;
     strlcpy(out->fault_reason, s_core.fault_reason, sizeof(out->fault_reason));
-    const bool ot_ready = s_core.ot_ready && out->mode != BR_MODE_RADIO_FAULT;
-    const bool border_router = s_core.bringup_started;
+    *ot_ready = s_core.ot_ready && out->mode != BR_MODE_RADIO_FAULT;
+    *border_router = s_core.bringup_started;
     xSemaphoreGive(s_core.mutex);
+}
+
+void br_core_get_status_brief(br_core_status_t *out)
+{
+    bool ot_ready, border_router;
+
+    get_status_brief(out, &ot_ready, &border_router);
+}
+
+void br_core_get_status(br_core_status_t *out)
+{
+    bool ot_ready, border_router;
+
+    get_status_brief(out, &ot_ready, &border_router);
     if (!ot_ready || !esp_openthread_lock_acquire(pdMS_TO_TICKS(STATUS_LOCK_MS))) {
         return;
     }
