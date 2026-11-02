@@ -13,7 +13,7 @@ from build123d import Align, Box, Cylinder, Part, Pos, Rot
 
 from p4_case import params as P
 from p4_case.base import rounded_block
-from p4_case.board import FACTS, BoardModel, check_facts
+from p4_case.board import ENV_RES, FACTS, BoardModel, check_facts
 from p4_case.lid import opening_widths
 from p4_case.params import board_z
 from p4_case.results import CheckResult
@@ -30,8 +30,9 @@ BRIDGE_MAX = 18.0  # 8: longest accepted bridge
 DROOP_MAX = 0.5  # small round tops (pin-holes, SMA) sag less than this; accepted
 DROOP_SPAN_MAX = 8.0  # ... as long as they are small
 BRIDGE_WIDTH_MAX = 3.0  # bridges here run across a 2 mm wall
-FIT_STEP_DEG = 1.0
-FIT_MAX_DEG = 30.0
+FIT_BACK = 0.2  # connector fronts this far inside the cable wall's inner face while dropping in
+FIT_LIFT = 0.5  # the board slides this high above the standoffs
+FIT_STEP_MM = 0.25
 SMA_ENVELOPE_R = 5.0  # 5.2: free radius around the SMA axis inside the wall
 SMA_ENVELOPE_LEN = 12.0
 HEADER_RIBBON_X = (2.1, 52.9)  # a 40-wire ribbon centred on the header
@@ -182,74 +183,88 @@ def opening_paths(base: Part, lid: Part) -> CheckResult:
 BOARD_CORNER_R = 2.0  # the PCB's corner radius (spec section 3)
 
 
-def board_bodies() -> list[Part]:
-    """The board for the motion check: the rounded PCB and the boxes of the parts above it.
+def board_bodies(rise: float = 0.0) -> list[Part]:
+    """The board for the motion check: the rounded PCB and the boxes of the parts above it, raised by rise on top.
 
     Part boxes are clipped to Z ≥ 0: below the PCB they hold only pins, which never reach the walls.
     """
     pcb = FACTS["pcb"]
     bodies = [
-        rounded_block(pcb.x0, pcb.x1, pcb.y0, pcb.y1, pcb.z0, pcb.z1, BOARD_CORNER_R)
+        rounded_block(
+            pcb.x0, pcb.x1, pcb.y0, pcb.y1, pcb.z0, pcb.z1 + rise, BOARD_CORNER_R
+        )
     ]
     for k in ("usb", "rj45", "sd", "button_a", "button_b", "header", "transformer"):
         b = FACTS[k]
-        bodies.append(_box(b.x0, b.x1, b.y0, b.y1, max(b.z0, 0.0), b.z1))
+        bodies.append(_box(b.x0, b.x1, b.y0, b.y1, max(b.z0, 0.0), b.z1 + rise))
     return bodies
 
 
-def _posed(bodies: list[Part], theta: float, shift_y: float) -> Part:
-    """Board bodies tilted by theta (header end up) about the PCB's bottom front edge, then shifted along Y."""
-    pivot_z = FACTS["pcb"].z0
-    moved = [
-        Pos(0, shift_y, pivot_z) * Rot(theta, 0, 0) * Pos(0, 0, -pivot_z) * b
-        for b in bodies
-    ]
-    return Part() + moved
+def _posed(bodies: list[Part], shift_y: float, lift: float) -> Part:
+    """Board bodies shifted toward the header end by shift_y and raised by lift."""
+    return Part() + [Pos(0, shift_y, lift) * b for b in bodies]
 
 
-def fitting_motion(base: Part) -> CheckResult:
-    """The board goes in tilted, slides its connectors into the cable wall, then swings down onto the standoffs.
+def _underside_over_standoffs(board: BoardModel, shift_max: float) -> float:
+    """Deepest board underside part (below the PCB) that crosses a standoff top while the board slides shift_max → 0."""
+    env = board.envelope
+    r = P.STANDOFF_D / 2
+    pcb_bottom = FACTS["pcb"].z0
+    deepest = 0.0
+    offsets = np.arange(-r, r + ENV_RES / 2, ENV_RES)
+    for hx, hy in P.SCREW_HOLES:
+        for s in np.arange(0.0, shift_max + 1e-6, ENV_RES):
+            for dx in offsets:
+                for dy in offsets:
+                    if dx * dx + dy * dy > r * r:
+                        continue
+                    b = env.bottom(hx + dx, hy + dy - s)
+                    if not math.isnan(b):
+                        deepest = max(deepest, pcb_bottom - b)
+    return deepest
 
-    Start tilt: the smallest angle at which the tilted board, shifted back so its connectors clear the cable wall's inner
-    face, drops in between the walls. From there the board slides forward at that tilt and rotates down to 0°, checked
-    at every FIT_STEP_DEG and every 0.5 mm of slide.
+
+def fitting_motion(base: Part, board: BoardModel | None = None) -> CheckResult:
+    """The board drops straight in, shifted toward the header end, then slides its connectors into the cable wall.
+
+    Drop: shifted back FIT_BACK beyond the connectors' fronts and raised FIT_LIFT above the standoffs, the board's swept
+    volume from above the wall tops down to that pose is clear of the base. Slide: at that height it moves forward in
+    FIT_STEP_MM steps until home, clear of the base; underside parts crossing the standoffs hang less than FIT_LIFT.
+    Settle: at home it lowers onto the standoffs.
     """
     bodies = board_bodies()
-    back = (
-        P.INNER[2] - min(FACTS[k].y0 for k in ("usb", "rj45")) + 0.2
-    )  # connectors just inside the wall face
-    theta0 = None
-    t = 0.0
-    while t <= FIT_MAX_DEG:
-        if _intersection(_posed(bodies, t, back), base) <= BOOL_EPS:
-            theta0 = t
-            break
-        t += FIT_STEP_DEG
-    if theta0 is None:
+    front = min(FACTS[k].y0 for k in ("usb", "rj45"))
+    back = P.INNER[2] - front + FIT_BACK
+    rise = board_z(P.TOP) + 5 - FACTS["pcb"].z0
+    if _intersection(_posed(board_bodies(rise), back, FIT_LIFT), base) > BOOL_EPS:
         return CheckResult(
             "board fits in",
             False,
-            f"no start tilt up to {FIT_MAX_DEG:.0f}° drops in between the walls",
+            f"the straight drop {back:.2f} mm back hits the base",
         )
-    for k in range(int(back / 0.5) + 1):
-        shift = max(back - 0.5 * k, 0.0)
-        if _intersection(_posed(bodies, theta0, shift), base) > BOOL_EPS:
+    n = math.ceil(back / FIT_STEP_MM)
+    for k in range(n + 1):
+        shift = back * (1 - k / n)
+        if _intersection(_posed(bodies, shift, FIT_LIFT), base) > BOOL_EPS:
+            return CheckResult(
+                "board fits in", False, f"the slide collides {shift:.2f} mm before home"
+            )
+    if _intersection(_posed(bodies, 0.0, 0.0), base) > BOOL_EPS:
+        return CheckResult(
+            "board fits in", False, "the board collides when it settles at home"
+        )
+    if board is not None:
+        deepest = _underside_over_standoffs(board, back)
+        if deepest >= FIT_LIFT:
             return CheckResult(
                 "board fits in",
                 False,
-                f"slide at {theta0:.0f}° collides {shift:.1f} mm before home",
+                f"an underside part {deepest:.2f} mm deep crosses a standoff during the slide",
             )
-    t = theta0
-    while t >= 0:
-        if _intersection(_posed(bodies, t, 0.0), base) > BOOL_EPS:
-            return CheckResult(
-                "board fits in",
-                False,
-                f"swing-down collides at {t:.0f}° (start tilt {theta0:.0f}°)",
-            )
-        t -= FIT_STEP_DEG
     return CheckResult(
-        "board fits in", True, f"start tilt {theta0:.0f}°, slide and swing-down clear"
+        "board fits in",
+        True,
+        f"drop in {back:.2f} mm back, lift {FIT_LIFT} mm, slide forward and settle: clear",
     )
 
 
@@ -503,7 +518,7 @@ def run_all(board: BoardModel, base: Part, lid: Part) -> list[CheckResult]:
         opening_paths(base, lid),
         lid_seats(base, lid),
         led_visible(lid),
-        fitting_motion(base),
+        fitting_motion(base, board),
         ribbon_plug_fit(base),
         keyhole_volumes(board),
         nut_circles(board),

@@ -23,7 +23,10 @@ def board_z(case_z_value: float) -> float:
 WALL = 2.0
 GAP = 0.5  # board edge to inner wall face
 PCB_X1, PCB_Y1 = 55.0, 68.0
-INNER = (-GAP, PCB_X1 + GAP, -GAP, PCB_Y1 + GAP)  # x0, x1, y0, y1
+# board edge to the header-end wall: room to drop the board in shifted back, then slide its connectors into the
+# cable wall (outer length 75 mm)
+HEADER_GAP = 2.5
+INNER = (-GAP, PCB_X1 + GAP, -GAP, PCB_Y1 + HEADER_GAP)  # x0, x1, y0, y1
 OUTER = (INNER[0] - WALL, INNER[1] + WALL, INNER[2] - WALL, INNER[3] + WALL)
 INNER_R = 2.0 + GAP  # board corner radius 2 + gap
 OUTER_R = 2.5  # outer vertical edges; concentric with the ribbon recess corners at the header end
