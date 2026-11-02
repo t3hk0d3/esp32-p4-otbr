@@ -142,11 +142,10 @@ def _ribbon_recesses() -> Part:
     r = P.RIBBON_RECESS
     ix0, ix1, _, iy1 = P.INNER
     z0, z1 = 0.0, P.RIBBON_RECESS_TOP
-    rise = (
-        z1 + P.RECESS_CHAMFER_RISE * r
-    )  # the ceiling slopes back to the wall face: prints without support
+    # the ceiling slopes back to the wall face, so it prints without support
+    rise = z1 + P.RECESS_CHAMFER_RISE * r
     y0, y1 = P.RIBBON_RECESS_Y0, iy1 + r
-    cuts = []
+    cuts = [rounded_block(ix0 - r, ix1 + r, y0, y1, z0, z1, P.RIBBON_RECESS_CORNER_R)]
     for face_x, out in ((ix0, -1), (ix1, 1)):
         pts = [
             (face_x - out * EPS, z0),
@@ -160,11 +159,11 @@ def _ribbon_recesses() -> Part:
     x0, x1 = ix0 - r, ix1 + r
     prism = extrude(Plane.YZ * Polygon(*pts, align=None), (x1 - x0) / 2, both=True)
     cuts.append(Pos((x0 + x1) / 2, 0, 0) * prism)
-    # the cavity's rounded inner corners at the header end would still cut into the plug's room
-    c = P.INNER_R
-    cuts.append(block(ix0 - r, ix0 + c, iy1 - c, iy1 + r, z0, z1))
-    cuts.append(block(ix1 - c, ix1 + r, iy1 - c, iy1 + r, z0, z1))
-    return Part() + cuts
+    # keep the recess inside its rounded outline, so the wall stays 1 mm thick round the outer corners
+    keep = rounded_block(
+        ix0 - r, ix1 + r, y0, y1, z0 - 1, rise + 1, P.RIBBON_RECESS_CORNER_R
+    )
+    return (Part() + cuts) & keep
 
 
 def _buttons() -> Part:

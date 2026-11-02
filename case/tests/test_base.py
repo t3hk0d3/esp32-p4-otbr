@@ -105,6 +105,15 @@ class TestDefaultBase:
         assert not solid_bz(base, 27.5, P.INNER[3] + 0.3, top + 0.5)  # sloped ceiling
         assert solid_bz(base, 27.5, P.INNER[3] + 0.9, top + 0.5)
 
+    def test_keeps_the_header_end_outer_corners_closed(self, base):
+        ox0, ox1, _, oy1 = P.OUTER
+        r = P.OUTER_R
+        d = r * (1 - 1 / 2**0.5)  # outer surface on the corner diagonal
+        for cx, sx in ((ox0, 1), (ox1, -1)):
+            x, y = cx + sx * (d + 0.5), oy1 - (d + 0.5)
+            for z in (2.0, 8.0, 12.0):
+                assert solid_bz(base, x, y, z), (x, y, z)
+
     def test_has_four_tab_dents_level_with_the_bumps(self, base):
         z = P.BUMP_Z
         for y in (
