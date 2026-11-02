@@ -153,17 +153,65 @@ static void render_cpu(metrics_writer_t *w, const diag_metrics_view_t *g)
     }
 }
 
-// Task names are not unique in FreeRTOS: the second task of a name is "<name>#2", the third "<name>#3". nth[i] is
-// the occurrence of task i's name, counted once for both task families.
-static void task_occurrences(const diag_metrics_view_t *g, uint8_t nth[DIAG_MAX_TASKS])
+// Task names are not unique in FreeRTOS: a repeated name gets "#2", "#3"... nth[i] is the suffix of task i (1 = none),
+// chosen so that the label equals no earlier label, and a suffixed one no task's own name (tasks "a", "a", "a#2" -> "a", "a#3",
+// "a#2"). Counted once for both task families.
+#define TASK_LABEL_MAX (DIAG_NAME_MAX + 4)
+
+static void format_label(char out[TASK_LABEL_MAX], const char *name, uint8_t n)
 {
-    for (size_t i = 0; i < g->task_count; i++) {
-        nth[i] = 1;
-        for (size_t k = 0; k < i; k++) {
-            if (strncmp(g->tasks[k].name, g->tasks[i].name, DIAG_NAME_MAX) == 0) {
-                nth[i]++;
+    size_t len = strnlen(name, DIAG_NAME_MAX);
+    char digits[3];
+    size_t d = 0;
+
+    memcpy(out, name, len);
+    if (n > 1) {
+        out[len++] = '#';
+        for (; n > 0; n /= 10) {
+            digits[d++] = (char)('0' + n % 10);
+        }
+        while (d > 0) {
+            out[len++] = digits[--d];
+        }
+    }
+    out[len] = '\0';
+}
+
+// A plain name only has to differ from the earlier labels; a suffixed one also from every other task's own name.
+static bool label_taken(const diag_metrics_view_t *g, const uint8_t nth[DIAG_MAX_TASKS], size_t i, const char *label,
+                        bool suffixed)
+{
+    char other[TASK_LABEL_MAX];
+
+    for (size_t k = 0; k < g->task_count; k++) {
+        if (k < i) {
+            format_label(other, g->tasks[k].name, nth[k]);
+            if (strcmp(other, label) == 0) {
+                return true;
             }
         }
+        if (suffixed && k != i) {
+            format_label(other, g->tasks[k].name, 1);
+            if (strcmp(other, label) == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static void task_occurrences(const diag_metrics_view_t *g, uint8_t nth[DIAG_MAX_TASKS])
+{
+    char label[TASK_LABEL_MAX];
+
+    for (size_t i = 0; i < g->task_count; i++) {
+        uint8_t n = 1;
+
+        format_label(label, g->tasks[i].name, n);
+        while (n < UINT8_MAX && label_taken(g, nth, i, label, n > 1)) {
+            format_label(label, g->tasks[i].name, ++n);
+        }
+        nth[i] = n;
     }
 }
 

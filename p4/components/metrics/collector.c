@@ -222,7 +222,8 @@ esp_err_t metrics_collector_copy(metrics_collector_view_t *out)
     }
     out->started = true;
     out->ever_collected = s_ever_collected;
-    out->valid = s_valid;
+    // A collection is at most 10 s old: drop the Thread series at once when the mode has left BR_RUNNING since.
+    out->valid = s_valid && br_core_get_mode() == BR_MODE_BR_RUNNING;
     out->failures = s_failures;
     out->thread = s_cache;
     const int64_t collected_us = s_collected_us;

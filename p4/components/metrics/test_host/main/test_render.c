@@ -161,6 +161,27 @@ TEST_CASE("On two tasks with the same name: the second is labelled <name>#2", "[
     free(out);
 }
 
+TEST_CASE("On a task literally named like a generated label: every task label is unique", "[metrics]")
+{
+    with_sample();
+    const char *names[] = {"worker", "worker", "worker#2"};
+
+    s_in.diag.task_count = 3;
+    for (size_t i = 0; i < 3; i++) {
+        memset(s_in.diag.tasks[i].name, 0, sizeof(s_in.diag.tasks[i].name));
+        strncpy(s_in.diag.tasks[i].name, names[i], DIAG_NAME_MAX - 1);
+        s_in.diag.tasks[i].cpu_us = 1000000ull * (i + 1);
+    }
+    char *out = render();
+
+    TEST_ASSERT_EQUAL(1, count_prefix(out, "br_task_cpu_seconds_total{task=\"worker\"}"));
+    TEST_ASSERT_EQUAL(1, count_prefix(out, "br_task_cpu_seconds_total{task=\"worker#2\"}"));
+    TEST_ASSERT_EQUAL(1, count_prefix(out, "br_task_cpu_seconds_total{task=\"worker#3\"}"));
+    TEST_ASSERT_TRUE(has_line(out, "br_task_cpu_seconds_total{task=\"worker#2\"} 3.000000"));
+    TEST_ASSERT_TRUE(has_line(out, "br_task_cpu_seconds_total{task=\"worker#3\"} 2.000000"));
+    free(out);
+}
+
 TEST_CASE("On a NULL diag view: diag families left out, br_scrape_partial 1", "[metrics]")
 {
     with_sample();
