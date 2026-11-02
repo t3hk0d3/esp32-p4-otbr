@@ -36,7 +36,7 @@ jobs:
       - name: Tooling tests
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          . "$IDF_EXPORT" >/dev/null && python3 -m pip install -q pytest requests # into the IDF Python environment
+          . "$IDF_EXPORT" >/dev/null && python3 -m pip install -q pytest requests prometheus_client # into the IDF Python environment
           make test-tools PYTEST="python3 -m pytest"
 
   build:
