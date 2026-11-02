@@ -82,11 +82,15 @@ var DatasetJoin = (function() {
     return network.name + ' (channel ' + network.channel + ', PAN ' + network.panId + ')';
   }
 
+  /* The network the board is on: null when no dataset is stored (204), {unknown: true} when it could not be read (so
+   * the confirm still warns that a network is replaced). */
   function readCurrentNetwork(fetchFn) {
     return fetchFn('/node/dataset/active', {headers : {'Accept' : 'application/json'}})
         .then(function(r) {
-          if (r.status !== 200)
+          if (r.status === 204)
             return null;
+          if (r.status !== 200)
+            return {unknown : true};
           return r.json().then(function(d) {
             return {
               name : d.networkName,
@@ -95,7 +99,17 @@ var DatasetJoin = (function() {
             };
           });
         })
-        .catch(function() { return null; });
+        .catch(function() { return {unknown : true}; });
+  }
+
+  function confirmQuestion(target, current) {
+    if (!current)
+      return 'Join ' + describeNetwork(target) + '?';
+    if (current.unknown)
+      return 'The network this board is on could not be read; it is replaced by ' + describeNetwork(target) +
+             '. Continue?';
+    return 'This board is on ' + describeNetwork(current) + '. That network is replaced by ' + describeNetwork(target) +
+           '. Continue?';
   }
 
   function statusOf(promise) {
@@ -162,6 +176,7 @@ var DatasetJoin = (function() {
     parseDatasetTlvs : parseDatasetTlvs,
     describeNetwork : describeNetwork,
     readCurrentNetwork : readCurrentNetwork,
+    confirmQuestion : confirmQuestion,
     joinWithDataset : joinWithDataset,
     joinErrorMessage : joinErrorMessage
   };
@@ -181,13 +196,18 @@ if (typeof document !== 'undefined') {
     if (!box || !preview || !button || !status)
       return;
     var parsed = null;
-    var pollTimer = null;
+    var busy = false; /* a join runs: from the click until it succeeded, failed, timed out or was cancelled */
 
     function refresh() {
       parsed = L.parseDatasetTlvs(box.value);
       preview.textContent = parsed.ok ? 'Network: ' + L.describeNetwork(parsed.network) : (box.value.trim() ? parsed.error : '');
       preview.style.color = parsed.ok ? 'var(--success)' : 'var(--danger)';
-      button.disabled = !parsed.ok;
+      button.disabled = busy || !parsed.ok;
+    }
+
+    function finish() {
+      busy = false;
+      refresh();
     }
 
     function setStatus(ok, text) {
@@ -195,28 +215,34 @@ if (typeof document !== 'undefined') {
       status.style.color = ok ? 'var(--success)' : 'var(--danger)';
     }
 
+    /* Poll the role until attached or 60 s; replies that arrive after the poll ended are ignored. */
     function poll() {
       var count = 0;
-      if (pollTimer)
-        clearInterval(pollTimer);
-      pollTimer = setInterval(function() {
+      var done = false;
+      var timer = setInterval(function() {
+        if (done)
+          return;
         if (++count > 30) {
-          clearInterval(pollTimer);
-          pollTimer = null;
+          done = true;
+          clearInterval(timer);
           finishBlocking(false, 'Timed out — check device status');
           setStatus(false, 'Timed out — check device status');
+          finish();
           return;
         }
         fetch('/node/state')
             .then(function(r) { return r.json(); })
             .then(function(role) {
+              if (done)
+                return;
               role = typeof role === 'string' ? role : '';
               updateBlockingStatus('Attaching... (' + (role || 'detached') + ')');
               if (role === 'leader' || role === 'router' || role === 'child') {
-                clearInterval(pollTimer);
-                pollTimer = null;
+                done = true;
+                clearInterval(timer);
                 finishBlocking(true, 'Joined — role: ' + role);
                 setStatus(true, 'Joined — role: ' + role);
+                finish();
               }
             })
             .catch(function() { /* transient while Thread restarts */ });
@@ -224,37 +250,36 @@ if (typeof document !== 'undefined') {
     }
 
     function join() {
+      if (busy)
+        return;
       refresh();
       if (!parsed.ok)
         return;
       var target = parsed;
+      busy = true;
       button.disabled = true;
       L.readCurrentNetwork(fetch.bind(window)).then(function(current) {
-        var question = 'Join ' + L.describeNetwork(target.network) + '?';
-        if (current)
-          question = 'This board is on ' + L.describeNetwork(current) + '. That network is replaced by ' +
-                     L.describeNetwork(target.network) + '. Continue?';
-        if (!window.confirm(question)) {
-          button.disabled = false;
+        if (!window.confirm(L.confirmQuestion(target.network, current))) {
+          finish();
           return;
         }
         showBlockingOverlay('Joining Thread Network', 'Storing the dataset...');
-        L.joinWithDataset(target.hex, fetch.bind(window)).then(function(result) {
-          button.disabled = false;
+        return L.joinWithDataset(target.hex, fetch.bind(window)).then(function(result) {
           if (!result.ok) {
             var message = L.joinErrorMessage(result.step, result.status);
             finishBlocking(false, message);
             setStatus(false, message);
+            finish();
             return;
           }
           updateBlockingStatus('Dataset stored — attaching...');
           poll();
         });
       }).catch(function() {
-        button.disabled = false;
         showBlockingOverlay('Joining Thread Network', ''); /* finishBlocking needs the overlay to exist */
         finishBlocking(false, 'Unexpected error — reload the page and check the board state');
         setStatus(false, 'Unexpected error — reload the page and check the board state');
+        finish();
       });
     }
 

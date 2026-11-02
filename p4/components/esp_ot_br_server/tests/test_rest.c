@@ -269,17 +269,36 @@ static void test_dataset_active_while_running(void)
         put_active("010203", "text/plain", 200);
         assert(!strcmp(mock_calls, "DPSE") && stored_is_new());
     }
-    /* Thread attached: the request's own dataset is stored, not the merge with the old one (no leftover TLVs of the
-     * old network, e.g. its Wake-up Channel). */
+    /* Thread attached, text/plain: the request's TLVs are stored as sent, not their merge with the old dataset (no
+     * leftover TLVs of the old network, e.g. its Wake-up Channel) and not rebuilt from the parsed dataset (TLVs the
+     * parser does not map are kept). */
+    dataset_case(OT_DEVICE_ROLE_LEADER, true);
+    mock_update_tlvs.mLength = 5; /* the merge would differ from the request */
+    memset(mock_update_tlvs.mTlvs, 0x07, 5);
+    mock_convert_tlvs.mLength = 4; /* and so would a rebuild */
+    memset(mock_convert_tlvs.mTlvs, 0x09, 4);
+    put_active("010203", "text/plain", 200);
+    assert(!strcmp(mock_calls, "DPSE") && stored_is_new());
+    /* Thread attached, JSON: the request's dataset converted to TLVs is stored, not the merge. */
     dataset_case(OT_DEVICE_ROLE_LEADER, true);
     mock_convert_tlvs.mLength = 4;
     memset(mock_convert_tlvs.mTlvs, 0x09, 4);
-    put_active("010203", "text/plain", 200);
+    put_active(COMPLETE_JSON_DATASET, "application/json", 200);
     assert(!strcmp(mock_calls, "DPSE") && mock_active_tlvs.mLength == 4 && mock_active_tlvs.mTlvs[3] == 0x09);
-    /* Thread attached, TLVs equal to the stored ones: 200 without any OpenThread write. */
+    /* Thread attached, the request's TLVs equal the stored ones: 200 without any OpenThread write. */
     dataset_case(OT_DEVICE_ROLE_LEADER, false);
     put_active("abcd", "text/plain", 200);
     assert(mock_ot_writes == 0 && !mock_calls[0] && mock_role == OT_DEVICE_ROLE_LEADER && stored_is_old());
+    /* Thread attached, the merge equals the stored TLVs but the request does not (it omits a TLV the old dataset has):
+     * the request is stored, not taken as a no-op. */
+    dataset_case(OT_DEVICE_ROLE_LEADER, false); /* mock merge leaves the stored TLVs unchanged */
+    put_active("010203", "text/plain", 200);
+    assert(!strcmp(mock_calls, "DPSE") && stored_is_new());
+    /* Thread attached, a partial request that would change nothing: still 409 (the completeness check comes first). */
+    dataset_case(OT_DEVICE_ROLE_LEADER, false);
+    mock_dataset.mComponents.mIsNetworkKeyPresent = false;
+    put_active("abcd", "text/plain", 409);
+    assert(mock_ot_writes == 0 && stored_is_old());
     /* Thread attached, the store fails: Thread is started again on the old dataset, 500. */
     dataset_case(OT_DEVICE_ROLE_LEADER, true);
     mock_set_active_error = OT_ERROR_FAILED;
@@ -304,6 +323,7 @@ static void test_dataset_active_while_running(void)
     assert(mock_ot_writes == 0 && stored_is_old());
     /* A complete JSON body (create_active_dataset) while attached takes the same path. */
     dataset_case(OT_DEVICE_ROLE_ROUTER, true);
+    mock_convert_tlvs = mock_update_tlvs; /* the request converted to TLVs */
     put_active(COMPLETE_JSON_DATASET, "application/json", 200);
     assert(!strcmp(mock_calls, "DPSE") && stored_is_new());
     /* A partial dataset while attached (here only the channel) would move this node alone: 409, nothing written. */

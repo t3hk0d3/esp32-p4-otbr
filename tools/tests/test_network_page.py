@@ -259,12 +259,44 @@ class TestReadCurrentNetwork:
             }
         ]
 
-    @pytest.mark.parametrize("answer", ["{status: 204}", "{status: 503}", "'error'"])
-    def test_no_dataset_or_failure_resolves_to_null(self, answer):
+    def test_no_dataset_resolves_to_null(self):
         assert (
-            scenario(f"return await L.readCurrentNetwork(fakeFetch([{answer}]));")
+            scenario("return await L.readCurrentNetwork(fakeFetch([{status: 204}]));")
             is None
         )
+
+    @pytest.mark.parametrize("answer", ["{status: 503}", "{status: 500}", "'error'"])
+    def test_failed_read_resolves_to_unknown(self, answer):
+        assert scenario(
+            f"return await L.readCurrentNetwork(fakeFetch([{answer}]));"
+        ) == {"unknown": True}
+
+
+CONFIRM_TARGET = {"name": "MyThread", "channel": 15, "panId": "0x1234"}
+
+
+@needs_node
+class TestConfirmQuestion:
+    """confirmQuestion"""
+
+    def question(self, current):
+        return logic(
+            f"L.confirmQuestion({json.dumps(CONFIRM_TARGET)}, {json.dumps(current)})"
+        )
+
+    def test_no_current_network_names_only_the_new_one(self):
+        assert self.question(None) == "Join MyThread (channel 15, PAN 0x1234)?"
+
+    def test_current_network_is_named_as_replaced(self):
+        text = self.question({"name": "Home", "channel": 20, "panId": "0xabcd"})
+        assert text == (
+            "This board is on Home (channel 20, PAN 0xabcd). That network is replaced by "
+            "MyThread (channel 15, PAN 0x1234). Continue?"
+        )
+
+    def test_unreadable_current_network_still_warns_of_the_replacement(self):
+        text = self.question({"unknown": True})
+        assert "could not be read" in text and "replaced by MyThread" in text
 
 
 @needs_node

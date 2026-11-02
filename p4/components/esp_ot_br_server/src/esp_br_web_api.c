@@ -2069,6 +2069,8 @@ static void rest_dataset(const esp_br_thread_rest_request_t *request, esp_br_thr
         return;
     }
     memset(&dataset, 0, sizeof(dataset));
+    otOperationalDatasetTlvs request_tlvs = {0}; /* patch 14: the request's own TLVs, as sent (text/plain only) */
+    bool request_raw = false;
     if (!strcmp(request->content_type, "text/plain")) {
         otOperationalDatasetTlvs update;
         int length = rest_unhex(request->body, update.mTlvs, sizeof(update.mTlvs));
@@ -2081,6 +2083,8 @@ static void rest_dataset(const esp_br_thread_rest_request_t *request, esp_br_thr
             response->status = 500;
             return;
         }
+        request_tlvs = update;
+        request_raw = true;
     } else {
         cJSON *json = cJSON_Parse(request->body);
         bool valid = rest_parse_dataset(json, &dataset, pending);
@@ -2127,13 +2131,9 @@ static void rest_dataset(const esp_br_thread_rest_request_t *request, esp_br_thr
             }
             return;
         }
-        /* Patch 14: Thread runs. The same dataset again is a no-op (no detach); a different one is stored with Thread
-         * stopped and Thread is started on it, all under the OpenThread lock this handler holds. */
-        if (same) {
-            return;
-        }
-        /* Only a whole network moves this node at once; a partial change (e.g. only the channel) would split it from
-         * the mesh and belongs in the pending dataset, so it keeps ot-br-posix's 409. */
+        /* Patch 14: Thread runs. Only a whole network moves this node at once; a partial change (e.g. only the channel)
+         * would split it from the mesh and belongs in the pending dataset, so it keeps ot-br-posix's 409, also when it
+         * would change nothing. */
         const otOperationalDatasetComponents *has = &dataset.mComponents;
         if (!has->mIsActiveTimestampPresent || !has->mIsNetworkKeyPresent || !has->mIsNetworkNamePresent ||
                 !has->mIsExtendedPanIdPresent || !has->mIsMeshLocalPrefixPresent || !has->mIsPanIdPresent ||
@@ -2141,9 +2141,18 @@ static void rest_dataset(const esp_br_thread_rest_request_t *request, esp_br_thr
             response->status = 409;
             return;
         }
-        /* A whole network replaces the old one: store the request's own dataset, not its merge with the old one (which
-         * would keep TLVs the request lacks, e.g. the old network's Wake-up Channel). */
-        otDatasetConvertToTlvs(&dataset, &base);
+        /* A whole network replaces the old one: the request's own TLVs (as sent for text/plain, built from the request
+         * for JSON) are compared and stored, not their merge with the old dataset, which would keep TLVs the request
+         * lacks (e.g. the old network's Wake-up Channel). The same TLVs again are a no-op (no detach); different ones
+         * are stored with Thread stopped and Thread is started on them, all under the OpenThread lock this handler
+         * holds. */
+        if (!request_raw) {
+            otDatasetConvertToTlvs(&dataset, &request_tlvs);
+        }
+        base = request_tlvs;
+        if (stored && base.mLength == current.mLength && !memcmp(base.mTlvs, current.mTlvs, base.mLength)) {
+            return;
+        }
         if (otThreadSetEnabled(instance, false) != OT_ERROR_NONE) {
             response->status = 500;
             return;
