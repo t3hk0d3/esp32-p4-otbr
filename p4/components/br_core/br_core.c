@@ -814,10 +814,12 @@ static void reboot_task(void *arg)
 }
 
 // The C6 job between stopping and restarting OpenThread: push the image, or (source NULL) ROM recovery of the base image.
-static esp_err_t run_c6_job(const rcp_fw_source_t *source, char *err_detail, size_t err_cap)
+// *base_only: the job leaves the C6 with its updater and no RCP (a ROM recovery, or c6_installer.bin through ESP-Hosted).
+static esp_err_t run_c6_job(const rcp_fw_source_t *source, char *err_detail, size_t err_cap, bool *base_only)
 {
+    *base_only = source == NULL;
     if (source) {
-        return rcp_sync_push_firmware(source, err_detail, err_cap);
+        return rcp_sync_push_firmware(source, err_detail, err_cap, base_only);
     }
     // A failed manual recovery still restarts OpenThread, whose boot probe may then run the one automatic recovery of
     // this boot (the probe sees the same trigger): a second attempt after a manual one is intended, not a loop.
@@ -854,7 +856,8 @@ static esp_err_t op_radio_job(const rcp_fw_source_t *source, char *err_detail, s
         // push, and a successful push is followed by a reboot, which starts OpenThread on a clean system. The fault
         // state and reason stay until then.
         ESP_LOGW(TAG, "%s without stopping OpenThread (abandoned start), reboot follows", what);
-        const esp_err_t abandoned_err = run_c6_job(source, err_detail, err_cap);
+        bool abandoned_base_only = false;
+        const esp_err_t abandoned_err = run_c6_job(source, err_detail, err_cap, &abandoned_base_only);
         if (abandoned_err == ESP_OK) {
             // The C6 is still in its updater (after a ROM recovery: its normal boot, the probe enters the updater again):
             // read back the version so that the HTTP reply and the status show it.
@@ -881,13 +884,12 @@ static esp_err_t op_radio_job(const rcp_fw_source_t *source, char *err_detail, s
     xSemaphoreTake(s_core.boot_done, 0);
     xSemaphoreTake(s_core.bringup_done, 0);
 
-    const esp_err_t push_err = run_c6_job(source, err_detail, err_cap);
+    bool base_only = false;
+    const esp_err_t push_err = run_c6_job(source, err_detail, err_cap, &base_only);
     if (push_err != ESP_OK) {
         ESP_LOGE(TAG, "%s failed: %s", what, esp_err_to_name(push_err));
     }
-    // A ROM recovery, or c6_installer.bin through ESP-Hosted: the C6 has its updater and no RCP, so the restart below ends
-    // in RADIO_FAULT "no rcp firmware" by design.
-    const bool base_only = source == NULL || (push_err == ESP_OK && rcp_sync_last_push_was_installer());
+    // base_only: the C6 has its updater and no RCP, so the restart below ends in RADIO_FAULT "no rcp firmware" by design.
 
     esp_err_t err = start_ot_task();
     if (err == ESP_OK) {

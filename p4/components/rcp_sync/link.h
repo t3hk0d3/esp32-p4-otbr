@@ -44,7 +44,7 @@ esp_err_t rcp_sync_probe_with(const rcp_sync_link_t *link, rcp_sync_probe_result
 
 /** rcp_sync_push_firmware on an explicit link. */
 esp_err_t rcp_sync_push_firmware_with(const rcp_sync_link_t *link, const rcp_fw_source_t *source, char *err_detail,
-                                      size_t err_cap);
+                                      size_t err_cap, bool *base_only);
 
 /** rcp_sync_rom_recover on an explicit link: releases the link, then runs link->rom_recover. ESP_ERR_NOT_SUPPORTED without one. */
 esp_err_t rcp_sync_rom_recover_with(const rcp_sync_link_t *link);

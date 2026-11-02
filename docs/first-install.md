@@ -49,14 +49,15 @@ any other board.
    curl --data-binary @c6_installer/build/c6_installer.bin http://<board>/device/radio/firmware
    ```
 
-   It takes up to about a minute: ESP-Hosted erases a slot, stores the installer and restarts into it; the installer
-   writes the updater, bootloader and partition table and restarts; the P4 waits for the updater to answer. Do not
+   It takes one to two minutes: ESP-Hosted erases a slot, stores the installer and restarts into it; the installer waits
+   30 s (so that no reset from a booting P4 can hit its writes), writes the updater, bootloader and partition table and
+   restarts; the P4 waits for the updater to answer and never resets the C6 meanwhile. Do not
    power off the board meanwhile: a power cut while the C6 bootloader or partition table is written (a fraction of a
    second) leaves a C6 that only Path 2 or 3 can repair. The reply is `{"installed": null}` and the status shows
    `"fault_reason":"no rcp firmware"`, with `jumper.base_installed` equal to `jumper.base_expected`.
 
    Refusals, nothing written: 400 `invalid_image` when the file is not `c6_installer.bin` (`c6_rcp.bin` cannot be sent
-   to ESP-Hosted) or when it comes from another build (the detail names both versions). 502 `push_failed` when the
+   to ESP-Hosted) or when it comes from another build (the detail names both versions). 502 `install_failed` when the
    transfer to ESP-Hosted failed (the detail names the step); the C6 then still runs ESP-Hosted, retry the upload.
 4. Upload the radio firmware as in Path 2 step 4. The border router starts and the mode becomes `BR_RUNNING`.
 

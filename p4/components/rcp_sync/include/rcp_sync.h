@@ -78,14 +78,12 @@ typedef struct {
  * First install (no jumper, the updater silent on the first attempt, the factory ESP-Hosted firmware answering): the
  * source must be c6_installer.bin of this release (project RCP_SYNC_INSTALLER_PROJECT, version equal to the embedded
  * base version), else RCP_SYNC_ERR_IMAGE_REJECTED and nothing is sent. It goes unchanged through the ESP-Hosted OTA
- * (failure: RCP_SYNC_ERR_HOSTED_OTA); the C6 restarts into it, it installs the base image and restarts into the
- * updater, which must answer HELLO within about 90 s (ESP_ERR_TIMEOUT otherwise). The C6 is never reset meanwhile.
- * ESP_OK then; the boot slot is blank, rcp_sync_last_push_was_installer() is true until the next push.
+ * (a refusal: RCP_SYNC_ERR_HOSTED_OTA); the C6 restarts into it, it installs the base image and restarts into the
+ * updater, which must answer HELLO within about 3 min (ESP_ERR_TIMEOUT otherwise). The C6 is never reset meanwhile, also
+ * not after an OTA timeout (the C6 may have taken the image): the P4 waits for the updater then too.
+ * ESP_OK then, with *base_only (may be NULL; false on every other outcome) true: the C6 has its updater and no RCP yet.
  */
-esp_err_t rcp_sync_push_firmware(const rcp_fw_source_t *source, char *err_detail, size_t err_cap);
-
-/** The last rcp_sync_push_firmware succeeded by installing c6_installer.bin: the C6 has the updater and no RCP yet. */
-bool rcp_sync_last_push_was_installer(void);
+esp_err_t rcp_sync_push_firmware(const rcp_fw_source_t *source, char *err_detail, size_t err_cap, bool *base_only);
 
 /** Drive GPIO6 high and pulse GPIO54: the C6 boots its boot slot. */
 esp_err_t rcp_sync_boot_rcp(void);

@@ -194,11 +194,6 @@ static bool link_jumper_present(void)
     return rcp_sync_jumper_present();
 }
 
-static esp_err_t link_hosted_detect(bool *present)
-{
-    return c6_hosted_detect(present);
-}
-
 static esp_err_t link_hosted_ota(const rcp_fw_source_t *source, char *detail, size_t cap)
 {
     const c6_hosted_source_t src = {.total_size = source->total_size, .read = source->read, .ctx = source->ctx};
@@ -269,7 +264,7 @@ const rcp_sync_link_t rcp_sync_link_spi = {
     .jumper_present = link_jumper_present,
     .rom_recover = rcp_sync_rom_recover,
     .base_version = rcp_sync_base_image_version,
-    .hosted_detect = link_hosted_detect,
+    .hosted_detect = c6_hosted_detect,
     .hosted_ota = link_hosted_ota,
     .attach_updater = link_attach_updater,
 };

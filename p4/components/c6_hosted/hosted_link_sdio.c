@@ -26,7 +26,8 @@ static const char *TAG = "c6_hosted";
 #define ESSL_TIMEOUT_MS    1000
 #define SLAVE_RX_BUF       1536  /* the slave's receive buffer size (ESP_RX_BUFFER_SIZE) */
 #define OPEN_DATA_PATH     (1u << 0)
-#define POLL_MS            5
+/* At least one tick between looks at the slave (pdMS_TO_TICKS(5) is 0 at 100 Hz): the push must not starve other tasks. */
+#define POLL_TICKS         (pdMS_TO_TICKS(5) > 0 ? pdMS_TO_TICKS(5) : 1)
 #define DMA_ALIGN          64
 #define BLOCK              512   /* reads and writes may round up to a whole block */
 
@@ -157,7 +158,7 @@ static esp_err_t link_recv(uint8_t *buf, size_t cap, size_t *len, uint32_t timeo
         if (link_now_ms() - start >= timeout_ms) {
             return ESP_ERR_TIMEOUT;
         }
-        vTaskDelay(pdMS_TO_TICKS(POLL_MS));
+        vTaskDelay(POLL_TICKS);
     }
 }
 

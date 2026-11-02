@@ -35,9 +35,20 @@ static uint32_t left_ms(const session_t *s, uint32_t deadline)
     return left > 0 ? (uint32_t)left : 0;
 }
 
+static bool all_zero(const uint8_t *p, size_t len)
+{
+    for (size_t i = 0; i < len; i++) {
+        if (p[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /*
- * The next packet from the C6 before the deadline. A receive may carry several packets followed by block padding; whatever
- * cannot be framed ends that receive. ESP_ERR_TIMEOUT when nothing came in time.
+ * The next packet from the C6 before the deadline. A receive may carry several packets followed by block padding, and may
+ * end inside a packet (the link returns what fits; the rest comes with the next receive): a partial packet is kept and
+ * completed by the next receive. Padding or a malformed header ends that receive. ESP_ERR_TIMEOUT when nothing came in time.
  */
 static esp_err_t next_packet(session_t *s, uint32_t deadline, hosted_packet_t *out)
 {
@@ -48,21 +59,31 @@ static esp_err_t next_packet(session_t *s, uint32_t deadline, hosted_packet_t *o
                 s->rx_pos += (size_t)n;
                 return ESP_OK;
             }
-            s->rx_pos = s->rx_len = 0; // padding, a partial or a malformed packet: drop the rest of this receive
+            if (n == 0 && all_zero(s->rx + s->rx_pos, s->rx_len - s->rx_pos)) {
+                s->rx_pos = s->rx_len = 0; // a short padding tail, not the start of a packet
+            } else if (n == 0 && s->rx_pos > 0) {
+                // A partial packet: move it to the front, the next receive appends the rest.
+                memmove(s->rx, s->rx + s->rx_pos, s->rx_len - s->rx_pos);
+                s->rx_len -= s->rx_pos;
+                s->rx_pos = 0;
+            } else if (n < 0 || s->rx_len == sizeof(s->rx)) {
+                s->rx_pos = s->rx_len = 0; // padding, a malformed header, or a packet that cannot fit: drop
+            }
+        } else {
+            s->rx_pos = s->rx_len = 0;
         }
         const uint32_t left = left_ms(s, deadline);
         if (left == 0) {
             return ESP_ERR_TIMEOUT;
         }
         size_t got = 0;
-        const esp_err_t err = s->link->recv(s->rx, sizeof(s->rx), &got, left);
+        const esp_err_t err = s->link->recv(s->rx + s->rx_len, sizeof(s->rx) - s->rx_len, &got, left);
         if (err == ESP_ERR_TIMEOUT) {
             return ESP_ERR_TIMEOUT;
         } else if (err != ESP_OK) {
             return err;
         }
-        s->rx_len = got;
-        s->rx_pos = 0;
+        s->rx_len += got;
     }
 }
 

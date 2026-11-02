@@ -16,6 +16,14 @@ static const char *TAG = "c6_installer";
 
 #define MAX_SLOTS 8
 
+/*
+ * Before anything is written: a C6 reset (from the P4) restarts the installer, and this wait with it. The P4 never
+ * resets the C6 while it waits for the updater after the OTA, but after a power cut in the middle of an install both chips
+ * boot together and the P4's boot probe resets the C6 several times in its first ~20 s. Only once the P4 is quiet does
+ * the install start, so no reset can land in the bootloader or partition table write.
+ */
+#define QUIET_MS 30000
+
 extern const uint8_t s_bootloader_start[] asm("_binary_c6_bootloader_bin_start");
 extern const uint8_t s_bootloader_end[] asm("_binary_c6_bootloader_bin_end");
 extern const uint8_t s_ptable_start[] asm("_binary_c6_partition_table_bin_start");
@@ -59,12 +67,22 @@ static void idle(const char *why)
     }
 }
 
-/* Hand the C6 back to the app in the other slot (the factory ESP-Hosted firmware) and restart. */
+/*
+ * Hand the C6 back to the app in the other slot (the factory ESP-Hosted firmware) and restart. After a relocation that slot
+ * holds another copy of this installer (ESP-Hosted is gone): selecting it would loop, so the C6 idles instead.
+ */
 static void back_to_stock(const esp_partition_t *running, const char *why)
 {
     ESP_LOGE(TAG, "%s: returning to the factory firmware", why);
     const esp_partition_t *other = esp_ota_get_next_update_partition(running);
-    if (other && esp_ota_set_boot_partition(other) == ESP_OK) {
+    esp_app_desc_t desc;
+    if (!other || esp_ota_get_partition_description(other, &desc) != ESP_OK) {
+        idle("no factory firmware in the other slot");
+    }
+    if (strncmp(desc.project_name, esp_app_get_description()->project_name, sizeof(desc.project_name)) == 0) {
+        idle("the other slot holds this installer, not the factory firmware; repair over the jumper or H7");
+    }
+    if (esp_ota_set_boot_partition(other) == ESP_OK) {
         esp_restart();
     }
     idle("the factory firmware cannot be selected either");
@@ -152,6 +170,8 @@ void app_main(void)
         break;
     }
     case INSTALLER_INSTALL: {
+        ESP_LOGW(TAG, "installing in %d s (a reset meanwhile starts over)", QUIET_MS / 1000);
+        vTaskDelay(pdMS_TO_TICKS(QUIET_MS));
         ESP_LOGW(TAG, "installing: updater, bootloader, partition table");
         const esp_err_t err = installer_install(&s_flash, &images);
         if (err != ESP_OK) {

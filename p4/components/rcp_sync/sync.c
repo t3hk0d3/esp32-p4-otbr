@@ -23,8 +23,9 @@ static const char *TAG = "rcp_sync";
 #define REPLY_BUF_LEN       ((RCP_SYNC_PROTO_HEADER_LEN + RCP_SYNC_PROTO_HELLO_REPLY_LEN + RCP_SYNC_PROTO_CRC_LEN + 3) & ~3u)
 #define ERR_PAYLOAD_LEN     6
 /* After the ESP-Hosted OTA: HELLOs until the updater answers. Each silent HELLO costs EXCHANGE_TRIES link timeouts
- * (about 3 s on the device), so this is about 90 s: OTA restart (5 s), relocation, install and the updater's boot. */
-#define WAIT_UPDATER_HELLOS 30
+ * (about 3 s on the device), so this is about 3 min: OTA restart (5 s), relocation, the installer's quiet period (30 s,
+ * c6_installer), the install and the updater's boot. The C6 is never reset meanwhile. */
+#define WAIT_UPDATER_HELLOS 60
 
 /* esp_app_desc_t inside an app image: after esp_image_header_t (24 bytes) and the first segment header (8 bytes). */
 #define APP_DESC_OFFSET     32
@@ -49,8 +50,6 @@ static rcp_sync_probe_result_t s_last;
 static portMUX_TYPE s_last_lock = portMUX_INITIALIZER_UNLOCKED;
 /* An automatic ROM recovery ran in this boot (spec 5.10: at most once, whatever its outcome). Same writers as s_last. */
 static bool s_auto_recovery_done;
-/* The last push installed c6_installer.bin (rcp_sync_last_push_was_installer). Written by the push only. */
-static bool s_last_push_installer;
 
 static uint32_t get_u32(const uint8_t *p)
 {
@@ -306,7 +305,8 @@ static esp_err_t wait_updater(sync_ctx_t *ctx)
 }
 
 /* First install: c6_installer.bin of this release through the ESP-Hosted OTA, then wait for the updater. */
-static esp_err_t push_installer(sync_ctx_t *ctx, const rcp_fw_source_t *source, uint8_t *head, char *detail, size_t cap)
+static esp_err_t push_installer(sync_ctx_t *ctx, const rcp_fw_source_t *source, uint8_t *head, char *detail, size_t cap,
+                                bool *base_only)
 {
     const rcp_sync_link_t *link = ctx->link;
     char project[APP_DESC_FIELD_LEN + 1], version[APP_DESC_FIELD_LEN + 1];
@@ -334,16 +334,28 @@ static esp_err_t push_installer(sync_ctx_t *ctx, const rcp_fw_source_t *source, 
     const replay_t replay = {.source = source, .head = head, .head_len = head_len};
     const rcp_fw_source_t through = {.total_size = source->total_size, .read = replay_read, .ctx = (void *) &replay};
     err = link->hosted_ota(&through, detail, cap);
-    if (err != ESP_OK) {
+    if (err != ESP_OK && err != ESP_ERR_TIMEOUT) {
+        // Refused, or never got that far: the C6 still runs ESP-Hosted and is safe to reset.
         ESP_LOGE(TAG, "ESP-Hosted OTA failed: %s (%s)", esp_err_to_name(err), detail ? detail : "");
         return RCP_SYNC_ERR_HOSTED_OTA;
     }
+    if (err == ESP_ERR_TIMEOUT) {
+        // An unanswered OTAEnd may still have switched the C6 to the installer: wait as after a success, never reset.
+        ESP_LOGW(TAG, "ESP-Hosted OTA timed out (%s); waiting for the updater in case the C6 took the image", detail);
+    }
+    const esp_err_t ota_err = err;
     err = wait_updater(ctx);
     if (err != ESP_OK) {
+        if (ota_err != ESP_OK) {
+            return RCP_SYNC_ERR_HOSTED_OTA; // detail names the OTA step that timed out
+        }
         set_text(detail, cap, "the C6 did not come back after the installer");
         return err;
     }
-    s_last_push_installer = true;
+    set_text(detail, cap, "");
+    if (base_only) {
+        *base_only = true;
+    }
     return ESP_OK;
 }
 
@@ -420,10 +432,12 @@ void rcp_sync_recovery_guard_reset(void)
 }
 
 esp_err_t rcp_sync_push_firmware_with(const rcp_sync_link_t *link, const rcp_fw_source_t *source, char *err_detail,
-                                      size_t err_cap)
+                                      size_t err_cap, bool *base_only)
 {
     set_text(err_detail, err_cap, "");
-    s_last_push_installer = false;
+    if (base_only) {
+        *base_only = false;
+    }
     if (!link || !source || !source->read) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -452,7 +466,7 @@ esp_err_t rcp_sync_push_firmware_with(const rcp_sync_link_t *link, const rcp_fw_
         if (link->enter_updater() != ESP_OK || hello(ctx, &h) != ESP_OK) {
             ESP_LOGW(TAG, "attempt %d: no HELLO reply", attempt);
             if (attempt == 1 && !jumper_seen(link) && esp_hosted_answers(link)) {
-                result = push_installer(ctx, source, chunk, err_detail, err_cap);
+                result = push_installer(ctx, source, chunk, err_detail, err_cap, base_only);
                 break;
             }
             set_text(err_detail, err_cap, "updater not responding");
@@ -489,9 +503,4 @@ void rcp_sync_get_last_probe(rcp_sync_probe_result_t *out)
     portENTER_CRITICAL(&s_last_lock);
     *out = s_last;
     portEXIT_CRITICAL(&s_last_lock);
-}
-
-bool rcp_sync_last_push_was_installer(void)
-{
-    return s_last_push_installer;
 }

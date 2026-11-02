@@ -21,6 +21,7 @@ typedef struct {
     int silent_msg;         /* this request id never gets an answer (0: all answered) */
     bool event_before_resp; /* an RPC event goes out right before every response */
     int fail_read_at;       /* source read at this offset fails (-1: never) */
+    bool short_pad;         /* receives end in 4 zero bytes instead of padding to a block */
     /* state */
     uint32_t now;
     uint8_t rxq[RXQ_MAX][HOSTED_RX_BUF];
@@ -59,7 +60,22 @@ static void queue_packet(uint8_t if_type, uint8_t pkt_type, const uint8_t *paylo
     const size_t n = hosted_frame_encode(if_type, 0, payload, len, buf, HOSTED_RX_BUF);
     TEST_ASSERT_TRUE(n > 0);
     buf[11] = pkt_type;
-    sl.rxq_len[sl.rxq_tail++] = n < 512 ? 512 : n;
+    sl.rxq_len[sl.rxq_tail++] = sl.short_pad ? n + 4 : (n < 512 ? 512 : n);
+}
+
+/* Split the receives so that a packet straddles two of them (the link returned only what fit). */
+static bool s_split_next_resp;
+
+static void split_last_queued(void)
+{
+    /* Move the last queued receive's second half into a new receive after it. */
+    TEST_ASSERT_TRUE(sl.rxq_tail >= 1 && sl.rxq_tail < RXQ_MAX);
+    const int last = sl.rxq_tail - 1;
+    const size_t n = sl.rxq_len[last];
+    const size_t first = 20; /* inside the packet: header plus a few payload bytes */
+    memcpy(sl.rxq[sl.rxq_tail], sl.rxq[last] + first, n - first);
+    sl.rxq_len[sl.rxq_tail++] = n - first;
+    sl.rxq_len[last] = first;
 }
 
 static size_t put_varint(uint8_t *p, uint64_t v)
@@ -165,6 +181,9 @@ static esp_err_t f_send(const uint8_t *buf, size_t len, uint32_t timeout_ms)
         }
         queue_rpc(HOSTED_RPC_TYPE_RESP, m.msg_id + HOSTED_RPC_RESP_OFFSET, m.uid,
                   sl.resp[m.msg_id - HOSTED_RPC_REQ_OTA_BEGIN]);
+        if (s_split_next_resp) {
+            split_last_queued();
+        }
     }
     return ESP_OK;
 }
@@ -305,6 +324,24 @@ TEST_CASE("On events before every response: they are skipped", "[session]")
 {
     setup();
     sl.event_before_resp = true;
+    TEST_ASSERT_EQUAL(ESP_OK, hosted_session_ota(&s_link, &s_src, NULL, 0));
+    TEST_ASSERT_EQUAL_MEMORY(image, sl.written, IMAGE_SIZE);
+}
+
+TEST_CASE("On responses split across two receives: they are reassembled", "[session]")
+{
+    setup();
+    s_split_next_resp = true;
+    const esp_err_t err = hosted_session_ota(&s_link, &s_src, NULL, 0);
+    s_split_next_resp = false;
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+    TEST_ASSERT_EQUAL_MEMORY(image, sl.written, IMAGE_SIZE);
+}
+
+TEST_CASE("On a receive ending in a short zero padding tail: the next packet is still read", "[session]")
+{
+    setup();
+    sl.short_pad = true;
     TEST_ASSERT_EQUAL(ESP_OK, hosted_session_ota(&s_link, &s_src, NULL, 0));
     TEST_ASSERT_EQUAL_MEMORY(image, sl.written, IMAGE_SIZE);
 }
