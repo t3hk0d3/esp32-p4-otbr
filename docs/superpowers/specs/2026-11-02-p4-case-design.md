@@ -184,7 +184,9 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 - **Corner tabs (snaps and guide pins):**
   - Four, hanging from the frame's underside into the four inner corners of the base. As the lid goes down, they find the
     corners first and steer it into the rebate. Their tips are chamfered to help with that.
-  - All are 1.2 mm thick, with 0.2 mm clearance to the walls.
+  - All are wedge-shaped: 2.0 mm thick at the root, tapering to 1.4 mm at the tip. The taper is on the inner face; the
+    outer face stays flat against the wall with 0.2 mm clearance. The thick root makes them stiff guides, and the thinner
+    tip leaves enough flex for the snap. The tip has a 0.6 mm lead-in chamfer.
   - **Cable-end corners:**
     - L-shaped: a 7 mm leg along the side wall and a 3.5 mm leg along the cable wall. They locate the lid in X and Y.
     - They reach 6.5 mm below the lid's underside, to about 10.5 mm above the board. That clears the buttons (3.3), the
@@ -195,7 +197,7 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
       ribbon plug (top about 11.5 above the board) and of the ribbon, which runs between X 2.1 and 52.9.
   - Each side-wall leg carries a bump on its outer face, about 0.6 mm high and ramped 45° on both faces, so a firm lever
     pops it out.
-  - Bump height, dent fit and tab lengths go into named constants, so they can be tuned after a test print.
+  - Bump height, dent fit, tab lengths and wedge thicknesses go into named constants, so they can be tuned after a test print.
 - **LED:** the LED (board X 0.3–1.6, Y 17.4–19.1) sits under the solid frame. The frame narrows locally there, so two or
   three honeycomb cells (3.5 mm or less) sit directly over it. There's no separate window.
 
