@@ -1,0 +1,232 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="1060" viewBox="0 0 1180 1060"><defs><marker id="a" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,2 L5,5 L0,8" fill="none" stroke="#db2777"/></marker></defs><rect width="100%" height="100%" fill="white"/><text x="60.0" y="32.0" font-family="sans-serif" font-size="18" fill="#111" text-anchor="start" font-weight="bold">ESP32-P4 case — sketch v5 (honeycomb lid on inside tabs)</text>
+<rect x="60.0" y="51.0" width="22.0" height="13.0" rx="0" fill="#d1d5db" fill-opacity="1" stroke="#374151" stroke-width="1"/>
+<text x="90.0" y="62.0" font-family="sans-serif" font-size="12" fill="#111" text-anchor="start" font-weight="normal">BASE (one part): back plate + all four walls + standoffs</text>
+<rect x="60.0" y="71.0" width="22.0" height="13.0" rx="0" fill="#a5b4fc" fill-opacity="1" stroke="#374151" stroke-width="1"/>
+<text x="90.0" y="82.0" font-family="sans-serif" font-size="12" fill="#111" text-anchor="start" font-weight="normal">LID: honeycomb grille plate, 4 tabs inside the walls</text>
+<text x="60.0" y="130.0" font-family="sans-serif" font-size="15" fill="#111" text-anchor="start" font-weight="bold">A. Front (as seen on the wall)</text>
+<text x="60.0" y="146.0" font-family="sans-serif" font-size="11" fill="#6b7280" text-anchor="start" font-weight="normal">outside is clean: no wings; dashed = tabs under the lid</text>
+<rect x="150.0" y="195.0" width="300.0" height="365.0" rx="8" fill="#d1d5db" fill-opacity="1" stroke="#374151" stroke-width="2"/>
+<rect x="155.0" y="200.0" width="290.0" height="355.0" rx="6" fill="#a5b4fc" fill-opacity="1" stroke="#374151" stroke-width="1.5"/>
+<polygon points="200.0,512.3 191.2,507.3 182.5,512.3 182.5,522.4 191.2,527.5 200.0,522.4" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="222.5,512.3 213.8,507.3 205.0,512.3 205.0,522.4 213.8,527.5 222.5,522.4" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="245.0,512.3 236.2,507.3 227.5,512.3 227.5,522.4 236.2,527.5 245.0,522.4" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="267.5,512.3 258.8,507.3 250.0,512.3 250.0,522.4 258.8,527.5 267.5,522.4" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="290.0,512.3 281.2,507.3 272.5,512.3 272.5,522.4 281.2,527.5 290.0,522.4" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="312.5,512.3 303.8,507.3 295.0,512.3 295.0,522.4 303.8,527.5 312.5,522.4" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="335.0,512.3 326.2,507.3 317.5,512.3 317.5,522.4 326.2,527.5 335.0,522.4" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="357.5,512.3 348.8,507.3 340.0,512.3 340.0,522.4 348.8,527.5 357.5,522.4" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="380.0,512.3 371.2,507.3 362.5,512.3 362.5,522.4 371.2,527.5 380.0,522.4" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="402.5,512.3 393.8,507.3 385.0,512.3 385.0,522.4 393.8,527.5 402.5,522.4" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="211.2,492.9 202.5,487.8 193.8,492.9 193.8,503.0 202.5,508.0 211.2,503.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="233.8,492.9 225.0,487.8 216.2,492.9 216.2,503.0 225.0,508.0 233.8,503.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="256.2,492.9 247.5,487.8 238.8,492.9 238.8,503.0 247.5,508.0 256.2,503.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="278.8,492.9 270.0,487.8 261.2,492.9 261.2,503.0 270.0,508.0 278.8,503.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="301.2,492.9 292.5,487.8 283.8,492.9 283.8,503.0 292.5,508.0 301.2,503.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="323.8,492.9 315.0,487.8 306.2,492.9 306.2,503.0 315.0,508.0 323.8,503.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="346.2,492.9 337.5,487.8 328.8,492.9 328.8,503.0 337.5,508.0 346.2,503.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="368.8,492.9 360.0,487.8 351.2,492.9 351.2,503.0 360.0,508.0 368.8,503.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="391.2,492.9 382.5,487.8 373.8,492.9 373.8,503.0 382.5,508.0 391.2,503.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="413.8,492.9 405.0,487.8 396.2,492.9 396.2,503.0 405.0,508.0 413.8,503.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="200.0,473.4 191.2,468.3 182.5,473.4 182.5,483.5 191.2,488.5 200.0,483.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="222.5,473.4 213.8,468.3 205.0,473.4 205.0,483.5 213.8,488.5 222.5,483.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="245.0,473.4 236.2,468.3 227.5,473.4 227.5,483.5 236.2,488.5 245.0,483.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="267.5,473.4 258.8,468.3 250.0,473.4 250.0,483.5 258.8,488.5 267.5,483.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="290.0,473.4 281.2,468.3 272.5,473.4 272.5,483.5 281.2,488.5 290.0,483.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="312.5,473.4 303.8,468.3 295.0,473.4 295.0,483.5 303.8,488.5 312.5,483.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="335.0,473.4 326.2,468.3 317.5,473.4 317.5,483.5 326.2,488.5 335.0,483.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="357.5,473.4 348.8,468.3 340.0,473.4 340.0,483.5 348.8,488.5 357.5,483.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="380.0,473.4 371.2,468.3 362.5,473.4 362.5,483.5 371.2,488.5 380.0,483.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="402.5,473.4 393.8,468.3 385.0,473.4 385.0,483.5 393.8,488.5 402.5,483.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="211.2,453.9 202.5,448.8 193.8,453.9 193.8,464.0 202.5,469.0 211.2,464.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="233.8,453.9 225.0,448.8 216.2,453.9 216.2,464.0 225.0,469.0 233.8,464.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="256.2,453.9 247.5,448.8 238.8,453.9 238.8,464.0 247.5,469.0 256.2,464.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="278.8,453.9 270.0,448.8 261.2,453.9 261.2,464.0 270.0,469.0 278.8,464.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="301.2,453.9 292.5,448.8 283.8,453.9 283.8,464.0 292.5,469.0 301.2,464.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="323.8,453.9 315.0,448.8 306.2,453.9 306.2,464.0 315.0,469.0 323.8,464.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="346.2,453.9 337.5,448.8 328.8,453.9 328.8,464.0 337.5,469.0 346.2,464.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="368.8,453.9 360.0,448.8 351.2,453.9 351.2,464.0 360.0,469.0 368.8,464.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="391.2,453.9 382.5,448.8 373.8,453.9 373.8,464.0 382.5,469.0 391.2,464.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="413.8,453.9 405.0,448.8 396.2,453.9 396.2,464.0 405.0,469.0 413.8,464.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="200.0,434.4 191.2,429.4 182.5,434.4 182.5,444.5 191.2,449.6 200.0,444.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="222.5,434.4 213.8,429.4 205.0,434.4 205.0,444.5 213.8,449.6 222.5,444.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="245.0,434.4 236.2,429.4 227.5,434.4 227.5,444.5 236.2,449.6 245.0,444.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="267.5,434.4 258.8,429.4 250.0,434.4 250.0,444.5 258.8,449.6 267.5,444.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="290.0,434.4 281.2,429.4 272.5,434.4 272.5,444.5 281.2,449.6 290.0,444.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="312.5,434.4 303.8,429.4 295.0,434.4 295.0,444.5 303.8,449.6 312.5,444.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="335.0,434.4 326.2,429.4 317.5,434.4 317.5,444.5 326.2,449.6 335.0,444.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="357.5,434.4 348.8,429.4 340.0,434.4 340.0,444.5 348.8,449.6 357.5,444.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="380.0,434.4 371.2,429.4 362.5,434.4 362.5,444.5 371.2,449.6 380.0,444.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="402.5,434.4 393.8,429.4 385.0,434.4 385.0,444.5 393.8,449.6 402.5,444.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="211.2,414.9 202.5,409.9 193.8,414.9 193.8,425.0 202.5,430.1 211.2,425.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="233.8,414.9 225.0,409.9 216.2,414.9 216.2,425.0 225.0,430.1 233.8,425.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="256.2,414.9 247.5,409.9 238.8,414.9 238.8,425.0 247.5,430.1 256.2,425.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="278.8,414.9 270.0,409.9 261.2,414.9 261.2,425.0 270.0,430.1 278.8,425.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="301.2,414.9 292.5,409.9 283.8,414.9 283.8,425.0 292.5,430.1 301.2,425.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="323.8,414.9 315.0,409.9 306.2,414.9 306.2,425.0 315.0,430.1 323.8,425.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="346.2,414.9 337.5,409.9 328.8,414.9 328.8,425.0 337.5,430.1 346.2,425.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="368.8,414.9 360.0,409.9 351.2,414.9 351.2,425.0 360.0,430.1 368.8,425.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="391.2,414.9 382.5,409.9 373.8,414.9 373.8,425.0 382.5,430.1 391.2,425.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="413.8,414.9 405.0,409.9 396.2,414.9 396.2,425.0 405.0,430.1 413.8,425.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="200.0,395.4 191.2,390.4 182.5,395.4 182.5,405.5 191.2,410.6 200.0,405.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="222.5,395.4 213.8,390.4 205.0,395.4 205.0,405.5 213.8,410.6 222.5,405.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="245.0,395.4 236.2,390.4 227.5,395.4 227.5,405.5 236.2,410.6 245.0,405.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="267.5,395.4 258.8,390.4 250.0,395.4 250.0,405.5 258.8,410.6 267.5,405.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="290.0,395.4 281.2,390.4 272.5,395.4 272.5,405.5 281.2,410.6 290.0,405.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="312.5,395.4 303.8,390.4 295.0,395.4 295.0,405.5 303.8,410.6 312.5,405.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="335.0,395.4 326.2,390.4 317.5,395.4 317.5,405.5 326.2,410.6 335.0,405.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="357.5,395.4 348.8,390.4 340.0,395.4 340.0,405.5 348.8,410.6 357.5,405.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="380.0,395.4 371.2,390.4 362.5,395.4 362.5,405.5 371.2,410.6 380.0,405.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="402.5,395.4 393.8,390.4 385.0,395.4 385.0,405.5 393.8,410.6 402.5,405.5" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="211.2,375.9 202.5,370.9 193.8,375.9 193.8,386.0 202.5,391.1 211.2,386.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="233.8,375.9 225.0,370.9 216.2,375.9 216.2,386.0 225.0,391.1 233.8,386.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="256.2,375.9 247.5,370.9 238.8,375.9 238.8,386.0 247.5,391.1 256.2,386.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="278.8,375.9 270.0,370.9 261.2,375.9 261.2,386.0 270.0,391.1 278.8,386.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="301.2,375.9 292.5,370.9 283.8,375.9 283.8,386.0 292.5,391.1 301.2,386.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="323.8,375.9 315.0,370.9 306.2,375.9 306.2,386.0 315.0,391.1 323.8,386.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="346.2,375.9 337.5,370.9 328.8,375.9 328.8,386.0 337.5,391.1 346.2,386.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="368.8,375.9 360.0,370.9 351.2,375.9 351.2,386.0 360.0,391.1 368.8,386.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="391.2,375.9 382.5,370.9 373.8,375.9 373.8,386.0 382.5,391.1 391.2,386.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="413.8,375.9 405.0,370.9 396.2,375.9 396.2,386.0 405.0,391.1 413.8,386.0" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="200.0,356.5 191.2,351.4 182.5,356.5 182.5,366.6 191.2,371.6 200.0,366.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="222.5,356.5 213.8,351.4 205.0,356.5 205.0,366.6 213.8,371.6 222.5,366.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="245.0,356.5 236.2,351.4 227.5,356.5 227.5,366.6 236.2,371.6 245.0,366.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="267.5,356.5 258.8,351.4 250.0,356.5 250.0,366.6 258.8,371.6 267.5,366.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="290.0,356.5 281.2,351.4 272.5,356.5 272.5,366.6 281.2,371.6 290.0,366.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="312.5,356.5 303.8,351.4 295.0,356.5 295.0,366.6 303.8,371.6 312.5,366.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="335.0,356.5 326.2,351.4 317.5,356.5 317.5,366.6 326.2,371.6 335.0,366.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="357.5,356.5 348.8,351.4 340.0,356.5 340.0,366.6 348.8,371.6 357.5,366.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="380.0,356.5 371.2,351.4 362.5,356.5 362.5,366.6 371.2,371.6 380.0,366.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="402.5,356.5 393.8,351.4 385.0,356.5 385.0,366.6 393.8,371.6 402.5,366.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="211.2,337.0 202.5,331.9 193.8,337.0 193.8,347.1 202.5,352.1 211.2,347.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="233.8,337.0 225.0,331.9 216.2,337.0 216.2,347.1 225.0,352.1 233.8,347.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="256.2,337.0 247.5,331.9 238.8,337.0 238.8,347.1 247.5,352.1 256.2,347.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="278.8,337.0 270.0,331.9 261.2,337.0 261.2,347.1 270.0,352.1 278.8,347.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="301.2,337.0 292.5,331.9 283.8,337.0 283.8,347.1 292.5,352.1 301.2,347.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="323.8,337.0 315.0,331.9 306.2,337.0 306.2,347.1 315.0,352.1 323.8,347.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="346.2,337.0 337.5,331.9 328.8,337.0 328.8,347.1 337.5,352.1 346.2,347.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="368.8,337.0 360.0,331.9 351.2,337.0 351.2,347.1 360.0,352.1 368.8,347.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="391.2,337.0 382.5,331.9 373.8,337.0 373.8,347.1 382.5,352.1 391.2,347.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="413.8,337.0 405.0,331.9 396.2,337.0 396.2,347.1 405.0,352.1 413.8,347.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="200.0,317.5 191.2,312.4 182.5,317.5 182.5,327.6 191.2,332.6 200.0,327.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="222.5,317.5 213.8,312.4 205.0,317.5 205.0,327.6 213.8,332.6 222.5,327.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="245.0,317.5 236.2,312.4 227.5,317.5 227.5,327.6 236.2,332.6 245.0,327.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="267.5,317.5 258.8,312.4 250.0,317.5 250.0,327.6 258.8,332.6 267.5,327.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="290.0,317.5 281.2,312.4 272.5,317.5 272.5,327.6 281.2,332.6 290.0,327.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="312.5,317.5 303.8,312.4 295.0,317.5 295.0,327.6 303.8,332.6 312.5,327.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="335.0,317.5 326.2,312.4 317.5,317.5 317.5,327.6 326.2,332.6 335.0,327.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="357.5,317.5 348.8,312.4 340.0,317.5 340.0,327.6 348.8,332.6 357.5,327.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="380.0,317.5 371.2,312.4 362.5,317.5 362.5,327.6 371.2,332.6 380.0,327.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="402.5,317.5 393.8,312.4 385.0,317.5 385.0,327.6 393.8,332.6 402.5,327.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="211.2,298.0 202.5,293.0 193.8,298.0 193.8,308.1 202.5,313.2 211.2,308.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="233.8,298.0 225.0,293.0 216.2,298.0 216.2,308.1 225.0,313.2 233.8,308.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="256.2,298.0 247.5,293.0 238.8,298.0 238.8,308.1 247.5,313.2 256.2,308.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="278.8,298.0 270.0,293.0 261.2,298.0 261.2,308.1 270.0,313.2 278.8,308.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="301.2,298.0 292.5,293.0 283.8,298.0 283.8,308.1 292.5,313.2 301.2,308.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="323.8,298.0 315.0,293.0 306.2,298.0 306.2,308.1 315.0,313.2 323.8,308.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="346.2,298.0 337.5,293.0 328.8,298.0 328.8,308.1 337.5,313.2 346.2,308.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="368.8,298.0 360.0,293.0 351.2,298.0 351.2,308.1 360.0,313.2 368.8,308.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="391.2,298.0 382.5,293.0 373.8,298.0 373.8,308.1 382.5,313.2 391.2,308.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="413.8,298.0 405.0,293.0 396.2,298.0 396.2,308.1 405.0,313.2 413.8,308.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="200.0,278.5 191.2,273.5 182.5,278.5 182.5,288.6 191.2,293.7 200.0,288.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="222.5,278.5 213.8,273.5 205.0,278.5 205.0,288.6 213.8,293.7 222.5,288.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="245.0,278.5 236.2,273.5 227.5,278.5 227.5,288.6 236.2,293.7 245.0,288.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="267.5,278.5 258.8,273.5 250.0,278.5 250.0,288.6 258.8,293.7 267.5,288.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="290.0,278.5 281.2,273.5 272.5,278.5 272.5,288.6 281.2,293.7 290.0,288.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="312.5,278.5 303.8,273.5 295.0,278.5 295.0,288.6 303.8,293.7 312.5,288.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="335.0,278.5 326.2,273.5 317.5,278.5 317.5,288.6 326.2,293.7 335.0,288.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="357.5,278.5 348.8,273.5 340.0,278.5 340.0,288.6 348.8,293.7 357.5,288.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="380.0,278.5 371.2,273.5 362.5,278.5 362.5,288.6 371.2,293.7 380.0,288.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="402.5,278.5 393.8,273.5 385.0,278.5 385.0,288.6 393.8,293.7 402.5,288.6" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="211.2,259.0 202.5,254.0 193.8,259.0 193.8,269.1 202.5,274.2 211.2,269.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="233.8,259.0 225.0,254.0 216.2,259.0 216.2,269.1 225.0,274.2 233.8,269.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="256.2,259.0 247.5,254.0 238.8,259.0 238.8,269.1 247.5,274.2 256.2,269.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="278.8,259.0 270.0,254.0 261.2,259.0 261.2,269.1 270.0,274.2 278.8,269.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="301.2,259.0 292.5,254.0 283.8,259.0 283.8,269.1 292.5,274.2 301.2,269.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="323.8,259.0 315.0,254.0 306.2,259.0 306.2,269.1 315.0,274.2 323.8,269.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="346.2,259.0 337.5,254.0 328.8,259.0 328.8,269.1 337.5,274.2 346.2,269.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="368.8,259.0 360.0,254.0 351.2,259.0 351.2,269.1 360.0,274.2 368.8,269.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="391.2,259.0 382.5,254.0 373.8,259.0 373.8,269.1 382.5,274.2 391.2,269.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="413.8,259.0 405.0,254.0 396.2,259.0 396.2,269.1 405.0,274.2 413.8,269.1" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="200.0,239.5 191.2,234.5 182.5,239.5 182.5,249.7 191.2,254.7 200.0,249.7" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="222.5,239.5 213.8,234.5 205.0,239.5 205.0,249.7 213.8,254.7 222.5,249.7" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="245.0,239.5 236.2,234.5 227.5,239.5 227.5,249.7 236.2,254.7 245.0,249.7" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="267.5,239.5 258.8,234.5 250.0,239.5 250.0,249.7 258.8,254.7 267.5,249.7" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="290.0,239.5 281.2,234.5 272.5,239.5 272.5,249.7 281.2,254.7 290.0,249.7" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="312.5,239.5 303.8,234.5 295.0,239.5 295.0,249.7 303.8,254.7 312.5,249.7" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="335.0,239.5 326.2,234.5 317.5,239.5 317.5,249.7 326.2,254.7 335.0,249.7" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="357.5,239.5 348.8,234.5 340.0,239.5 340.0,249.7 348.8,254.7 357.5,249.7" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="380.0,239.5 371.2,234.5 362.5,239.5 362.5,249.7 371.2,254.7 380.0,249.7" fill="white" stroke="#374151" stroke-width="0.8"/>
+<polygon points="402.5,239.5 393.8,234.5 385.0,239.5 385.0,249.7 393.8,254.7 402.5,249.7" fill="white" stroke="#374151" stroke-width="0.8"/>
+<rect x="182.5" y="373.0" width="235.0" height="9.0" rx="0" fill="#a5b4fc" fill-opacity="1" stroke="#374151" stroke-width="0.8"/>
+<rect x="160.0" y="480.0" width="6.0" height="35.0" rx="0" fill="none" fill-opacity="1" stroke="#111" stroke-width="1" stroke-dasharray="2,1.5"/>
+<rect x="434.0" y="480.0" width="6.0" height="35.0" rx="0" fill="none" fill-opacity="1" stroke="#111" stroke-width="1" stroke-dasharray="2,1.5"/>
+<rect x="160.0" y="330.0" width="6.0" height="35.0" rx="0" fill="none" fill-opacity="1" stroke="#111" stroke-width="1" stroke-dasharray="2,1.5"/>
+<rect x="434.0" y="330.0" width="6.0" height="35.0" rx="0" fill="none" fill-opacity="1" stroke="#111" stroke-width="1" stroke-dasharray="2,1.5"/>
+<text x="460.0" y="352.5" font-family="sans-serif" font-size="10" fill="#111" text-anchor="start" font-weight="normal">tab (inside)</text>
+<text x="460.0" y="502.5" font-family="sans-serif" font-size="10" fill="#111" text-anchor="start" font-weight="normal">tab (inside)</text>
+<rect x="450.0" y="270.0" width="20.0" height="35.0" rx="0" fill="#fbbf24" fill-opacity="1" stroke="#374151" stroke-width="1.5"/>
+<text x="475.0" y="317.5" font-family="sans-serif" font-size="11" fill="#111" text-anchor="start" font-weight="bold">SMA</text>
+<line x1="150.0" y1="185.0" x2="450.0" y2="185.0" stroke="#db2777" stroke-width="1" marker-start="url(#a)" marker-end="url(#a)"/>
+<text x="300.0" y="180.0" font-family="sans-serif" font-size="11" fill="#db2777" text-anchor="middle" font-weight="normal">60</text>
+<line x1="132.5" y1="560.0" x2="132.5" y2="195.0" stroke="#db2777" stroke-width="1" marker-start="url(#a)" marker-end="url(#a)"/>
+<text x="127.5" y="377.5" font-family="sans-serif" font-size="11" fill="#db2777" text-anchor="middle" font-weight="normal" transform="rotate(-90 127.5 377.5)">73</text>
+<text x="300.0" y="580.0" font-family="sans-serif" font-size="10" fill="#6b7280" text-anchor="middle" font-weight="normal">▼ cable end</text>
+<text x="600.0" y="130.0" font-family="sans-serif" font-size="15" fill="#111" text-anchor="start" font-weight="bold">C. Left side — buttons</text>
+<text x="600.0" y="146.0" font-family="sans-serif" font-size="11" fill="#6b7280" text-anchor="start" font-weight="normal">dashed = lid tabs inside the wall</text>
+<rect x="660.0" y="190.0" width="365.0" height="135.5" rx="0" fill="#d1d5db" fill-opacity="1" stroke="#374151" stroke-width="2"/>
+<rect x="660.0" y="190.0" width="365.0" height="10.0" rx="0" fill="#a5b4fc" fill-opacity="0.6" stroke="#374151" stroke-width="1"/>
+<rect x="705.0" y="200.0" width="35.0" height="32.5" rx="0" fill="none" fill-opacity="1" stroke="#111" stroke-width="1" stroke-dasharray="2,1.5"/>
+<rect x="855.0" y="200.0" width="35.0" height="32.5" rx="0" fill="none" fill-opacity="1" stroke="#111" stroke-width="1" stroke-dasharray="2,1.5"/>
+<rect x="672.5" y="282.5" width="340.0" height="8.0" rx="0" fill="none" fill-opacity="1" stroke="#16a34a" stroke-width="1" stroke-dasharray="3,3"/>
+<circle cx="700.8" cy="274.2" r="6.2" fill="#111" stroke="#d97706" stroke-width="1.5"/>
+<text x="690.8" y="262.5" font-family="sans-serif" font-size="10" fill="#111" text-anchor="end" font-weight="normal">BOOT?</text>
+<circle cx="734.2" cy="274.2" r="6.2" fill="#111" stroke="#d97706" stroke-width="1.5"/>
+<text x="744.2" y="262.5" font-family="sans-serif" font-size="10" fill="#111" text-anchor="start" font-weight="normal">RST?</text>
+<text x="660.0" y="343.0" font-family="sans-serif" font-size="10" fill="#6b7280" text-anchor="start" font-weight="normal">← cable end</text>
+<text x="1025.0" y="343.0" font-family="sans-serif" font-size="10" fill="#6b7280" text-anchor="end" font-weight="normal">header end →</text>
+<text x="600.0" y="360.0" font-family="sans-serif" font-size="15" fill="#111" text-anchor="start" font-weight="bold">D. Right side — SMA</text>
+<rect x="660.0" y="410.0" width="365.0" height="135.5" rx="0" fill="#d1d5db" fill-opacity="1" stroke="#374151" stroke-width="2"/>
+<rect x="660.0" y="410.0" width="365.0" height="10.0" rx="0" fill="#a5b4fc" fill-opacity="0.6" stroke="#374151" stroke-width="1"/>
+<rect x="705.0" y="420.0" width="35.0" height="32.5" rx="0" fill="none" fill-opacity="1" stroke="#111" stroke-width="1" stroke-dasharray="2,1.5"/>
+<rect x="855.0" y="420.0" width="35.0" height="32.5" rx="0" fill="none" fill-opacity="1" stroke="#111" stroke-width="1" stroke-dasharray="2,1.5"/>
+<rect x="672.5" y="502.5" width="340.0" height="8.0" rx="0" fill="none" fill-opacity="1" stroke="#16a34a" stroke-width="1" stroke-dasharray="3,3"/>
+<circle cx="932.5" cy="457.5" r="16.5" fill="white" stroke="#d97706" stroke-width="2"/>
+<text x="932.5" y="490.0" font-family="sans-serif" font-size="10" fill="#111" text-anchor="middle" font-weight="normal">SMA</text>
+<text x="660.0" y="563.0" font-family="sans-serif" font-size="10" fill="#6b7280" text-anchor="start" font-weight="normal">← cable end</text>
+<text x="1025.0" y="563.0" font-family="sans-serif" font-size="10" fill="#6b7280" text-anchor="end" font-weight="normal">header end →</text>
+<text x="600.0" y="590.0" font-family="sans-serif" font-size="15" fill="#111" text-anchor="start" font-weight="bold">G. Back plate (seen from behind)</text>
+<text x="600.0" y="606.0" font-family="sans-serif" font-size="11" fill="#6b7280" text-anchor="start" font-weight="normal">flat; two L-keyholes 32 mm apart</text>
+<rect x="670.0" y="630.0" width="300.0" height="365.0" rx="8" fill="#d1d5db" fill-opacity="1" stroke="#374151" stroke-width="2"/>
+<rect x="896.8" y="737.5" width="21.5" height="35.0" rx="2" fill="white" fill-opacity="1" stroke="#374151" stroke-width="1.5"/>
+<rect x="872.5" y="761.8" width="35.0" height="21.5" rx="2" fill="white" fill-opacity="1" stroke="#374151" stroke-width="1.5"/>
+<circle cx="907.5" cy="772.5" r="20.0" fill="white" stroke="#374151" stroke-width="1.5"/>
+<rect x="736.8" y="737.5" width="21.5" height="35.0" rx="2" fill="white" fill-opacity="1" stroke="#374151" stroke-width="1.5"/>
+<rect x="712.5" y="761.8" width="35.0" height="21.5" rx="2" fill="white" fill-opacity="1" stroke="#374151" stroke-width="1.5"/>
+<circle cx="747.5" cy="772.5" r="20.0" fill="white" stroke="#374151" stroke-width="1.5"/>
+<text x="60.0" y="610.0" font-family="sans-serif" font-size="15" fill="#111" text-anchor="start" font-weight="bold">B. Cable end (bottom on the wall)</text>
+<text x="60.0" y="626.0" font-family="sans-serif" font-size="11" fill="#6b7280" text-anchor="start" font-weight="normal">board drops in tilted: connectors into the holes first</text>
+<rect x="120.0" y="665.0" width="300.0" height="135.5" rx="0" fill="#d1d5db" fill-opacity="1" stroke="#374151" stroke-width="2"/>
+<rect x="125.0" y="665.0" width="290.0" height="10.0" rx="0" fill="#a5b4fc" fill-opacity="1" stroke="#374151" stroke-width="1.2"/>
+<rect x="132.5" y="757.5" width="275.0" height="8.0" rx="0" fill="none" fill-opacity="1" stroke="#16a34a" stroke-width="1" stroke-dasharray="3,3"/>
+<rect x="151.5" y="675.0" width="83.0" height="87.5" rx="0" fill="white" fill-opacity="1" stroke="#d97706" stroke-width="2"/>
+<text x="193.0" y="712.5" font-family="sans-serif" font-size="10" fill="#111" text-anchor="middle" font-weight="normal">USB-A</text>
+<text x="193.0" y="747.5" font-family="sans-serif" font-size="10" fill="#111" text-anchor="middle" font-weight="normal">USB-C</text>
+<rect x="239.5" y="686.0" width="85.0" height="76.5" rx="0" fill="white" fill-opacity="1" stroke="#d97706" stroke-width="2"/>
+<text x="282.0" y="727.5" font-family="sans-serif" font-size="10" fill="#111" text-anchor="middle" font-weight="normal">RJ45 (PoE)</text>
+<rect x="328.5" y="747.5" width="61.0" height="13.0" rx="0" fill="white" fill-opacity="1" stroke="#d97706" stroke-width="2"/>
+<text x="359.0" y="735.0" font-family="sans-serif" font-size="10" fill="#111" text-anchor="middle" font-weight="normal">µSD</text>
+<rect x="340.0" y="760.5" width="37.5" height="12.0" rx="0" fill="none" fill-opacity="1" stroke="#d97706" stroke-width="1" stroke-dasharray="2,2"/>
+<line x1="110.0" y1="800.5" x2="110.0" y2="665.0" stroke="#db2777" stroke-width="1" marker-start="url(#a)" marker-end="url(#a)"/>
+<text x="105.0" y="732.8" font-family="sans-serif" font-size="11" fill="#db2777" text-anchor="middle" font-weight="normal" transform="rotate(-90 105.0 732.8)">27</text>
+<text x="60.0" y="825.0" font-family="sans-serif" font-size="15" fill="#111" text-anchor="start" font-weight="bold">H. Header end (top on the wall)</text>
+<text x="60.0" y="841.0" font-family="sans-serif" font-size="11" fill="#6b7280" text-anchor="start" font-weight="normal">ribbon / jumper wires leave through the slot</text>
+<rect x="120.0" y="880.0" width="300.0" height="135.5" rx="0" fill="#d1d5db" fill-opacity="1" stroke="#374151" stroke-width="2"/>
+<rect x="125.0" y="880.0" width="290.0" height="10.0" rx="0" fill="#a5b4fc" fill-opacity="1" stroke="#374151" stroke-width="1.2"/>
+<rect x="132.5" y="972.5" width="275.0" height="8.0" rx="0" fill="none" fill-opacity="1" stroke="#16a34a" stroke-width="1" stroke-dasharray="3,3"/>
+<rect x="135.0" y="890.0" width="270.0" height="20.0" rx="0" fill="white" fill-opacity="1" stroke="#d97706" stroke-width="2"/>
+<text x="270.0" y="904.0" font-family="sans-serif" font-size="10" fill="#111" text-anchor="middle" font-weight="normal">40-pin cable slot 54 × 4</text>
+<rect x="143.0" y="931.0" width="254.0" height="41.5" rx="0" fill="none" fill-opacity="1" stroke="#2563eb" stroke-width="1" stroke-dasharray="3,3"/>
+<text x="270.0" y="952.5" font-family="sans-serif" font-size="10" fill="#2563eb" text-anchor="middle" font-weight="normal">header behind this wall</text>
+<line x1="110.0" y1="1015.5" x2="110.0" y2="880.0" stroke="#db2777" stroke-width="1" marker-start="url(#a)" marker-end="url(#a)"/>
+<text x="105.0" y="947.8" font-family="sans-serif" font-size="11" fill="#db2777" text-anchor="middle" font-weight="normal" transform="rotate(-90 105.0 947.8)">27</text>
+<text x="60.0" y="1045.0" font-family="sans-serif" font-size="11" fill="#6b7280" text-anchor="start" font-weight="normal">Sketch only — approximate (mm). Amber = openings, blue dashed = parts inside, green dashed = board.</text></svg>
