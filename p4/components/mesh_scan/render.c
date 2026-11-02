@@ -252,8 +252,11 @@ static void key_u64(writer_t *w, const char *key, uint64_t value)
 
 static void write_child(writer_t *w, const mesh_scan_router_t *r, const mesh_scan_child_t *c)
 {
+    // The child-table fields are known only when the router answered the query and the table listed this child.
+    const bool detail = r->children_detail && c->has_ext;
+
     key_u64(w, "{\"rloc16\":", c->rloc16);
-    if (r->children_detail) {
+    if (detail) {
         raw(w, ",\"ext_address\":");
         ext_address(w, c->ext);
     }
@@ -264,7 +267,7 @@ static void write_child(writer_t *w, const mesh_scan_router_t *r, const mesh_sca
     raw(w, ",\"full_network_data\":");
     boolean(w, c->full_network_data);
     key_u64(w, "},\"lq_in\":", c->lq_in);
-    if (r->children_detail) {
+    if (detail) {
         key_u64(w, ",\"timeout_s\":", c->timeout_s);
         key_u64(w, ",\"age_s\":", c->age_s);
         key_u64(w, ",\"connected_s\":", c->connected_s);

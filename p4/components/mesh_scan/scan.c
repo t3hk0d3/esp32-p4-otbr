@@ -126,6 +126,19 @@ static void finish(bool cap_hit)
     ESP_LOGI(TAG, "scan done (%u routers queried%s)", (unsigned)s.queried, partial ? ", partial" : "");
 }
 
+/** Cap hit: the router being queried and every responding router not reached yet have no children detail. */
+static void mark_unfinished(void)
+{
+    mesh_scan_result_t *r = &s.block->result;
+    const int from = s.phase == PHASE_DISCOVER ? 0 : s.current;
+
+    for (int id = from; id < MESH_SCAN_MAX_ROUTERS; id++) {
+        if (r->routers[id].present && r->routers[id].responded) {
+            r->routers[id].children_detail = false;
+        }
+    }
+}
+
 /** Close the router being queried without its children detail. */
 static void skip_current(void)
 {
@@ -534,6 +547,7 @@ void mesh_scan_on_cap(void)
     s.ops.cancel();
     if (s.ops.br_running()) {
         ESP_LOGW(TAG, "scan cap of %d ms hit", MESH_SCAN_CAP_MS);
+        mark_unfinished();
         finish(true);
     } else {
         fail(MESH_SCAN_ERR_STOPPED);

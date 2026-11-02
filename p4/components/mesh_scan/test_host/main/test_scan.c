@@ -602,10 +602,11 @@ TEST_CASE("While not running: mesh_scan_cancel does nothing", "[mesh_scan]")
 TEST_CASE("On 60 s elapsed while running and the mode is BR_RUNNING: calls ops.cancel, takes the snapshot with "
           "partial:true, state becomes done", "[mesh_scan]")
 {
-    const uint8_t ids[] = { 3, 9 };
+    const uint8_t ids[] = { 3, 9, 34 };
 
-    discover(ids, 2);
-    answer_router();
+    discover(ids, 3);
+    answer_router();                                        // router 3 finished
+    mesh_scan_on_child_table_done(MESH_SCAN_OT_ERROR_NONE); // router 9 cut off in its addresses query
     g_fake.now_ms += MESH_SCAN_CAP_MS;
     mesh_scan_on_cap();
     TEST_ASSERT_EQUAL(1, g_fake.cancel_calls);
@@ -613,6 +614,24 @@ TEST_CASE("On 60 s elapsed while running and the mode is BR_RUNNING: calls ops.c
     const mesh_scan_result_t *res = done_result();
     TEST_ASSERT_TRUE(res->partial);
     TEST_ASSERT_TRUE(res->routers[3].children_detail);
+    TEST_ASSERT_FALSE(res->routers[9].children_detail);  // cut off
+    TEST_ASSERT_FALSE(res->routers[34].children_detail); // not reached
+}
+
+TEST_CASE("On 60 s elapsed during discover and the mode is BR_RUNNING: finishes done with children_detail:false on "
+          "every responding router", "[mesh_scan]")
+{
+    start();
+    mesh_scan_on_router(router(3, 1));
+    mesh_scan_on_router(router(9, 0));
+    mesh_scan_on_cap();
+    TEST_ASSERT_EQUAL(1, g_fake.cancel_calls);
+    TEST_ASSERT_EQUAL(0, g_fake.child_table_calls);
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_TRUE(res->partial);
+    TEST_ASSERT_FALSE(res->routers[3].children_detail);
+    TEST_ASSERT_FALSE(res->routers[9].children_detail);
+    TEST_ASSERT_EQUAL(1, res->routers[3].n_children); // discover data stays
 }
 
 TEST_CASE("On 60 s elapsed while the mode is not BR_RUNNING: state becomes failed with error stopped", "[mesh_scan]")

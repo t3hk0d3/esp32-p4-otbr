@@ -177,6 +177,24 @@ TEST_CASE("On done: omits the child-table fields of children under children_deta
     sink_free(&s);
 }
 
+TEST_CASE("On done: omits the child-table fields of a child the child table did not list, keeps its sibling's",
+          "[mesh_scan]")
+{
+    mesh_scan_result_t *result = sample_result();
+    mesh_scan_child_t *missing = &result->routers[3].children[1]; // 0x0c02
+
+    memset(missing->ext, 0, sizeof(missing->ext));
+    missing->has_ext = false;
+    const mesh_scan_view_t view = done_view(result);
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "{\"rloc16\":3074,\"mode\":{\"rx_on_when_idle\":false,\"full_thread_device\":false,"
+                    "\"full_network_data\":false},\"lq_in\":3,\"addresses\":[\"2001:db8:4a2:1::c02\"]}");
+    assert_contains(out, "{\"rloc16\":3073,\"ext_address\":\"3000000000000001\",");
+    sink_free(&s);
+}
+
 TEST_CASE("On done: writes rloc16 and partition_id as unsigned numbers, ext addresses as 16 lower-case hex digits",
           "[mesh_scan]")
 {
