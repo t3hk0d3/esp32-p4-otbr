@@ -16,11 +16,14 @@ TARGET_PYTEST ?= .venv/bin/pytest
 TEST ?=
 MARK ?=
 TIMEOUT ?= 900
+SIZES ?= build/sizes.json
+SIZES_BASE ?=
+SIZES_BASE_LABEL ?=
 
 IDF := $(if $(shell command -v idf.py),,. "$(IDF_EXPORT)" >/dev/null &&)
 board_url = $(if $(BOARD),http://$(BOARD),$(error set BOARD=<board address>, e.g. make $@ BOARD=192.168.1.50))
 
-.PHONY: help build build-test reconfigure clean flash monitor erase c6-flash-base bundle package ota radio recover \
+.PHONY: help build build-test reconfigure clean flash monitor erase c6-flash-base bundle package sizes sizes-report ota radio recover \
 	status test test-host test-vendored test-tools test-target lan-ping-up lan-ping-down lint routing-vectors
 
 help: ## List the targets
@@ -40,7 +43,7 @@ reconfigure: ## Refresh the P4 version stamp (the -dirty flag is as of the last 
 	$(IDF) idf.py -C p4 reconfigure
 
 clean: ## Remove all build directories and dist/
-	rm -rf c6_updater/build c6_rcp/build c6_installer/build p4/build $(DIST)
+	rm -rf c6_updater/build c6_rcp/build c6_installer/build p4/build $(DIST) $(SIZES)
 	find . -path ./.venv -prune -o -type d -name build -path '*/test_host/build' -print0 | xargs -0 rm -rf
 
 # --- flash over USB ---
@@ -68,6 +71,14 @@ bundle: ## Build the P4 OTA bundle dist/otbr.bundle from the current build
 
 package: ## Collect all release files into dist/ (what CI publishes)
 	$(IDF) tools/package_release.sh $(DIST)
+
+sizes: ## Image sizes and flash headroom of the current build into SIZES (default build/sizes.json), then sizes-report
+	tools/image_sizes.py collect --out $(SIZES)
+	@$(MAKE) -s --no-print-directory sizes-report
+
+sizes-report: ## Markdown table of SIZES; SIZES_BASE=<sizes.json of another build> adds the deltas (no ESP-IDF needed)
+	tools/image_sizes.py report $(SIZES) $(if $(SIZES_BASE),--base $(SIZES_BASE)) \
+		$(if $(SIZES_BASE_LABEL),--base-label "$(SIZES_BASE_LABEL)")
 
 ota: bundle ## Update the P4 app and web UI over the network (BOARD)
 	curl --fail-with-body --data-binary @$(DIST)/otbr.bundle $(board_url)/device/ota

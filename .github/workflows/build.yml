@@ -63,6 +63,68 @@ jobs:
           name: firmware
           path: dist/
           if-no-files-found: error
+      - name: Image sizes
+        run: make -s sizes SIZES=sizes/sizes.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sizes # master runs keep it as the base of the pull request size reports
+          path: sizes/sizes.json
+          if-no-files-found: error
+
+  # Posts the image sizes and their change against master as a pull request comment, updated on every push.
+  size-report:
+    if: github.event_name == 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read # the base sizes artifact of a master run
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: sizes
+          path: head
+      - name: Base sizes from master
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # The run of the PR's base commit, else the latest successful master run (the base commit's may be cancelled).
+          runs="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml --branch master --event push \
+            --status success --limit 50 --json databaseId,headSha)"
+          run="$(jq -r --arg sha "$BASE_SHA" '(map(select(.headSha == $sha)) + .)[0] | "\(.databaseId) \(.headSha)"' <<<"$runs")"
+          read -r id sha <<<"$run"
+          if [[ "$id" != null ]] && gh run download "$id" --repo "$GITHUB_REPOSITORY" --name sizes --dir base; then
+            label="master @ ${sha:0:7}"
+            [[ "$sha" == "$BASE_SHA" ]] || label+=" (the latest successful master build)"
+            echo "label=$label" >>"$GITHUB_OUTPUT"
+          else
+            echo "no master build with a sizes artifact"
+          fi
+      - name: Report
+        env:
+          LABEL: ${{ steps.base.outputs.label }}
+        run: |
+          make -s sizes-report SIZES=head/sizes.json SIZES_BASE=base/sizes.json SIZES_BASE_LABEL="$LABEL" >report.md
+          cat report.md >>"$GITHUB_STEP_SUMMARY"
+      - name: Comment
+        # A pull request from a fork gets a read-only token: the report stays in the job summary.
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          id="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- image-sizes -->"))) | .id' |
+            head -n 1)"
+          if [[ -n "$id" ]]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@report.md >/dev/null
+          else
+            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file report.md
+          fi
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
