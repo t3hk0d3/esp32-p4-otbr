@@ -6,7 +6,8 @@ ot-br-posix built with OTBR_TREL or another ESP Thread BR):
   1. `avahi-browse -rt _trel._udp` lists this board (TXT xa, xp) while Thread runs.
   2. Ethernet page, "Thread over Ethernet" card: Active, peers 1 or more, the peer table shows the other BR.
      `ot trel peers` on the console agrees; `ot neighbor table` lists the other BR.
-  3. Off: the card shows Off within a poll; the other BR loses the TREL peer; Thread devices stay reachable. On again.
+  3. Off: the card shows Off within a poll; the other BR marks it removed (its log; `trel peers` keeps it); Thread
+     devices stay reachable. On again.
   4. Split mode: from the mgmt VLAN, `nc -u <mgmt address> 12390` traffic never reaches OpenThread (the rx counter
      does not move).
   5. Sniffer start and stop: TREL is active again afterwards.
@@ -23,10 +24,12 @@ import time
 
 import pytest
 import requests
-from conftest import BOOT_TIMEOUT_S, ot
+from conftest import ot, wait_ot_state
 
 REQUEST_TIMEOUT_S = 10
-THREAD_UP = rb"br_core: Thread started with the stored dataset"
+# The board formed the network alone. Polled, not read from the log: base_url waits for the boot's address line, which
+# comes after "Thread started" and consumes it.
+LEADER_TIMEOUT_S = 60
 TREL_PEER = os.environ.get(
     "TREL_PEER", "otbr-trel"
 )  # container of tools/trel_peer/up.sh
@@ -79,7 +82,7 @@ def test_network_config_carries_trel(base_url):
 
 
 def test_trel_switches_live_without_a_reboot(dut, stored_dataset, base_url):
-    dut.expect(THREAD_UP, timeout=BOOT_TIMEOUT_S)
+    wait_ot_state(dut, {"leader"}, LEADER_TIMEOUT_S)
     try:
         reply = put_trel(base_url, False)
         assert reply.status_code == 200, reply.text
@@ -203,7 +206,7 @@ def packets(trel):
 
 def linked_over_trel(dut, base_url, trel_peer, tlvs):
     """Join the peer to the board's network and wait until both use TREL towards each other; the board's ext address."""
-    dut.expect(THREAD_UP, timeout=BOOT_TIMEOUT_S)
+    wait_ot_state(dut, {"leader"}, LEADER_TIMEOUT_S)
     board = ot(dut, "extaddr")[-1]
     trel_peer.join(tlvs)
     wait_for(
@@ -229,12 +232,8 @@ def linked_over_trel(dut, base_url, trel_peer, tlvs):
     return board
 
 
-def test_board_links_with_a_trel_border_router(
-    dut, stored_dataset, base_url, trel_peer
-):
-    # On a second border router of the same network on the backbone link: both find each other over DNS-SD, the
-    # peer's link to the board uses TREL next to 15.4, and TREL packets flow in both directions on the board.
-    linked_over_trel(dut, base_url, trel_peer, stored_dataset)
+def wait_for_traffic(base_url):
+    """Wait until the board has both sent and received TREL packets since the call."""
     before = packets(status(base_url))
 
     def both_grew():
@@ -244,6 +243,15 @@ def test_board_links_with_a_trel_border_router(
     wait_for(
         both_grew, TRAFFIC_TIMEOUT_S, "TREL packets sent and received by the board"
     )
+
+
+def test_board_links_with_a_trel_border_router(
+    dut, stored_dataset, base_url, trel_peer
+):
+    # On a second border router of the same network on the backbone link: both find each other over DNS-SD, the
+    # peer's link to the board uses TREL next to 15.4, and TREL packets flow in both directions on the board.
+    linked_over_trel(dut, base_url, trel_peer, stored_dataset)
+    wait_for_traffic(base_url)
     peer_entry = status(base_url)["peer_list"][0]
     assert peer_entry["ext_address"] and peer_entry["address"]
 
@@ -251,26 +259,29 @@ def test_board_links_with_a_trel_border_router(
 def test_trel_off_ends_the_link_and_on_brings_it_back(
     dut, stored_dataset, base_url, trel_peer
 ):
-    # On TREL switched off on the board: the board leaves the peer's TREL peer table and the peer stops using TREL
-    # towards it; Thread stays up over 15.4. Switched on again: the TREL link returns, all without a reboot.
+    # On TREL switched off on the board: TREL is inactive with no peers and no TREL packet moves; Thread stays up over
+    # 15.4. Switched on again: the board finds the peer, the peer uses TREL towards it and packets flow, all without a
+    # reboot. The peer's `trel peers` is no witness: OpenThread keeps a peer whose service was removed (it only marks
+    # its DNS-SD state, which the CLI does not show).
     board = linked_over_trel(dut, base_url, trel_peer, stored_dataset)
     try:
         assert put_trel(base_url, False).status_code == 200
-        wait_for(
-            lambda: board not in trel_peer.trel_peers(),
-            LINK_TIMEOUT_S,
-            "the board to leave the peer's TREL peers",
-        )
+        trel = status(base_url)
+        assert (trel["active"], trel["peers"]) == (False, 0)
+        before = packets(trel)
+        time.sleep(TRAFFIC_TIMEOUT_S / 3)
+        assert packets(status(base_url)) == before
         assert trel_peer.command("state")[-1] in ("child", "router", "leader")
     finally:
         assert put_trel(base_url, True).status_code == 200
     wait_for(
-        lambda: board in trel_peer.trel_peers(),
+        lambda: (status(base_url)["peers"] or 0) >= 1,
         LINK_TIMEOUT_S,
-        "the board back in the peer's TREL peers",
+        "the peer back on the board",
     )
     wait_for(
         lambda: "TREL" in trel_peer.radios_of(board),
         LINK_TIMEOUT_S,
         "the TREL link back",
     )
+    wait_for_traffic(base_url)
