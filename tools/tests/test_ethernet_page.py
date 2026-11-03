@@ -997,7 +997,7 @@ class TestTrelLogic:
         v = eth(
             "L.trelView({enabled: true, active: true, peers: 1, peers_other: 2}, 'single')"
         )
-        assert [v["peers"], v["peersOther"]] == ["1", "+ 2 other network"]
+        assert [v["peers"], v["peersOther"]] == ["1", "+ 2 other networks"]
 
     def test_no_other_network_count_without_foreign_peers(self):
         assert (
@@ -1013,25 +1013,22 @@ class TestTrelLogic:
             == ""
         )
 
-    def test_trel_below_the_radio_is_low(self):
+    def test_peer_preference_parts_mark_a_low_trel(self):
         r = eth(
-            "L.trelPeerView({same_network: true, preference: {ieee802154: 230, trel: 55}})"
+            "L.trelPeerView({same_network: true, preference: {ieee802154: 230, trel: 55}}).prefParts"
         )
-        assert [r["prefTrel"], r["pref154"], r["trelLow"]] == [55, 230, True]
-
-    def test_trel_at_or_above_the_radio_or_alone_is_not_low(self):
-        assert (
-            eth("L.trelPeerView({preference: {ieee802154: 200, trel: 255}}).trelLow")
-            is False
-        )
-        assert (
-            eth("L.trelPeerView({preference: {ieee802154: null, trel: 55}}).trelLow")
-            is False
-        )
+        assert r == [
+            {"text": "15.4 230", "low": False},
+            {"text": " \u00b7 ", "low": False},
+            {"text": "TREL ", "low": False},
+            {"text": "55", "low": True},
+        ]
 
     def test_non_neighbour_has_no_preference(self):
-        r = eth("L.trelPeerView({same_network: false, preference: null})")
-        assert [r["prefTrel"], r["pref154"], r["trelLow"]] == [None, None, False]
+        assert (
+            eth("L.trelPeerView({same_network: false, preference: null}).prefParts")
+            == []
+        )
 
 
 @needs_node
@@ -1092,7 +1089,7 @@ class TestTrelCard:
             return cells.map((td) => [td.allText().replace(/\s+/g, ' '), td.findAll((e) => e.className === 'pref-low').length]);
         """
         )
-        assert r == [["TREL 255 \u00b7 15.4 255", 0], ["TREL 55 \u00b7 15.4 230", 1]]
+        assert r == [["15.4 255 \u00b7 TREL 255", 0], ["15.4 230 \u00b7 TREL 55", 1]]
 
     def test_preference_of_a_non_neighbour_is_a_dash(self):
         r = scenario(

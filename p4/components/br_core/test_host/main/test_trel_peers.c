@@ -21,7 +21,7 @@ static br_core_trel_raw_peer_t peer(uint8_t id, const uint8_t pan[8])
 static void sort_one(const uint8_t *own, br_core_trel_raw_peer_t p)
 {
     memset(&out, 0, sizeof(out));
-    br_core_trel_sort_init(&sort, own);
+    br_core_trel_sort_init(&sort, own, false);
     br_core_trel_sort_add(&sort, &p);
     br_core_trel_sort_finish(&sort, &out);
 }
@@ -90,7 +90,7 @@ TEST_CASE("On a peer that is not a neighbour: preference is absent", "[trel_peer
 
 TEST_CASE("On more than 8 peers, foreign ones first: this network's peers lead a list of at most 8", "[trel_peers]")
 {
-    br_core_trel_sort_init(&sort, OWN);
+    br_core_trel_sort_init(&sort, OWN, false);
     for (uint8_t i = 0; i < 10; i++) {
         br_core_trel_raw_peer_t p = peer(0x10 + i, FOREIGN);
         br_core_trel_sort_add(&sort, &p);
@@ -112,7 +112,7 @@ TEST_CASE("On more than 8 peers, foreign ones first: this network's peers lead a
 
 TEST_CASE("On more than 8 peers: both counts cover the whole table", "[trel_peers]")
 {
-    br_core_trel_sort_init(&sort, OWN);
+    br_core_trel_sort_init(&sort, OWN, false);
     for (uint8_t i = 0; i < 10; i++) {
         br_core_trel_raw_peer_t p = peer(0x10 + i, FOREIGN);
         br_core_trel_sort_add(&sort, &p);
@@ -129,9 +129,23 @@ TEST_CASE("On more than 8 peers: both counts cover the whole table", "[trel_peer
 TEST_CASE("On an empty table: both counts 0, empty list", "[trel_peers]")
 {
     memset(&out, 0xff, sizeof(out));
-    br_core_trel_sort_init(&sort, OWN);
+    br_core_trel_sort_init(&sort, OWN, false);
     br_core_trel_sort_finish(&sort, &out);
     TEST_ASSERT_EQUAL(0, out.peers);
     TEST_ASSERT_EQUAL(0, out.peers_other);
+    TEST_ASSERT_EQUAL(0, out.peer_count);
+}
+
+TEST_CASE("On a count-only sort: counts both networks, lists no peer", "[trel_peers]")
+{
+    br_core_trel_raw_peer_t mine = peer(1, OWN), theirs = peer(2, FOREIGN);
+
+    memset(&out, 0, sizeof(out));
+    br_core_trel_sort_init(&sort, OWN, true);
+    br_core_trel_sort_add(&sort, &mine);
+    br_core_trel_sort_add(&sort, &theirs);
+    br_core_trel_sort_finish(&sort, &out);
+    TEST_ASSERT_EQUAL(1, out.peers);
+    TEST_ASSERT_EQUAL(1, out.peers_other);
     TEST_ASSERT_EQUAL(0, out.peer_count);
 }

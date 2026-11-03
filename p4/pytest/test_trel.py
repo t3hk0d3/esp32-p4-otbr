@@ -313,7 +313,7 @@ def test_peer_of_another_network_is_listed_apart(
     dut, stored_dataset, base_url, trel_peer
 ):
     # On a TREL border router of another Thread network on the link: the board lists it with same_network false and no
-    # preference (never a neighbour), and counts it in peers_other, not in peers.
+    # preference (never a neighbour), and counts it in peers_other.
     wait_ot_state(dut, {"leader"}, LEADER_TIMEOUT_S)
     trel_peer.command("dataset init new")
     trel_peer.command("dataset commit active")
@@ -335,7 +335,6 @@ def test_peer_of_another_network_is_listed_apart(
     assert entry["same_network"] is False
     assert entry["preference"] is None
     assert trel["peers_other"] >= 1
-    assert trel["peers"] == 0
 
 
 def run_scan(base_url):

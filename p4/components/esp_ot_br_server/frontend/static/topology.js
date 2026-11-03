@@ -11,6 +11,7 @@
 'use strict';
 
 var TopologyLogic = (function() {
+var C = typeof DeviceCommon !== 'undefined' ? DeviceCommon : require('./device_common.js');
 
 var LAST_KEY = 'topology:last';
 var NAMES_KEY = 'topology:names';
@@ -228,10 +229,6 @@ function routerLinks(result) {
 
 var TREL_HIGH_PREFERENCE = 220; // OpenThread kHighPreference (radio_selector.hpp)
 
-function prefOf(transport, radio) {
-  return transport && typeof transport[radio] === 'number' ? transport[radio] : null;
-}
-
 /**
  * The radio OpenThread sends on, as RadioSelector::Select picks it: radios are tried TREL first, then 15.4; the first
  * with a preference of at least 220 wins; when none reaches 220 the higher preference wins, a tie going to TREL. A
@@ -240,7 +237,7 @@ function prefOf(transport, radio) {
 function sendsOver(transport) {
   var order = ['trel', 'ieee802154'], best = null, bestPref = -1;
   for (var i = 0; i < order.length; i++) {
-    var p = prefOf(transport, order[i]);
+    var p = C.radioPref(transport, order[i]);
     if (p === null)
       continue;
     if (p >= TREL_HIGH_PREFERENCE)
@@ -253,25 +250,10 @@ function sendsOver(transport) {
   return best;
 }
 
-/** TREL's preference is below 15.4's: the tunnel is losing to the radio (shown red). */
-function trelLow(transport) {
-  var trel = prefOf(transport, 'trel'), radio = prefOf(transport, 'ieee802154');
-  return trel !== null && radio !== null && trel < radio;
-}
-
-/** [{text, low}] of "15.4 255 · TREL 55, sends over 15.4"; low marks the TREL figure when trelLow. */
+/** [{text, low}] of "15.4 255 · TREL 55, sends over 15.4"; low marks the TREL figure when it is below 15.4's. */
 function transportParts(transport) {
-  var radio = prefOf(transport, 'ieee802154'), trel = prefOf(transport, 'trel');
-  var parts = [];
-  if (radio !== null)
-    parts.push({text : '15.4 ' + radio, low : false});
-  if (radio !== null && trel !== null)
-    parts.push({text : ' \u00b7 ', low : false});
-  if (trel !== null) {
-    parts.push({text : 'TREL ', low : false});
-    parts.push({text : String(trel), low : trelLow(transport)});
-  }
-  if (radio !== null && trel !== null)
+  var parts = C.preferenceParts(transport);
+  if (C.radioPref(transport, 'ieee802154') !== null && C.radioPref(transport, 'trel') !== null)
     parts.push({text : ', sends over ' + (sendsOver(transport) === 'trel' ? 'TREL' : '15.4'), low : false});
   return parts;
 }
@@ -824,7 +806,7 @@ return {
   devices : devices,
   routerLinks : routerLinks,
   sendsOver : sendsOver,
-  trelLow : trelLow,
+  trelLow : C.trelLow,
   transportParts : transportParts,
   transportText : transportText,
   linkText : linkText,

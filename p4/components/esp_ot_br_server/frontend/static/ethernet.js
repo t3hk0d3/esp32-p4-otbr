@@ -283,24 +283,18 @@ function count(n) {
  * What the TREL card shows for the "trel" object of GET /device/status (null in a build without TREL: no card) and the
  * running mode: {available, chip, chipClass, where, peers, tx, rx, failures, peerList, hint}.
  */
-/* Preference value or null: a number 0..255, anything else (null, missing) is "radio not used". */
-function pref(p, radio) { return p && typeof p[radio] === 'number' ? p[radio] : null; }
-
 /*
  * One row of the TREL peer table. `preference` is null for a peer that is not a Thread neighbour (every peer of another
- * network); trelLow: TREL's preference is below 15.4's, the tunnel is losing to the radio.
+ * network): no preference parts, shown "-".
  */
 function trelPeerView(p) {
-  var trel = pref(p.preference, 'trel'), radio = pref(p.preference, 'ieee802154');
   return {
     ext_address : p.ext_address,
     address : p.address,
     panId : p.ext_pan_id || '-',
     network : p.same_network ? 'this' : 'other',
     networkClass : p.same_network ? 'chip chip-ok' : 'chip chip-bad',
-    prefTrel : trel,
-    pref154 : radio,
-    trelLow : trel !== null && radio !== null && trel < radio
+    prefParts : C.preferenceParts(p.preference)
   };
 }
 
@@ -312,7 +306,7 @@ function trelView(trel, mode) {
     available : true,
     where : mode === 'split' ? 'On Thread backbone' : 'On Ethernet port',
     peers : count(trel.peers),
-    peersOther : other > 0 ? '+ ' + count(other) + ' other network' : '',
+    peersOther : other > 0 ? '+ ' + count(other) + (other === 1 ? ' other network' : ' other networks') : '',
     tx : count(trel.tx_packets),
     rx : count(trel.rx_packets),
     failures : count(trel.tx_failures),
@@ -568,17 +562,10 @@ function renderTrel() {
   setText('trel-hint', v.hint);
 }
 
-/* "TREL 255 · 15.4 200", the TREL figure red when it is below 15.4's; "-" for a peer that is not a neighbour. */
+/* "15.4 200 · TREL 255", the TREL figure red when it is below 15.4's; "-" for a peer that is not a neighbour. */
 function preferenceCell(p) {
-  var td = el('td', p.prefTrel === null && p.pref154 === null ? '-' : '');
-  if (p.prefTrel !== null) {
-    td.appendChild(el('span', 'TREL '));
-    td.appendChild(el('span', String(p.prefTrel), p.trelLow ? 'pref-low' : ''));
-  }
-  if (p.prefTrel !== null && p.pref154 !== null)
-    td.appendChild(el('span', ' \u00b7 '));
-  if (p.pref154 !== null)
-    td.appendChild(el('span', '15.4 ' + p.pref154));
+  var td = el('td', p.prefParts.length ? '' : '-');
+  p.prefParts.forEach(function(part) { td.appendChild(el('span', part.text, part.low ? 'pref-low' : '')); });
   return td;
 }
 

@@ -130,10 +130,10 @@ static void read_trel(otInstance *ins, metrics_thread_t *t)
     static br_core_trel_t trel; // the collector task only; kept off its stack
 
     memset(&trel, 0, sizeof(trel));
-    br_core_trel_read_locked(ins, &trel); // the same peer walk as /device/status: both count alike
+    br_core_trel_read_locked(ins, &trel, false); // the same walk as /device/status, counts only: both report alike
     t->trel.built = true;
     t->trel.enabled = br_core_trel_wanted();
-    t->trel.active = otTrelIsEnabled(ins);
+    t->trel.active = trel.active;
     t->trel.peers = trel.peers;
     t->trel.peers_other = trel.peers_other;
     t->trel.tx_packets = trel.tx_packets;

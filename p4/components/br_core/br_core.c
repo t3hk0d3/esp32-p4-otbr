@@ -845,7 +845,7 @@ bool br_core_trel_wanted(void)
 static br_core_trel_sort_t s_trel_sort;
 #endif
 
-void br_core_trel_read_locked(otInstance *instance, br_core_trel_t *out)
+void br_core_trel_read_locked(otInstance *instance, br_core_trel_t *out, bool with_peers)
 {
 #if CONFIG_OPENTHREAD_RADIO_TREL
     const otTrelCounters *counters = otTrelGetCounters(instance);
@@ -863,7 +863,7 @@ void br_core_trel_read_locked(otInstance *instance, br_core_trel_t *out)
     }
     // Without an active dataset the board has no network: every peer is another network's.
     br_core_trel_sort_init(&s_trel_sort,
-                           otDatasetIsCommissioned(instance) ? otThreadGetExtendedPanId(instance)->m8 : NULL);
+                           otDatasetIsCommissioned(instance) ? otThreadGetExtendedPanId(instance)->m8 : NULL, !with_peers);
     otTrelInitPeerIterator(instance, &iterator);
     while ((peer = otTrelGetNextPeer(instance, &iterator)) != NULL) {
         char sock_address[OT_IP6_SOCK_ADDR_STRING_SIZE];
@@ -872,6 +872,10 @@ void br_core_trel_read_locked(otInstance *instance, br_core_trel_t *out)
 
         memcpy(raw.ext_address, peer->mExtAddress.m8, sizeof(raw.ext_address));
         memcpy(raw.ext_pan_id, peer->mExtPanId.m8, sizeof(raw.ext_pan_id));
+        if (!with_peers) { // counted by its network only
+            br_core_trel_sort_add(&s_trel_sort, &raw);
+            continue;
+        }
         otIp6SockAddrToString(&peer->mSockAddr, sock_address, sizeof(sock_address));
         if (otMultiRadioGetNeighborInfo(instance, &peer->mExtAddress, &radios) == OT_ERROR_NONE) {
             raw.neighbor = true;
@@ -905,7 +909,7 @@ void br_core_get_trel(br_core_trel_t *out)
         br_core_ot_session_end();
         return;
     }
-    br_core_trel_read_locked(esp_openthread_get_instance(), out);
+    br_core_trel_read_locked(esp_openthread_get_instance(), out, true);
     esp_openthread_lock_release();
     br_core_ot_session_end();
 #endif

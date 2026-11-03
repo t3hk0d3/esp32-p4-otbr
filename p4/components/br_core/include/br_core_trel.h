@@ -48,6 +48,7 @@ typedef struct {
 
 /** Collects the whole peer table: counts every peer, keeps the first BR_CORE_TREL_PEERS_MAX of each network kind. */
 typedef struct {
+    bool count_only; /**< count the peers, keep no list */
     bool has_own;
     uint8_t own_ext_pan_id[8];
     uint16_t same, other;
@@ -56,8 +57,11 @@ typedef struct {
     br_core_trel_peer_t other_list[BR_CORE_TREL_PEERS_MAX];
 } br_core_trel_sort_t;
 
-/** Start a sort. `own_ext_pan_id`: the board's extended PAN ID, NULL when it has none (no active dataset). */
-void br_core_trel_sort_init(br_core_trel_sort_t *s, const uint8_t *own_ext_pan_id);
+/**
+ * Start a sort. `own_ext_pan_id`: the board's extended PAN ID, NULL when it has none (no active dataset). With
+ * `count_only`, peers are counted but not listed (finish writes peer_count 0).
+ */
+void br_core_trel_sort_init(br_core_trel_sort_t *s, const uint8_t *own_ext_pan_id, bool count_only);
 
 void br_core_trel_sort_add(br_core_trel_sort_t *s, const br_core_trel_raw_peer_t *peer);
 

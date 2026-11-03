@@ -10,9 +10,10 @@ static void hex8(char out[17], const uint8_t in[8])
     }
 }
 
-void br_core_trel_sort_init(br_core_trel_sort_t *s, const uint8_t *own_ext_pan_id)
+void br_core_trel_sort_init(br_core_trel_sort_t *s, const uint8_t *own_ext_pan_id, bool count_only)
 {
     memset(s, 0, sizeof(*s));
+    s->count_only = count_only;
     if (own_ext_pan_id) {
         s->has_own = true;
         memcpy(s->own_ext_pan_id, own_ext_pan_id, sizeof(s->own_ext_pan_id));
@@ -30,7 +31,7 @@ void br_core_trel_sort_add(br_core_trel_sort_t *s, const br_core_trel_raw_peer_t
     } else {
         s->other++;
     }
-    if (*n >= BR_CORE_TREL_PEERS_MAX) {
+    if (s->count_only || *n >= BR_CORE_TREL_PEERS_MAX) {
         return;
     }
     br_core_trel_peer_t *entry = &list[(*n)++];

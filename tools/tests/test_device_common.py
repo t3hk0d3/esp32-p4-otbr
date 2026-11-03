@@ -122,6 +122,42 @@ class TestCommonLogic:
 
 
 @needs_node
+class TestRadioPreference:
+    """radioPref, trelLow, preferenceParts: OpenThread's per-radio preference of a Thread neighbour"""
+
+    def test_trel_below_the_radio_is_low(self):
+        assert common("L.trelLow({ieee802154: 230, trel: 55})") is True
+
+    def test_trel_at_or_above_the_radio_is_not_low(self):
+        assert common("L.trelLow({ieee802154: 200, trel: 255})") is False
+        assert common("L.trelLow({ieee802154: 200, trel: 200})") is False
+
+    def test_trel_alone_or_no_preference_is_not_low(self):
+        assert common("L.trelLow({ieee802154: null, trel: 55})") is False
+        assert common("L.trelLow(null)") is False
+
+    def test_parts_read_15_4_then_trel_with_the_low_figure_marked(self):
+        r = common("L.preferenceParts({ieee802154: 230, trel: 55})")
+        assert "".join(p["text"] for p in r) == "15.4 230 \u00b7 TREL 55"
+        assert [p["text"] for p in r if p["low"]] == ["55"]
+
+    def test_parts_of_one_radio_or_none(self):
+        assert (
+            common(
+                "L.preferenceParts({ieee802154: null, trel: 255}).map((p) => p.text).join('')"
+            )
+            == "TREL 255"
+        )
+        assert (
+            common(
+                "L.preferenceParts({ieee802154: 255, trel: null}).map((p) => p.text).join('')"
+            )
+            == "15.4 255"
+        )
+        assert common("L.preferenceParts(null)") == []
+
+
+@needs_node
 class TestLimits:
     """Client-side size limits against the device's own"""
 

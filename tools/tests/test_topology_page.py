@@ -1644,10 +1644,10 @@ class TestTrelMap:
     def test_dialog_names_both_preferences_the_radio_in_use_and_the_lqi_caveat(self):
         r = run(
             self.LOAD_TR
-            + " node('r9').click(); return t.el('t-d-neighbors').children.map((c) => c.allText().replace(/\\s+/g, ' '));"
+            + " node('r9').click(); return t.el('t-d-neighbors').children.map((c) => c.allText().replace(/\\s+/g, ' ').replace(/ ,/g, ','));"
         )
         assert r[1] == (
-            "This border router LQI 3 15.4 230 \u00b7 TREL 55 , sends over 15.4 link quality includes TREL frames"
+            "This border router LQI 3 15.4 230 \u00b7 TREL 55, sends over 15.4 link quality includes TREL frames"
         )
 
     def test_dialog_marks_a_low_trel_figure_red(self):
@@ -1661,8 +1661,8 @@ class TestTrelMap:
     def test_connected_via_names_the_boards_transport_to_that_router(self):
         r = run(
             self.LOAD_TR
-            + " return [row('r9').children[2].allText().replace(/\\s+/g, ' '),"
+            + " return [row('r9').children[2].allText().replace(/\\s+/g, ' ').replace(/ ,/g, ','),"
             " row('r23').children[2].allText()];"
         )
-        assert r[0] == "3 router neighbors 15.4 230 \u00b7 TREL 55 , sends over 15.4"
+        assert r[0] == "3 router neighbors 15.4 230 \u00b7 TREL 55, sends over 15.4"
         assert "TREL" not in r[1]
