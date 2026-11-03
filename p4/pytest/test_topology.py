@@ -78,14 +78,18 @@ def in_prefix(address, prefixes):
 
 
 @pytest.fixture
-def scan(request, dut, peer, base_url):
+def scan(request, dut, peer):
     """One finished scan of the rig, with what the checks compare it against.
 
     Returns a dict: result (the `result` object), peer_state, peer_ext (hex, lower case), router_ids (the board's
-    router table, read just before the scan)."""
+    router table, read just before the scan).
+
+    thread_peer_address comes before base_url: it orders stored_dataset before board_ip, and the dataset store may
+    reboot the board, so board_ip must wait for the address of the final boot (see its docstring)."""
     request.getfixturevalue(
         "thread_peer_address"
     )  # the peer is attached, with an OMR address
+    base_url = request.getfixturevalue("base_url")
     peer_state = peer.wait_state({"child", "router", "leader"}, 30)
     peer_ext = peer.command("extaddr")[-1].lower()
     router_ids = board_router_ids(dut)
