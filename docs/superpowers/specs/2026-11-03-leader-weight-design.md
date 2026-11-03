@@ -1,0 +1,136 @@
+# Leader weight and "Become leader": design
+
+Date: 2026-11-03. Status: draft, awaiting approval. Mockup: https://claude.ai/artifact/DHVssN3ZEPZXetCP8KTECj (Leader card on the Network
+page, and its four states).
+
+## 1. Purpose and scope
+
+On a Thread network shared with a Linux border router (ot-br-posix), the Linux one always ends up as leader. Both report
+the same leader weight (65), so nothing in Thread prefers this board, and a healthy leader is never replaced anyway.
+The user wants to make this board the leader and keep it there through later partition merges.
+
+In scope: a stored leader weight adjustment, applied whenever Thread starts and live; a "Become leader" action; an API
+for both; a Leader card on the Network page showing this board's and the current leader's weight; docs; tests.
+
+Out of scope: an automatic take-over (the board never takes over on its own), the other device properties (power
+supply, CCM), metrics, a Dashboard change, changing the weight of other border routers.
+
+## 2. Facts this design rests on (checked in IDF 6.1's OpenThread)
+
+- Thread version 1.4 is the default, so `OPENTHREAD_CONFIG_MLE_DEVICE_PROPERTY_LEADER_WEIGHT_ENABLE` is on and
+  `otThreadSetDeviceProperties` exists. The weight is `DeviceProperties::CalculateLeaderWeight`: base 64, +1 for a border
+  router (`mIsBorderRouter` is preset when border routing is built in), +0 for the default power supply
+  (`OPENTHREAD_CONFIG_DEVICE_POWER_SUPPLY` = external), plus `mLeaderWeightAdjustment`, clamped to −16..+16. So this
+  board is 65 today, and 49..81 with the adjustment.
+- `Mle::ComparePartitions` orders partitions by leader weight first, then non-singleton, then partition ID. The weight
+  only matters when partitions meet (after a leader loss or a split); a router that joins a partition never displaces
+  its leader.
+- `otThreadBecomeLeader` starts a new partition with this device as leader. While attached it refuses with
+  `OT_ERROR_NOT_CAPABLE` unless the local weight is strictly greater than the current leader's
+  (`otThreadGetLeaderWeight`), or when the device may not be a router. Other errors: `OT_ERROR_INVALID_STATE` when
+  Thread is disabled or the dataset is incomplete.
+- `otThreadSetDeviceProperties` updates the local weight at once. The partition's advertised weight is fixed when its
+  leader takes the role, so a change made while this board is leader shows in the partition only after the next
+  partition this board forms.
+- OpenThread does not store device properties; the firmware has to apply them at every start.
+
+## 3. Decisions
+
+| Topic | Decision |
+| --- | --- |
+| Setting | one integer, the weight adjustment, −16..+16, default 0. Nothing else of the device properties is exposed |
+| Storage | NVS, its own namespace `leader`, key `adj` (i8), written only when the value changes; survives reboot and firmware updates; not touched by `net reset` |
+| Apply | at every Thread bring-up before Thread is enabled; live under the OpenThread lock in `BR_RUNNING` |
+| API, read | `GET /device/leader` |
+| API, setting | `PUT /device/leader` `{"adjustment": n}`: `200` with the GET body plus `"applied": true`, or `false` when not `BR_RUNNING` or the OpenThread lock was not free within 1 s (stored, applied at the next start). Errors in the style of `/device/names`: 400 `invalid_config` with `field` `adjustment` (missing, not an integer, outside −16..16) or `body`, `length_required`, `invalid_request`; 413 `payload_too_large`; 500 `storage_failed` |
+| API, take over | `POST /device/leader/take-over` (no body): `202 {"started": true}`. 409 `cannot_take_over` with `detail` `weight not higher` (the leader's weight is equal or higher), `already leader`, `not attached` (detached or disabled), `not router eligible`; 409 `busy` with `detail` `mode <MODE>` when not `BR_RUNNING`; 503 `busy` `OpenThread is busy, retry` when the lock was not free within 1 s |
+| Take-over trigger | only the button (the POST). Never automatic, never at boot |
+| Take-over persistence | none: only the weight is stored |
+| Modes | the setting can be saved in every mode; take-over only in `BR_RUNNING` |
+| Access | the same as `/device/names`: routes registered in `device_api.c`'s table next to it, served and gated the same way |
+| Router eligible | `otThreadIsRouterEligible` (input to the take-over decision) |
+| Live apply fails | the value stays stored; PUT answers 200 with `"applied": false` and a `detail` naming the failure (as `/device/names` does) |
+| UI placement | a "Leader" card at the top of the Network page (`network.html`) |
+| Slider | applies on Save, not while dragging; the label shows the resulting weight and "not saved" while it differs |
+| Button | greyed out unless the saved weight is strictly greater than the leader's, this board is not the leader, and there is no unsaved slider change; the hint says why |
+| Confirm | a dialog before the POST, listing the effects |
+| Leader name | "this board" when this board is leader; else the nickname from the Topology page's localStorage key `topology:names` (`{ext: nickname}`, written by `static/topology.js`) when `ext_address` is known and has one; else `router 0x<rloc16>`. `leader.js` reads the key itself (unreadable or missing: no nickname) |
+
+### `GET /device/leader`
+
+```json
+{
+  "adjustment": 8,
+  "weight": 73,
+  "base_weight": 65,
+  "role": "router",
+  "partition_id": 305419896,
+  "leader": {"rloc16": "0x2c00", "router_id": 11, "ext_address": "1a2b3c4d5e6f7a8b", "weight": 65},
+  "can_take_over": true
+}
+```
+
+- `adjustment`: the stored value; always present.
+- `weight`: `otThreadGetLocalLeaderWeight`; `base_weight` = `weight − adjustment` (what the UI shows as "base"). Both are
+  omitted when OpenThread is not running.
+- `role`: `disabled`, `detached`, `child`, `router`, `leader` (the strings the REST API and the metrics already use);
+  omitted when OpenThread is not running.
+- `partition_id` and `leader`: omitted unless attached. `leader.weight` is `otThreadGetLeaderWeight`; `ext_address` comes
+  from the router table entry of the leader's router ID and is omitted when the entry is not known. When this board is
+  leader, `leader` describes this board.
+- `can_take_over`: the same test the POST makes (attached, not leader, router eligible, `weight > leader.weight`).
+- Read with a bounded OpenThread lock wait like the other Thread reads; on a timeout the Thread fields are omitted and
+  `"partial": true` is added.
+
+## 4. Architecture
+
+- `br_core` (owns OpenThread):
+  - `esp_err_t br_core_set_leader_adjustment(int8_t adj)`: range check, NVS write when changed, live apply in
+    `BR_RUNNING` (`otThreadGetDeviceProperties`, change `mLeaderWeightAdjustment`, `otThreadSetDeviceProperties`).
+    Returns whether it was applied or only saved.
+  - `int8_t br_core_leader_adjustment(void)`: the stored value; never takes a lock.
+  - `void br_core_get_leader(br_core_leader_t *out)`: the read for `GET`.
+  - `esp_err_t br_core_become_leader(void)`: checks and `otThreadBecomeLeader` under the lock; maps the OpenThread errors
+    to the reasons in section 3.
+  - Bring-up applies the stored adjustment next to the TREL setting, before Thread is enabled.
+  - A pure helper decides `can_take_over` and the take-over refusal reason from (mode, role, router eligible, local
+    weight, leader weight), so both are host-tested.
+- `device_api`: the three handlers, JSON in and out, error replies through the existing `json_err` helpers.
+- Web UI: the Leader card on `network.html` and a new `static/leader.js` (ES5 like the other pages). It polls
+  `GET /device/leader` every 5 s while the page is visible, and every 1 s for 30 s after a take-over until `role` is
+  `leader`. The card shows the role, both weights with this board's breakdown (base and adjustment), a 48..96 scale
+  with both markers, a one-line verdict (lower / equal / higher / this board is the leader), the slider with Save, the
+  Become leader button with its hint, and an open "What Become leader does" box:
+  1. This board starts a new partition with itself as leader: same network, same devices.
+  2. The other routers, the old leader included, join it; their end devices follow.
+  3. Mesh traffic can drop for a few seconds; addresses and pairings don't change.
+  4. The dataset doesn't change; the old leader keeps working as a border router.
+  Afterwards: only the weight is stored. If this board restarts or is offline for more than about 2 minutes, another
+  router takes over and keeps the role, so press the button again. Why greyed out: OpenThread only takes over from a
+  leader with a strictly lower weight.
+  When OpenThread is not running the card shows the stored adjustment, keeps Save working, and hides the comparison.
+- Docs: the three rows in the Device API table of `docs/api.md`; a subsection "Choosing the leader" under "Adding more
+  border routers" in `docs/api.md` (why another border router stays leader, the adjustment, the button).
+
+## 5. Testing
+
+- Host tests: the take-over decision helper (every reason), adjustment range and JSON parsing, the GET JSON writer.
+- Frontend tests in `tools/tests/` with the existing fake-DOM harness: button state and hint for lower / equal /
+  higher / leader / unsaved, Save enablement, the leader name fallback.
+- The on-board test is written in the plan but run in the batched hardware pass after review and fixes, not inside a
+  task. Until then the "Afterwards" text is provisional (section 6).
+- On the board, with the Thread peer (ot_cli on the C6 devkit) as the other router: the peer forms the network and is
+  leader with weight 65 (`leaderweight`); the board joins; take-over is refused (`weight not higher`); adjustment +1;
+  take-over succeeds and the board becomes leader while the peer stays attached as a router; the adjustment survives a
+  reboot. With the peer at `leaderweight 81`, +16 still refuses.
+
+## 6. Risks
+
+- What happens when this board, as leader, restarts quickly: OpenThread may resume the leader role on reattach instead
+  of joining the other partition. The "Afterwards" text says "about 2 minutes"; check it on the board and correct the
+  text if the behaviour differs.
+- ot-br-posix may set a higher weight on some builds (CCM border router: 72, stable power: +4). Up to 81 is reachable
+  with +16; above that the button stays greyed out and the hint says so.
+- A take-over interrupts mesh traffic for a few seconds; the confirm dialog says so.
+- Two boards of this firmware with high adjustments and both clicking take over: OpenThread's strict comparison keeps
+  them from flipping back and forth; equal weights refuse.
