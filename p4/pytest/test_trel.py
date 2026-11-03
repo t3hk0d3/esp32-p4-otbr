@@ -83,11 +83,11 @@ def test_trel_switches_live_without_a_reboot(dut, stored_dataset, base_url):
     try:
         reply = put_trel(base_url, False)
         assert reply.status_code == 200, reply.text
-        assert reply.json()["status"] in ("applied", "saved")
+        assert reply.json()["status"] == "applied"
         assert active_config(base_url)["trel"] is False
         trel = status(base_url)
         assert trel["enabled"] is False
-        assert trel["active"] in (False, None)
+        assert trel["active"] is False
         assert (
             requests.get(
                 f"{base_url}/device/network", timeout=REQUEST_TIMEOUT_S
@@ -99,7 +99,7 @@ def test_trel_switches_live_without_a_reboot(dut, stored_dataset, base_url):
     assert reply.status_code == 200, reply.text
     trel = status(base_url)
     assert trel["enabled"] is True
-    assert trel["active"] in (True, None)
+    assert trel["active"] is True
 
 
 def test_trel_change_without_other_changes_is_not_a_trial(base_url):
