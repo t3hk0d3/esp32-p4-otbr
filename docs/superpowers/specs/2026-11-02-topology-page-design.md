@@ -152,6 +152,7 @@ This shape is the contract between the firmware and the page:
         "rssi_avg": -61, "rssi_last": -63, "link_margin_db": 39,
         "frame_error_pct": 0.4, "message_error_pct": 0.0, "version": 4, "csl": false,
         "addresses": ["2001:db8:4a2:1:2be4:6c19:a0f7:3381", "..."]
+        // "addresses_reported": false only when the child was asked directly and did not answer (3.4)
       }]
     }],
     "srp_hosts": [{"name": "kitchen-plug", "addresses": ["..."],
@@ -171,6 +172,40 @@ This shape is the contract between the firmware and the page:
   The page shows "–" for a missing value.
 - IPv6 addresses and prefixes are in RFC 5952 short form (`fdde:ad00:beef::/64`). The addresses in the sample above
   are only illustrative.
+
+### 3.4 Amendment 2026-11-03: findings from the hardware pass
+
+On the rig and on a populated network, a child that is a full Thread device (a REED, `full_thread_device: true`) came
+back with an empty address list. Only minimal (MTD) children register their addresses with their parent, so
+`otMeshDiagQueryChildrenIp6Addrs` has nothing for a REED child.
+
+**Asking children directly.** After the per-router queries, and before the snapshot, the scan runs one more step:
+- **Which children:** every child that is rx-on-when-idle and has no addresses. Sleepy children are skipped. They are
+  MTDs, so their parent already covers them, and asking them would mean waiting for them to wake.
+- **The query:** a unicast Network Diagnostic Get (`otThreadSendDiagnosticGet`) to the child's RLOC address
+  (mesh-local prefix + `0:ff:fe00:<rloc16>`), asking only for the IPv6 Address List TLV (8).
+- **Concurrency:** at most 4 of these queries are in flight at a time. Answers fill that child's `addresses`, up to
+  the existing cap.
+- **The result:** a child that was asked and gave no answer (an error, a timeout, or a cap hit) keeps an empty list
+  and gets `"addresses_reported": false`. Every other child leaves the key out.
+  - `partial` keeps its meaning (the cap, or a router flag). A child's flag doesn't set it.
+- **Progress:** progress gains `"children": {"total": N, "queried": M}` during this step. Before the step, `total` is
+  0.
+- **Cancel, cap and watchdog** cover this step the same way. A cap hit during the step marks the children that are
+  still waiting as not reported.
+
+**The page:**
+- **A child with `addresses_reported: false`:**
+  - the table's Routable addresses cell reads "Not reported" in grey, not the amber "None yet";
+  - the dialog says "This device didn't report its addresses." instead of the "No routable address yet" note.
+- **The loading view** shows "Asking devices for their addresses: M of N" while `progress.children.total > 0`.
+- **Other border routers** (`border_router: true` and not `this_device`):
+  - on the map: a router disc with an orange outer ring;
+  - in the legend: "Other border router";
+  - Type in the table: "Border router";
+  - in the dialog: a "Border router" chip.
+- **The "Home network · Ethernet" box** must not overlap any node or node label. It takes the nearest free spot
+  around the board, trying wider rings when the close ones are taken. The map grows if it must.
 
 ## 4. Page
 
@@ -223,7 +258,7 @@ This shape is the contract between the firmware and the page:
   - A badge in the middle of the link shows the number, or `in/out` (e.g. `3/2`) when the two sides differ, in the
     first router's view.
 - **Parent links.** Thin grey.
-- **Labels.** Under each node: the display name (4.6), or "Unnamed 0xNNNN".
+- **Labels.** Under each node: the display name (4.6), or "Unknown 0xNNNN".
 - **Legend.** Node kinds, the LQI colors 3/2/1, the `3/2` notation, and the parent link.
 - **Layout is deterministic.** The same set of routers and children gives the same picture:
   - This board sits in the centre. If the board is a child (`this_device` is not set on any router; the board is the
@@ -300,7 +335,7 @@ Address classes, decided on the page:
 - **Display name, in order:**
   1. The user's nickname for that ext address.
   2. The SRP host name of the first host that shares an address with the device.
-  3. "Unnamed 0xNNNN".
+  3. "Unknown 0xNNNN".
 - This board is named "This border router" on the map and by its SRP or host name elsewhere.
 - **Rename** edits the nickname inline. **Save** stores it and an empty name removes it. Nicknames live in this
   browser only, which the dialog says.
