@@ -6,6 +6,7 @@
 #include "esp_err.h"
 #include "esp_netif.h"
 #include "openthread/link_raw.h"
+#include "br_core_leader.h"
 #include "br_core_mode.h"
 #include "rcp_sync.h"
 
