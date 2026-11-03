@@ -62,8 +62,10 @@ typedef struct {
     bool ula_published; /**< the ULA on-mesh entry is ours, with ula_default_route */
     bool ula_default_route;
     bool ula_failed; /**< the last attempt to add or remove the ULA entry failed (logged once) */
+    bool omr_failed; /**< the last set_omr_config failed (logged once) */
     bool pd_applied; /**< pd_enabled is what OpenThread has */
     bool pd_enabled;
+    bool pd_failed; /**< the last pd_set_enabled failed (logged once) */
 } routing_publisher_t;
 
 /** The ops on OpenThread (ot_ops.c, target only). They use esp_openthread_get_instance(). */
@@ -83,9 +85,14 @@ void routing_publisher_init(routing_publisher_t *p, const routing_ot_ops_t *ops)
  *   register_netdata; otherwise the ULA entry is removed (and registered) if the publisher added it;
  * - auto: set_omr_config(AUTO, NULL, medium) and removes the ULA entry if the publisher added it;
  * - pd_set_enabled(method == pd).
- * A failed op is not recorded as applied and is issued again by the next apply. Nothing else on the mesh is touched.
+ * A failed op is not recorded as applied and is issued again by the next apply (its failure is logged once until it
+ * succeeds). Nothing else on the mesh is touched.
+ *
+ * Returns true when everything is at its wanted state afterwards: the OMR config, the DHCPv6-PD client and the ULA
+ * entry (published exactly when wanted; the ULA not yet known counts as nothing wanted). false: an op failed, call
+ * again to retry.
  */
-void routing_publisher_apply(routing_publisher_t *p, const routing_settings_t *s);
+bool routing_publisher_apply(routing_publisher_t *p, const routing_settings_t *s);
 
 /**
  * Periodic check: learns the ULA if init could not, then brings the ULA entry in line with the applied settings. When

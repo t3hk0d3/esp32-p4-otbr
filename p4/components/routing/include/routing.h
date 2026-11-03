@@ -29,7 +29,7 @@ esp_err_t routing_start(void);
 /**
  * The br_core border-router-up hook (br_core_set_border_router_up_cb): runs with the OpenThread lock held. Starts the
  * prefix publisher (it learns the self-generated ULA first), then applies the latest settings: OMR config, the ULA
- * entry next to a custom prefix, DHCPv6-PD on only with method pd.
+ * entry next to a custom prefix, DHCPv6-PD on only with method pd. What fails is retried at the task's next state read.
  */
 void routing_on_border_router_up(otInstance *instance);
 

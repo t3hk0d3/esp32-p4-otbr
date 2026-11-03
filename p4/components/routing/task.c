@@ -95,6 +95,8 @@ static routing_publisher_t s_publisher;
  * held: readers take either one.
  */
 static bool s_publisher_ready;
+/* only under the OpenThread lock: the hook's last apply failed, the state read retries it with the engine's settings */
+static bool s_publisher_retry;
 
 /* routing task only */
 static int s_listen_fd = -1;
@@ -529,9 +531,10 @@ static bool io_publisher_apply(void *ctx, const routing_settings_t *s)
             !esp_openthread_lock_acquire(pdMS_TO_TICKS(OT_LOCK_APPLY_MS))) {
         return false;
     }
-    bool ok = br_core_get_mode() == BR_MODE_BR_RUNNING;
+    /* false when an OpenThread call failed: the engine keeps the apply pending and retries it at the next poll */
+    bool ok = br_core_get_mode() == BR_MODE_BR_RUNNING && routing_publisher_apply(&s_publisher, s);
     if (ok) {
-        routing_publisher_apply(&s_publisher, s);
+        s_publisher_retry = false;
     }
     esp_openthread_lock_release();
     return ok;
@@ -566,6 +569,9 @@ static void read_ot(otInstance *ins, routing_engine_state_t *st)
     if (s_publisher_ready) {
         routing_announce_input_t in;
         memset(&in, 0, sizeof(in));
+        if (s_publisher_retry) {
+            s_publisher_retry = !routing_publisher_apply(&s_publisher, s);
+        }
         routing_publisher_sync_default_route(&s_publisher);
         routing_publisher_prefix_state(&s_publisher, &in);
         st->ula_known = in.ula_known;
@@ -918,7 +924,7 @@ void routing_on_border_router_up(otInstance *instance)
         if (routing_settings_load(&s) != ESP_OK) {
             ESP_LOGW(TAG, "border router up before routing_start, stored settings unavailable: using the defaults");
         }
-        routing_publisher_apply(&s_publisher, &s);
+        s_publisher_retry = !routing_publisher_apply(&s_publisher, &s);
         s_publisher_ready = true;
         return;
     }
@@ -931,7 +937,7 @@ void routing_on_border_router_up(otInstance *instance)
         s = s_settings;
         uint32_t gen = s_settings_gen;
         xSemaphoreGive(s_mutex);
-        routing_publisher_apply(&s_publisher, &s);
+        s_publisher_retry = !routing_publisher_apply(&s_publisher, &s);
         xSemaphoreTake(s_mutex, portMAX_DELAY);
         bool current = gen == s_settings_gen;
         if (current) {

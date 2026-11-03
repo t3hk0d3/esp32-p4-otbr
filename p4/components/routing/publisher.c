@@ -98,38 +98,49 @@ static void add_ula_if_wanted(routing_publisher_t *p, bool follow_flag)
     }
 }
 
-static void apply_omr(routing_publisher_t *p)
+// A failure is logged once until the call succeeds again: the engine retries a failed apply at every poll.
+static bool apply_omr(routing_publisher_t *p)
 {
     bool custom = p->want_omr_mode == ROUTING_OMR_CUSTOM;
 
     if (p->omr_applied && p->omr_mode == p->want_omr_mode &&
             (!custom || prefix_eq(&p->omr_prefix, &p->want_custom))) {
-        return;
+        return true;
     }
     int err = p->ops->set_omr_config(p->want_omr_mode, custom ? &p->want_custom : NULL, ROUTING_PREF_MED);
     if (err != 0) {
-        ESP_LOGW(TAG, "setting the %s OMR config failed: %d", custom ? "custom" : "auto", err);
+        if (!p->omr_failed) {
+            ESP_LOGW(TAG, "setting the %s OMR config failed: %d", custom ? "custom" : "auto", err);
+        }
+        p->omr_failed = true;
         p->omr_applied = false;
-        return;
+        return false;
     }
+    p->omr_failed = false;
     p->omr_applied = true;
     p->omr_mode = p->want_omr_mode;
     p->omr_prefix = custom ? p->want_custom : NO_PREFIX;
+    return true;
 }
 
-static void apply_pd(routing_publisher_t *p, bool enabled)
+static bool apply_pd(routing_publisher_t *p, bool enabled)
 {
     if (p->pd_applied && p->pd_enabled == enabled) {
-        return;
+        return true;
     }
     int err = p->ops->pd_set_enabled(enabled);
     if (err != 0) {
-        ESP_LOGW(TAG, "switching DHCPv6-PD %s failed: %d", enabled ? "on" : "off", err);
+        if (!p->pd_failed) {
+            ESP_LOGW(TAG, "switching DHCPv6-PD %s failed: %d", enabled ? "on" : "off", err);
+        }
+        p->pd_failed = true;
         p->pd_applied = false;
-        return;
+        return false;
     }
+    p->pd_failed = false;
     p->pd_applied = true;
     p->pd_enabled = enabled;
+    return true;
 }
 
 void routing_publisher_init(routing_publisher_t *p, const routing_ot_ops_t *ops)
@@ -139,7 +150,7 @@ void routing_publisher_init(routing_publisher_t *p, const routing_ot_ops_t *ops)
     learn_ula(p);
 }
 
-void routing_publisher_apply(routing_publisher_t *p, const routing_settings_t *s)
+bool routing_publisher_apply(routing_publisher_t *p, const routing_settings_t *s)
 {
     p->have_settings = true;
     p->want_omr_mode = s->omr_mode;
@@ -150,9 +161,10 @@ void routing_publisher_apply(routing_publisher_t *p, const routing_settings_t *s
     // Network Data: our entry goes before the auto config makes OpenThread publish the ULA (or removing ours would
     // remove its entry), and comes after the custom config made OpenThread withdraw its own.
     remove_ula_if_unwanted(p);
-    apply_omr(p);
+    bool omr_ok = apply_omr(p);
     add_ula_if_wanted(p, false);
-    apply_pd(p, s->method == ROUTING_METHOD_PD);
+    bool pd_ok = apply_pd(p, s->method == ROUTING_METHOD_PD);
+    return omr_ok && pd_ok && p->ula_published == ula_wanted(p);
 }
 
 void routing_publisher_sync_default_route(routing_publisher_t *p)

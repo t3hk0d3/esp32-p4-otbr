@@ -469,3 +469,55 @@ TEST_CASE("After apply: reports ula, ula_known, and whether the custom prefix an
     TEST_ASSERT_FALSE(io.custom_in_netdata); /* auto: no custom prefix, even if one lingers in Network Data */
     TEST_ASSERT_TRUE(io.ula_in_netdata);
 }
+
+/* --- apply: result --- */
+
+TEST_CASE("Everything applied: apply returns true", "[routing]")
+{
+    start();
+    routing_settings_t s = settings(ROUTING_METHOD_PD, ROUTING_OMR_CUSTOM, &CUSTOM, true);
+
+    TEST_ASSERT_TRUE(routing_publisher_apply(&s_pub, &s));
+    TEST_ASSERT_TRUE(routing_publisher_apply(&s_pub, &s)); /* nothing left to issue */
+}
+
+TEST_CASE("OMR config call failed: apply returns false", "[routing]")
+{
+    start();
+    g_fake.ret[FAKE_SET_OMR_CONFIG] = 7;
+    routing_settings_t s = settings(ROUTING_METHOD_BGP, ROUTING_OMR_CUSTOM, &CUSTOM, false);
+
+    TEST_ASSERT_FALSE(routing_publisher_apply(&s_pub, &s));
+}
+
+TEST_CASE("PD call failed: apply returns false", "[routing]")
+{
+    start();
+    g_fake.ret[FAKE_PD_SET_ENABLED] = 1;
+    routing_settings_t s = settings(ROUTING_METHOD_PD, ROUTING_OMR_AUTO, NULL, false);
+
+    TEST_ASSERT_FALSE(routing_publisher_apply(&s_pub, &s));
+}
+
+TEST_CASE("Adding the ULA entry failed: apply returns false", "[routing]")
+{
+    start();
+    g_fake.ret[FAKE_ADD_ON_MESH] = 3;
+    routing_settings_t s = settings(ROUTING_METHOD_BGP, ROUTING_OMR_CUSTOM, &CUSTOM, true);
+
+    TEST_ASSERT_FALSE(routing_publisher_apply(&s_pub, &s));
+}
+
+TEST_CASE("A failed call succeeds on retry: apply returns true", "[routing]")
+{
+    start();
+    g_fake.ret[FAKE_SET_OMR_CONFIG] = 7;
+    g_fake.ret[FAKE_PD_SET_ENABLED] = 1;
+    routing_settings_t s = settings(ROUTING_METHOD_PD, ROUTING_OMR_CUSTOM, &CUSTOM, true);
+    TEST_ASSERT_FALSE(routing_publisher_apply(&s_pub, &s));
+
+    g_fake.ret[FAKE_SET_OMR_CONFIG] = 0;
+    TEST_ASSERT_FALSE(routing_publisher_apply(&s_pub, &s)); /* PD still failing */
+    g_fake.ret[FAKE_PD_SET_ENABLED] = 0;
+    TEST_ASSERT_TRUE(routing_publisher_apply(&s_pub, &s));
+}
