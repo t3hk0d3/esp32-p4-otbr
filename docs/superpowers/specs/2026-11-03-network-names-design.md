@@ -102,13 +102,15 @@ Anti-goals (failure even if it works):
 Data shape (contract):
 
 - `netnames_settings_t`: `hostname` (0–63 chars, empty = default), `ha_name_follows_hostname` (bool), `ha_name`
-  (0–63 bytes UTF-8), `http_advert` (bool), `dhcp_name` (0–63 chars, empty = default).
+  (0–63 bytes UTF-8), `http_advert` (bool), `dhcp_name` (0–32 chars, empty = default; amended after review:
+  `esp_netif_set_hostname` refuses longer names).
 
 ## 5. Behaviour
 
 ### Validation (rules.c)
 
-- Hostname and DHCP name: empty, or 1–63 characters of `a-z`, `0-9`, `-`, not starting or ending with `-`. Upper case
+- Hostname and DHCP name: empty, or 1–63 (DHCP name: 1–32, the `esp_netif` limit) characters of `a-z`, `0-9`, `-`,
+  not starting or ending with `-`. Upper case
   is accepted and stored in lower case. Anything else is rejected with the field name.
 - HA name (used only when it doesn't follow the hostname): 1–63 bytes of UTF-8, no control characters, no leading or
   trailing spaces. Empty with "follows hostname" off is rejected.
@@ -127,7 +129,8 @@ Data shape (contract):
    is on and the mode is single. Removed when it's turned off. An instance-name change updates it. The setting is
    stored in either mode. Switching modes needs a reboot, so it is applied at boot.
 5. DHCP name changed: `esp_netif_set_hostname` on every netif that uses DHCP, then a lease renewal so the router learns
-   the name. The renewal must not drop the current address: no `dhcpc_stop`/`dhcpc_start`. The builder picks the
+   the name. The renewal must not drop the current address: no `dhcpc_stop`/`dhcpc_start`. Only an interface that
+   holds a lease renews; one still looking for a lease sends the name with its next DISCOVER or REQUEST. The builder picks the
    mechanism, for example lwIP `dhcp_renew` through the TCP/IP context. Interfaces with static IPv4 just keep the
    value. The page explains that it only matters with DHCP.
 

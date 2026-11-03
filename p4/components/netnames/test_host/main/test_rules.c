@@ -90,6 +90,29 @@ TEST_CASE("DHCP name invalid like a hostname: rejected as dhcp_name", "[netnames
     TEST_ASSERT_EQUAL_STRING("dhcp_name", field);
 }
 
+TEST_CASE("DHCP name of 32 chars: valid (the esp_netif hostname limit)", "[netnames]")
+{
+    netnames_settings_t s = blank();
+    const char *field = NULL;
+
+    memset(s.dhcp_name, 'd', 32);
+    s.dhcp_name[32] = '\0';
+    TEST_ASSERT_TRUE(check(&s, &field));
+}
+
+TEST_CASE("DHCP name of 33 chars: rejected as dhcp_name", "[netnames]")
+{
+    netnames_settings_t s = blank();
+    const char *field = NULL;
+    const char *reason = NULL;
+
+    memset(s.dhcp_name, 'd', 33);
+    s.dhcp_name[33] = '\0';
+    TEST_ASSERT_FALSE(netnames_rules_check(&s, &field, &reason));
+    TEST_ASSERT_EQUAL_STRING("dhcp_name", field);
+    TEST_ASSERT_EQUAL_STRING("longer than 32 characters", reason);
+}
+
 TEST_CASE("HA name not following and empty: rejected as ha_name", "[netnames]")
 {
     netnames_settings_t s = blank();

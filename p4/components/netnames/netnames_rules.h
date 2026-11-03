@@ -20,7 +20,7 @@ typedef struct {
 
 /**
  * Are the settings valid? On false, *field is "hostname", "ha_name" or "dhcp_name" and *reason a short English reason.
- * Hostname and DHCP name: empty, or 1-63 of a-z A-Z 0-9 '-', not starting or ending with '-'. HA name (only when it does
+ * Hostname and DHCP name: empty, or 1-63 (DHCP name: 1-32) of a-z A-Z 0-9 '-', not starting or ending with '-'. HA name (only when it does
  * not follow the hostname): 1-63 bytes of UTF-8, no control characters, no leading or trailing space.
  */
 bool netnames_rules_check(const netnames_settings_t *in, const char **field, const char **reason);

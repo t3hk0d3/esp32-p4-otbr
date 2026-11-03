@@ -7,16 +7,16 @@
 
 #define NAME_MAX_LEN (NETNAMES_NAME_LEN - 1)
 
-/* An empty name, or a DNS label: 1-63 of letters, digits and '-', not starting or ending with '-'. */
-static bool label_valid(const char *name, const char **reason)
+/* An empty name, or a DNS label: 1-max_len of letters, digits and '-', not starting or ending with '-'. */
+static bool label_valid(const char *name, size_t max_len, const char **reason)
 {
     const size_t len = strnlen(name, NETNAMES_NAME_LEN);
 
     if (len == 0) {
         return true;
     }
-    if (len > NAME_MAX_LEN) {
-        *reason = "longer than 63 characters";
+    if (len > max_len) {
+        *reason = max_len == NETNAMES_DHCP_NAME_MAX ? "longer than 32 characters" : "longer than 63 characters";
         return false;
     }
     for (size_t i = 0; i < len; i++) {
@@ -93,7 +93,7 @@ static bool free_text_valid(const char *name, const char **reason)
 
 bool netnames_rules_check(const netnames_settings_t *in, const char **field, const char **reason)
 {
-    if (!label_valid(in->hostname, reason)) {
+    if (!label_valid(in->hostname, NAME_MAX_LEN, reason)) {
         *field = "hostname";
         return false;
     }
@@ -101,7 +101,7 @@ bool netnames_rules_check(const netnames_settings_t *in, const char **field, con
         *field = "ha_name";
         return false;
     }
-    if (!label_valid(in->dhcp_name, reason)) {
+    if (!label_valid(in->dhcp_name, NETNAMES_DHCP_NAME_MAX, reason)) {
         *field = "dhcp_name";
         return false;
     }

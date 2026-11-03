@@ -58,8 +58,8 @@ board is named on the network. A save takes effect at once: no reboot, no trial,
 | Advertise the web UI | an `_http._tcp` record (port 80, `path=/`) so that network browsers find the web UI | off |
 | DHCP client name | the name the board sends with its DHCP requests, which routers list | `esp-otbr` |
 
-Hostname and DHCP name: letters, digits and hyphens, at most 63, not starting or ending with a hyphen; upper case is
-stored in lower case. The Home Assistant name: at most 63 bytes of UTF-8, no control characters. An empty hostname or
+Hostname and DHCP name: letters, digits and hyphens, at most 63 (DHCP name: 32), not starting or ending with a
+hyphen; upper case is stored in lower case. The Home Assistant name: at most 63 bytes of UTF-8, no control characters. An empty hostname or
 DHCP name means the default.
 
 - **Conflicts:** when another device already uses the hostname, the board answers as `<name>-2.local`. The page shows

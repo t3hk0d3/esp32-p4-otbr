@@ -102,10 +102,11 @@ static esp_err_t add_iface(const char *name, const char *key, int route_prio, ne
     taskENTER_CRITICAL(&s_dhcp_name_lock);
     strlcpy(dhcp_name, s_dhcp_name, sizeof(dhcp_name));
     taskEXIT_CRITICAL(&s_dhcp_name_lock);
-    if (dhcp_name[0]) {
-        ESP_RETURN_ON_ERROR(esp_netif_set_hostname(iface->netif, dhcp_name), TAG, "DHCP name of %s failed", name);
-    }
     s_net.count++; // counted from here on, so that netcfg_ifaces_destroy also undoes a half-built interface
+    // A name the netif refuses must never cost the interface: lwIP's default name is used instead.
+    if (dhcp_name[0] && esp_netif_set_hostname(iface->netif, dhcp_name) != ESP_OK) {
+        ESP_LOGW(TAG, "%s: DHCP name \"%s\" refused, the default is used", name, dhcp_name);
+    }
     if (cfg->vlan == NETCFG_VLAN_UNTAGGED) {
         iface->stock_glue = esp_eth_new_netif_glue(s_net.eth);
         ESP_RETURN_ON_FALSE(iface->stock_glue, ESP_FAIL, TAG, "creating the netif glue of %s failed", name);
@@ -315,12 +316,19 @@ esp_netif_t *netcfg_mgmt_netif(void)
     return s_net.created ? s_net.iface[s_net.mgmt].netif : NULL;
 }
 
-/* Runs on the TCP/IP thread: a DHCPREQUEST that carries the new name, the lease and its address stay. */
+/*
+ * Runs on the TCP/IP thread: a DHCPREQUEST that carries the new name, the lease and its address stay. Only with a lease:
+ * dhcp_renew forces the RENEWING state whatever the client was doing, and without a lease nothing would ever take it out
+ * of it again. A client still looking for a lease sends the new name with its next DISCOVER or REQUEST anyway.
+ */
 static esp_err_t renew_lease(void *ctx)
 {
     struct netif *netif = esp_netif_get_netif_impl(ctx);
 
-    return netif && dhcp_renew(netif) == ERR_OK ? ESP_OK : ESP_FAIL;
+    if (!netif || !netif_dhcp_data(netif) || !dhcp_supplied_address(netif)) {
+        return ESP_OK;
+    }
+    return dhcp_renew(netif) == ERR_OK ? ESP_OK : ESP_FAIL;
 }
 
 esp_err_t netcfg_ifaces_set_dhcp_name(const char *name)

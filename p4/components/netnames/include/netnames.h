@@ -14,6 +14,8 @@ extern "C" {
 
 /** Buffer size of every name: up to 63 characters (bytes of UTF-8 for the HA name) plus the terminator. */
 #define NETNAMES_NAME_LEN 64
+/** Longest DHCP client name: esp_netif_set_hostname refuses more (ESP_NETIF_HOSTNAME_MAX_SIZE). */
+#define NETNAMES_DHCP_NAME_MAX 32
 /** Default DHCP client name (replaces lwIP's CONFIG_LWIP_LOCAL_HOSTNAME). */
 #define NETNAMES_DEFAULT_DHCP_NAME "esp-otbr"
 

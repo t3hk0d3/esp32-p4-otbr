@@ -9,6 +9,7 @@
 
 var NamesLogic = (function() {
 var NAME_MAX = 63;
+var DHCP_NAME_MAX = 32; // esp_netif refuses longer DHCP client names
 
 /* The name without a pasted ".local" (or ".local."), case kept: the board stores it in lower case. */
 function normaliseHostname(text) {
@@ -32,12 +33,12 @@ function utf8Bytes(text) {
   return n;
 }
 
-/* The board's rules (netnames_rules_check): an empty name or a DNS label. null when valid. */
-function labelError(name) {
+/* The board's rules (netnames_rules_check): an empty name or a DNS label of at most `max`. null when valid. */
+function labelError(name, max) {
   if (name === '')
     return null;
-  if (name.length > NAME_MAX)
-    return 'Longer than 63 characters.';
+  if (name.length > max)
+    return 'Longer than ' + max + ' characters.';
   if (!/^[A-Za-z0-9-]+$/.test(name))
     return 'Only letters, digits and hyphens are allowed.';
   if (name[0] === '-' || name[name.length - 1] === '-')
@@ -70,8 +71,8 @@ function fromApi(body) {
 /* {count, errors: {field: message}} with the API's field names. */
 function validate(form) {
   var errors = {};
-  var host = labelError(normaliseHostname(form.hostname));
-  var dhcp = labelError(form.dhcp_name.trim());
+  var host = labelError(normaliseHostname(form.hostname), NAME_MAX);
+  var dhcp = labelError(form.dhcp_name.trim(), DHCP_NAME_MAX);
   var ha = form.follows ? null : haNameError(form.ha_name);
   if (host)
     errors.hostname = host;
@@ -178,7 +179,8 @@ function render() {
   show('nm-hostname-split', split);
   setText('nm-hostname-hint', 'Letters, digits and hyphens, up to 63. Leave empty for the default ' +
                                   api.hostname_default + '.');
-  setText('nm-dhcp-hint', 'What your router lists for this board. Leave empty for the default ' +
+  setText('nm-dhcp-hint', 'What your router lists for this board: letters, digits and hyphens, up to 32. Leave empty ' +
+                              'for the default ' +
                               api.dhcp_name_default + '. The router sees it at the lease renewal the board asks for on ' +
                               'Save; it only matters with an automatic (DHCP) address.');
   Object.keys(FIELDS).forEach(function(f) { messages(FIELDS[f] + '-err', v.errors[f] || serverErrors[f]); });
@@ -190,7 +192,8 @@ function render() {
                                  : '');
   show('nm-conflict', renamed);
   var changed = L.dirty(saved, form);
-  $('nm-save').disabled = off || !changed || v.count > 0;
+  // After a conflict rename, saving the same name again asks the board to try it again.
+  $('nm-save').disabled = off || !(changed || renamed) || v.count > 0;
   $('nm-discard').disabled = off || !changed;
 }
 
@@ -241,8 +244,10 @@ function discard() {
 function settleThenReload(before, reply) {
   return new Promise(function(resolve) { env.setTimeout(resolve, SETTLE_MS); }).then(function() {
     return kit.request('GET', '/device/names', {timeoutMs : 5000});
-  }).then(function(r) {
-    var after = r.status === 200 && r.body ? r.body : reply;
+  }).then(function(r) { return r.status === 200 && r.body ? r.body : reply; }, function() {
+    // The old name may already be gone (the board says goodbye for it): the PUT reply has the live name too.
+    return reply;
+  }).then(function(after) {
     var target = L.redirectTarget(env.location || {}, before, after);
     if (target) {
       note('nm-msg', 'Saved. Moving to ' + target + ' ...', false);
@@ -251,14 +256,11 @@ function settleThenReload(before, reply) {
     }
     form = null;
     load(after);
-  }, function() {
-    form = null;
-    load(reply);
   });
 }
 
 function save() {
-  if (!form || blocked() || L.validate(form).count || !L.dirty(saved, form))
+  if (!form || blocked() || L.validate(form).count || !(L.dirty(saved, form) || L.conflict(api)))
     return Promise.resolve(null);
   var before = api;
   saving = true;

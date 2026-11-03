@@ -66,7 +66,7 @@ esp_err_t netcfg_reset(void);
 /**
  * DHCP client name (option 12) of every interface: taken by the interfaces netcfg_start makes, and applied at once to the
  * running ones, whose DHCP client renews its lease to send it without giving up the address. Empty = lwIP's default.
- * Callable before netcfg_start. ESP_ERR_INVALID_ARG when NULL or longer than 63 characters.
+ * Callable before netcfg_start. ESP_ERR_INVALID_ARG when NULL or longer than 32 characters.
  */
 esp_err_t netcfg_set_dhcp_hostname(const char *name);
 

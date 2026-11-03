@@ -84,6 +84,13 @@ class TestNamesLogic:
         # On "bad.name": an error on dhcp_name.
         assert set(errors_of(form(dhcp_name="bad.name"))) == {"dhcp_name"}
 
+    def test_dhcp_name_limit_is_32_characters(self):
+        # On 32 characters: valid; on 33: refused with the limit in the message (esp_netif refuses longer names).
+        assert errors_of(form(dhcp_name="d" * 32)) == {}
+        err = errors_of(form(dhcp_name="d" * 33))
+        assert set(err) == {"dhcp_name"}
+        assert "32 characters" in err["dhcp_name"]
+
     def test_ha_name_is_checked_only_when_it_does_not_follow(self):
         # On an empty or space-padded HA name: an error only with follows off.
         assert errors_of(form(follows=True, ha_name=" x")) == {}
@@ -370,6 +377,44 @@ class TestNamesPage:
         """
         )
         assert r == ["http://garage-2.local/ethernet.html"]
+
+    def test_after_a_conflict_the_same_name_can_be_saved_again(self):
+        # On hostname_live kitchen-2 and an unchanged form: Save enabled; Save sends the same hostname to retry it.
+        r = scenario(
+            page("names", routes("H.fixture(H.NAMES, {hostname_live: 'kitchen-2'})"))
+            + START
+            + """
+            const enabled = !t.el('nm-save').disabled;
+            t.el('nm-save').click(); await t.advance(2500);
+            const put = t.calls.find((c) => c.method === 'PUT');
+            return [enabled, put && JSON.parse(put.body).hostname, t.el('nm-discard').disabled];
+        """
+        )
+        assert r == [True, "kitchen", True]
+
+    def test_save_moves_to_the_new_name_even_when_the_fresh_read_fails(self):
+        # On Save from kitchen.local, the PUT answered with live garage, then the GET failing: navigation to garage.local.
+        r = scenario(
+            page(
+                "names",
+                """(u, o) => {
+                    if (u !== '/device/names') return {status: 200, body: H.NETWORK};
+                    if (o.method === 'PUT') return {status: 200, body: H.fixture(H.NAMES, {hostname: 'garage', hostname_live: 'garage', applied: true})};
+                    if (t.saved) throw new Error('connection dropped');
+                    return {status: 200, body: H.fixture(H.NAMES)};
+                }""",
+            ).replace("const t =", "var t; t =")
+            + """
+            t.env.location = {protocol: 'http:', hostname: 'kitchen.local', port: '', pathname: '/ethernet.html', search: ''};
+            t.page.init(); await t.advance(100);
+            t.el('nm-hostname').type('garage');
+            t.saved = true;
+            t.el('nm-save').click();
+            await t.advance(2500);
+            return t.navigations();
+        """
+        )
+        assert r == ["http://garage.local/ethernet.html"]
 
     def test_save_refused_shows_the_error_under_the_field(self):
         # On a 400 invalid_config for ha_name: the detail under the HA input, buttons usable again.
