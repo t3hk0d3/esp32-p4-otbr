@@ -14,6 +14,10 @@ release's `versions.txt`.
   `"trel"` in `PUT /device/network`. State, peers and counters in `/device/status`, on the Ethernet page and as
   `br_trel_*` metrics. In split mode the TREL port is dropped on `mgmt`. The app image grows by about 19 KB. See
   `docs/networking.md`.
+- Choosing the leader: a **Leader** card on the Network page and `GET`/`PUT /device/thread` set a stored leader weight
+  adjustment (-16 to +16 on top of the base weight 65) and a **Become leader** button that makes this board take over
+  from a leader with a strictly lower weight (never automatic; the role is not stored). See `docs/api.md`, "Choosing the
+  leader". Not yet tested on the board.
 - First install without wires: on a factory C6 (ESP-Hosted firmware, no jumper) the board reports `RADIO_FAULT`
   `esp-hosted firmware`, and uploading the new release file `c6_installer.bin` sends it through ESP-Hosted's own update
   over the P4-C6 SDIO lines; it installs the C6 bootloader, partition table and updater, after which `c6_rcp.bin` is
