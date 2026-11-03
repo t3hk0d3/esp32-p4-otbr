@@ -58,10 +58,7 @@ size_t routing_ripng_encode_response(uint8_t *buf, size_t cap, const routing_rip
     if (take == 0) {
         return 0;
     }
-    buf[0] = CMD_RESPONSE;
-    buf[1] = VERSION;
-    buf[2] = 0;
-    buf[3] = 0;
+    routing_ripng_encode_empty_response(buf, cap);
     for (size_t i = 0; i < take; i++) {
         uint8_t *rte = &buf[ROUTING_RIPNG_HDR_LEN + i * ROUTING_RIPNG_RTE_LEN];
 
@@ -72,6 +69,18 @@ size_t routing_ripng_encode_response(uint8_t *buf, size_t cap, const routing_rip
     }
     *consumed = take;
     return ROUTING_RIPNG_HDR_LEN + take * ROUTING_RIPNG_RTE_LEN;
+}
+
+size_t routing_ripng_encode_empty_response(uint8_t *buf, size_t cap)
+{
+    if (cap < ROUTING_RIPNG_HDR_LEN) {
+        return 0;
+    }
+    buf[0] = CMD_RESPONSE;
+    buf[1] = VERSION;
+    buf[2] = 0;
+    buf[3] = 0;
+    return ROUTING_RIPNG_HDR_LEN;
 }
 
 /* True for the whole-table request RTE: prefix ::, prefix length 0, metric 16 (RFC 2080 section 2.4.1). */

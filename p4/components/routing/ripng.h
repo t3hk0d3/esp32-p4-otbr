@@ -54,12 +54,19 @@ typedef enum {
 size_t routing_ripng_encode_response(uint8_t *buf, size_t cap, const routing_ripng_rte_t *rtes, size_t n,
                                      size_t *consumed);
 
+/**
+ * Writes a response message without RTEs (command 2, version 1, the 4-byte header only): the answer to a whole-table
+ * request while nothing is announced (RFC 2080 section 2.4.1 answers every request). Returns 4, or 0 (nothing written)
+ * when `cap` is below 4.
+ */
+size_t routing_ripng_encode_empty_response(uint8_t *buf, size_t cap);
+
 /** Classifies a received datagram (`len` bytes of UDP payload). */
 routing_ripng_kind_t routing_ripng_classify(const uint8_t *buf, size_t len);
 
 /**
  * The answer to a whole-table request: every `announced` prefix at metric 1 (at most `out_cap`), returning how many.
- * Encode it with routing_ripng_encode_response.
+ * Encode it with routing_ripng_encode_response, or routing_ripng_encode_empty_response when it returns 0.
  */
 size_t routing_ripng_table(const routing_prefix_set_t *announced, routing_ripng_rte_t *out, size_t out_cap);
 

@@ -139,6 +139,23 @@ TEST_CASE("More entries than fit one message: splits them across messages that e
     TEST_ASSERT_EQUAL_HEX8(61, s_buf[4 + 5]);
 }
 
+TEST_CASE("Empty response: writes the 4-byte header, command 2, version 1, no RTEs", "[routing]")
+{
+    static const uint8_t expected[4] = {2, 1, 0, 0};
+
+    fill_buf();
+    TEST_ASSERT_EQUAL_size_t(4, routing_ripng_encode_empty_response(s_buf, sizeof(s_buf)));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, s_buf, 4);
+}
+
+TEST_CASE("Empty response, buffer below 4 bytes: returns 0 and writes nothing", "[routing]")
+{
+    fill_buf();
+    uint8_t before = s_buf[0];
+    TEST_ASSERT_EQUAL_size_t(0, routing_ripng_encode_empty_response(s_buf, 3));
+    TEST_ASSERT_EQUAL_HEX8(before, s_buf[0]);
+}
+
 TEST_CASE("Buffer too small for one RTE, or no entries: returns 0 and writes nothing", "[routing]")
 {
     const routing_ripng_rte_t rtes[] = {{P0, 1}};

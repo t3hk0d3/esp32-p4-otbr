@@ -895,6 +895,10 @@ void routing_engine_ripng_rx(routing_engine_t *e, const uint8_t src[16], uint16_
     case ROUTING_RIPNG_REQUEST_ALL: {
         size_t n = routing_ripng_table(&e->announced, rtes, ROUTING_RIPNG_MAX_RTES);
         size_t off = 0;
+        if (n == 0) {
+            /* RFC 2080 answers every request: nothing announced is a response without RTEs */
+            ripng_unicast(e, src, port, routing_ripng_encode_empty_response(e->ripng_tx, sizeof(e->ripng_tx)), &sent);
+        }
         while (off < n) {
             size_t consumed = 0;
             size_t out = routing_ripng_encode_response(e->ripng_tx, sizeof(e->ripng_tx), rtes + off, n - off,

@@ -1259,6 +1259,36 @@ TEST_CASE("Whole-table request: counted in requests_answered", "[routing]")
     TEST_ASSERT_EQUAL_UINT32(1, status_at(T0 + 10).ripng.requests_answered);
 }
 
+TEST_CASE("Whole-table request while nothing is announced: answered with a header-only response", "[routing]")
+{
+    routing_settings_t s = base_settings(ROUTING_METHOD_RIPNG);
+    uint8_t req[24] = {1, 1, 0, 0};
+    static const uint8_t expected[4] = {2, 1, 0, 0};
+
+    req[23] = ROUTING_RIPNG_INFINITY;
+    begin(&s); /* no poll yet: the border router is not known to be up, the set is empty */
+    TEST_ASSERT_EQUAL(0, status_at(T0).announced.count);
+    fake_io_clear_calls();
+    routing_engine_ripng_rx(&s_e, CLIENT, CLIENT_PORT, req, sizeof(req), T0 + 10);
+    TEST_ASSERT_EQUAL(1, fake_io_count(FIO_RIPNG_SEND));
+    const fake_io_call_t *c = fake_io_find(FIO_RIPNG_SEND, 0);
+    assert_sent(c, expected, sizeof(expected));
+    TEST_ASSERT_TRUE(c->has_addr);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(CLIENT, c->addr, 16);
+    TEST_ASSERT_EQUAL_UINT16(CLIENT_PORT, c->port);
+}
+
+TEST_CASE("Whole-table request while nothing is announced: counted in requests_answered", "[routing]")
+{
+    routing_settings_t s = base_settings(ROUTING_METHOD_RIPNG);
+    uint8_t req[24] = {1, 1, 0, 0};
+
+    req[23] = ROUTING_RIPNG_INFINITY;
+    begin(&s);
+    routing_engine_ripng_rx(&s_e, CLIENT, ROUTING_RIPNG_PORT, req, sizeof(req), T0 + 10);
+    TEST_ASSERT_EQUAL_UINT32(1, status_at(T0 + 10).ripng.requests_answered);
+}
+
 TEST_CASE("Specific request: answered to the requester with metric 1 for an announced prefix, 16 otherwise",
           "[routing]")
 {
