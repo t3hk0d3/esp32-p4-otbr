@@ -7,8 +7,7 @@ renders with routing method bgp, sample-ripng.prom with ripng: BGP peer and RIPn
 from pathlib import Path
 
 import pytest
-
-parser = pytest.importorskip("prometheus_client.parser")
+from prometheus_client import parser
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 BUILD = ROOT / "p4" / "components" / "metrics" / "test_host" / "build"
