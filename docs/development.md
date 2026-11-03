@@ -60,6 +60,27 @@ Tests that need a person or a special rig are deselected by marker and run with 
 - `manual_cable`: unplug and replug Ethernet (add `-s` by running pytest directly).
 - `no_jumper`: remove the jumper wires.
 - `vlan_switch`: managed switch and Docker macvlan hosts, env `VLAN_MGMT`, `VLAN_THREAD`, `HOST_IF_MGMT`, `HOST_IF_THREAD`.
+
+**Latency tests (`test_latency.py`)** ping the Thread peer's OMR address through the board, so the pings must come from a
+host that has a route to the Thread network. Don't change the host's own networking. Use a disposable container on a
+Docker macvlan network on the board's Ethernet segment instead. It accepts the board's router advertisements, and their
+route information option gives it the OMR prefix via the board:
+
+```
+make lan-ping-up
+tools/lan_ping.sh status
+PING_PREFIX="docker exec otbr-lan-ping" make test-target TIMEOUT=3000 TEST=p4/pytest/test_latency.py
+make lan-ping-down
+```
+
+- **Status check:** `tools/lan_ping.sh status` must list the OMR prefix `via fe80::… proto ra`. Every test forms a fresh
+  network with a new prefix, and the container follows the board's next RA.
+- **Interface:** `LAN_IF` (default `mgmt0`) is the host interface on the board's segment, untagged in single mode.
+- **Network:** the script reuses the macvlan network `LAN_NET` (default `otbr-p0`) or creates it.
+- **IPv4:** the container has no IPv4, so the `pcap_stream` load, which pings the board's IPv4 address, needs the host.
+  Select the loads with `-k`, e.g. `TARGET_PYTEST=".venv/bin/pytest -k 'topology_requests or node_requests'"`.
+- **Settings are erased:** the fixtures erase the board's NVS and form a new network, so the board leaves any network it
+  was on.
 - `pd_router`: delegating server in Docker, env `PD_HOST_IF`.
 
 `test_hosted_install.py` (the no-wires first install) skips unless `OTBR_C6_STOCK_URL`, `OTBR_C6_INSTALLER` and
