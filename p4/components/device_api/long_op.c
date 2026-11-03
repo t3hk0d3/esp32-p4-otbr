@@ -46,3 +46,8 @@ bool device_api_op_long_running(void)
 {
     return atomic_load(&s_long_op) != -1;
 }
+
+bool device_api_op_pcap_running(void)
+{
+    return atomic_load(&s_pcap);
+}

@@ -330,7 +330,8 @@ static bool callback_enter(phase_t phase)
         return false;
     }
     if (!s.ops.br_running()) {
-        s.ops.cancel();
+        // No otMeshDiagCancel from inside a mesh-diag callback: OpenThread's single slot keeps a new discover out
+        // (OT_ERROR_BUSY) until the abandoned one ends, as the watchdog path relies on.
         fail(MESH_SCAN_ERR_STOPPED);
         return false;
     }
@@ -375,7 +376,11 @@ esp_err_t mesh_scan_core_start(void)
     esp_err_t ret = ESP_OK;
 
     lock();
-    if (!s.ops.br_running() || s.state == MESH_SCAN_RUNNING) {
+    if (!s.ops.br_running()) {
+        ret = ESP_ERR_NOT_ALLOWED;
+        goto out;
+    }
+    if (s.state == MESH_SCAN_RUNNING) {
         ret = ESP_ERR_INVALID_STATE;
         goto out;
     }
@@ -424,6 +429,19 @@ void mesh_scan_core_cancel(void)
     lock();
     if (s.state == MESH_SCAN_RUNNING) {
         s.ops.cancel();
+        fail(MESH_SCAN_ERR_STOPPED);
+    }
+    unlock();
+}
+
+void mesh_scan_core_fail_stopped(void)
+{
+    if (!s.lock) {
+        return;
+    }
+    lock();
+    if (s.state == MESH_SCAN_RUNNING) {
+        ESP_LOGW(TAG, "scan stopped without telling OpenThread");
         fail(MESH_SCAN_ERR_STOPPED);
     }
     unlock();

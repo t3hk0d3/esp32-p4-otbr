@@ -4,9 +4,9 @@
 //
 // otMeshDiagCancel (OpenThread mesh_diag.cpp) is synchronous: it aborts the discover CoAP transactions, returns the
 // module to idle and stops its timer, and every response path checks that state first. So no callback of a cancelled
-// operation runs afterwards, and the callbacks below need no guard of their own. The one path that fails a scan
-// without cancelling (the mode watchdog) relies on OpenThread's single mesh-diag slot instead: a new discover gets
-// OT_ERROR_BUSY until the abandoned operation has ended.
+// operation runs afterwards, and the callbacks below need no guard of their own. The paths that fail a scan without
+// cancelling (the mode watchdog, a callback that finds the mode lost, a cancel without the OpenThread lock) rely on
+// OpenThread's single mesh-diag slot instead: a new discover gets OT_ERROR_BUSY until the abandoned operation has ended.
 //
 // The child address step (spec 3.4, ruling R14) uses otThreadSendDiagnosticGet, which otMeshDiagCancel does not
 // cover. OpenThread's netdiag client keeps ONE callback slot: every send replaces the callback and its context, and
@@ -573,15 +573,19 @@ esp_err_t mesh_scan_start(void)
     return err;
 }
 
-void mesh_scan_cancel(void)
+esp_err_t mesh_scan_cancel(void)
 {
     if (!s_initialised) {
-        return;
+        return ESP_OK;
     }
     if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(LOCK_WAIT_MS))) {
-        ESP_LOGW(TAG, "cancel: OpenThread lock not free within %d ms", LOCK_WAIT_MS);
-        return;
+        // Fail the scan anyway (scan mutex only), so the caller never runs alongside a live scan.
+        ESP_LOGW(TAG, "cancel: OpenThread lock not free within %d ms; stopping without telling OpenThread",
+                 LOCK_WAIT_MS);
+        mesh_scan_core_fail_stopped();
+        return ESP_ERR_TIMEOUT;
     }
     mesh_scan_core_cancel();
     esp_openthread_lock_release();
+    return ESP_OK;
 }

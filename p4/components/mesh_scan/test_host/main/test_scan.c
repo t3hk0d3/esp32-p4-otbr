@@ -258,11 +258,11 @@ TEST_CASE("When the result cannot be allocated: returns ESP_ERR_NO_MEM", "[mesh_
     TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, mesh_scan_core_start());
 }
 
-TEST_CASE("When the mode is not BR_RUNNING: returns ESP_ERR_INVALID_STATE without calling ops", "[mesh_scan]")
+TEST_CASE("When the mode is not BR_RUNNING: returns ESP_ERR_NOT_ALLOWED without calling ops", "[mesh_scan]")
 {
     fake_ops_install();
     g_fake.br_running = false;
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mesh_scan_core_start());
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_ALLOWED, mesh_scan_core_start());
     TEST_ASSERT_EQUAL(0, g_fake.ops_calls);
     TEST_ASSERT_EQUAL(MESH_SCAN_IDLE, view().state);
 }
@@ -651,6 +651,36 @@ TEST_CASE("While running: calls ops.cancel, state becomes failed with error stop
     TEST_ASSERT_EQUAL(0, g_fake.child_table_calls);
 }
 
+TEST_CASE("Without the OpenThread lock, while running: mesh_scan_core_fail_stopped fails the scan with error stopped "
+          "without calling ops.cancel", "[mesh_scan]")
+{
+    const uint8_t ids[] = { 3 };
+
+    discover(ids, 1); // in router 3's child-table query
+    const int disarms = g_fake.disarm_calls;
+
+    mesh_scan_core_fail_stopped();
+    assert_failed(MESH_SCAN_ERR_STOPPED);
+    TEST_ASSERT_EQUAL(0, g_fake.cancel_calls);
+    TEST_ASSERT_EQUAL(disarms + 1, g_fake.disarm_calls);
+    TEST_ASSERT_EQUAL(g_fake.allocs, g_fake.releases); // the result went with the failure
+
+    // late callbacks of the abandoned scan are ignored
+    mesh_scan_on_child_table_done(MESH_SCAN_OT_ERROR_NONE);
+    assert_failed(MESH_SCAN_ERR_STOPPED);
+    TEST_ASSERT_EQUAL(0, g_fake.child_addrs_calls);
+}
+
+TEST_CASE("Without the OpenThread lock, while not running: mesh_scan_core_fail_stopped does nothing", "[mesh_scan]")
+{
+    discover(NULL, 0);
+    const int calls = g_fake.ops_calls;
+
+    mesh_scan_core_fail_stopped();
+    TEST_ASSERT_EQUAL(calls, g_fake.ops_calls);
+    TEST_ASSERT_EQUAL(MESH_SCAN_DONE, view().state);
+}
+
 TEST_CASE("While not running: mesh_scan_cancel does nothing", "[mesh_scan]")
 {
     fake_ops_install();
@@ -809,8 +839,8 @@ static void cb_child_deadline(void)
     expire(MESH_SCAN_CHILD_DEADLINE_MS);
 }
 
-TEST_CASE("When the mode is no longer BR_RUNNING: any callback calls ops.cancel, state becomes failed with error "
-          "stopped", "[mesh_scan]")
+TEST_CASE("When the mode is no longer BR_RUNNING: any callback fails the scan with error stopped without calling "
+          "ops.cancel", "[mesh_scan]")
 {
     const callback_t callbacks[] = { cb_router, cb_discover_done, cb_child_entry, cb_child_table_done,
                                      cb_child_addrs, cb_child_addrs_done, cb_child_diag, cb_child_deadline
@@ -830,7 +860,7 @@ TEST_CASE("When the mode is no longer BR_RUNNING: any callback calls ops.cancel,
         }
         g_fake.br_running = false;
         callbacks[i]();
-        TEST_ASSERT_EQUAL_MESSAGE(1, g_fake.cancel_calls, "callback index");
+        TEST_ASSERT_EQUAL_MESSAGE(0, g_fake.cancel_calls, "callback index"); // no otMeshDiagCancel from a callback
         assert_failed(MESH_SCAN_ERR_STOPPED);
         TEST_ASSERT_EQUAL(0, g_fake.snapshot_calls);
     }

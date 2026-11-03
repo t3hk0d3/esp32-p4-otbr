@@ -736,7 +736,8 @@ return {
   conflictText : conflictText,
   pingSummary : pingSummary,
   clockText : clockText,
-  agoText : agoText
+  agoText : agoText,
+  BOARD_LABEL : BOARD_LABEL
 };
 })();
 
@@ -755,7 +756,7 @@ var SVG_NS = 'http://www.w3.org/2000/svg';
 var POLL_MS = 1000;
 var COPY_RESET_MS = 2000;
 var POLL_GIVE_UP = 5;
-var BOARD_LABEL = 'This border router';
+var FRESH_AGE_S = 5;     /* a done answer at most this old counts as a fresh load; an older one shows as saved */
 var NO_SAVED = 'No saved result in this browser yet.';
 var STOPPED_ANSWERING = "The board stopped answering. Load again when it's back.";
 var NAMES_NOTE = "This browser can't save names. They last until the page is reloaded.";
@@ -830,7 +831,7 @@ function svg(tag, attrs, parent) {
 
 function nameOf(d) { return L.displayName(d, names, model.srp); }
 
-function mapName(d) { return d.thisBoard ? BOARD_LABEL : nameOf(d); }
+function mapName(d) { return d.thisBoard ? L.BOARD_LABEL : nameOf(d); }
 
 function unnamed(d) { return !d.thisBoard && !(d.ext && names[d.ext]) && !L.srpHostFor(d, model.srp); }
 
@@ -957,10 +958,11 @@ function follow(state) {
   var wasScanning = scanning;
   scanning = false;
   if (state && state.state === 'done' && state.result) {
-    var at = env.now() - (Number(state.age_s) || 0) * 1000;
+    var age = Number(state.age_s) || 0;
+    var at = env.now() - age * 1000;
     last = {savedAt : at, result : state.result};
     L.saveResult(storage, state.result, at);
-    showResult(last, true);
+    showResult(last, age <= FRESH_AGE_S); /* an older one is the board's earlier scan: shown as saved, at its time */
   } else if (wasScanning && state && state.state === 'idle') {
     /* The board forgot the scan this page was following: it restarted mid-scan. */
     renderStart(INTERRUPTED);

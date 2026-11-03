@@ -10,24 +10,36 @@ static void set_reply(device_api_topology_reply_t *out, int status, const char *
     snprintf(out->detail, sizeof(out->detail), "%s", detail ? detail : "");
 }
 
+static void set_mode_reply(device_api_topology_reply_t *out, int mode)
+{
+    char detail[sizeof(out->detail)];
+
+    snprintf(detail, sizeof(detail), "mode %s", device_api_mode_name(mode));
+    set_reply(out, 409, "busy", detail);
+}
+
 void device_api_topology_start_reply(esp_err_t start_err, int mode, bool long_op_busy, const char *long_op_detail,
-                                     device_api_topology_reply_t *out)
+                                     bool pcap_busy, const char *pcap_detail, device_api_topology_reply_t *out)
 {
     if (mode != BR_MODE_BR_RUNNING) {
-        char detail[sizeof(out->detail)];
-
-        snprintf(detail, sizeof(detail), "mode %s", device_api_mode_name(mode));
-        set_reply(out, 409, "busy", detail);
+        set_mode_reply(out, mode);
         return;
     }
     if (long_op_busy) {
         set_reply(out, 409, "busy", long_op_detail);
         return;
     }
+    if (pcap_busy) {
+        set_reply(out, 409, "busy", pcap_detail);
+        return;
+    }
     switch (start_err) {
     case ESP_OK:
     case ESP_ERR_INVALID_STATE: // a scan is already running: join it
         set_reply(out, 202, NULL, "");
+        break;
+    case ESP_ERR_NOT_ALLOWED: // the mode left BR_RUNNING before the start; `mode` was read after the refusal
+        set_mode_reply(out, mode);
         break;
     case ESP_ERR_NOT_FINISHED:
         set_reply(out, 409, "busy", "mesh diagnostics are in use");

@@ -31,11 +31,18 @@ typedef esp_err_t (*mesh_scan_sink_t)(void *ctx, const char *data, size_t len);
 
 esp_err_t mesh_scan_init(void);
 
-/** Start a scan. ESP_ERR_INVALID_STATE while one runs; ESP_ERR_NOT_SUPPORTED when mesh_scan_init never succeeded. */
+/**
+ * Start a scan. ESP_ERR_INVALID_STATE while one runs; ESP_ERR_NOT_ALLOWED when the mode is not BR_RUNNING;
+ * ESP_ERR_TIMEOUT when the OpenThread lock is not free within 100 ms; ESP_ERR_NOT_SUPPORTED when mesh_scan_init never
+ * succeeded.
+ */
 esp_err_t mesh_scan_start(void);
 
-/** Cancel a running scan; it ends failed with error "stopped". */
-void mesh_scan_cancel(void);
+/**
+ * Cancel a running scan; it ends failed with error "stopped" either way. ESP_OK, or ESP_ERR_TIMEOUT when the
+ * OpenThread lock was not free within 100 ms and OpenThread could not be told (its mesh-diag operation runs on).
+ */
+esp_err_t mesh_scan_cancel(void);
 
 /** Write the state object through `sink` in chunks of at most 2 KB. Returns the first sink error, or ESP_OK. */
 esp_err_t mesh_scan_render(mesh_scan_sink_t sink, void *ctx);

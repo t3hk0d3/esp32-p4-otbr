@@ -586,6 +586,12 @@ class TestTopologyLogic:
             "[L.mapLabel('a-very-long-device-name'), L.mapLabel('This border router')]"
         ) == ["a-very-long-devic…", "This border router"]
 
+    def test_source_defines_the_board_label_once(self):
+        # On the page half: it uses TopologyLogic's board label instead of a copy of its own.
+        from device_js import STATIC
+
+        assert (STATIC / "topology.js").read_text().count("'This border router'") == 1
+
     def test_source_has_no_random_numbers(self):
         # On any input: the layout does not use Math.random.
         from device_js import STATIC
@@ -915,6 +921,34 @@ class TestTopologyPage:
         assert r[:4] == [True, "MyThread", True, False]
         assert r[4] == f"Loaded at {r[8]}"
         assert r[5:8] == [True, "Load again", 0]
+
+    def test_done_post_reply_up_to_five_seconds_old_counts_as_a_fresh_load(self):
+        # On a POST answered with done and age_s 5: the green pill "Loaded at HH:MM" at the board's end time.
+        r = run(
+            "await start(); S.post = {status: 202, body: DONE(RF, 5)}; t.el('t-load').click(); await t.flush();"
+            " return [vis('t-loaded'), txt('t-pill'), t.el('t-pill').classes.has('t-pill-live'),"
+            " t.el('t-pill').classes.has('t-pill-saved'), txt('t-reload'), L.clockText(t.env.now() - 5000)];"
+        )
+        assert r[0] is True
+        assert r[1] == f"Loaded at {r[5]}"
+        assert r[2:5] == [True, False, "Load again"]
+
+    def test_done_post_reply_older_than_five_seconds_shows_as_saved_at_its_real_time(
+        self,
+    ):
+        # On a POST answered with done and age_s 6 or more: the amber pill "Saved result from HH:MM, N min ago" at the
+        # board's end time, not the green "Loaded at".
+        r = run(
+            "await start(); S.post = {status: 202, body: DONE(RF, 600)}; t.el('t-load').click(); await t.flush();"
+            " const a = [vis('t-loaded'), txt('t-pill'), t.el('t-pill').classes.has('t-pill-saved'),"
+            " t.el('t-pill').classes.has('t-pill-live'), txt('t-reload'), L.clockText(t.env.now() - 600000)];"
+            " S.post = {status: 202, body: DONE(RF, 6)}; t.el('t-reload').click(); await t.flush();"
+            " a.push(t.el('t-pill').classes.has('t-pill-saved')); return a;"
+        )
+        assert r[0] is True
+        assert r[1] == f"Saved result from {r[5]}, 10 min ago"
+        assert r[2:5] == [True, False, "Load fresh"]
+        assert r[6] is True
 
     def test_failed_scan_shows_its_error_and_keeps_the_last_result(self):
         # On failed: the error in the start view; the last result stays.

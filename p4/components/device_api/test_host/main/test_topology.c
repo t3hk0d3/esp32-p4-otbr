@@ -9,7 +9,7 @@ static device_api_topology_reply_t reply_for(esp_err_t start_err)
 {
     device_api_topology_reply_t r;
 
-    device_api_topology_start_reply(start_err, BR_MODE_BR_RUNNING, false, "", &r);
+    device_api_topology_start_reply(start_err, BR_MODE_BR_RUNNING, false, "", false, "", &r);
     return r;
 }
 
@@ -33,7 +33,7 @@ TEST_CASE("On the mode STARTING: 409 busy, detail mode STARTING", "[device_api][
 {
     device_api_topology_reply_t r;
 
-    device_api_topology_start_reply(ESP_OK, BR_MODE_STARTING, false, "", &r);
+    device_api_topology_start_reply(ESP_OK, BR_MODE_STARTING, false, "", false, "", &r);
     TEST_ASSERT_EQUAL_INT(409, r.status);
     TEST_ASSERT_EQUAL_STRING("busy", r.error);
     TEST_ASSERT_EQUAL_STRING("mode STARTING", r.detail);
@@ -43,7 +43,7 @@ TEST_CASE("On the mode SNIFFER: 409 busy, detail mode SNIFFER", "[device_api][to
 {
     device_api_topology_reply_t r;
 
-    device_api_topology_start_reply(ESP_OK, BR_MODE_SNIFFER, false, "", &r);
+    device_api_topology_start_reply(ESP_OK, BR_MODE_SNIFFER, false, "", false, "", &r);
     TEST_ASSERT_EQUAL_INT(409, r.status);
     TEST_ASSERT_EQUAL_STRING("busy", r.error);
     TEST_ASSERT_EQUAL_STRING("mode SNIFFER", r.detail);
@@ -53,7 +53,7 @@ TEST_CASE("On the mode RADIO_FAULT: 409 busy, detail mode RADIO_FAULT", "[device
 {
     device_api_topology_reply_t r;
 
-    device_api_topology_start_reply(ESP_OK, BR_MODE_RADIO_FAULT, false, "", &r);
+    device_api_topology_start_reply(ESP_OK, BR_MODE_RADIO_FAULT, false, "", false, "", &r);
     TEST_ASSERT_EQUAL_INT(409, r.status);
     TEST_ASSERT_EQUAL_STRING("busy", r.error);
     TEST_ASSERT_EQUAL_STRING("mode RADIO_FAULT", r.detail);
@@ -63,7 +63,7 @@ TEST_CASE("On a mode other than BR_RUNNING with the slot held: the mode wins", "
 {
     device_api_topology_reply_t r;
 
-    device_api_topology_start_reply(ESP_OK, BR_MODE_SNIFFER, true, "an update is running", &r);
+    device_api_topology_start_reply(ESP_OK, BR_MODE_SNIFFER, true, "an update is running", true, "a capture", &r);
     TEST_ASSERT_EQUAL_STRING("mode SNIFFER", r.detail);
 }
 
@@ -71,10 +71,39 @@ TEST_CASE("On the long-op slot held: 409 busy with the slot's detail", "[device_
 {
     device_api_topology_reply_t r;
 
-    device_api_topology_start_reply(ESP_OK, BR_MODE_BR_RUNNING, true, "an update is running", &r);
+    device_api_topology_start_reply(ESP_OK, BR_MODE_BR_RUNNING, true, "an update is running", false, "", &r);
     TEST_ASSERT_EQUAL_INT(409, r.status);
     TEST_ASSERT_EQUAL_STRING("busy", r.error);
     TEST_ASSERT_EQUAL_STRING("an update is running", r.detail);
+}
+
+TEST_CASE("On the pcap slot held: 409 busy with the pcap slot's detail", "[device_api][topology]")
+{
+    device_api_topology_reply_t r;
+
+    device_api_topology_start_reply(ESP_OK, BR_MODE_BR_RUNNING, false, "", true,
+                                    "a capture stream is already running", &r);
+    TEST_ASSERT_EQUAL_INT(409, r.status);
+    TEST_ASSERT_EQUAL_STRING("busy", r.error);
+    TEST_ASSERT_EQUAL_STRING("a capture stream is already running", r.detail);
+}
+
+TEST_CASE("On ESP_ERR_NOT_ALLOWED (the mode left BR_RUNNING before the start): 409 busy, detail mode <MODE> of the "
+          "mode passed", "[device_api][topology]")
+{
+    device_api_topology_reply_t r;
+
+    // The handler re-reads the mode after the refusal and passes it.
+    device_api_topology_start_reply(ESP_ERR_NOT_ALLOWED, BR_MODE_SNIFFER, false, "", false, "", &r);
+    TEST_ASSERT_EQUAL_INT(409, r.status);
+    TEST_ASSERT_EQUAL_STRING("busy", r.error);
+    TEST_ASSERT_EQUAL_STRING("mode SNIFFER", r.detail);
+
+    // Even when the mode passed reads BR_RUNNING again by then.
+    device_api_topology_start_reply(ESP_ERR_NOT_ALLOWED, BR_MODE_BR_RUNNING, false, "", false, "", &r);
+    TEST_ASSERT_EQUAL_INT(409, r.status);
+    TEST_ASSERT_EQUAL_STRING("busy", r.error);
+    TEST_ASSERT_EQUAL_STRING("mode BR_RUNNING", r.detail);
 }
 
 TEST_CASE("On ESP_ERR_NOT_FINISHED: 409 busy, detail mesh diagnostics are in use", "[device_api][topology]")

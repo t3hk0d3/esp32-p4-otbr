@@ -60,14 +60,20 @@ struct mesh_scan_ops {
 void mesh_scan_set_ops(const mesh_scan_ops_t *ops);
 
 /**
- * Start a scan. ESP_OK when discover started; ESP_ERR_INVALID_STATE when the mode is not BR_RUNNING or a scan runs;
- * ESP_ERR_NO_MEM (failed, no_memory); ESP_ERR_NOT_FINISHED on OT_ERROR_BUSY (failed, busy); ESP_FAIL on any other
+ * Start a scan. ESP_OK when discover started; ESP_ERR_NOT_ALLOWED when the mode is not BR_RUNNING;
+ * ESP_ERR_INVALID_STATE when a scan runs (or the scan mutex was never created); ESP_ERR_NO_MEM (failed, no_memory); ESP_ERR_NOT_FINISHED on OT_ERROR_BUSY (failed, busy); ESP_FAIL on any other
  * discover error (failed, stopped).
  */
 esp_err_t mesh_scan_core_start(void);
 
 /** Cancel a running scan (failed, stopped); does nothing otherwise. */
 void mesh_scan_core_cancel(void);
+
+/**
+ * Fail a running scan with "stopped" without telling OpenThread (scan mutex only, never ops.cancel): for a caller that
+ * could not get the OpenThread lock. Does nothing otherwise.
+ */
+void mesh_scan_core_fail_stopped(void);
 
 /**
  * A copy of the state made under the mutex. `result` points at the current result (done only) and holds no
