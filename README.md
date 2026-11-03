@@ -27,8 +27,9 @@ Get the board from [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.
   /64 from your space, or the self-generated ULA) and announce it to your core router over **BGP** (iBGP or eBGP, up to
   2 peers) or **RIPng**, so hosts on other subnets reach Thread devices. Set live on the Routing page, no reboot.
 - **Joins border routers over Ethernet.** TREL (Thread over Ethernet) links border routers of the same Thread network
-  through the LAN, so radio islands in different rooms or floors become one mesh and traffic can route around weak radio
-  hops. Works with any TREL-capable border router on the LAN. On by default, switched live on the Ethernet page.
+  over Ethernet, so radio islands in different rooms or floors become one mesh and traffic can route around weak radio
+  hops. Works with any TREL-capable border router on the same Ethernet link (the Thread backbone VLAN in split mode). On
+  by default, switched live on the Ethernet page.
 - **Built for your network.** An optional VLAN split mode puts management and the Thread backbone on separate VLANs,
   and confirm-or-revert means a bad network setting can't lock you out.
 - **Sees what is on the air.** Sniffer mode streams 802.15.4 traffic as pcap straight into Wireshark.
