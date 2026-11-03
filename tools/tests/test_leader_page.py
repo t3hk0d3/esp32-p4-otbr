@@ -489,7 +489,9 @@ class TestGuardWithTheLeaderCard:
         # On RADIO_FAULT: the card's controls stay enabled and the card is not greyed; every other card is disabled.
         from device_js import STATIC
 
-        r = scenario(GUARD_SCENARIO.replace("@MGMT@", json.dumps(str(STATIC / "mgmt.js"))))
+        r = scenario(
+            GUARD_SCENARIO.replace("@MGMT@", json.dumps(str(STATIC / "mgmt.js")))
+        )
         assert r == [False, False, False, True, True]
 
     def test_the_network_page_marks_the_card_exempt(self):

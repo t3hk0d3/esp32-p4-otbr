@@ -18,7 +18,9 @@ from test_latency import thread_peer_address  # noqa: F401  (pytest fixture)
 
 PEER_WEIGHT = 70
 PEER_HIGH_WEIGHT = 82
-PEER_DEFAULT_WEIGHT = 64  # OpenThread's default; the CLI setting lives in RAM and outlasts `thread stop`
+PEER_DEFAULT_WEIGHT = (
+    64  # OpenThread's default; the CLI setting lives in RAM and outlasts `thread stop`
+)
 ADJUSTMENT = 6
 MAX_ADJUSTMENT = 16
 BASE_WEIGHT = 65
@@ -33,7 +35,7 @@ def base_url(board_ip):
 
 
 @pytest.fixture
-def adjustment_reset(thread_peer_address, base_url, peer):  # noqa: ARG001  (orders the rig first)
+def adjustment_reset(thread_peer_address, base_url, peer):  # noqa: F811  (a fixture argument; orders the rig first)
     """Yield a rig with `url` (the board's base URL; the test sets it again after a reboot, the address may change).
     Afterwards put the adjustment back to 0 on that URL (the board may be mid-reboot: failures are ignored) and the
     peer's weight back to the default. `leaderweight` rather than `restart()`: it is a plain CLI command with no reboot
