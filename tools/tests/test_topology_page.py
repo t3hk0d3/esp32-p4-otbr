@@ -59,6 +59,10 @@ const names = (ds, list) => list.map((d) => d.id);
 """
 
 
+# The page's map labels for a device list: "This border router" for the board, else the display name.
+LABELS = "((ds) => Object.fromEntries(ds.map((d) => [d.id, d.thisBoard ? 'This border router' : L.displayName(d, {}, SRP)])))"
+
+
 def js(expression):
     """Evaluate `expression` with the fixture (R, B, D, DB, LK, NET, SRP) in scope."""
     return logic("topology", f"(() => {{ {FIXTURE} return ({expression}); }})()")
@@ -233,9 +237,19 @@ class TestTopologyLogic:
         # Otherwise: "Unnamed 0xNNNN".
         assert js("L.displayName(byId(D, 'c23553'), {}, SRP)") == "Unnamed 0x5c01"
 
-    def test_displayname_of_this_board_is_its_srp_or_nickname_not_a_map_label(self):
-        # On this board: the usual name chain applies (the map label is the page's concern).
-        assert js("L.displayName(byId(D, 'r34'), {}, SRP)") == "Unnamed 0x8800"
+    def test_displayname_of_this_board_without_nickname_or_srp_host_is_this_border_router(
+        self,
+    ):
+        # On this board with no nickname and no SRP host: "This border router" (spec 4.6), never "Unnamed".
+        assert js("L.displayName(byId(D, 'r34'), {}, SRP)") == "This border router"
+        assert js("L.displayName(byId(DB, 'c40962'), {}, SRP)") == "This border router"
+
+    def test_displayname_of_this_board_prefers_its_nickname(self):
+        # On this board with a nickname: the nickname.
+        assert (
+            js("L.displayName(byId(D, 'r34'), {bb00000000008800: 'Attic BR'}, SRP)")
+            == "Attic BR"
+        )
 
     # rows
 
@@ -336,25 +350,76 @@ class TestTopologyLogic:
             ".map((d) => Math.hypot(m.pos[d.id].x - m.pos[d.parentId].x, m.pos[d.id].y - m.pos[d.parentId].y)); })()"
         )
         assert len(got) == 7
-        assert all(40 <= d <= 100 for d in got)
+        assert all(40 <= d <= 160 for d in got)
 
     def test_layout_never_goes_below_the_minimum_size_and_grows_with_the_node_count(
         self,
     ):
-        # On any input: at least 640x420, positions inside the map, and a bigger mesh gives a bigger map.
+        # On any input: at least 320x200, positions inside the map, and a bigger mesh gives a bigger map.
         got = js(
             "(() => { const small = L.layout(D.slice(0, 1), []); const m = L.layout(D, LK);"
             " const many = []; for (let i = 0; i < 16; i++) { many.push({id: 'r' + i, kind: 'router', rloc16: i << 10,"
             " routerId: i, parentId: null, thisBoard: i === 0, leader: false, addrs: []}); }"
             " const big = L.layout(many, []);"
             " const inside = Object.keys(m.pos).every((k) => m.pos[k].x >= 0 && m.pos[k].x <= m.width && m.pos[k].y >= 0 && m.pos[k].y <= m.height);"
-            " return [small.width, small.height, m.width >= 640, m.height >= 420, inside, big.width > m.width && big.height > m.height]; })()"
+            " return [small.width, small.height, m.width >= 320, m.height >= 200, inside, big.width > m.width && big.height > m.height]; })()"
         )
-        assert got == [640, 420, True, True, True, True]
+        assert got == [320, 200, True, True, True, True]
 
     def test_layout_of_no_devices_is_the_minimum_empty_map(self):
-        # On no devices: 640x420 and no positions.
-        assert plain("L.layout([], [])") == {"width": 640, "height": 420, "pos": {}}
+        # On no devices: 320x200, no positions and no Home-network box.
+        assert plain("L.layout([], [])") == {
+            "width": 320,
+            "height": 200,
+            "pos": {},
+            "home": None,
+            "ring": 0,
+        }
+
+    def test_layout_of_the_fixture_fits_800_by_600(self):
+        # On the fixture (13 nodes), with the board a router or a child: the map is at most 800x600.
+        got = js(
+            f"[[D, LK], [DB, L.routerLinks(B)]].map(([ds, lk]) => {{ const m = L.layout(ds, lk, {LABELS}(ds));"
+            " return [m.width, m.height]; })"
+        )
+        assert all(w <= 800 and h <= 600 for w, h in got), got
+
+    def test_layout_puts_the_home_box_next_to_the_board(self):
+        # On a board that is a router or a child: the Home-network box centre is within 120 px of the board.
+        got = js(
+            f"[[D, LK, 'r34'], [DB, L.routerLinks(B), 'c40962']].map(([ds, lk, id]) => {{"
+            f" const m = L.layout(ds, lk, {LABELS}(ds)); return Math.hypot(m.home.x - m.pos[id].x, m.home.y - m.pos[id].y); }})"
+        )
+        assert all(d <= 120 for d in got), got
+
+    def test_layout_keeps_a_linkless_stub_on_the_ring(self):
+        # On a router without links (the stub 0xdc00): no farther from the centre than the ring.
+        got = js(
+            f"(() => {{ const m = L.layout(D, LK, {LABELS}(D));"
+            " return [Math.hypot(m.pos.r55.x - m.pos.r34.x, m.pos.r55.y - m.pos.r34.y), m.ring]; })()"
+        )
+        assert got[0] <= got[1] + 1, got
+
+    def test_layout_label_boxes_never_overlap(self):
+        # On the fixture: no two label boxes (estimated width x 14 px, under each node) overlap.
+        got = js(
+            f"[[D, LK], [DB, L.routerLinks(B)]].map(([ds, lk]) => {{ const labels = {LABELS}(ds);"
+            " const m = L.layout(ds, lk, labels);"
+            " const box = (d) => { const w = L.mapLabel(labels[d.id]).length * (d.parentId === null ? 7 : 6.5);"
+            "   const p = m.pos[d.id], y = p.y + L.nodeHalf(d) + 4; return [d.id, p.x - w / 2, p.x + w / 2, y, y + 14]; };"
+            " const b = ds.map(box), hits = [];"
+            " for (let i = 0; i < b.length; i++) for (let j = i + 1; j < b.length; j++)"
+            "   if (b[i][1] < b[j][2] && b[j][1] < b[i][2] && b[i][3] < b[j][4] && b[j][3] < b[i][4])"
+            "     hits.push(b[i][0] + '/' + b[j][0]);"
+            " return hits; })"
+        )
+        assert got == [[], []]
+
+    def test_maplabel_cuts_long_names_with_an_ellipsis(self):
+        # On a name longer than 18 characters: the first 17 and "…"; shorter names unchanged.
+        assert plain(
+            "[L.mapLabel('a-very-long-device-name'), L.mapLabel('This border router')]"
+        ) == ["a-very-long-devic…", "This border router"]
 
     def test_source_has_no_random_numbers(self):
         # On any input: the layout does not use Math.random.
@@ -528,10 +593,17 @@ class TestTopologyLogic:
 
 # ---- TopologyPage ----
 
-# Fake routes: GET /device/topology answers S.gets in turn (the last one repeats), POST answers S.post, /ping S.ping.
+# Fake routes: GET /device/topology answers S.gets in turn (the last one repeats; 'drop' drops the connection), POST
+# answers S.post, /ping S.ping.
 PAGE_ROUTES = """(u, o) => {
-  if (u === '/device/topology')
-    return o.method === 'POST' ? S.post : {status: 200, body: S.gets.length > 1 ? S.gets.shift() : S.gets[0]};
+  if (u === '/device/topology') {
+    if (o.method === 'POST')
+      return S.post;
+    const g = S.gets.length > 1 ? S.gets.shift() : S.gets[0];
+    if (g === 'drop')
+      throw new Error('connection dropped');
+    return {status: 200, body: g};
+  }
   if (u === '/ping')
     return {status: 200, body: S.ping};
   return {status: 200, body: H.NETWORK};
@@ -697,6 +769,40 @@ class TestTopologyPage:
         )
         assert r == [True, False, "The Thread network isn't running (mode SNIFFER)", 1]
 
+    def test_five_failed_polls_in_a_row_give_up_on_the_scan(self):
+        # On 5 failed GETs in a row (with backoff): the start view says the board stopped answering, no more GETs,
+        # and Load topology works again.
+        r = run(
+            "await start(); S.gets = ['drop']; t.el('t-load').click(); await t.advance(40000);"
+            " const gets = () => calls('GET', '/device/topology').length;"
+            " const a = [vis('t-start'), vis('t-loading'), txt('t-start-note'), gets()]; await t.advance(60000);"
+            " a.push(gets()); t.el('t-load').click(); await t.flush(); a.push(calls('POST', '/device/topology').length);"
+            " return a;"
+        )
+        assert r == [
+            True,
+            False,
+            "The board stopped answering. Load again when it's back.",
+            6,
+            6,
+            2,
+        ]
+
+    def test_a_success_after_four_failed_polls_carries_on(self):
+        # On 4 failed GETs then answers: polling goes on and the scan ends in the loaded view.
+        r = run(
+            "await start(); S.gets = ['drop', 'drop', 'drop', 'drop', RUNNING(2, 5), DONE(RF, 0)];"
+            " t.el('t-load').click(); await t.advance(31000);"
+            " const a = [vis('t-loading'), txt('t-progress')]; await t.advance(1000);"
+            " a.push(vis('t-loaded'), calls('GET', '/device/topology').length); return a;"
+        )
+        assert r == [
+            True,
+            "Asking each router about its children: 2 of 5",
+            True,
+            7,
+        ]
+
     # Show last result
 
     def test_show_last_result_shows_the_amber_pill_without_a_request(self):
@@ -850,7 +956,7 @@ class TestTopologyPage:
         )
         assert r == [
             "Unnamed 0x5c00 LQI 2",
-            "Unnamed 0x8800 LQI 3",
+            "This border router LQI 3",
             "Unnamed 0xa000 LQI 1 in / 3 out",
         ]
 

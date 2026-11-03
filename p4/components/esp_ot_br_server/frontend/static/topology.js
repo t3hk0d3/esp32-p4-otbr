@@ -234,14 +234,14 @@ function srpHostFor(device, srpHosts) {
   return null;
 }
 
-/** Nickname, else SRP host name, else "Unnamed 0xNNNN". */
+/** Nickname, else SRP host name, else "This border router" for this board and "Unnamed 0xNNNN" for the others. */
 function displayName(device, names, srpHosts) {
   if (device.ext && names && has(names, device.ext) && names[device.ext])
     return names[device.ext];
   var host = srpHostFor(device, srpHosts);
   if (host && host.name)
     return host.name;
-  return 'Unnamed 0x' + hex4(device.rloc16);
+  return device.thisBoard ? BOARD_LABEL : 'Unnamed 0x' + hex4(device.rloc16);
 }
 
 /* ---- table rows ---- */
@@ -280,18 +280,179 @@ function rows(devs, filter, query, names, srpHosts) {
 
 /* ---- map layout ---- */
 
-var MIN_WIDTH = 640, MIN_HEIGHT = 420, MARGIN = 90;
-var RING_MIN = 150, RING_PER_ROUTER = 34;
+var BOARD_LABEL = 'This border router';
+var LABEL_CHARS = 18;                         /* map labels longer than this are cut with an ellipsis */
+var CHAR_W_ROUTER = 7, CHAR_W_CHILD = 6.5;    /* estimated px per character at 12 px and 11 px */
+var LABEL_GAP = 4, LABEL_H = 14, BOX_GAP = 6;
+var RING_MIN = 150, RING_PER_ROUTER = 30;
 var STEPS = 60, STEP_MAX = 20, REPEL = 2000000, ATTRACT = 250;
-var CHILD_R = 80, CHILD_R_ALT = 15, ARC_PER_CHILD = 25, ARC_MAX = 270;
+var FAN_R_MIN = 60, FAN_R_STEP = 15, FAN_R_MAX = 240, FAN_ARC_MAX = 270, FAN_STEP = 3 * Math.PI / 180;
+var RESOLVE_ROUNDS = 40;
+var HOME_W = 170, HOME_H = 26;
+/* Home-network box centres around the board, tried in this order: below, above, right, left, then the diagonals. */
+var HOME_SPOTS = [ [ 0, 78 ], [ 0, -62 ], [ 118, 0 ], [ -118, 0 ], [ 100, 55 ], [ -100, 55 ], [ 100, -50 ], [ -100, -50 ] ];
+var MARGIN = 16, MIN_WIDTH = 320, MIN_HEIGHT = 200;
 
-/** {width, height, pos: {id: {x, y}}}. Deterministic: no randomness anywhere. */
-function layout(devs, links) {
+/** Half the height of a node's shape on the map. */
+function nodeHalf(d) {
+  if (d.kind === 'br')
+    return d.parentId === null ? 20 : 9;
+  if (d.parentId !== null)
+    return 9;
+  return d.leader ? 21 : 16;
+}
+
+/** A map label: at most LABEL_CHARS characters, longer ones cut with "…". */
+function mapLabel(text) {
+  text = String(text);
+  return text.length > LABEL_CHARS ? text.slice(0, LABEL_CHARS - 1) + '…' : text;
+}
+
+/** The node and its label(s) below it, relative to the node centre: {x0, x1, y0, y1}. */
+function footprint(d, label) {
+  var half = nodeHalf(d);
+  var charW = d.parentId === null ? CHAR_W_ROUTER : CHAR_W_CHILD;
+  var w = Math.max(2 * half, mapLabel(label).length * charW);
+  return {x0 : -w / 2, x1 : w / 2, y0 : -half, y1 : half + LABEL_GAP + LABEL_H * (d.kind === 'stub' ? 2 : 1)};
+}
+
+function boxAt(fp, p) { return {x0 : p.x + fp.x0, x1 : p.x + fp.x1, y0 : p.y + fp.y0, y1 : p.y + fp.y1}; }
+
+function overlaps(a, b) {
+  return a.x0 < b.x1 + BOX_GAP && b.x0 < a.x1 + BOX_GAP && a.y0 < b.y1 + BOX_GAP && b.y0 < a.y1 + BOX_GAP;
+}
+
+/** How crowded the direction `angle` is from `p`, given the positions of its neighbours. */
+function crowding(p, angle, others) {
+  return others.reduce(function(sum, q) {
+    var a = Math.atan2(q.y - p.y, q.x - p.x);
+    return sum + Math.max(0, Math.cos(angle - a));
+  }, 0);
+}
+
+/*
+ * Children around their parent: one after the other along an arc at radius r, each at the smallest angle step after
+ * the previous one at which its box (node plus label) clears every sibling before it. The arc is centred on `dir`
+ * (two passes: the first measures the span). When the arc is wider than FAN_ARC_MAX or a child box hits the parent's,
+ * r grows.
+ */
+function placeFan(p, parentBox, kids, fps, dir) {
+  var out = {};
+  function sweep(start, r) {
+    var placed = [], angle = start;
+    kids.forEach(function(c, i) {
+      for (var guard = 0; i > 0 && guard < 120; guard++) {
+        var at = {x : p.x + r * Math.cos(angle), y : p.y + r * Math.sin(angle)};
+        var box = boxAt(fps[c.id], at);
+        if (!placed.some(function(o) { return overlaps(box, o.box); }))
+          break;
+        angle += FAN_STEP;
+      }
+      var pos = {x : p.x + r * Math.cos(angle), y : p.y + r * Math.sin(angle)};
+      placed.push({id : c.id, angle : angle, pos : pos, box : boxAt(fps[c.id], pos)});
+    });
+    return placed;
+  }
+  for (var r = FAN_R_MIN;; r += FAN_R_STEP) {
+    var first = sweep(dir, r);
+    var span = first[first.length - 1].angle - first[0].angle;
+    var placed = sweep(dir - span / 2, r);
+    span = placed[placed.length - 1].angle - placed[0].angle;
+    var clear = !placed.some(function(o) { return overlaps(o.box, parentBox); });
+    if ((clear && span <= FAN_ARC_MAX * Math.PI / 180) || r >= FAN_R_MAX) {
+      placed.forEach(function(o) { out[o.id] = o.pos; });
+      return out;
+    }
+  }
+}
+
+/*
+ * Pushes overlapping boxes apart, a fixed number of rounds in a fixed order. A child moves before a router; of two
+ * routers the one that is not the centre moves, taking its children along. The move is the smaller of the two
+ * axis-aligned separations.
+ */
+function resolve(devs, pos, fps, centre) {
+  var items = devs.filter(function(d) { return pos[d.id]; });
+  function move(d, dx, dy) {
+    pos[d.id] = {x : pos[d.id].x + dx, y : pos[d.id].y + dy};
+    if (d.parentId === null) {
+      items.forEach(function(c) {
+        if (c.parentId === d.id)
+          pos[c.id] = {x : pos[c.id].x + dx, y : pos[c.id].y + dy};
+      });
+    }
+  }
+  for (var round = 0; round < RESOLVE_ROUNDS; round++) {
+    var moved = false;
+    for (var i = 0; i < items.length; i++) {
+      for (var j = i + 1; j < items.length; j++) {
+        var a = items[i], b = items[j];
+        var A = boxAt(fps[a.id], pos[a.id]), B = boxAt(fps[b.id], pos[b.id]);
+        if (!overlaps(A, B))
+          continue;
+        var mover = b, other = a;
+        if (a.parentId !== null && b.parentId === null) {
+          mover = a; other = b;
+        } else if (a.parentId === null && b.parentId === null && b === centre) {
+          mover = a; other = b;
+        }
+        var M = mover === a ? A : B, O = mover === a ? B : A;
+        var px = Math.min(M.x1 + BOX_GAP - O.x0, O.x1 + BOX_GAP - M.x0);
+        var py = Math.min(M.y1 + BOX_GAP - O.y0, O.y1 + BOX_GAP - M.y0);
+        if (px < py)
+          move(mover, (M.x0 + M.x1 >= O.x0 + O.x1 ? 1 : -1) * px, 0);
+        else
+          move(mover, 0, (M.y0 + M.y1 >= O.y0 + O.y1 ? 1 : -1) * py);
+        moved = true;
+      }
+    }
+    if (!moved)
+      return;
+  }
+}
+
+/** Centre of the Home-network box next to the board: a spot clear of every box, on its least crowded side. */
+function placeHome(board, devs, pos, fps, links) {
+  var p = pos[board.id];
+  var near = [];
+  devs.forEach(function(d) {
+    if (pos[d.id] && (d.parentId === board.id || d.id === board.parentId))
+      near.push(pos[d.id]);
+  });
+  links.forEach(function(l) {
+    if (l.a === board.id && pos[l.b])
+      near.push(pos[l.b]);
+    if (l.b === board.id && pos[l.a])
+      near.push(pos[l.a]);
+  });
+  var best = null;
+  HOME_SPOTS.forEach(function(s) {
+    var at = {x : p.x + s[0], y : p.y + s[1]};
+    var box = {x0 : at.x - HOME_W / 2, x1 : at.x + HOME_W / 2, y0 : at.y - HOME_H / 2, y1 : at.y + HOME_H / 2};
+    var hits = devs.filter(function(d) { return pos[d.id] && overlaps(box, boxAt(fps[d.id], pos[d.id])); }).length;
+    var score = crowding(p, Math.atan2(s[1], s[0]), near);
+    if (best === null || hits < best.hits || (hits === best.hits && score < best.score - 1e-9))
+      best = {hits : hits, score : score, at : at};
+  });
+  return best.at;
+}
+
+/*
+ * {width, height, pos: {id: {x, y}}, home: {x, y, w, h} | null, ring}. Deterministic: no randomness anywhere.
+ * `labels` maps a device id to its map label (sizes the label boxes); missing ones are estimated.
+ */
+function layout(devs, links, labels) {
   var routers = sortedBy(devs.filter(function(d) { return d.parentId === null; }), 'routerId');
   var pos = {};
   if (routers.length === 0)
-    return {width : MIN_WIDTH, height : MIN_HEIGHT, pos : pos};
+    return {width : MIN_WIDTH, height : MIN_HEIGHT, pos : pos, home : null, ring : 0};
+  var fps = {};
+  devs.forEach(function(d) {
+    var label = labels && labels[d.id] ? labels[d.id] : d.thisBoard ? BOARD_LABEL : 'Unnamed 0x' + hex4(d.rloc16);
+    fps[d.id] = footprint(d, label);
+  });
 
+  /* Routers: a ring around the centre, then force relaxation along links, never past the ring. */
   var centre = routers.filter(function(d) { return d.thisBoard; })[0] ||
                routers.filter(function(d) { return d.leader; })[0] || routers[0];
   var others = routers.filter(function(d) { return d !== centre; });
@@ -301,9 +462,11 @@ function layout(devs, links) {
     var angle = -Math.PI / 2 + 2 * Math.PI * i / others.length;
     pos[d.id] = {x : ring * Math.cos(angle), y : ring * Math.sin(angle)};
   });
-
-  var all = [ centre ].concat(others);
   var usable = (links || []).filter(function(l) { return pos[l.a] && pos[l.b]; });
+  var linked = {};
+  usable.forEach(function(l) { linked[l.a] = linked[l.b] = true; });
+  var movers = others.filter(function(d) { return linked[d.id]; }); /* routers without links keep their ring spot */
+  var all = [ centre ].concat(others);
   var force = {};
   function push(a, b, amount) { /* amount > 0 pushes a away from b */
     var fx = pos[a].x - pos[b].x, fy = pos[a].y - pos[b].y;
@@ -331,41 +494,70 @@ function layout(devs, links) {
       push(l.b, l.a, -pull);
     });
     var limit = STEP_MAX * (1 - step / STEPS);
-    others.forEach(function(d) {
+    movers.forEach(function(d) {
       var f = force[d.id];
       var mag = Math.sqrt(f.x * f.x + f.y * f.y);
       var scale = mag > limit ? limit / mag : 1;
-      pos[d.id].x += f.x * scale;
-      pos[d.id].y += f.y * scale;
+      var p = pos[d.id];
+      p.x += f.x * scale;
+      p.y += f.y * scale;
+      var r = Math.sqrt(p.x * p.x + p.y * p.y);
+      if (r > ring) {
+        p.x *= ring / r;
+        p.y *= ring / r;
+      }
     });
   }
 
+  /* Children: fans away from the centre; the centre's children go to its least crowded side. */
   routers.forEach(function(p) {
     var kids = sortedBy(devs.filter(function(d) { return d.parentId === p.id; }), 'rloc16');
     if (kids.length === 0)
       return;
-    var away = p === centre ? Math.PI / 2 : Math.atan2(pos[p.id].y - pos[centre.id].y, pos[p.id].x - pos[centre.id].x);
-    var arc = Math.min(ARC_MAX, kids.length * ARC_PER_CHILD) * Math.PI / 180;
-    kids.forEach(function(c, i) {
-      var angle = away - arc / 2 + arc * (i + 0.5) / kids.length;
-      var r = CHILD_R + (kids.length > 6 && i % 2 === 1 ? CHILD_R_ALT : 0);
-      pos[c.id] = {x : pos[p.id].x + r * Math.cos(angle), y : pos[p.id].y + r * Math.sin(angle)};
-    });
+    var dir;
+    if (p === centre) {
+      var around = others.map(function(o) { return pos[o.id]; });
+      dir = Math.PI / 2;
+      var least = Infinity;
+      for (var k = 0; k < 8; k++) {
+        var angle = Math.PI / 2 + k * Math.PI / 4;
+        var c = crowding(pos[p.id], angle, around);
+        if (c < least - 1e-9) {
+          least = c;
+          dir = angle;
+        }
+      }
+    } else {
+      dir = Math.atan2(pos[p.id].y - pos[centre.id].y, pos[p.id].x - pos[centre.id].x);
+    }
+    var fan = placeFan(pos[p.id], boxAt(fps[p.id], pos[p.id]), kids, fps, dir);
+    Object.keys(fan).forEach(function(id) { pos[id] = fan[id]; });
   });
 
-  var ids = Object.keys(pos);
+  resolve(devs, pos, fps, centre);
+
+  var boxes = Object.keys(pos).map(function(id) { return boxAt(fps[id], pos[id]); });
+  var board = devs.filter(function(d) { return d.thisBoard && pos[d.id]; })[0];
+  var home = null;
+  if (board) {
+    home = placeHome(board, devs, pos, fps, usable);
+    boxes.push({x0 : home.x - HOME_W / 2, x1 : home.x + HOME_W / 2, y0 : home.y - HOME_H / 2, y1 : home.y + HOME_H / 2});
+  }
+
   var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  ids.forEach(function(id) {
-    minX = Math.min(minX, pos[id].x); maxX = Math.max(maxX, pos[id].x);
-    minY = Math.min(minY, pos[id].y); maxY = Math.max(maxY, pos[id].y);
+  boxes.forEach(function(b) {
+    minX = Math.min(minX, b.x0); maxX = Math.max(maxX, b.x1);
+    minY = Math.min(minY, b.y0); maxY = Math.max(maxY, b.y1);
   });
   var width = Math.max(MIN_WIDTH, Math.ceil(maxX - minX + 2 * MARGIN));
   var height = Math.max(MIN_HEIGHT, Math.ceil(maxY - minY + 2 * MARGIN));
-  var dx = (width - (maxX - minX)) / 2 - minX, dy = (height - (maxY - minY)) / 2 - minY;
-  ids.forEach(function(id) {
-    pos[id] = {x : Math.round(pos[id].x + dx), y : Math.round(pos[id].y + dy)};
+  var sx = (width - (maxX - minX)) / 2 - minX, sy = (height - (maxY - minY)) / 2 - minY;
+  Object.keys(pos).forEach(function(id) {
+    pos[id] = {x : Math.round(pos[id].x + sx), y : Math.round(pos[id].y + sy)};
   });
-  return {width : width, height : height, pos : pos};
+  if (home)
+    home = {x : Math.round(home.x + sx), y : Math.round(home.y + sy), w : HOME_W, h : HOME_H};
+  return {width : width, height : height, pos : pos, home : home, ring : ring};
 }
 
 /* ---- browser storage (never throws) ---- */
@@ -505,6 +697,8 @@ return {
   srpHostFor : srpHostFor,
   rows : rows,
   layout : layout,
+  mapLabel : mapLabel,
+  nodeHalf : nodeHalf,
   savedResult : savedResult,
   saveResult : saveResult,
   loadNames : loadNames,
@@ -531,9 +725,10 @@ var doc = env.document;
 var SVG_NS = 'http://www.w3.org/2000/svg';
 var POLL_MS = 1000;
 var COPY_RESET_MS = 2000;
-var LABEL_MAX = 22;
+var POLL_GIVE_UP = 5;
 var BOARD_LABEL = 'This border router';
 var NO_SAVED = 'No saved result in this browser yet.';
+var STOPPED_ANSWERING = "The board stopped answering. Load again when it's back.";
 var NAMES_NOTE = "This browser can't save names. They last until the page is reloaded.";
 var NO_DETAIL = "Details unavailable: its parent didn't answer";
 var NO_ROUTE = "No routable address yet. Hosts on your home network can't reach this device.";
@@ -604,7 +799,7 @@ function nameOf(d) { return L.displayName(d, names, model.srp); }
 
 function mapName(d) { return d.thisBoard ? BOARD_LABEL : nameOf(d); }
 
-function unnamed(d) { return !(d.ext && names[d.ext]) && !L.srpHostFor(d, model.srp); }
+function unnamed(d) { return !d.thisBoard && !(d.ext && names[d.ext]) && !L.srpHostFor(d, model.srp); }
 
 function badgeText(d) { return d.thisBoard ? 'This board' : d.leader && d.parentId === null ? 'Leader' : ''; }
 
@@ -747,8 +942,14 @@ function poll() {
   }, retry);
 }
 
+/* Backoff after a failed GET; after POLL_GIVE_UP failures in a row the page gives up on the scan. */
 function retry() {
   pollFailures++;
+  if (pollFailures >= POLL_GIVE_UP) {
+    scanning = false;
+    renderStart(STOPPED_ANSWERING);
+    return;
+  }
   schedulePoll(C.nextDelay(POLL_MS, pollFailures));
 }
 
@@ -794,7 +995,7 @@ function showResult(rec, live) {
     devs : devs,
     byId : byId,
     links : links,
-    lay : L.layout(devs, links)
+    lay : null
   };
   if (selected !== null && !byId[selected])
     selected = null;
@@ -883,8 +1084,6 @@ function neighbourhood(id) {
   return near;
 }
 
-function shortLabel(text) { return text.length > LABEL_MAX ? text.slice(0, LABEL_MAX - 1) + '…' : text; }
-
 /* Draws the node shape at the origin of `g`; returns its half height. */
 function drawShape(g, d) {
   if (d.kind === 'br' && d.parentId === null) {
@@ -922,12 +1121,13 @@ function drawNode(layer, d, p) {
                  ? svg('rect', {x : -26, y : -26, width : 52, height : 52, rx : 14, 'class' : 't-ring hidden'}, g)
                  : svg('circle', {r : half + 6, 'class' : 't-ring hidden'}, g);
   rings[d.id] = ring;
-  var label = svg('text', {'class' : d.parentId === null ? 't-label t-label-router' : 't-label', y : half + 16,
+  svg('title', {}, g).textContent = mapName(d);
+  var label = svg('text', {'class' : d.parentId === null ? 't-label t-label-router' : 't-label', y : half + 15,
                            'text-anchor' : 'middle'},
                   g);
-  label.textContent = shortLabel(mapName(d));
+  label.textContent = L.mapLabel(mapName(d));
   if (d.kind === 'stub') {
-    svg('text', {'class' : 't-label t-label-note', y : half + 30, 'text-anchor' : 'middle'}, g).textContent =
+    svg('text', {'class' : 't-label t-label-note', y : half + 29, 'text-anchor' : 'middle'}, g).textContent =
         "didn't answer";
   }
   g.addEventListener('click', function() { openDevice(d.id); });
@@ -960,22 +1160,27 @@ function drawLink(layer, l, pos) {
   dimmables.push({el : g, lit : function(f) { return f === l.a || f === l.b; }});
 }
 
-/* The dashed line from this board to the "Home network · Ethernet" box below it. */
-function drawUplink(layer, board, p, lay) {
+/* The dashed line from this board to the "Home network · Ethernet" box the layout placed next to it. */
+function drawUplink(layer, board, p, home) {
   var g = svg('g', {'class' : 't-uplink'}, layer);
-  var cx = Math.min(Math.max(p.x, 92), lay.width - 92);
-  var cy = board.parentId === null ? lay.height - 28 : Math.min(lay.height - 16, p.y + 60);
-  svg('line', {x1 : p.x, y1 : p.y, x2 : cx, y2 : cy - 13, stroke : '#b35c00', 'stroke-width' : 2, 'stroke-dasharray' : '6 4'}, g);
-  svg('rect', {x : cx - 90, y : cy - 13, width : 180, height : 26, rx : 6, fill : '#fff8f0', stroke : '#b35c00',
-               'stroke-dasharray' : '4 3'},
+  svg('line', {x1 : p.x, y1 : p.y, x2 : home.x, y2 : home.y, stroke : '#b35c00', 'stroke-width' : 2,
+               'stroke-dasharray' : '6 4'},
       g);
-  svg('text', {'class' : 't-uplink-text', x : cx, y : cy, 'text-anchor' : 'middle', 'dominant-baseline' : 'central'}, g)
+  svg('rect', {x : home.x - home.w / 2, y : home.y - home.h / 2, width : home.w, height : home.h, rx : 6,
+               fill : '#fff8f0', stroke : '#b35c00', 'stroke-dasharray' : '4 3'},
+      g);
+  svg('text', {'class' : 't-uplink-text', x : home.x, y : home.y, 'text-anchor' : 'middle',
+               'dominant-baseline' : 'central'},
+      g)
       .textContent = 'Home network · Ethernet';
   dimmables.push({el : g, lit : function(f) { return f === board.id; }});
 }
 
 function renderMap() {
   var map = $('t-map');
+  var labels = {};
+  model.devs.forEach(function(d) { labels[d.id] = mapName(d); });
+  model.lay = L.layout(model.devs, model.links, labels); /* label widths size the layout: redo it after a rename */
   var lay = model.lay, pos = lay.pos;
   clear(map);
   dimmables = [];
@@ -985,8 +1190,8 @@ function renderMap() {
   map.setAttribute('viewBox', '0 0 ' + lay.width + ' ' + lay.height);
   var edges = svg('g', {}, map), nodes = svg('g', {}, map);
   var board = model.devs.filter(function(d) { return d.thisBoard; })[0];
-  if (board && pos[board.id])
-    drawUplink(edges, board, pos[board.id], lay);
+  if (board && pos[board.id] && lay.home)
+    drawUplink(edges, board, pos[board.id], lay.home);
   model.devs.forEach(function(d) {
     if (d.parentId === null || !pos[d.id] || !pos[d.parentId])
       return;
