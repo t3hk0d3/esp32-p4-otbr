@@ -40,7 +40,11 @@ void routing_settings_defaults(routing_settings_t *out);
 esp_err_t routing_settings_from_json(const char *json, const routing_settings_t *current,
                                      const routing_validate_ctx_t *ctx, routing_settings_t *out, const char **bad_field);
 
-/** The GET /device/routing shape, with "status": null when `status` is NULL. Malloc'd, the caller frees; NULL on OOM. */
+/**
+ * The GET /device/routing shape, with "status": null when `status` is NULL. Each peer of `s` gets the status entry
+ * with its address; a peer `status` has no entry for (the status predates the settings) is shown idle, uptime 0, no
+ * last error, nothing dropped. Malloc'd, the caller frees; NULL on OOM.
+ */
 char *routing_settings_to_json(const routing_settings_t *s, const routing_status_t *status);
 
 /**
@@ -49,6 +53,9 @@ char *routing_settings_to_json(const routing_settings_t *s, const routing_status
  * `*bad_field` (may be NULL) naming the offending field. Valid text: those settings, true.
  */
 bool routing_settings_from_stored(const char *text, routing_settings_t *out, const char **bad_field);
+
+/** The entry of `st` for the peer `addr`, NULL when `st` has none (it was built from settings without that peer). */
+const routing_bgp_peer_status_t *routing_status_peer(const routing_status_t *st, const uint8_t addr[16]);
 
 /** ROUTING_CHANGE_* flags for what differs between `a` and `b`; 0 when they are the same. */
 uint32_t routing_settings_diff(const routing_settings_t *a, const routing_settings_t *b);

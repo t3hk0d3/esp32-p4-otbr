@@ -77,6 +77,7 @@ typedef enum {
 } routing_bgp_state_t;
 
 typedef struct {
+    uint8_t addr[16]; /**< the peer this entry is for */
     routing_bgp_state_t state;
     uint32_t uptime_s;
     char last_error[ROUTING_LAST_ERROR_LEN]; /**< "" when none */
@@ -99,7 +100,13 @@ typedef struct {
     routing_prefix_set_t announced;
     uint32_t bgp_router_id;  /**< host order IPv4 in use, 0 none */
     const char *bgp_blocked; /**< why sessions do not run, NULL when not blocked */
-    routing_bgp_peer_status_t peers[ROUTING_MAX_PEERS]; /**< peers[i] is the session of settings peers[i] */
+    /**
+     * One entry per peer of the settings the status was built from (peers[i] for its peers[i]); they can be older than
+     * the stored settings for a moment after a PUT, so consumers pair entries with peers by address
+     * (routing_status_peer).
+     */
+    uint8_t peer_count;
+    routing_bgp_peer_status_t peers[ROUTING_MAX_PEERS];
     routing_ripng_status_t ripng;
 } routing_status_t;
 

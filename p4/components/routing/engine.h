@@ -190,7 +190,8 @@ const routing_settings_t *routing_engine_settings(const routing_engine_t *e);
 
 /**
  * The status: OMR prefix in use (custom; else the delegated prefix; else the ULA), ULA, announcement set, router ID in
- * use and blocked reason (method bgp only), peers[i] for settings peer i, RIPng counters.
+ * use and blocked reason (method bgp only), peers[i] for settings peer i (with its address, peer_count of them), RIPng
+ * counters.
  */
 void routing_engine_status(const routing_engine_t *e, uint32_t now_ms, routing_status_t *out);
 

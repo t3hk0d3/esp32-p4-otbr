@@ -528,6 +528,16 @@ bool routing_settings_from_stored(const char *text, routing_settings_t *out, con
 
 /* ---- JSON out ---- */
 
+const routing_bgp_peer_status_t *routing_status_peer(const routing_status_t *st, const uint8_t addr[16])
+{
+    for (int i = 0; i < st->peer_count && i < ROUTING_MAX_PEERS; i++) {
+        if (memcmp(st->peers[i].addr, addr, 16) == 0) {
+            return &st->peers[i];
+        }
+    }
+    return NULL;
+}
+
 static bool add_prefix(cJSON *obj, const char *key, bool known, const routing_prefix64_t *p)
 {
     char text[PREFIX_TEXT_MAX];
@@ -614,8 +624,13 @@ static cJSON *bgp_status_to_cjson(const routing_settings_t *s, const routing_sta
 
     ok = peers != NULL;
     for (int i = 0; ok && i < s->peer_count && i < ROUTING_MAX_PEERS; i++) {
-        const routing_bgp_peer_status_t *p = &st->peers[i];
+        static const routing_bgp_peer_status_t unknown = {.state = ROUTING_BGP_IDLE};
+        const routing_bgp_peer_status_t *p = routing_status_peer(st, s->peers[i].addr);
         cJSON *peer = add_array_object(peers);
+
+        if (!p) {
+            p = &unknown; /* not in the status yet: the status was built from older settings */
+        }
         char last_error[ROUTING_LAST_ERROR_LEN];
         const bool state_ok = (unsigned)p->state < COUNT_OF(BGP_STATE_NAMES);
 

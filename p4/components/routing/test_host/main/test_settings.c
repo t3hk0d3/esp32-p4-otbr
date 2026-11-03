@@ -443,6 +443,8 @@ TEST_CASE("Settings and status: renders the GET shape of spec section 6; status.
     st.announced.p[1] = st.ula_prefix;
     st.announced.count = 2;
     st.bgp_router_id = 0xc0a8140f;
+    st.peer_count = 1;
+    memcpy(st.peers[0].addr, PEER_GLOBAL, 16);
     st.peers[0].state = ROUTING_BGP_ESTABLISHED;
     st.peers[0].uptime_s = 8123;
     st.peers[0].received_dropped = 3;
@@ -492,6 +494,75 @@ TEST_CASE("Settings and status: renders the GET shape of spec section 6; status.
     json = routing_settings_to_json(&s, NULL);
     TEST_ASSERT_NOT_NULL(strstr(json, "\"status\":null}"));
     free(json);
+}
+
+/* Settings with PEER_GLOBAL then PEER_LINK_LOCAL, method bgp. */
+static void two_peer_settings(routing_settings_t *s)
+{
+    populated(s);
+    s->omr_mode = ROUTING_OMR_AUTO;
+    memset(&s->omr_prefix, 0, sizeof(s->omr_prefix));
+}
+
+static void status_peer(routing_status_t *st, const uint8_t addr[16], routing_bgp_state_t state, uint32_t uptime_s,
+                        const char *last_error)
+{
+    routing_bgp_peer_status_t *p = &st->peers[st->peer_count++];
+
+    memcpy(p->addr, addr, 16);
+    p->state = state;
+    p->uptime_s = uptime_s;
+    snprintf(p->last_error, sizeof(p->last_error), "%s", last_error);
+}
+
+TEST_CASE("Status built from settings with the peers in another order: each peer gets the entry with its address",
+          "[routing]")
+{
+    routing_settings_t s;
+    routing_status_t st;
+
+    two_peer_settings(&s);
+    memset(&st, 0, sizeof(st));
+    status_peer(&st, PEER_LINK_LOCAL, ROUTING_BGP_ACTIVE, 0, "connect: refused");
+    status_peer(&st, PEER_GLOBAL, ROUTING_BGP_ESTABLISHED, 42, "");
+    char *json = routing_settings_to_json(&s, &st);
+
+    TEST_ASSERT_NOT_NULL(strstr(json, "\"peers\":[{\"address\":\"2001:db8:42::1\",\"state\":\"established\","
+                                "\"uptime_s\":42,\"last_error\":null,\"received_dropped\":0},"
+                                "{\"address\":\"fe80::211:22ff:fe33:4455\",\"state\":\"active\",\"uptime_s\":0,"
+                                "\"last_error\":\"connect: refused\",\"received_dropped\":0}]"));
+    free(json);
+}
+
+TEST_CASE("Peer the status does not know yet: rendered idle, uptime 0, no last error, nothing dropped", "[routing]")
+{
+    routing_settings_t s;
+    routing_status_t st;
+
+    two_peer_settings(&s);
+    memset(&st, 0, sizeof(st));
+    status_peer(&st, PEER_GLOBAL, ROUTING_BGP_ESTABLISHED, 42, "");
+    status_peer(&st, (const uint8_t[16]) {
+        0x20, 0x01, 0x0d, 0xb8, 0x00, 0x42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x09
+    }, ROUTING_BGP_OPENSENT, 7, "x");
+    st.peers[1].received_dropped = 5;
+    char *json = routing_settings_to_json(&s, &st);
+
+    TEST_ASSERT_NOT_NULL(strstr(json, "{\"address\":\"fe80::211:22ff:fe33:4455\",\"state\":\"idle\",\"uptime_s\":0,"
+                                "\"last_error\":null,\"received_dropped\":0}]"));
+    free(json);
+}
+
+TEST_CASE("Status peer lookup: the entry with that address, NULL when the status has none", "[routing]")
+{
+    routing_status_t st;
+
+    memset(&st, 0, sizeof(st));
+    status_peer(&st, PEER_LINK_LOCAL, ROUTING_BGP_ACTIVE, 0, "");
+    TEST_ASSERT_EQUAL_PTR(&st.peers[0], routing_status_peer(&st, PEER_LINK_LOCAL));
+    TEST_ASSERT_NULL(routing_status_peer(&st, PEER_GLOBAL));
+    memcpy(st.peers[1].addr, PEER_GLOBAL, 16); /* past peer_count: not an entry */
+    TEST_ASSERT_NULL(routing_status_peer(&st, PEER_GLOBAL));
 }
 
 TEST_CASE("Round trip: from_json(to_json(s)) equals s", "[routing]")

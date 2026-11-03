@@ -285,7 +285,9 @@ static void fill_routing(device_api_status_t *s)
     s->routing_announced_count = status.announced.count;
     s->routing_peers_configured = settings.peer_count;
     for (size_t i = 0; i < settings.peer_count && i < ROUTING_MAX_PEERS; i++) {
-        if (status.peers[i].state == ROUTING_BGP_ESTABLISHED) {
+        /* by address: right after a PUT the status can still be the one of the previous peers */
+        const routing_bgp_peer_status_t *p = routing_status_peer(&status, settings.peers[i].addr);
+        if (p && p->state == ROUTING_BGP_ESTABLISHED) {
             s->routing_peers_established++;
         }
     }

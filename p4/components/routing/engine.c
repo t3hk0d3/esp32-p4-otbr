@@ -951,12 +951,14 @@ void routing_engine_status(const routing_engine_t *e, uint32_t now_ms, routing_s
         out->bgp_router_id = e->bgp_running ? e->router_id : 0;
         out->bgp_blocked = e->blocked;
     }
-    for (int i = 0; i < s->peer_count && i < ROUTING_MAX_PEERS; i++) {
+    out->peer_count = s->peer_count < ROUTING_MAX_PEERS ? s->peer_count : ROUTING_MAX_PEERS;
+    for (int i = 0; i < out->peer_count; i++) {
         const routing_engine_peer_t *p = peer_by_addr_const(e, s->peers[i].addr);
+        routing_bgp_peer_status_t *ps = &out->peers[i];
+        memcpy(ps->addr, s->peers[i].addr, sizeof(ps->addr));
         if (p == NULL) {
             continue;
         }
-        routing_bgp_peer_status_t *ps = &out->peers[i];
         ps->state = routing_bgp_fsm_state(&p->fsm);
         ps->uptime_s = routing_bgp_fsm_uptime_s(&p->fsm, now_ms);
         snprintf(ps->last_error, sizeof(ps->last_error), "%s", routing_bgp_fsm_last_error(&p->fsm));

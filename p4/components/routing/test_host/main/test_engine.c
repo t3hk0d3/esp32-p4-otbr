@@ -1136,6 +1136,25 @@ TEST_CASE("Peers reordered: sessions kept, status follows the new order", "[rout
     (void)h1;
 }
 
+TEST_CASE("Status: every peers entry carries its peer's address, peer_count is the settings' peer count", "[routing]")
+{
+    routing_settings_t s = two_peers();
+
+    begin(&s);
+    poll_up(T0);
+    routing_status_t st = status_at(T0);
+    TEST_ASSERT_EQUAL(2, st.peer_count);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(P1, st.peers[0].addr, 16);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(P2, st.peers[1].addr, 16);
+
+    s.peer_count = 1;
+    s.peers[0] = s.peers[1];
+    routing_engine_set_settings(&s_e, &s, T0 + 100);
+    st = status_at(T0 + 100);
+    TEST_ASSERT_EQUAL(1, st.peer_count);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(P2, st.peers[0].addr, 16);
+}
+
 TEST_CASE("Same settings again: nothing happens", "[routing]")
 {
     routing_settings_t s = base_settings(ROUTING_METHOD_BGP);
