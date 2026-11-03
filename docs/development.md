@@ -134,6 +134,11 @@ that the on-board tests use; never ship them.
 `IDF_VERSION`: `make test-host`, `make test-tools`, `make build`, `make test-vendored` and `make package`. The workflow keeps
 the packaged files as the `firmware` artifact of the run. No board is involved; the on-board tests stay on the bench.
 
+`make sizes` (also run by the workflow, into the job summary) lists each image's size, its flash region and the space left
+there. The run keeps the numbers as the `sizes` artifact; on a pull request a follow-up job compares them with the
+`sizes` artifact of the master build of the PR's base commit (or the latest successful master build) and posts the table
+with the deltas as a PR comment, updated on every push. Pull requests from forks only get the job summary.
+
 Pushing a `v*` tag also publishes a GitHub release with those files. Its notes start with the tag's section of
 `CHANGELOG.md`, so move the "Unreleased" entries under the new version first:
 
