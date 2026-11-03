@@ -230,6 +230,26 @@ reason, spec reference.
    `about.html`: project texts and links, `/device/status` fields. Every upstream page gets the project footer instead
    of the Espressif copyright line. Host tests: `tools/tests/test_mgmt_pages.py`.
 
+18. Applied. OpenThread sessions around every OpenThread user outside the OpenThread task, so that a radio push or ROM
+   recovery (which deletes the OpenThread lock and instance in `esp_openthread_deinit`) cannot run under them.
+   `esp_ot_br_server/src/esp_br_web.c`: every Web GUI handler (`s_resource_handlers`, `s_web_gui_handlers`) is registered
+   behind `ot_session_handler`, which opens a `br_core_ot_session_begin` session for the whole handler; `guard_now` sees
+   OpenThread as ready only inside one (`ot_ready_for_request`). The Thread REST dispatcher opens its own session around
+   the guard and `esp_br_thread_rest_request`. `esp_br_web_api.c`: `rest_process_once` opens one per poll. The waits for
+   OpenThread callbacks (scan, join, ping, pending dataset: `ot_wait_callback`; the topology collection loop) end early
+   once the REST flag is off, so a push waits for them about 0.25 s instead of up to 30 s, and a scan waits at most
+   30 s (was `portMAX_DELAY`: a radio fault that stopped the main loop mid-scan hung the only HTTP task). The scan list
+   is not replaced, and the network-key join does not read it, while `otThreadIsDiscoverInProgress` says a scan whose
+   wait timed out may still write it. Before: the handlers checked the ready flag, then waited for the lock, and the
+   pending-dataset write (30 s) and ping (14 s) released the lock and took it again without a re-check, so a push started
+   meanwhile deleted the lock under them (use-after-free). Now `br_core` puts the mode to STARTING and clears its ready
+   state under the OpenThread lock, waits up to 45 s for open sessions to close (the main loop keeps running, an RCP
+   failure meanwhile only resets the C6) and refuses the push as busy (409) if they do not, putting the mode back. A pending-dataset
+   PUT whose wait ends that way answers 503 and clears its busy flag (its callback dies with the instance). Known
+   limit: a Web GUI session also covers the request's socket I/O, so a very slow client can hold it. Host tests:
+   `tests/test_rest.c` `test_no_openthread_without_a_session`, `test_callback_wait_ends_when_not_ready` (mocks
+   `br_core_ot_session_begin/end` in `tests/host_platform.c`).
+
 ### REST guard classification (patches 2 and 9)
 
 Classes: `NONE` no OpenThread access, always served. `READ` reads OpenThread state: 200 while OpenThread runs (patch 9

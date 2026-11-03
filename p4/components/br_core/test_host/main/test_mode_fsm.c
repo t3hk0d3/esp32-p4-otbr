@@ -18,6 +18,7 @@ typedef struct {
     int64_t now;
     uint8_t raw_channel;
     bool push_restarted; /* what the push op reports: OpenThread runs again */
+    br_core_mode_t mode_in_job; /* the mode the push or ROM recovery op saw */
     otLinkRawReceiveDone raw_cb;
     void (*deferred_fn)(void *ctx); /* what the defer op was given, run by run_deferred() */
     void *deferred_ctx;
@@ -94,6 +95,7 @@ static esp_err_t f_reset_rcp(void)
 static esp_err_t f_push(const rcp_fw_source_t *source, char *err_detail, size_t err_cap, bool *restarted)
 {
     *restarted = fake.push_restarted;
+    fake.mode_in_job = mode_fsm_get_mode(&fsm);
     return record(OP_PUSH, "push_firmware");
 }
 static esp_err_t f_rom_recover(char *err_detail, size_t err_cap, bool *restarted)
@@ -518,6 +520,49 @@ TEST_CASE("On push when OpenThread does not come back: stays in RADIO_FAULT", "[
     fake.fail[OP_PUSH] = ESP_FAIL;
     TEST_ASSERT_EQUAL(ESP_FAIL, mode_fsm_push_firmware(&fsm, &push_source, push_detail, sizeof(push_detail)));
     TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
+}
+
+TEST_CASE("On push: the mode is STARTING while the job runs", "[mode_fsm]")
+{
+    setup(BR_MODE_BR_RUNNING);
+    fake.push_restarted = true;
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_push_firmware(&fsm, &push_source, push_detail, sizeof(push_detail)));
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, fake.mode_in_job);
+    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
+}
+
+TEST_CASE("On a begun radio job: a second begin is refused and the push runs the begun job", "[mode_fsm]")
+{
+    setup(BR_MODE_RADIO_FAULT);
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_begin_radio_job(&fsm));
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_begin_radio_job(&fsm));
+    fake.push_restarted = true;
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_push_firmware(&fsm, &push_source, push_detail, sizeof(push_detail)));
+    TEST_ASSERT_EQUAL(1, count_of("push_firmware"));
+    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
+}
+
+TEST_CASE("On the border router start inside a radio job: the mode stays STARTING until the job ends", "[mode_fsm]")
+{
+    setup(BR_MODE_BR_RUNNING);
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_begin_radio_job(&fsm));
+    TEST_ASSERT_FALSE(mode_fsm_set_started(&fsm));
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
+    mode_fsm_cancel_radio_job(&fsm);
+}
+
+TEST_CASE("On a cancelled radio job: the mode before it comes back, unless a fault came meanwhile", "[mode_fsm]")
+{
+    setup(BR_MODE_BR_RUNNING);
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_begin_radio_job(&fsm));
+    mode_fsm_cancel_radio_job(&fsm);
+    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_begin_radio_job(&fsm)); /* the job flag was cleared */
+    atomic_store(&fsm.mode, BR_MODE_RADIO_FAULT);
+    mode_fsm_cancel_radio_job(&fsm);
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
+    TEST_ASSERT_EQUAL(0, fake.count);
 }
 
 TEST_CASE("On push without a source: returns ESP_ERR_INVALID_ARG and does not fall back to ROM recovery", "[mode_fsm]")
