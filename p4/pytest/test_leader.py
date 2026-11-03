@@ -7,6 +7,7 @@ strictly lower weight), and the board then takes the role back through PUT /devi
 """
 
 import time
+from types import SimpleNamespace
 
 import pytest
 import requests
@@ -17,6 +18,7 @@ from test_latency import thread_peer_address  # noqa: F401  (pytest fixture)
 
 PEER_WEIGHT = 70
 PEER_HIGH_WEIGHT = 82
+PEER_DEFAULT_WEIGHT = 64  # OpenThread's default; the CLI setting lives in RAM and outlasts `thread stop`
 ADJUSTMENT = 6
 MAX_ADJUSTMENT = 16
 BASE_WEIGHT = 65
@@ -31,17 +33,22 @@ def base_url(board_ip):
 
 
 @pytest.fixture
-def adjustment_reset(thread_peer_address, base_url):  # noqa: ARG001  (orders the rig first)
-    """Yield the base URL; afterwards put the adjustment back to 0 (the board may be mid-reboot: failures are ignored)."""
-    yield base_url
+def adjustment_reset(thread_peer_address, base_url, peer):  # noqa: ARG001  (orders the rig first)
+    """Yield a rig with `url` (the board's base URL; the test sets it again after a reboot, the address may change).
+    Afterwards put the adjustment back to 0 on that URL (the board may be mid-reboot: failures are ignored) and the
+    peer's weight back to the default. `leaderweight` rather than `restart()`: it is a plain CLI command with no reboot
+    and no SLAAC-address quirk, and the weight is the only state this test changes on the peer."""
+    rig = SimpleNamespace(url=base_url)
+    yield rig
     try:
         requests.put(
-            f"{base_url}/device/thread",
+            f"{rig.url}/device/thread",
             json={"leader_weight_adjustment": 0},
             timeout=10,
         )
     except requests.RequestException:
         pass
+    peer.command(f"leaderweight {PEER_DEFAULT_WEIGHT}")
 
 
 def get_thread(base_url):
@@ -102,12 +109,14 @@ class TestLeaderWeight:
     ):
         # On a peer leader at 70: refused at 65, taken over at 71 (+6); then refused again at 81 against a peer at 82,
         # and the stored adjustment survives a reboot.
-        base_url = adjustment_reset
+        rig = adjustment_reset
+        base_url = rig.url
         peer_takes_over(peer, PEER_WEIGHT)
         wait_board_state(base_url, {"router", "child"}, PARTITION_WAIT_S)
         before = get_thread(base_url)
         assert before["leader_weight_adjustment"] == 0
         assert before["leader_weight"] == BASE_WEIGHT
+        assert before["leader_weight_base"] == BASE_WEIGHT
 
         refused = put_thread(base_url, {"become_leader": True})
         assert refused.status_code == 409
@@ -140,6 +149,8 @@ class TestLeaderWeight:
         reboot()
         address = dut.expect(GOT_IP, timeout=BOOT_TIMEOUT_S).group(1).decode()
         wait_reachable(address)
-        after = wait_thread_weight(f"http://{address}")
+        rig.url = f"http://{address}"  # the teardown resets the adjustment there
+        after = wait_thread_weight(rig.url)
         assert after["leader_weight_adjustment"] == MAX_ADJUSTMENT
         assert after["leader_weight"] == BASE_WEIGHT + MAX_ADJUSTMENT
+        assert after["leader_weight_base"] == BASE_WEIGHT
