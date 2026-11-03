@@ -252,7 +252,7 @@ reason, spec reference.
    `CONFIG_LWIP_MAX_SOCKETS`) counts the web server's sockets; with one definition, raising it trips that check
    instead of silently overrunning the budget. (docs/superpowers/specs/2026-11-03-mesh-routing-design.md section 5)
 
-18. Applied. OpenThread sessions around every OpenThread user outside the OpenThread task, so that a radio push or ROM
+22. Applied. OpenThread sessions around every OpenThread user outside the OpenThread task, so that a radio push or ROM
    recovery (which deletes the OpenThread lock and instance in `esp_openthread_deinit`) cannot run under them.
    `esp_ot_br_server/src/esp_br_web.c`: every Web GUI handler (`s_resource_handlers`, `s_web_gui_handlers`) is registered
    behind `ot_session_handler`, which opens a `br_core_ot_session_begin` session for the whole handler; `guard_now` sees
@@ -270,7 +270,17 @@ reason, spec reference.
    PUT whose wait ends that way answers 503 and clears its busy flag (its callback dies with the instance). Known
    limit: a Web GUI session also covers the request's socket I/O, so a very slow client can hold it. Host tests:
    `tests/test_rest.c` `test_no_openthread_without_a_session`, `test_callback_wait_ends_when_not_ready` (mocks
-   `br_core_ot_session_begin/end` in `tests/host_platform.c`).
+   `br_core_ot_session_begin/end` in `tests/host_platform.c`). (Before the numbering was fixed this entry was 18 and
+   comments in `src/` said "patch 16".)
+
+23. Applied. Architecture review follow-ups (2026-11). `src/esp_br_web_api.c`: the `/topology` and diagnostics
+   collection (`handle_ot_resource_network_diagnostics_request`) releases its `netdiag_mux` listener when it ends
+   (`netdiag_mux_release`), so late answers to its multicast Get no longer reach `diagnosticTlv_result_handler`; the
+   callback returns at once while no collection runs instead of waiting up to 1 s for `s_diagnostic_semaphore` on the
+   OpenThread task, and the result set is taken out under the semaphore and converted after it. `src/esp_br_web.c`: the
+   Thread REST reset (`DELETE /node`) reboots through `reboot_gate_restart`, so a running update or radio push is not
+   cut off (`CMakeLists.txt`: `reboot_gate` in `PRIV_REQUIRES`). Host tests: `tests/test_rest.c`
+   `test_topology_collector` (release count, late answer dropped), stubs in `tests/host_platform.c`.
 
 ### REST guard classification (patches 2 and 9)
 

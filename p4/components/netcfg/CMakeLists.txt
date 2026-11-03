@@ -11,7 +11,7 @@ idf_component_register(SRCS "config.c" "policy.c" "trial.c" "vlan_frame.c" "isol
                        INCLUDE_DIRS "include"
                        PRIV_INCLUDE_DIRS "."
                        REQUIRES esp_eth esp_netif esp_http_server
-                       PRIV_REQUIRES board_cores mdns nvs_flash esp_timer esp_event esp_system lwip console log)
+                       PRIV_REQUIRES board_cores mdns nvs_flash esp_timer esp_event esp_system lwip console log reboot_gate)
 
 # --wrap=udp_recv puts mdns_filter.c in front of the receive callback of the mDNS library (own announcements, spec 5.13); -u pulls
 # its archive member in, nothing else references it.

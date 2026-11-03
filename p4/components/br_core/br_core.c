@@ -1102,7 +1102,14 @@ static esp_err_t op_radio_job(const rcp_fw_source_t *source, char *err_detail, s
         if (s_core.fault_reason[0] == '\0') {
             enter_fault("radio restart failed");
         }
-        return mode_fsm_radio_job_result(base_only, push_err, err);
+        const esp_err_t result = mode_fsm_radio_job_result(base_only, push_err, err);
+        if (result == RCP_SYNC_ERR_RESTART && err_detail && err_cap) {
+            xSemaphoreTake(s_core.mutex, portMAX_DELAY);
+            snprintf(err_detail, err_cap, "the image is installed, but OpenThread did not start on it: %s",
+                     s_core.fault_reason);
+            xSemaphoreGive(s_core.mutex);
+        }
+        return result;
     }
     *restarted = true;
     return push_err;

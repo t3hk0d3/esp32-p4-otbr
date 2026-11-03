@@ -17,8 +17,10 @@
 #include "eth.h"
 #include "netcfg.h"
 #include "netnames.h"
+#include "reboot_gate.h"
 #include "routing.h"
 #include "storage.h"
+#include "supervisor.h"
 
 static const char *TAG = "app";
 
@@ -59,6 +61,9 @@ static void net_init_task(void *arg)
 
 void app_main(void)
 {
+    // Before anything can reboot (netcfg's trial check at its start, the console, HTTP): reboots other than an update's
+    // or a radio push's own wait until those end.
+    reboot_gate_set_busy(device_api_long_op_running);
     // The sampler (core 1) starts first so that the lock statistics and CPU windows cover the whole boot.
     // Diagnostics are not essential (spec 5.3: validity does not depend on them): log and carry on.
     const esp_err_t diag_err = diag_start();
@@ -122,6 +127,11 @@ void app_main(void)
     }
     esp_br_web_set_extra_handlers(device_api_register);
     esp_br_web_start(s_web_base_path);
+    // A stuck OpenThread lock or HTTP server task aborts (core dump, reboot) instead of waiting for a power cycle.
+    err = supervisor_start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "supervisor_start: %s", esp_err_to_name(err));
+    }
 
     BaseType_t created = xTaskCreatePinnedToCore(net_init_task, "net_init", NET_INIT_TASK_STACK, NULL, NET_INIT_TASK_PRIORITY,
                                                  NULL, NET_CORE);

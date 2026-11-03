@@ -41,6 +41,7 @@ The change is stored as a trial and the board reboots into it. You then have 5 m
 `POST /device/network/confirm` (or press **Keep new settings** on any device page) from the management side, that is the `single`
 interface or `mgmt` of the trial config. If you do not (or the board resets first), the trial is dropped and the board
 reboots into the previous config. If the board is unreachable after a network change: wait 5 minutes, or use the console.
+A revert (and `net reset`) that comes while an update, radio firmware push or ROM recovery runs waits until it ends.
 
 <img src="images/ethernet-trial.png" width="640" alt="Ethernet page after the reboot into split mode: a banner says these settings are on trial and the board goes back in 4:08 unless you keep them, with the Keep new settings button">
 

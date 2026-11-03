@@ -121,6 +121,8 @@ otError netdiag_mux_send_get(const otIp6Address *dest, const uint8_t *tlvs, uint
                              otReceiveDiagnosticGetCallback cb, void *ctx, bool filter_peer);
 extern unsigned mock_netdiag_sends;           /* netdiag_mux_send_get() calls so far */
 extern unsigned mock_netdiag_filtered_sends;  /* of those, with filter_peer set */
+void netdiag_mux_release(otReceiveDiagnosticGetCallback cb);
+extern unsigned mock_netdiag_releases;        /* netdiag_mux_release() calls so far (patch 23) */
 otInstance *esp_openthread_get_instance(void);
 bool esp_openthread_lock_acquire(uint32_t timeout);
 void esp_openthread_lock_release(void);
@@ -128,6 +130,7 @@ void esp_fill_random(void *buffer, size_t length);
 int64_t esp_timer_get_time(void);
 void esp_br_web_epskc_set_active_tap(const char *tap);
 void esp_restart(void);
+void reboot_gate_restart(uint32_t delay_ms); /* patch 23 */
 SemaphoreHandle_t xSemaphoreCreateBinary(void);
 int xSemaphoreTake(SemaphoreHandle_t semaphore, uint32_t timeout);
 int xSemaphoreGive(SemaphoreHandle_t semaphore);

@@ -85,7 +85,7 @@ static SemaphoreHandle_t s_join_done_semaphore;
 static SemaphoreHandle_t s_diagnostic_semaphore;
 static SemaphoreHandle_t s_ping_done_semaphore;
 static SemaphoreHandle_t s_ping_mutex;
-static bool ot_wait_callback(SemaphoreHandle_t semaphore, uint32_t timeout_ms); /* patch 18 */
+static bool ot_wait_callback(SemaphoreHandle_t semaphore, uint32_t timeout_ms); /* patch 22 */
 
 void esp_br_web_api_init(void)
 {
@@ -536,7 +536,7 @@ static void build_availableNetworks_list(otActiveScanResult *result)
     return;
 }
 
-/* Patch 16: the HTTP task waits for the end of a scan at most SCAN_WAIT_MS (a radio fault can stop the main loop
+/* Patch 22: the HTTP task waits for the end of a scan at most SCAN_WAIT_MS (a radio fault can stop the main loop
  * mid-scan; an unbounded wait would hang the only HTTP task). A scan whose wait timed out may still deliver results
  * into s_networkList, so the list is not replaced or read while OpenThread reports a discover in progress (a per-instance
  * state: a restarted OpenThread starts idle). */
@@ -561,7 +561,7 @@ static otError get_openthread_available_networks(void)
         ESP_GOTO_ON_FALSE(OT_ERROR_NONE == (ret = otIp6SetEnabled(ins, true)), ret, exit, API_TAG,
                           "Failed to enable IPv6 interface for scanning");
     }
-    xSemaphoreTake(s_discover_done_semaphore, 0); /* patch 18: drop the end of an earlier scan whose wait timed out */
+    xSemaphoreTake(s_discover_done_semaphore, 0); /* patch 22: drop the end of an earlier scan whose wait timed out */
     ESP_GOTO_ON_FALSE(OT_ERROR_NONE ==
                           (ret = otThreadDiscover(ins, scanChannels, OT_PANID_BROADCAST, false, false,
                                                   &handle_active_scan_event, NULL)),
@@ -571,7 +571,7 @@ exit:
     return ret;
 }
 
-/* Patch 16: true while a discover (possibly one whose wait timed out) can still write s_networkList. */
+/* Patch 22: true while a discover (possibly one whose wait timed out) can still write s_networkList. */
 static bool scan_in_progress(void)
 {
     esp_openthread_lock_acquire(portMAX_DELAY);
@@ -585,7 +585,7 @@ cJSON *handle_openthread_available_network_request(void)
     otError ret = OT_ERROR_NONE;
     cJSON *networks = cJSON_CreateArray();
 
-    /* Patch 16: an earlier scan still running (its wait timed out) owns s_networkList. */
+    /* Patch 22: an earlier scan still running (its wait timed out) owns s_networkList. */
     ESP_GOTO_ON_FALSE(!scan_in_progress(), OT_ERROR_BUSY, exit, API_TAG, "An earlier scan is still running");
 
     destroy_available_thread_networks_list(s_networkList);
@@ -599,7 +599,7 @@ cJSON *handle_openthread_available_network_request(void)
     ESP_GOTO_ON_FALSE(!get_openthread_available_networks(), OT_ERROR_FAILED, exit, API_TAG,
                       "Failed to get thread network list");
     ESP_GOTO_ON_FALSE(ot_wait_callback(s_discover_done_semaphore, SCAN_WAIT_MS), OT_ERROR_FAILED, exit, API_TAG,
-                      "Scan did not end"); /* patch 18 */
+                      "Scan did not end"); /* patch 22 */
 
     ESP_GOTO_ON_FALSE(s_networkList, OT_ERROR_INVALID_ARGS, exit, API_TAG, "Invalid network list");
 
@@ -735,7 +735,7 @@ otError handle_openthread_join_network_request(const cJSON *request, cJSON *log)
     /* join active dataset */
     if (!memcmp(param.credentialType, CREDENTIAL_TYPE_NETWORK_KEY, sizeof(CREDENTIAL_TYPE_NETWORK_KEY))) {
         cJSON_SetValuestring(log, "Warning: Click `scan` and Try against");
-        /* Patch 16: a scan whose wait timed out may still be appending to the list. */
+        /* Patch 22: a scan whose wait timed out may still be appending to the list. */
         ESP_RETURN_ON_FALSE(!scan_in_progress(), OT_ERROR_BUSY, API_TAG, "A scan is still running");
         list = s_networkList;
         count = s_networkList_count;
@@ -782,7 +782,7 @@ otError handle_openthread_join_network_request(const cJSON *request, cJSON *log)
 
         /* Release lock while waiting for joiner callback to avoid blocking other requests */
         esp_openthread_lock_release();
-        if (!ot_wait_callback(s_join_done_semaphore, 10000)) { /* patch 18 */
+        if (!ot_wait_callback(s_join_done_semaphore, 10000)) { /* patch 22 */
             ESP_LOGW(API_TAG, "Joiner timed out waiting for callback");
             ret = OT_ERROR_RESPONSE_TIMEOUT;
             goto exit_no_unlock;
@@ -1063,6 +1063,11 @@ static void diagnosticTlv_result_handler(otError aError, otMessage *aMessage, co
             return;
         }
 
+        /* Patch 23: no collection running (a late answer to an earlier multicast Get): drop it without waiting for
+           the semaphore, which would stall the OpenThread task. */
+        if (!s_diag_collecting) {
+            return;
+        }
         if (esp_get_free_heap_size() < DIAG_MIN_FREE_HEAP) {
             ESP_LOGW(API_TAG, "Diagnostic callback: low heap (%lu), dropping result",
                      (unsigned long)esp_get_free_heap_size());
@@ -1201,7 +1206,7 @@ cJSON *handle_ot_resource_network_diagnostics_request()
         TickType_t elapsed = now - start;
         TickType_t quiet = now - s_diag_last_response_tick;
 
-        if (!esp_br_web_openthread_ready()) { /* patch 18: OpenThread is being stopped (radio push) or a capture started */
+        if (!esp_br_web_openthread_ready()) { /* patch 22: OpenThread is being stopped (radio push) or a capture started */
             ESP_LOGW(API_TAG, "Diagnostic collection: OpenThread no longer ready (%d responses)", s_diag_response_count);
             break;
         }
@@ -1222,13 +1227,21 @@ cJSON *handle_ot_resource_network_diagnostics_request()
 
     /* Stop accepting new responses and serialize the result.
        Free the diagnostic set immediately after conversion so the
-       JSON string serialization in the HTTP handler has more heap. */
+       JSON string serialization in the HTTP handler has more heap.
+       Patch 23: the set is taken out under the semaphore and converted after it, so a late answer never waits on the
+       conversion; the listener is released so that late answers stop reaching the callback at all. */
     xSemaphoreTake(s_diagnostic_semaphore, portMAX_DELAY);
     s_diag_collecting = false;
-    cJSON *result = diagnosticTlv_set_convert2_json(s_diagnosticTlv_set);
-    destroy_thread_diagnosticTlv_set(s_diagnosticTlv_set);
+    thread_diagnosticTlv_set_t *set = s_diagnosticTlv_set;
     s_diagnosticTlv_set = NULL;
     xSemaphoreGive(s_diagnostic_semaphore);
+
+    esp_openthread_lock_acquire(portMAX_DELAY);
+    netdiag_mux_release(&diagnosticTlv_result_handler);
+    esp_openthread_lock_release();
+
+    cJSON *result = diagnosticTlv_set_convert2_json(set);
+    destroy_thread_diagnosticTlv_set(set);
 
     return result;
 }
@@ -1347,7 +1360,7 @@ cJSON *handle_openthread_ping_request(const cJSON *request)
     }
 
     /* Wait for ping to complete. Timeout: count * interval + extra timeout + margin */
-    if (!ot_wait_callback(s_ping_done_semaphore, (count * config.mInterval) + config.mTimeout + 1000)) { /* patch 18 */
+    if (!ot_wait_callback(s_ping_done_semaphore, (count * config.mInterval) + config.mTimeout + 1000)) { /* patch 22 */
         ESP_LOGW(API_TAG, "Ping timed out waiting for statistics callback");
         /* Stop any in-progress ping */
         esp_openthread_lock_acquire(portMAX_DELAY);
@@ -1691,7 +1704,7 @@ void handle_ot_resource_node_epskc_key_delete_request(void)
 
 #define THREAD_REST_COLLECTION_LIMIT 200
 
-/* Patch 16: wait up to timeout_ms for `semaphore` (given by an OpenThread callback) in slices, and give up early once
+/* Patch 22: wait up to timeout_ms for `semaphore` (given by an OpenThread callback) in slices, and give up early once
  * the Thread REST flag is off: a radio push turns it off, then waits for this request's br_core session to close
  * before it tears OpenThread down. A sniffer start also turns it off and interrupts the wait. */
 #define OT_WAIT_SLICE_MS 250
@@ -2255,10 +2268,10 @@ static void rest_dataset(const esp_br_thread_rest_request_t *request, esp_br_thr
     }
     /* The permanent callback context also absorbs responses after the HTTP timeout. */
     esp_openthread_lock_release();
-    bool done = ot_wait_callback(s_rest_pending_done, 30000); /* patch 18 */
+    bool done = ot_wait_callback(s_rest_pending_done, 30000); /* patch 22 */
     esp_openthread_lock_acquire(portMAX_DELAY);
     if (!done && !esp_br_web_openthread_ready()) {
-        /* patch 18: OpenThread is being stopped; the request dies with the instance and its callback may never come. */
+        /* patch 22: OpenThread is being stopped; the request dies with the instance and its callback may never come. */
         s_rest_pending_busy = false;
         response->status = 503;
         response->detail = "OpenThread is stopping";
@@ -3418,7 +3431,7 @@ static void rest_poll_guarded(void)
 }
 
 /* Patch 2: while OpenThread is not ready (stopped, being torn down for a radio push or recovery) the worker must
- * not touch it; the guard is checked again under the lock in rest_poll_guarded(). Patch 16: the br_core session keeps
+ * not touch it; the guard is checked again under the lock in rest_poll_guarded(). Patch 22: the br_core session keeps
  * a push from deleting the lock while the worker waits for it. */
 static void rest_process_once(void)
 {

@@ -29,6 +29,9 @@ The Dashboard shows the fault in red, with what to do and a link to the page tha
 - Thread REST answers 503 `radio not available`: see `mode` above; 409 `sniffer active`: a capture is running
   (`DELETE /device/sniffer`).
 - The board boots in `RADIO_FAULT` after an on-board test: see [Development](development.md#testing) (`c6_hold 0`).
+- The board rebooted by itself and the console showed `supervisor: the OpenThread lock is stuck` or `... the HTTP
+  server task is stuck`: a deadlock was caught (the OpenThread lock not free for 2 minutes, or the HTTP server task not
+  answering for 2 minutes). The core dump is in the `coredump` partition (`idf.py -C p4 coredump-info`); please report it.
 - Recovery from a bad P4 flash: reflash over USB (`make erase flash`). See [First install](first-install.md#recovery-procedures)
   for the C6.
 

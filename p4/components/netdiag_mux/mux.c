@@ -91,6 +91,19 @@ void netdiag_mux_core_dispatch(otError error, otMessage *msg, const otMessageInf
     }
 }
 
+void netdiag_mux_core_release(otReceiveDiagnosticGetCallback cb)
+{
+    if (!cb) {
+        return;
+    }
+    for (size_t i = 0; i < NETDIAG_MUX_MAX_LISTENERS; i++) {
+        if (s_listeners[i].cb == cb) {
+            memset(&s_listeners[i], 0, sizeof(s_listeners[i]));
+            return;
+        }
+    }
+}
+
 void netdiag_mux_core_reset(void)
 {
     memset(s_listeners, 0, sizeof(s_listeners));

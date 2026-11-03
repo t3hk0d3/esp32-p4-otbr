@@ -264,7 +264,8 @@ static void cap_timer_cb(void *arg)
     (void)arg;
     const uint32_t gen = (uint32_t)atomic_load(&s_cap_armed_gen);
 
-    if (br_core_get_mode() != BR_MODE_BR_RUNNING) {
+    // The session keeps a radio push from deleting the task queue between the mode check and the post.
+    if (br_core_get_mode() != BR_MODE_BR_RUNNING || !br_core_ot_session_begin()) {
         mesh_scan_on_mode_lost(gen);
         return;
     }
@@ -272,6 +273,7 @@ static void cap_timer_cb(void *arg)
         // ESP_ERR_INVALID_STATE: a new scan armed the timer meanwhile, which supersedes this cap.
         esp_timer_start_once(s_cap_timer, (uint64_t)CAP_POST_RETRY_MS * 1000);
     }
+    br_core_ot_session_end();
 }
 
 // Child deadline: the same hand-over as the cap. scan.c checks the generation and which queries are overdue, so an
@@ -292,13 +294,14 @@ static void child_timer_cb(void *arg)
     (void)arg;
     const uint32_t gen = (uint32_t)atomic_load(&s_child_armed_gen);
 
-    if (br_core_get_mode() != BR_MODE_BR_RUNNING) {
+    if (br_core_get_mode() != BR_MODE_BR_RUNNING || !br_core_ot_session_begin()) {
         mesh_scan_on_mode_lost(gen);
         return;
     }
     if (esp_openthread_task_queue_post(child_deadline_on_ot_task, (void *)(uintptr_t)gen) != ESP_OK) {
         esp_timer_start_once(s_child_timer, (uint64_t)CAP_POST_RETRY_MS * 1000);
     }
+    br_core_ot_session_end();
 }
 
 /** esp_timer task, every second while a scan runs. */

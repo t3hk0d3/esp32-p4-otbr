@@ -11,6 +11,8 @@ set(requires mdns fatfs spiffs esp_eth nvs_flash freertos openthread esp_http_se
 list(APPEND requires br_core netcfg)
 # Patch 17: every Network Diagnostic Get goes through netdiag_mux (one OpenThread netdiag callback for every sender).
 list(APPEND requires netdiag_mux)
+# Patch 23: the Thread REST reset reboots through reboot_gate (a running update or radio push is not cut off).
+list(APPEND requires reboot_gate)
 
 # For IDF < 6.0, use IDF's built-in json component; for IDF >= 6.0 use managed cJSON component through idf_component.yml
 if("${IDF_VERSION_MAJOR}" VERSION_LESS "6")

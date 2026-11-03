@@ -36,6 +36,7 @@ void mock_reset(void) {
     diagnostic_callback=NULL;
     mock_netdiag_sends=0;
     mock_netdiag_filtered_sends=0;
+    mock_netdiag_releases=0;
     mock_time=0;
     mock_ticks=0;
     mock_on_delay=NULL;

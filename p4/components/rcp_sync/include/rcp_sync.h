@@ -55,6 +55,12 @@ void rcp_sync_get_last_probe(rcp_sync_probe_result_t *out);
 #define RCP_SYNC_ERR_HOSTED_OTA 0x7a02
 
 /**
+ * Radio push result (br_core): the C6 installed the image, but OpenThread did not come back up on it (err_detail
+ * names the fault). Pushing the same image again does not help.
+ */
+#define RCP_SYNC_ERR_RESTART 0x7a03
+
+/**
  * Where an RCP image comes from during a push. `read` delivers bytes sequentially: offsets ascend without
  * gaps. A NULL `reopen` marks a one-shot source (a request body). `reopen` is non-NULL only for sources that
  * can restart from offset 0 (a URL pull); it is called before every whole-transfer retry.

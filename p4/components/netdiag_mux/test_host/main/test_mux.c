@@ -433,6 +433,43 @@ TEST_CASE("On an answer with no listeners: nothing is called", "[netdiag_mux]")
     }
 }
 
+TEST_CASE("A released listener gets no further answers; the others still do", "[netdiag_mux]")
+{
+    reset();
+    send(multicast(), cb_a, NULL, true);
+    send(multicast(), cb_b, NULL, true);
+    netdiag_mux_core_release(cb_a);
+    otMessageInfo info = from(rloc_0400());
+    netdiag_mux_core_dispatch(OT_ERROR_NONE, MSG, &info);
+    TEST_ASSERT_EQUAL_INT(0, s_rec[0].calls);
+    TEST_ASSERT_EQUAL_INT(1, s_rec[1].calls);
+}
+
+TEST_CASE("Releasing an unknown or NULL callback changes nothing", "[netdiag_mux]")
+{
+    reset();
+    send(rloc_0400(), cb_a, NULL, false);
+    netdiag_mux_core_release(cb_b);
+    netdiag_mux_core_release(NULL);
+    otMessageInfo info = from(rloc_0400());
+    netdiag_mux_core_dispatch(OT_ERROR_NONE, MSG, &info);
+    TEST_ASSERT_EQUAL_INT(1, s_rec[0].calls);
+}
+
+TEST_CASE("A released slot is reused and the callback can register again", "[netdiag_mux]")
+{
+    reset();
+    otReceiveDiagnosticGetCallback cbs[] = { cb_a, cb_b, cb_c, cb_d, cb_e, cb_f, cb_g, cb_h };
+    for (int i = 0; i < NETDIAG_MUX_MAX_LISTENERS; i++) {
+        TEST_ASSERT_EQUAL_INT(OT_ERROR_NONE, send(rloc_0400(), cbs[i], NULL, false));
+    }
+    TEST_ASSERT_EQUAL_INT(OT_ERROR_NO_BUFS, send(rloc_0400(), cb_i, NULL, false));
+    netdiag_mux_core_release(cb_c);
+    TEST_ASSERT_EQUAL_INT(OT_ERROR_NONE, send(rloc_0400(), cb_i, NULL, false));
+    netdiag_mux_core_release(cb_i);
+    TEST_ASSERT_EQUAL_INT(OT_ERROR_NONE, send(rloc_0400(), cb_c, NULL, false));
+}
+
 void app_main(void)
 {
     UNITY_BEGIN();

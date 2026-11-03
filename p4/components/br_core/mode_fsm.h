@@ -172,7 +172,8 @@ bool mode_fsm_next_recovery_failed(bool previous, bool attempted, bool succeeded
 
 /**
  * Result of a C6 job (the part of op_radio_job after the job ran): `job_err` is the push or the ROM recovery, `restart_err`
- * the OpenThread restart that follows. A firmware push reports its own error first, then the restart's. A ROM recovery
+ * the OpenThread restart that follows. A firmware push reports its own error first; a push that worked followed by a
+ * failed restart is RCP_SYNC_ERR_RESTART (the image is installed, so a retry of the push cannot help). A ROM recovery
  * reports only its own result: the restart after it fails when the C6 has no RCP firmware (the normal outcome of a
  * recovery), and that state is in the status (RADIO_FAULT "no rcp firmware"), not an error of the recovery. A push of
  * c6_installer.bin through ESP-Hosted leaves the same state and counts as base-only too (`base_only` true for both).
