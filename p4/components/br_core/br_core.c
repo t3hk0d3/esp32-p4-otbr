@@ -1466,22 +1466,46 @@ static esp_err_t store_leader_adjustment(int8_t adj)
     return err;
 }
 
-// Takes the OpenThread lock within `wait_ms` while OpenThread runs and the mode is still `mode` after the wait (a push
-// clears ot_ready under the lock before it tears OpenThread down). ESP_ERR_INVALID_STATE when it does not run or the
-// mode changed, ESP_ERR_TIMEOUT when the lock was not free in time. On ESP_OK the caller releases the lock.
-static esp_err_t ot_lock_in_mode(br_core_mode_t mode, uint32_t wait_ms)
+// OpenThread takes calls (like br_core_get_status: every mode but RADIO_FAULT). Device properties live in the host
+// instance, so the leader weight adjustment can be read and set in STARTING and SNIFFER too.
+static bool ot_usable(void)
 {
-    if (!ot_ready_now() || br_core_get_mode() != mode) {
+    return ot_ready_now() && br_core_get_mode() != BR_MODE_RADIO_FAULT;
+}
+
+static bool br_running(void)
+{
+    return ot_ready_now() && br_core_get_mode() == BR_MODE_BR_RUNNING;
+}
+
+// Takes the OpenThread lock within `wait_ms` while `usable()` holds, checked before and again after the wait (a push
+// clears ot_ready under the lock before it tears OpenThread down). ESP_ERR_INVALID_STATE when it does not hold,
+// ESP_ERR_TIMEOUT when the lock was not free in time. On ESP_OK the caller releases the lock.
+static esp_err_t ot_lock_while(bool (*usable)(void), uint32_t wait_ms)
+{
+    if (!usable()) {
         return ESP_ERR_INVALID_STATE;
     }
     if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(wait_ms))) {
         return ESP_ERR_TIMEOUT;
     }
-    if (!ot_ready_now() || br_core_get_mode() != mode) {
+    if (!usable()) {
         esp_openthread_lock_release();
         return ESP_ERR_INVALID_STATE;
     }
     return ESP_OK;
+}
+
+// With the OpenThread lock held: make OpenThread use the stored adjustment if it does not yet (a save that could not
+// take the lock, or one between bring-up's apply and a later read).
+static void sync_leader_adjustment(otInstance *instance)
+{
+    const int8_t adj = (int8_t)atomic_load(&s_leader_adj);
+
+    if (otThreadGetDeviceProperties(instance)->mLeaderWeightAdjustment != adj) {
+        apply_leader_adjustment(instance, adj);
+        ESP_LOGI(TAG, "leader weight adjustment %+d (weight %u)", adj, otThreadGetLocalLeaderWeight(instance));
+    }
 }
 
 esp_err_t br_core_set_leader_adjustment(int8_t adj, bool *applied)
@@ -1498,18 +1522,13 @@ esp_err_t br_core_set_leader_adjustment(int8_t adj, bool *applied)
         atomic_store(&s_leader_adj, adj);
     }
 
-    if (ot_lock_in_mode(BR_MODE_BR_RUNNING, LEADER_LOCK_MS) != ESP_OK) {
+    if (ot_lock_while(ot_usable, LEADER_LOCK_MS) != ESP_OK) {
         if (changed) {
-            ESP_LOGI(TAG, "leader weight adjustment %+d stored, applied at the next Thread start", adj);
+            ESP_LOGI(TAG, "leader weight adjustment %+d stored, applied at the next start or weight read", adj);
         }
         return ESP_OK;
     }
-    otInstance *instance = esp_openthread_get_instance();
-    const int8_t live = otThreadGetDeviceProperties(instance)->mLeaderWeightAdjustment;
-    if (live != adj) {
-        apply_leader_adjustment(instance, adj);
-        ESP_LOGI(TAG, "leader weight adjustment %+d (weight %u)", adj, otThreadGetLocalLeaderWeight(instance));
-    }
+    sync_leader_adjustment(esp_openthread_get_instance());
     esp_openthread_lock_release();
     *applied = true;
     return ESP_OK;
@@ -1523,18 +1542,13 @@ int8_t br_core_leader_adjustment(void)
 esp_err_t br_core_leader_weight(uint8_t *out)
 {
     ESP_RETURN_ON_FALSE(out, ESP_ERR_INVALID_ARG, TAG, "no output");
-    // Like br_core_get_status: OpenThread takes calls in every mode but RADIO_FAULT.
-    if (!ot_ready_now() || br_core_get_mode() == BR_MODE_RADIO_FAULT) {
-        return ESP_ERR_INVALID_STATE;
+    const esp_err_t err = ot_lock_while(ot_usable, STATUS_LOCK_MS);
+    if (err != ESP_OK) {
+        return err; // not logged: the GET polls this every few seconds
     }
-    if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(STATUS_LOCK_MS))) {
-        return ESP_ERR_TIMEOUT;
-    }
-    if (!ot_ready_now()) {
-        esp_openthread_lock_release();
-        return ESP_ERR_INVALID_STATE;
-    }
-    *out = otThreadGetLocalLeaderWeight(esp_openthread_get_instance());
+    otInstance *instance = esp_openthread_get_instance();
+    sync_leader_adjustment(instance);
+    *out = otThreadGetLocalLeaderWeight(instance);
     esp_openthread_lock_release();
     return ESP_OK;
 }
@@ -1544,7 +1558,7 @@ esp_err_t br_core_become_leader(br_core_leader_refusal_t *refusal)
     ESP_RETURN_ON_FALSE(refusal, ESP_ERR_INVALID_ARG, TAG, "no refusal output");
     *refusal = BR_CORE_LEADER_OK;
 
-    const esp_err_t lock_err = ot_lock_in_mode(BR_MODE_BR_RUNNING, LEADER_LOCK_MS);
+    const esp_err_t lock_err = ot_lock_while(br_running, LEADER_LOCK_MS);
     if (lock_err == ESP_ERR_TIMEOUT) {
         return ESP_ERR_TIMEOUT;
     }

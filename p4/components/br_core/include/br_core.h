@@ -200,11 +200,13 @@ esp_err_t br_core_rom_recover(char *err_detail, size_t err_cap);
 
 /**
  * Store the leader weight adjustment (NVS namespace `thread`, key `leader_adj`; written only when it changes, `net reset`
- * keeps it) and apply it at once in BR_RUNNING: OpenThread's device properties recompute the local leader weight. In any
- * other mode, or when the OpenThread lock is not free within 1 s, the value is stored and applied at the next border
- * router start. Call it from one task at a time (the HTTP server task).
+ * keeps it) and apply it at once whenever OpenThread is ready (any mode but RADIO_FAULT: STARTING, BR_RUNNING, SNIFFER):
+ * OpenThread's device properties recompute the local leader weight. When OpenThread is not ready or its lock is not free
+ * within 1 s, the value is stored and applied at the next border router start or the next br_core_leader_weight read,
+ * whichever comes first. Call it from one task at a time (the HTTP server task).
  * @param adj BR_CORE_LEADER_ADJ_MIN..BR_CORE_LEADER_ADJ_MAX
- * @param applied set to whether OpenThread uses the value now (false on every error)
+ * @param applied set to whether OpenThread uses the value now: false only when OpenThread is not ready or the lock wait
+ *        ran out (and on every error)
  * @return ESP_ERR_INVALID_ARG out of range or NULL `applied` (nothing stored), ESP_ERR_INVALID_STATE when storage is
  *         degraded (nothing changes), the NVS error when the write fails
  */
@@ -215,7 +217,8 @@ int8_t br_core_leader_adjustment(void);
 
 /**
  * This board's leader weight (otThreadGetLocalLeaderWeight: 64 + border router + power supply + the adjustment), with
- * the bounded lock wait of br_core_get_status.
+ * the bounded lock wait of br_core_get_status. A stored adjustment that OpenThread does not use yet (a save that could
+ * not take the lock) is applied first, so the weight always matches br_core_leader_adjustment.
  * @return ESP_ERR_INVALID_STATE when OpenThread is not running (RADIO_FAULT, not started, a push), ESP_ERR_TIMEOUT when
  *         the lock was not free in time
  */
