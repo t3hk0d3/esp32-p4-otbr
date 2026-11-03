@@ -32,11 +32,11 @@ function checkUpdateUrl(url) {
 /** Hint for the radio card from status.fault_reason. */
 function faultHint(reason) {
   if (reason === 'no rcp firmware')
-    return {highlight : true, text : 'The C6 has no valid radio firmware. Install c6_rcp.bin below.'};
+    return {highlight : true, text : 'The radio co-processor has no valid firmware. Install c6_rcp.bin below.'};
   if (reason === 'esp-hosted firmware')
     return {
       highlight : true,
-      text : 'The C6 still runs its factory ESP-Hosted firmware. Install c6_installer.bin below first (once), then c6_rcp.bin.'
+      text : 'The radio co-processor still runs its factory ESP-Hosted firmware. Install c6_installer.bin below first (once), then c6_rcp.bin.'
     };
   if (reason === 'rcp incompatible')
     return {
@@ -266,7 +266,7 @@ function recover() {
                                    'while it runs; the radio firmware may have to be installed again afterwards.'))
     return Promise.resolve(null);
   return kit.runOp(function() {
-    note('recoverMsg', 'Rewriting the C6 base image through the ROM loader (this takes a while)...', false);
+    note('recoverMsg', 'Rewriting the radio co-processor base image through the ROM loader (this takes a while)...', false);
     return kit.request('POST', '/device/radio/recover').then(function(r) {
       note('recoverMsg', r.status === 200 ? (r.body && r.body.detail) || 'Done.' : kit.failure(r), r.status !== 200);
       refreshStatus();

@@ -22,7 +22,7 @@ function faultText(reason) {
     return 'The radio still runs its factory ESP-Hosted firmware. On the Firmware page, install c6_installer.bin ' +
            'once, then c6_rcp.bin of the same release.';
   if (reason === 'rom recovery failed')
-    return 'Rewriting the radio over the maintenance jumper failed. Reboot the board, or use Recover C6 on the ' +
+    return 'Rewriting the radio over the maintenance jumper failed. Reboot the board, or use Recover radio on the ' +
            'Firmware page.';
   if (reason === 'storage unavailable')
     return 'The settings storage did not start, so the Thread network cannot start. The rest of the board works; ' +

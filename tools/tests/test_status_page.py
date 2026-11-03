@@ -492,7 +492,7 @@ class TestUxReview:
         ("reason", "word"),
         [
             ("esp-hosted firmware", "c6_installer.bin"),
-            ("rom recovery failed", "Recover C6"),
+            ("rom recovery failed", "Recover radio"),
             ("storage unavailable", "storage"),
         ],
     )

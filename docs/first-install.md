@@ -249,7 +249,7 @@ Within about half a minute `curl http://<board>/node/state` goes from `"detached
   reboot unless it was confirmed. Or use the P4 console (`make monitor`, USB-C, 115200 baud): `net reset` restores `single`, untagged,
   DHCPv4 and reboots; `net show` prints the config.
 - **C6 broken** (bootloader, partition table or updater damaged, RCP firmware missing): with the jumper the P4 repairs it at boot (once per boot), or
-  `curl -X POST http://<board>/device/radio/recover` / "Recover C6" on the Firmware page; then upload `c6_rcp.bin` if
+  `curl -X POST http://<board>/device/radio/recover` / "Recover radio" on the Firmware page; then upload `c6_rcp.bin` if
   `fault_reason` says `no rcp firmware`. Without the jumper use Path 3.
 - **P4 broken** (bad OTA that cannot roll back, corrupt flash): reflash over USB-C, `make erase flash`
   (this deletes the stored dataset and network settings). If the P4 will not enter download mode, hold BOOT while pressing reset.

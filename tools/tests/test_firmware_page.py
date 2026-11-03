@@ -324,12 +324,12 @@ class TestFirmwarePageReview:
 
 
 def test_recovery_text_asks_for_a_reinstall_only_without_radio_firmware():
-    # On the recovery card: the reinstall is conditional on the Radio card showing no firmware.
+    # On the recovery card: the reinstall is conditional on the Radio Co-Processor card showing no firmware.
     from device_js import FRONTEND
 
     html = (FRONTEND / "firmware.html").read_text()
     assert "Afterwards install the radio firmware again" not in html
-    assert "If the Radio card then shows no installed firmware" in html
+    assert "If the Radio Co-Processor card then shows no installed firmware" in html
 
 
 @needs_node
