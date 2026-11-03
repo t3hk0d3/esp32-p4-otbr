@@ -377,19 +377,44 @@ def build():
 # --- RIPng (RFC 2080) ---
 
 RIPNG_UNKNOWN = "2001:db8:99::"  # a /64 the board does not announce
-# a /56 covering PREFIXES[0]: same first 8 bytes, prefix length not 64
-RIPNG_COVERING = "2001:db8:42:100::"
+RIPNG_HOST = "2001:db8:42:100::1"  # inside PREFIXES[0]: same first 8 bytes
+
+
+def rte(entry):
+    """(prefix, prefix length, metric[, route tag]) with the tag defaulting to 0."""
+    return tuple(entry) if len(entry) == 4 else (*entry, 0)
 
 
 def ripng(cmd, entries, ver=1):
     """A RIPng message: header (command, version, 2 zero bytes) and its RTEs, each
-    (prefix, prefix length, metric) with route tag 0."""
+    (prefix, prefix length, metric[, route tag])."""
     msg = RIPng(cmd=cmd, ver=ver)
-    for prefix, plen, metric in entries:
+    for prefix, plen, metric, tag in map(rte, entries):
         msg = msg / RIPngEntry(
-            prefix_or_nh=prefix, routetag=0, prefixlen=plen, metric=metric
+            prefix_or_nh=prefix, routetag=tag, prefixlen=plen, metric=metric
         )
     return bytes(msg)
+
+
+def some_request(metrics):
+    """The specific request's RTEs with the given metrics: our /64, an unknown /64
+    with route tag 7, then PREFIXES[0]'s first 8 bytes as a /56, a host inside it as a
+    /128, and that host address as a /64 (bytes 8-15 not zero)."""
+    p0 = net(PREFIXES[0])
+    rtes = [
+        (p0, 64),
+        (RIPNG_UNKNOWN, 64),
+        (p0, 56),
+        (RIPNG_HOST, 128),
+        (RIPNG_HOST, 64),
+    ]
+    tags = [0, 7, 0, 0, 0]
+    return [(a, n, m, t) for (a, n), m, t in zip(rtes, metrics, tags)]
+
+
+# Request metrics are 0 so that the answer's filled-in metrics are visible.
+SOME_REQUEST_METRICS = [0] * 5
+SOME_ANSWER_METRICS = [1, 16, 16, 16, 16]
 
 
 def net(prefix):
@@ -419,8 +444,14 @@ def build_ripng():
         ),
         (
             "RIPNG_REQUEST_SOME",
-            f"request: {PREFIXES[0]}, {RIPNG_UNKNOWN}/64, {RIPNG_COVERING}/56",
-            ripng(1, [(p0, 64, 16), (RIPNG_UNKNOWN, 64, 16), (RIPNG_COVERING, 56, 16)]),
+            f"request, metric 0: {PREFIXES[0]}, {RIPNG_UNKNOWN}/64 tag 7, {p0}/56, "
+            + f"{RIPNG_HOST}/128, {RIPNG_HOST}/64",
+            ripng(1, some_request(SOME_REQUEST_METRICS)),
+        ),
+        (
+            "RIPNG_ANSWER_SOME",
+            "answer to RIPNG_REQUEST_SOME: the same RTEs, metrics 1, 16, 16, 16, 16",
+            ripng(2, some_request(SOME_ANSWER_METRICS)),
         ),
         # cut inside the 4-byte header
         ("RIPNG_RX_SHORT", "a response header cut short", two[:3]),
@@ -646,19 +677,18 @@ def cross_check(vectors):
 
 
 def check_ripng(name, raw, cmd, ver, entries):
-    """Parsed back with scapy: header fields and every RTE (prefix, length, metric),
-    route tag 0, nothing left over."""
+    """Parsed back with scapy: header fields and every RTE (prefix, length, metric,
+    route tag; tag 0 unless given), nothing left over."""
     p = RIPng(raw)
     check(len(raw) == 4 + 20 * len(entries), f"{name}: length")
     check(p.cmd == cmd and p.ver == ver and p.null == 0, f"{name}: header")
     got = []
     e = p.payload
     while isinstance(e, RIPngEntry):
-        check(e.routetag == 0, f"{name}: route tag")
-        got.append((e.prefix_or_nh, e.prefixlen, e.metric))
+        got.append((e.prefix_or_nh, e.prefixlen, e.metric, e.routetag))
         e = e.payload
     check(not bytes(e), f"{name}: trailing bytes")
-    check(got == entries, f"{name}: RTEs {got}")
+    check(got == [rte(x) for x in entries], f"{name}: RTEs {got}")
 
 
 def cross_check_ripng(vectors):
@@ -680,7 +710,14 @@ def cross_check_ripng(vectors):
         v["RIPNG_REQUEST_SOME"],
         1,
         1,
-        [(p0, 64, 16), (RIPNG_UNKNOWN, 64, 16), (RIPNG_COVERING, 56, 16)],
+        some_request(SOME_REQUEST_METRICS),
+    )
+    check_ripng(
+        "RIPNG_ANSWER_SOME",
+        v["RIPNG_ANSWER_SOME"],
+        2,
+        1,
+        some_request(SOME_ANSWER_METRICS),
     )
     check_ripng("RIPNG_RX_VERSION_2", v["RIPNG_RX_VERSION_2"], 2, 2, [(p0, 64, 1)])
     # Malformed: prefixes of a valid response, checked on the raw bytes.

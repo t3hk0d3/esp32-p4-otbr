@@ -58,16 +58,20 @@ size_t routing_ripng_encode_response(uint8_t *buf, size_t cap, const routing_rip
 routing_ripng_kind_t routing_ripng_classify(const uint8_t *buf, size_t len);
 
 /**
- * The entries answering a request, at most `out_cap`, returning how many. A whole-table request gets every `announced`
- * prefix at metric 1. A request for specific prefixes gets one entry per requested RTE, in request order: metric 1 when
- * the RTE has prefix length 64 and its first 8 bytes are announced, 16 otherwise (any other prefix length included).
- * Anything that is not a valid request gets 0 entries.
- *
- * An entry carries a /64, so the answer to a requested prefix whose length is not 64 is encoded as the /64 of its first
- * 8 bytes, at metric 16.
+ * The answer to a whole-table request: every `announced` prefix at metric 1 (at most `out_cap`), returning how many.
+ * Encode it with routing_ripng_encode_response.
  */
-size_t routing_ripng_answer_request(const uint8_t *req, size_t len, const routing_prefix_set_t *announced,
-                                    routing_ripng_rte_t *out, size_t out_cap);
+size_t routing_ripng_table(const routing_prefix_set_t *announced, routing_ripng_rte_t *out, size_t out_cap);
+
+/**
+ * The answer to a request for specific prefixes (RFC 2080 section 2.4.1): writes the request back as a response
+ * (command 2, version 1) with every RTE unchanged (all 16 prefix bytes, route tag, prefix length) except its metric:
+ * 1 when the RTE is exactly an announced /64 (prefix length 64, first 8 bytes announced, last 8 bytes zero), 16
+ * otherwise. Returns the length written (`len`), or 0 without writing anything when the request is not
+ * ROUTING_RIPNG_REQUEST_SOME, has no RTEs, or does not fit in `cap`.
+ */
+size_t routing_ripng_encode_answer(const uint8_t *req, size_t len, const routing_prefix_set_t *announced, uint8_t *buf,
+                                   size_t cap);
 
 /** A prefix withdrawn from the announcement set, still sent at metric 16. */
 typedef struct {
@@ -87,7 +91,7 @@ typedef struct {
     uint32_t regular_at;
     bool trigger_pending;
     uint32_t trigger_at;
-    bool triggered_once;
+    bool trigger_gap; /**< a triggered update went out less than 5000 ms ago (cleared once that has passed) */
     uint32_t last_trigger_ms;
 } routing_ripng_sched_t;
 

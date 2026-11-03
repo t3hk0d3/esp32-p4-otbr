@@ -6,8 +6,6 @@
 /* The prefixes the scapy vectors were built with (tools/routing_vectors.py). */
 #define P0 {{0x20, 0x01, 0x0d, 0xb8, 0x00, 0x42, 0x01, 0x00}} /* 2001:db8:42:100::/64 */
 #define P1 {{0xfd, 0x98, 0x26, 0x56, 0x47, 0x40, 0x00, 0x01}} /* fd98:2656:4740:1::/64 */
-#define P_UNKNOWN {{0x20, 0x01, 0x0d, 0xb8, 0x00, 0x99, 0x00, 0x00}} /* 2001:db8:99::/64 */
-#define P_COVERING P0 /* 2001:db8:42:100::/56: the first 8 bytes of P0, prefix length 56 */
 
 static const routing_prefix64_t PFX0 = P0;
 static const routing_prefix64_t PFX1 = P1;
@@ -187,11 +185,11 @@ TEST_CASE("Datagram truncated mid-RTE (length not 4 + 20 n): is dropped and coun
 
 TEST_CASE("Response from a neighbour: counts it in responses_dropped and changes nothing", "[routing]")
 {
-    routing_ripng_rte_t out[4];
-
     TEST_ASSERT_EQUAL(ROUTING_RIPNG_RESPONSE, routing_ripng_classify(RIPNG_RESPONSE_2, sizeof(RIPNG_RESPONSE_2)));
-    TEST_ASSERT_EQUAL_size_t(0, routing_ripng_answer_request(RIPNG_RESPONSE_2, sizeof(RIPNG_RESPONSE_2), &SET_BOTH,
-                                                             out, 4));
+    fill_buf();
+    TEST_ASSERT_EQUAL_size_t(0, routing_ripng_encode_answer(RIPNG_RESPONSE_2, sizeof(RIPNG_RESPONSE_2), &SET_BOTH,
+                                                            s_buf, sizeof(s_buf)));
+    TEST_ASSERT_EQUAL_HEX8(FILL, s_buf[0]);
 }
 
 TEST_CASE("Whole-table request (one RTE, prefix ::/0, length 0, metric 16): returns a full-table response addressed "
@@ -201,7 +199,7 @@ TEST_CASE("Whole-table request (one RTE, prefix ::/0, length 0, metric 16): retu
     size_t consumed;
 
     TEST_ASSERT_EQUAL(ROUTING_RIPNG_REQUEST_ALL, routing_ripng_classify(RIPNG_REQUEST_ALL, sizeof(RIPNG_REQUEST_ALL)));
-    size_t n = routing_ripng_answer_request(RIPNG_REQUEST_ALL, sizeof(RIPNG_REQUEST_ALL), &SET_BOTH, out, 4);
+    size_t n = routing_ripng_table(&SET_BOTH, out, 4);
 
     TEST_ASSERT_EQUAL_size_t(2, n);
     fill_buf();
@@ -210,22 +208,43 @@ TEST_CASE("Whole-table request (one RTE, prefix ::/0, length 0, metric 16): retu
     TEST_ASSERT_EQUAL_HEX8_ARRAY(RIPNG_RESPONSE_2, s_buf, sizeof(RIPNG_RESPONSE_2));
 }
 
+TEST_CASE("Whole-table request: is not answered as a request for specific prefixes", "[routing]")
+{
+    fill_buf();
+    TEST_ASSERT_EQUAL_size_t(0, routing_ripng_encode_answer(RIPNG_REQUEST_ALL, sizeof(RIPNG_REQUEST_ALL), &SET_BOTH,
+                                                            s_buf, sizeof(s_buf)));
+    TEST_ASSERT_EQUAL_HEX8(FILL, s_buf[0]);
+}
+
+/* RTE `i` of a message: its byte at `off` within the 20-byte entry. */
+#define RTE_BYTE(msg, i, off) ((msg)[ROUTING_RIPNG_HDR_LEN + (i) * ROUTING_RIPNG_RTE_LEN + (off)])
+
 TEST_CASE("Request for specific prefixes: returns those entries, metric 1 for announced ones and 16 for the others",
           "[routing]")
 {
-    const routing_ripng_rte_t want[] = {{P0, 1}, {P_UNKNOWN, 16}, {P_COVERING, 16}};
-    routing_ripng_rte_t out[4];
-
     TEST_ASSERT_EQUAL(ROUTING_RIPNG_REQUEST_SOME,
                       routing_ripng_classify(RIPNG_REQUEST_SOME, sizeof(RIPNG_REQUEST_SOME)));
-    memset(out, 0xaa, sizeof(out));
-    size_t n = routing_ripng_answer_request(RIPNG_REQUEST_SOME, sizeof(RIPNG_REQUEST_SOME), &SET_BOTH, out, 4);
+    fill_buf();
+    size_t n = routing_ripng_encode_answer(RIPNG_REQUEST_SOME, sizeof(RIPNG_REQUEST_SOME), &SET_BOTH, s_buf,
+                                           sizeof(s_buf));
 
-    TEST_ASSERT_EQUAL_size_t(3, n);
-    for (size_t i = 0; i < 3; i++) {
-        TEST_ASSERT_EQUAL_HEX8_ARRAY(want[i].prefix.b, out[i].prefix.b, 8);
-        TEST_ASSERT_EQUAL_UINT8(want[i].metric, out[i].metric);
+    TEST_ASSERT_EQUAL_size_t(sizeof(RIPNG_ANSWER_SOME), n);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(RIPNG_ANSWER_SOME, s_buf, sizeof(RIPNG_ANSWER_SOME));
+    TEST_ASSERT_EQUAL_HEX8(FILL, s_buf[n]);
+    TEST_ASSERT_EQUAL_UINT8(2, s_buf[0]);
+    /* every RTE echoed (prefix, tag, length) with its metric filled in */
+    for (size_t i = 0; i < 5; i++) {
+        TEST_ASSERT_EQUAL_HEX8_ARRAY(&RTE_BYTE(RIPNG_REQUEST_SOME, i, 0), &RTE_BYTE(s_buf, i, 0), 19);
     }
+    TEST_ASSERT_EQUAL_UINT8(1, RTE_BYTE(s_buf, 0, 19));   /* P0 /64: announced */
+    TEST_ASSERT_EQUAL_UINT8(16, RTE_BYTE(s_buf, 1, 19));  /* unknown /64, tag 7 kept */
+    TEST_ASSERT_EQUAL_UINT8(7, RTE_BYTE(s_buf, 1, 17));
+    TEST_ASSERT_EQUAL_UINT8(56, RTE_BYTE(s_buf, 2, 18));  /* P0's first 8 bytes as a /56 */
+    TEST_ASSERT_EQUAL_UINT8(16, RTE_BYTE(s_buf, 2, 19));
+    TEST_ASSERT_EQUAL_UINT8(128, RTE_BYTE(s_buf, 3, 18)); /* a /128 inside P0 */
+    TEST_ASSERT_EQUAL_UINT8(16, RTE_BYTE(s_buf, 3, 19));
+    TEST_ASSERT_EQUAL_UINT8(64, RTE_BYTE(s_buf, 4, 18));  /* P0 with bytes 8-15 not zero */
+    TEST_ASSERT_EQUAL_UINT8(16, RTE_BYTE(s_buf, 4, 19));
 }
 
 TEST_CASE("Request with the ::/0 metric-16 RTE followed by another RTE: is a request for specific prefixes",
@@ -238,13 +257,16 @@ TEST_CASE("Request with the ::/0 metric-16 RTE followed by another RTE: is a req
     TEST_ASSERT_EQUAL(ROUTING_RIPNG_REQUEST_SOME, routing_ripng_classify(msg, sizeof(msg)));
 }
 
-TEST_CASE("Request for more prefixes than out_cap: returns the first out_cap entries", "[routing]")
+TEST_CASE("Request for specific prefixes larger than cap, or with no RTEs: returns 0 and writes nothing", "[routing]")
 {
-    routing_ripng_rte_t out[2];
-
-    TEST_ASSERT_EQUAL_size_t(2, routing_ripng_answer_request(RIPNG_REQUEST_SOME, sizeof(RIPNG_REQUEST_SOME),
-                                                             &SET_BOTH, out, 2));
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(PFX0.b, out[0].prefix.b, 8);
+    fill_buf();
+    TEST_ASSERT_EQUAL_size_t(0, routing_ripng_encode_answer(RIPNG_REQUEST_SOME, sizeof(RIPNG_REQUEST_SOME), &SET_BOTH,
+                                                            s_buf, sizeof(RIPNG_REQUEST_SOME) - 1));
+    TEST_ASSERT_EQUAL_size_t(0, routing_ripng_encode_answer(RIPNG_REQUEST_SOME, ROUTING_RIPNG_HDR_LEN, &SET_BOTH,
+                                                            s_buf, sizeof(s_buf)));
+    for (size_t i = 0; i < sizeof(s_buf); i++) {
+        TEST_ASSERT_EQUAL_HEX8(FILL, s_buf[i]);
+    }
 }
 
 /* --- schedule --- */
@@ -306,6 +328,27 @@ TEST_CASE("Announcement set changed: sends a triggered response with only the ch
     n = poll_at(T0 + 10000);
     TEST_ASSERT_EQUAL_size_t(1, n); /* P1 unchanged, so left out */
     TEST_ASSERT_EQUAL_UINT8(1, metric_of(n, &PFX0));
+}
+
+TEST_CASE("Announcement set changed more than 2^31 ms after the previous triggered update: sends it at once",
+          "[routing]")
+{
+    started_both();
+    routing_ripng_sched_set_changed(&s, &SET_P0, T0 + 1000);
+    TEST_ASSERT_EQUAL_size_t(1, poll_at(T0 + 1000));
+
+    /* regular updates only, until the clock is more than 2^31 ms past that triggered update */
+    uint32_t now = T0;
+    for (uint32_t i = 0; i < 0x80000000u / ROUTING_RIPNG_UPDATE_MS + 100; i++) {
+        now += ROUTING_RIPNG_UPDATE_MS;
+        TEST_ASSERT_NOT_EQUAL(0, poll_at(now));
+    }
+
+    routing_ripng_sched_set_changed(&s, &SET_BOTH, now + 1000);
+    TEST_ASSERT_EQUAL_UINT32(now + 1000, routing_ripng_sched_next_deadline_ms(&s));
+    size_t n = poll_at(now + 1000);
+    TEST_ASSERT_EQUAL_size_t(1, n);
+    TEST_ASSERT_EQUAL_UINT8(1, metric_of(n, &PFX1));
 }
 
 TEST_CASE("Announcement set unchanged: sends no triggered update", "[routing]")

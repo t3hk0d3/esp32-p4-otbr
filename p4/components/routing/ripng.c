@@ -104,31 +104,48 @@ routing_ripng_kind_t routing_ripng_classify(const uint8_t *buf, size_t len)
     }
 }
 
-size_t routing_ripng_answer_request(const uint8_t *req, size_t len, const routing_prefix_set_t *announced,
-                                    routing_ripng_rte_t *out, size_t out_cap)
+size_t routing_ripng_table(const routing_prefix_set_t *announced, routing_ripng_rte_t *out, size_t out_cap)
 {
     size_t n = 0;
 
-    switch (routing_ripng_classify(req, len)) {
-    case ROUTING_RIPNG_REQUEST_ALL:
-        for (size_t i = 0; i < announced->count && n < out_cap; i++) {
-            out[n].prefix = announced->p[i];
-            out[n++].metric = ROUTING_RIPNG_METRIC;
-        }
-        return n;
-    case ROUTING_RIPNG_REQUEST_SOME:
-        for (size_t off = ROUTING_RIPNG_HDR_LEN; off < len && n < out_cap; off += ROUTING_RIPNG_RTE_LEN) {
-            const uint8_t *rte = &req[off];
+    for (size_t i = 0; i < announced->count && n < out_cap; i++) {
+        out[n].prefix = announced->p[i];
+        out[n++].metric = ROUTING_RIPNG_METRIC;
+    }
+    return n;
+}
 
-            memcpy(out[n].prefix.b, rte, sizeof(out[n].prefix.b));
-            out[n].metric = rte[RTE_PLEN_OFF] == PREFIX_LEN && in_set(announced, &out[n].prefix)
-                            ? ROUTING_RIPNG_METRIC : ROUTING_RIPNG_INFINITY;
-            n++;
+/* True when `rte` is exactly one of the announced /64s: length 64, first 8 bytes announced, last 8 bytes zero. */
+static bool rte_announced(const uint8_t *rte, const routing_prefix_set_t *announced)
+{
+    routing_prefix64_t p;
+
+    if (rte[RTE_PLEN_OFF] != PREFIX_LEN) {
+        return false;
+    }
+    for (size_t i = sizeof(p.b); i < RTE_TAG_OFF; i++) {
+        if (rte[i] != 0) {
+            return false;
         }
-        return n;
-    default:
+    }
+    memcpy(p.b, rte, sizeof(p.b));
+    return in_set(announced, &p);
+}
+
+size_t routing_ripng_encode_answer(const uint8_t *req, size_t len, const routing_prefix_set_t *announced, uint8_t *buf,
+                                   size_t cap)
+{
+    if (routing_ripng_classify(req, len) != ROUTING_RIPNG_REQUEST_SOME || len == ROUTING_RIPNG_HDR_LEN || len > cap) {
         return 0;
     }
+    memcpy(buf, req, len);
+    buf[0] = CMD_RESPONSE;
+    buf[2] = 0;
+    buf[3] = 0;
+    for (size_t off = ROUTING_RIPNG_HDR_LEN; off < len; off += ROUTING_RIPNG_RTE_LEN) {
+        buf[off + RTE_METRIC_OFF] = rte_announced(&buf[off], announced) ? ROUTING_RIPNG_METRIC : ROUTING_RIPNG_INFINITY;
+    }
+    return len;
 }
 
 /* --- scheduler --- */
@@ -175,6 +192,15 @@ static void withdrawn_add(routing_ripng_sched_t *s, const routing_prefix64_t *p)
     s->withdrawn[slot] = (routing_ripng_withdrawn_t) {
         .prefix = *p, .left = ROUTING_RIPNG_WITHDRAW_UPDATES, .changed = true
     };
+}
+
+/* Ends the 5000 ms gap after a triggered update once it has passed, so the stored time never ages past ~2^31 ms (poll
+ * runs at least once per regular update). */
+static void expire_trigger_gap(routing_ripng_sched_t *s, uint32_t now_ms)
+{
+    if (s->trigger_gap && due(now_ms, s->last_trigger_ms + ROUTING_RIPNG_TRIGGER_GAP_MS)) {
+        s->trigger_gap = false;
+    }
 }
 
 void routing_ripng_sched_start(routing_ripng_sched_t *s, const routing_prefix_set_t *set, uint32_t now_ms,
@@ -227,10 +253,10 @@ void routing_ripng_sched_set_changed(routing_ripng_sched_t *s, const routing_pre
     memcpy(s->announced_changed, next_changed, sizeof(next_changed));
 
     if (!s->trigger_pending) {
-        uint32_t earliest = s->last_trigger_ms + ROUTING_RIPNG_TRIGGER_GAP_MS;
-
+        expire_trigger_gap(s, now_ms);
         s->trigger_pending = true;
-        s->trigger_at = s->triggered_once && !due(now_ms, earliest) ? deadline(earliest, 0) : deadline(now_ms, 0);
+        s->trigger_at = s->trigger_gap ? deadline(s->last_trigger_ms, ROUTING_RIPNG_TRIGGER_GAP_MS)
+                        : deadline(now_ms, 0);
     }
 }
 
@@ -279,7 +305,7 @@ static size_t send_triggered(routing_ripng_sched_t *s, uint32_t now_ms, routing_
         }
     }
     s->trigger_pending = false;
-    s->triggered_once = true;
+    s->trigger_gap = true;
     s->last_trigger_ms = now_ms;
     return n;
 }
@@ -289,6 +315,7 @@ size_t routing_ripng_sched_poll(routing_ripng_sched_t *s, uint32_t now_ms, routi
     if (!s->running) {
         return 0;
     }
+    expire_trigger_gap(s, now_ms);
     if (due(now_ms, s->regular_at)) {
         return send_regular(s, now_ms, out, out_cap);
     }
