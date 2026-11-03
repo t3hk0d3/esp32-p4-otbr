@@ -554,7 +554,7 @@ static void test_worker_polls_under_the_lock_when_ready(void)
     assert(mock_lock_acquires == before + 1);
     assert(mock_sessions_open == 0);
 }
-/* Patch 16: without a br_core session (a radio push is about to delete the lock) nothing touches OpenThread, and every
+/* Patch 18: without a br_core session (a radio push is about to delete the lock) nothing touches OpenThread, and every
  * session opened is closed again. */
 static void test_no_openthread_without_a_session(void)
 {
@@ -576,7 +576,7 @@ static void test_no_openthread_without_a_session(void)
     release(&req, json);
     assert(mock_sessions_open == 0);
 }
-/* Patch 16: a callback wait ends early once the REST flag is off (a radio push waits for the session), and still
+/* Patch 18: a callback wait ends early once the REST flag is off (a radio push waits for the session), and still
  * returns what the callback gave while it is on. */
 static void test_callback_wait_ends_when_not_ready(void)
 {
@@ -637,6 +637,11 @@ static void test_topology_collector(void)
     assert(cJSON_GetObjectItem(cJSON_GetArrayItem(result, 0), "Rloc16")->valueint == 0x0400);
     assert(s_diag_response_count == 1);
     cJSON_Delete(result);
+    /* Patch 20: the collection releases its netdiag_mux listener, and a late answer is dropped without counting. */
+    assert(mock_netdiag_releases == 1);
+    otNetworkDiagTlv late[] = {{.mType = OT_NETWORK_DIAGNOSTIC_TLV_SHORT_ADDRESS, .mData.mAddr16 = 0x0800}};
+    deliver_with_tlvs(late, 1);
+    assert(s_diag_response_count == 1 && s_diagnosticTlv_set == NULL);
     /* Only such answers: no entry, and the collection is not ended early by them (it runs to the hard cap). */
     mock_reset();
     xSemaphoreGive(s_diagnostic_semaphore);

@@ -25,3 +25,8 @@ otError netdiag_mux_send_get(const otIp6Address *dest, const uint8_t *tlvs, uint
 {
     return netdiag_mux_core_send(&real_ops, dest, tlvs, count, cb, ctx, filter_peer);
 }
+
+void netdiag_mux_release(otReceiveDiagnosticGetCallback cb)
+{
+    netdiag_mux_core_release(cb);
+}

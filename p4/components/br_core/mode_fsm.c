@@ -334,5 +334,5 @@ esp_err_t mode_fsm_radio_job_result(bool base_only, esp_err_t job_err, esp_err_t
     if (base_only || job_err != ESP_OK) {
         return job_err;
     }
-    return restart_err;
+    return restart_err == ESP_OK ? ESP_OK : RCP_SYNC_ERR_RESTART;
 }

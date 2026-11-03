@@ -113,6 +113,15 @@ TEST_CASE("On c6_installer.bin failing to go through ESP-Hosted: 502 install_fai
     TEST_ASSERT_EQUAL_STRING("install_failed", device_api_map_push_error(RCP_SYNC_ERR_HOSTED_OTA).code);
 }
 
+TEST_CASE("On a push that installed but whose OpenThread restart failed: 502 restart_failed", "[device_api]")
+{
+    device_api_error_t e = device_api_map_push_error(RCP_SYNC_ERR_RESTART);
+
+    TEST_ASSERT_EQUAL(502, e.http_status);
+    TEST_ASSERT_EQUAL_STRING("restart_failed", e.code);
+    TEST_ASSERT_NOT_NULL(e.detail);
+}
+
 TEST_CASE("On a push that failed in the transfer: 502 push_failed", "[device_api]")
 {
     TEST_ASSERT_EQUAL(502, device_api_map_push_error(ESP_ERR_TIMEOUT).http_status);

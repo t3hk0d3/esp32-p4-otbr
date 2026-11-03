@@ -139,6 +139,11 @@ device_api_error_t device_api_map_push_error(esp_err_t err)
             502, "install_failed", NULL
         };
     }
+    if (err == RCP_SYNC_ERR_RESTART) {
+        return (device_api_error_t) {
+            502, "restart_failed", "the image is installed, but OpenThread did not start on it"
+        };
+    }
     return (device_api_error_t) {
         502, "push_failed", NULL
     };

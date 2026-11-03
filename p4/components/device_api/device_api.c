@@ -193,6 +193,11 @@ static void schedule_reboot(uint32_t delay_ms)
     }
 }
 
+bool device_api_long_op_running(void)
+{
+    return device_api_op_long_running();
+}
+
 // A long operation (OTA, firmware push) is not interrupted by a reboot request.
 static esp_err_t reboot_post_handler(httpd_req_t *req)
 {

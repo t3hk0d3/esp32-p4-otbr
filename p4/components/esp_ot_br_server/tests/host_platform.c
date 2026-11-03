@@ -59,6 +59,12 @@ otError netdiag_mux_send_get(const otIp6Address *dest, const uint8_t *tlvs, uint
     mock_netdiag_filtered_sends += filter_peer;
     return otThreadSendDiagnosticGet(esp_openthread_get_instance(), dest, tlvs, count, cb, ctx);
 }
+unsigned mock_netdiag_releases;
+void netdiag_mux_release(otReceiveDiagnosticGetCallback cb)
+{
+    (void)cb;
+    mock_netdiag_releases++;
+}
 bool esp_openthread_lock_acquire(uint32_t timeout)
 {
     (void)timeout;
@@ -79,6 +85,11 @@ void esp_br_web_epskc_set_active_tap(const char *tap)
 }
 void esp_restart(void)
 {
+    assert(!"Unexpected restart");
+}
+void reboot_gate_restart(uint32_t delay_ms)
+{
+    (void)delay_ms;
     assert(!"Unexpected restart");
 }
 SemaphoreHandle_t xSemaphoreCreateBinary(void)

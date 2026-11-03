@@ -42,6 +42,7 @@
 #include "esp_vfs.h"
 #include "http_parser.h"
 #include "netcfg.h"
+#include "reboot_gate.h"
 #include "mdns.h"
 #include "protocol_examples_common.h"
 
@@ -147,7 +148,7 @@ static httpd_uri_t s_resource_handlers[] = {
 /*----------------------------------------------------------------------
                     OpenThread sessions (patch 18)
 ----------------------------------------------------------------------*/
-/* Patch 16: every Web GUI handler runs inside a br_core OpenThread session, so that a radio push or ROM
+/* Patch 18: every Web GUI handler runs inside a br_core OpenThread session, so that a radio push or ROM
  * recovery cannot delete the OpenThread lock and instance while the handler waits for the lock or, with the lock
  * released, for an OpenThread callback (scan, join, ping, pending dataset). Without a session (OpenThread stopped or
  * about to stop) the guard treats OpenThread as not ready. httpd runs one handler at a time, so one flag suffices. */
@@ -478,7 +479,7 @@ static esp_err_t esp_otbr_thread_rest_handler(httpd_req_t *req)
     request.if_none_match = condition;
     /* Patches 2 and 9: sniffer active (409) or OpenThread not (fully) initialised / mode forbids it (503). Pre-check
      * without the OpenThread lock, which does not exist before OpenThread is up; esp_br_thread_rest_request asks
-     * again while holding the lock. Patch 16: the br_core session keeps a radio push from deleting the lock and the
+     * again while holding the lock. Patch 18: the br_core session keeps a radio push from deleting the lock and the
      * instance while the request uses them; without one OpenThread counts as not ready. */
     const bool session = br_core_ot_session_begin();
     const int refused = esp_br_guard_status(ESP_BR_GUARD_REST_CLASS(req->method), br_core_get_mode(),
@@ -510,9 +511,9 @@ exit:
     free(condition);
     cJSON_Delete(query);
     if (reset) {
-        /* httpd_resp_send has submitted the response before rebooting. */
-        vTaskDelay(pdMS_TO_TICKS(200));
-        esp_restart();
+        /* httpd_resp_send has submitted the response before rebooting. Patch 20: through the reboot gate, so that a
+           running update or radio push is not cut off (the reboot follows once it ends). */
+        reboot_gate_restart(200);
     }
     return error;
 }
@@ -668,7 +669,7 @@ static cJSON *resource_status(char *error, char *msg)
     return root;
 }
 
-/* Patch 16: every handler goes behind the OpenThread session wrapper. */
+/* Patch 18: every handler goes behind the OpenThread session wrapper. */
 static esp_err_t httpd_server_register_http_uri(const http_server_t *server, httpd_uri_t *uris, uint8_t size)
 {
     ESP_RETURN_ON_FALSE((server->handle && uris), ESP_ERR_INVALID_ARG, WEB_TAG, "Invalid argument");

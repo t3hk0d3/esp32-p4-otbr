@@ -172,21 +172,21 @@ static esp_err_t apply_http(void)
 static esp_err_t apply_ha_name(void)
 {
     esp_err_t err = mdns_instance_name_set(s.ha_name);
-    const br_core_mode_t mode = br_core_get_mode();
-
-    // The setter frees the previous name, which the role-change handler reads on the OpenThread task: under the lock while
-    // OpenThread runs. STARTING and RADIO_FAULT have no running OpenThread task (and maybe no lock yet); the next start
-    // publishes with the name stored here.
+    // The setter frees the previous name, which the role-change handler reads on the OpenThread task: under the lock
+    // whenever OpenThread runs. A session opens whenever OpenThread is up, whatever the mode: RADIO_FAULT can come with
+    // a running OpenThread task too (a boot or bring-up wait that timed out, a failed restart after a push).
     // The session keeps a radio push from deleting the lock under this call; none opens once a push has begun. During a
     // push OpenThread may still run (the push waits for open sessions first), so the name is not set at all: it is
-    // stored, and the next boot publishes it.
-    if ((mode != BR_MODE_BR_RUNNING && mode != BR_MODE_SNIFFER) || !br_core_ot_session_begin()) {
+    // stored, and the next boot publishes it. Without a session and without a push OpenThread is not up (STARTING,
+    // or parked after a fault): the next start publishes with the name stored here.
+    if (!br_core_ot_session_begin()) {
         if (br_core_radio_job_running()) {
             return err == ESP_OK ? ESP_ERR_INVALID_STATE : err;
         }
         esp_openthread_set_meshcop_instance_name(s.ha_name);
         return err;
     }
+    const br_core_mode_t mode = br_core_get_mode();
     esp_openthread_lock_acquire(portMAX_DELAY);
     esp_openthread_set_meshcop_instance_name(s.ha_name);
     const otDeviceRole role = otThreadGetDeviceRole(esp_openthread_get_instance());

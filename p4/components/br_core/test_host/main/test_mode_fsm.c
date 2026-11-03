@@ -864,9 +864,15 @@ TEST_CASE("On a ROM recovery that failed: the job result is its error, whatever 
     TEST_ASSERT_EQUAL(ESP_FAIL, mode_fsm_radio_job_result(true, ESP_FAIL, ESP_ERR_TIMEOUT));
 }
 
-TEST_CASE("On a firmware push that worked and a failed restart: the job result is the restart error", "[mode_fsm]")
+TEST_CASE("On a firmware push that worked and a failed restart: the job result is RCP_SYNC_ERR_RESTART", "[mode_fsm]")
 {
-    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, mode_fsm_radio_job_result(false, ESP_OK, ESP_ERR_TIMEOUT));
+    TEST_ASSERT_EQUAL(RCP_SYNC_ERR_RESTART, mode_fsm_radio_job_result(false, ESP_OK, ESP_ERR_TIMEOUT));
+    TEST_ASSERT_EQUAL(RCP_SYNC_ERR_RESTART, mode_fsm_radio_job_result(false, ESP_OK, ESP_FAIL));
+}
+
+TEST_CASE("On a firmware push that worked and a restart that worked: the job result is ESP_OK", "[mode_fsm]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_radio_job_result(false, ESP_OK, ESP_OK));
 }
 
 TEST_CASE("On a firmware push that failed: the job result is the push error", "[mode_fsm]")

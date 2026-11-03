@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
 #include "esp_http_server.h"
@@ -43,6 +44,12 @@ esp_err_t device_api_register(httpd_handle_t server);
  * starts; without it base_expected is empty.
  */
 void device_api_set_base_expected(const uint8_t *start, const uint8_t *end);
+
+/**
+ * True while an OTA, a radio firmware push or a ROM recovery runs (or a committed OTA waits for its own reboot): the
+ * predicate of the reboot gate (reboot_gate_set_busy), so that other reboots wait for it. Safe from any task.
+ */
+bool device_api_long_op_running(void);
 
 #ifdef OTBR_TEST_BUILD
 /** Test builds: reset the C6 once, when a radio firmware push has read up to `offset` bytes of its source (0 = off). */

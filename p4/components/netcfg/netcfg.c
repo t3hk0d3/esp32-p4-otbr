@@ -16,6 +16,7 @@
 #include "netcfg_glue.h"
 #include "netcfg_priv.h"
 #include "nvs.h"
+#include "reboot_gate.h"
 
 static const char *TAG = "netcfg";
 
@@ -32,7 +33,6 @@ static struct {
     netcfg_trial_t trial;
     netcfg_config_t running;
     esp_timer_handle_t trial_timer;
-    esp_timer_handle_t restart_timer;
     bool start_called;
     bool ready;         /* lock, storage and trial state exist: the API that needs only those works (net reset, PUT, confirm) */
     bool fallback;      /* the stored config could not be applied: the defaults run */
@@ -93,17 +93,11 @@ static uint64_t clock_ms(void *ctx)
     return (uint64_t)esp_timer_get_time() / US_PER_MS;
 }
 
-static void reboot_now(void *arg)
-{
-    ESP_LOGW(TAG, "rebooting");
-    esp_restart();
-}
-
+// The trial expiry, a trial store and `net reset` reboot through the gate: a running update, radio push or ROM
+// recovery is not cut off; the reboot follows once it ends.
 static void request_restart(void *ctx)
 {
-    if (!s.restart_timer || esp_timer_start_once(s.restart_timer, REBOOT_DELAY_MS * US_PER_MS) != ESP_OK) {
-        reboot_now(NULL);
-    }
+    reboot_gate_restart(REBOOT_DELAY_MS);
 }
 
 static const netcfg_env_t s_env = {
@@ -155,9 +149,6 @@ esp_err_t netcfg_start(esp_eth_handle_t eth)
     s.start_called = true;
     s.lock = xSemaphoreCreateMutex();
     ESP_RETURN_ON_FALSE(s.lock, ESP_ERR_NO_MEM, TAG, "no memory");
-    const esp_timer_create_args_t restart_args = {.callback = reboot_now, .name = "netcfg_reboot"};
-
-    ESP_RETURN_ON_ERROR(esp_timer_create(&restart_args, &s.restart_timer), TAG, "creating the reboot timer failed");
     s.nvs_open = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &s.nvs) == ESP_OK;
     if (!s.nvs_open) {
         ESP_LOGE(TAG, "cannot open the %s storage: running the defaults, nothing can be saved", NVS_NAMESPACE);

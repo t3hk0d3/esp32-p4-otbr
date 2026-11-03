@@ -37,6 +37,14 @@ extern "C" {
 otError netdiag_mux_send_get(const otIp6Address *dest, const uint8_t *tlvs, uint8_t count,
                              otReceiveDiagnosticGetCallback cb, void *ctx, bool filter_peer);
 
+/**
+ * Remove the listener of `cb`, so that it gets no further answers (late answers to a multicast Get keep coming for
+ * as long as routers answer). Call it when a collection ends. Nothing happens for an unknown or NULL `cb`.
+ *
+ * Run it on the OpenThread task or with the OpenThread lock held.
+ */
+void netdiag_mux_release(otReceiveDiagnosticGetCallback cb);
+
 #ifdef __cplusplus
 }
 #endif

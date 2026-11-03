@@ -26,6 +26,9 @@ otError netdiag_mux_core_send(const netdiag_mux_ops_t *ops, const otIp6Address *
 /** One call of OpenThread's netdiag callback: hand an answer to every listener it belongs to. */
 void netdiag_mux_core_dispatch(otError error, otMessage *msg, const otMessageInfo *info);
 
+/** netdiag_mux_release(). */
+void netdiag_mux_core_release(otReceiveDiagnosticGetCallback cb);
+
 /** Forget every listener (host tests). */
 void netdiag_mux_core_reset(void);
 

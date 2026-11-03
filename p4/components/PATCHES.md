@@ -216,7 +216,7 @@ reason, spec reference.
    the filtered sends and that a discovery answer without TLV 0 adds no device. The mux itself is tested in
    `p4/components/netdiag_mux/test_host/`.
 
-17. Applied (2026-11). `esp_ot_br_server` frontend, upstream pages: new
+19. Applied (2026-11). `esp_ot_br_server` frontend, upstream pages: new
    `frontend/static/mgmt.js` (pure logic exported for node: mode banner, random network parameters, Form Network and
    PSKd validation, the replace-network confirm; page code guarded by `typeof document`), loaded after `api.js` by
    `network.html`, `commission.html`, `addresses.html`, `tools.html`, whose `checkThreadState`
@@ -248,7 +248,17 @@ reason, spec reference.
    PUT whose wait ends that way answers 503 and clears its busy flag (its callback dies with the instance). Known
    limit: a Web GUI session also covers the request's socket I/O, so a very slow client can hold it. Host tests:
    `tests/test_rest.c` `test_no_openthread_without_a_session`, `test_callback_wait_ends_when_not_ready` (mocks
-   `br_core_ot_session_begin/end` in `tests/host_platform.c`).
+   `br_core_ot_session_begin/end` in `tests/host_platform.c`). (Comments in `src/` said "patch 16" for this item
+   before the numbering was fixed.)
+
+20. Applied. Architecture review follow-ups (2026-11). `src/esp_br_web_api.c`: the `/topology` and diagnostics
+   collection (`handle_ot_resource_network_diagnostics_request`) releases its `netdiag_mux` listener when it ends
+   (`netdiag_mux_release`), so late answers to its multicast Get no longer reach `diagnosticTlv_result_handler`; the
+   callback returns at once while no collection runs instead of waiting up to 1 s for `s_diagnostic_semaphore` on the
+   OpenThread task, and the result set is taken out under the semaphore and converted after it. `src/esp_br_web.c`: the
+   Thread REST reset (`DELETE /node`) reboots through `reboot_gate_restart`, so a running update or radio push is not
+   cut off (`CMakeLists.txt`: `reboot_gate` in `PRIV_REQUIRES`). Host tests: `tests/test_rest.c`
+   `test_topology_collector` (release count, late answer dropped), stubs in `tests/host_platform.c`.
 
 ### REST guard classification (patches 2 and 9)
 
