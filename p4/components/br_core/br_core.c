@@ -32,6 +32,7 @@
 #include "openthread/link_raw.h"
 #include "openthread/platform/radio.h"
 #include "openthread/thread.h"
+#include "openthread/trel.h"
 #include "mode_fsm.h"
 #include "rcp_sync.h"
 #include "sdkconfig.h"
@@ -55,8 +56,13 @@ static const char *TAG = "br_core";
 #define FAULT_NO_RCP "no rcp firmware"
 #define FAULT_INCOMPATIBLE "rcp incompatible"
 #define FAULT_ROM_RECOVERY "rom recovery failed"
-// Spinel SPI endpoint, an eventfd each for the netif, the task queue and the border router.
+// Spinel SPI endpoint, an eventfd each for the netif, the task queue and the border router, and one for TREL reception.
+#if CONFIG_OPENTHREAD_RADIO_TREL
+#define EVENTFD_COUNT 5
+#else
 #define EVENTFD_COUNT 4
+#endif
+#define TREL_SET_LOCK_MS 1000
 
 typedef struct {
     StaticSemaphore_t mutex_storage;
@@ -101,6 +107,9 @@ static struct {
 } s_saved;
 // The platform config must outlive esp_openthread_init: OpenThread keeps pointers into it.
 static esp_openthread_platform_config_t s_platform_config;
+
+// TREL setting (br_core_set_trel); applied after every esp_openthread_init.
+static atomic_bool s_trel_wanted = true;
 
 static void set_reason(const char *reason)
 {
@@ -336,6 +345,11 @@ static esp_err_t init_openthread(void)
     s_platform_config = platform_config();
     ESP_RETURN_ON_ERROR(esp_openthread_init(&s_platform_config), TAG, "esp_openthread_init");
     s_core.ot_initialised = true;
+#if CONFIG_OPENTHREAD_RADIO_TREL
+    esp_openthread_lock_acquire(portMAX_DELAY);
+    otTrelSetEnabled(esp_openthread_get_instance(), atomic_load(&s_trel_wanted));
+    esp_openthread_lock_release();
+#endif
 
     esp_netif_config_t netif_config = ESP_NETIF_DEFAULT_OPENTHREAD();
     esp_netif_t *netif = esp_netif_new(&netif_config);
@@ -602,6 +616,77 @@ void br_core_get_status(br_core_status_t *out)
         }
     }
     esp_openthread_lock_release();
+}
+
+// OpenThread can be called: initialised and not in the radio fault mode (where the init may be parked).
+static bool ot_callable(void)
+{
+    if (!s_core.started) {
+        return false;
+    }
+    xSemaphoreTake(s_core.mutex, portMAX_DELAY);
+    const bool callable = s_core.ot_ready && br_core_get_mode() != BR_MODE_RADIO_FAULT;
+
+    xSemaphoreGive(s_core.mutex);
+    return callable;
+}
+
+esp_err_t br_core_set_trel(bool enabled)
+{
+#if CONFIG_OPENTHREAD_RADIO_TREL
+    atomic_store(&s_trel_wanted, enabled);
+    if (!ot_callable()) {
+        return ESP_OK; // applied by the next esp_openthread_init
+    }
+    if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(TREL_SET_LOCK_MS))) {
+        ESP_LOGW(TAG, "TREL %s: OpenThread busy, applied at the next start", enabled ? "on" : "off");
+        return ESP_ERR_TIMEOUT;
+    }
+    otTrelSetEnabled(esp_openthread_get_instance(), enabled);
+    esp_openthread_lock_release();
+    ESP_LOGI(TAG, "TREL %s", enabled ? "on" : "off");
+    return ESP_OK;
+#else
+    (void)enabled;
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+void br_core_get_trel(br_core_trel_t *out)
+{
+    memset(out, 0, sizeof(*out));
+#if CONFIG_OPENTHREAD_RADIO_TREL
+    out->built = true;
+    out->enabled = atomic_load(&s_trel_wanted);
+    if (!ot_callable() || !esp_openthread_lock_acquire(pdMS_TO_TICKS(STATUS_LOCK_MS))) {
+        return;
+    }
+    otInstance *instance = esp_openthread_get_instance();
+    const otTrelCounters *counters = otTrelGetCounters(instance);
+    otTrelPeerIterator iterator;
+    const otTrelPeer *peer;
+
+    out->state_valid = true;
+    out->active = otTrelIsEnabled(instance);
+    out->peers = otTrelGetNumberOfPeers(instance);
+    if (counters) {
+        out->tx_packets = counters->mTxPackets;
+        out->tx_bytes = counters->mTxBytes;
+        out->tx_failures = counters->mTxFailure;
+        out->rx_packets = counters->mRxPackets;
+        out->rx_bytes = counters->mRxBytes;
+    }
+    otTrelInitPeerIterator(instance, &iterator);
+    while (out->peer_count < BR_CORE_TREL_PEERS_MAX && (peer = otTrelGetNextPeer(instance, &iterator)) != NULL) {
+        br_core_trel_peer_t *entry = &out->peer_list[out->peer_count++];
+
+        for (size_t i = 0; i < sizeof(peer->mExtAddress.m8); i++) {
+            snprintf(&entry->ext_address[2 * i], 3, "%02x", peer->mExtAddress.m8[i]);
+        }
+        otIp6SockAddrToString(&peer->mSockAddr, entry->sock_address, sizeof(entry->sock_address));
+    }
+    esp_openthread_lock_release();
+#endif
 }
 
 // ---- mode state machine: real operations (run under the OpenThread lock) ----

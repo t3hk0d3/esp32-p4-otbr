@@ -71,6 +71,35 @@ void br_core_get_status(br_core_status_t *out);
 /** Like br_core_get_status but never takes the OpenThread lock: ot_state_valid is false, channel and pd_* are not read. */
 void br_core_get_status_brief(br_core_status_t *out);
 
+#define BR_CORE_TREL_PEERS_MAX 8
+
+typedef struct {
+    char ext_address[17]; /**< 16 hex digits */
+    char sock_address[48]; /**< "[ipv6]:port" */
+} br_core_trel_peer_t;
+
+typedef struct {
+    bool built;       /**< the firmware has TREL (CONFIG_OPENTHREAD_RADIO_TREL) */
+    bool enabled;     /**< the setting (br_core_set_trel) */
+    bool state_valid; /**< the fields below were read from OpenThread; false when it is not up or its lock was busy */
+    bool active;      /**< OpenThread runs TREL: enabled and Thread up (otTrelIsEnabled) */
+    uint16_t peers;   /**< otTrelGetNumberOfPeers */
+    uint64_t tx_packets, tx_bytes, tx_failures, rx_packets, rx_bytes;
+    size_t peer_count; /**< entries in peer_list, at most BR_CORE_TREL_PEERS_MAX */
+    br_core_trel_peer_t peer_list[BR_CORE_TREL_PEERS_MAX];
+} br_core_trel_t;
+
+/**
+ * Set whether TREL runs. Before br_core_start it only sets the value the start applies; afterwards it is applied to
+ * OpenThread at once (otTrelSetEnabled; TREL then runs whenever Thread is up). Storing the setting is the caller's job
+ * (netcfg_set_trel). ESP_ERR_NOT_SUPPORTED in a build without TREL; ESP_ERR_TIMEOUT when the OpenThread lock was not free
+ * within 1 s (the value is still applied at the next OpenThread start).
+ */
+esp_err_t br_core_set_trel(bool enabled);
+
+/** TREL setting and, when OpenThread is up and its lock free within 100 ms, its state, counters and peers. */
+void br_core_get_trel(br_core_trel_t *out);
+
 /**
  * BR_RUNNING to SNIFFER (spec 5.4): Thread stops, the OpenThread netif goes down (Ethernet stays up), the raw link
  * receives promiscuously on `channel`. `receive_cb` runs in the OpenThread task for every frame.
