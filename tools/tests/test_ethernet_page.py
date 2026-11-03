@@ -975,7 +975,6 @@ class TestTrelLogic:
             == "1\u2009234\u2009567"
         )
 
-
     def test_peer_of_this_network_gets_the_this_chip(self):
         r = eth(
             "L.trelPeerView({ext_address: 'a', ext_pan_id: 'adf0d025c4b51f00', same_network: true,"
@@ -995,23 +994,40 @@ class TestTrelLogic:
         assert [r["network"], r["networkClass"]] == ["other", "chip chip-bad"]
 
     def test_other_networks_are_counted_beside_the_peers(self):
-        v = eth("L.trelView({enabled: true, active: true, peers: 1, peers_other: 2}, 'single')")
+        v = eth(
+            "L.trelView({enabled: true, active: true, peers: 1, peers_other: 2}, 'single')"
+        )
         assert [v["peers"], v["peersOther"]] == ["1", "+ 2 other network"]
 
     def test_no_other_network_count_without_foreign_peers(self):
         assert (
-            eth("L.trelView({enabled: true, active: true, peers: 1, peers_other: 0}, 'single').peersOther")
+            eth(
+                "L.trelView({enabled: true, active: true, peers: 1, peers_other: 0}, 'single').peersOther"
+            )
             == ""
         )
-        assert eth("L.trelView({enabled: true, active: true, peers: 1}, 'single').peersOther") == ""
+        assert (
+            eth(
+                "L.trelView({enabled: true, active: true, peers: 1}, 'single').peersOther"
+            )
+            == ""
+        )
 
     def test_trel_below_the_radio_is_low(self):
-        r = eth("L.trelPeerView({same_network: true, preference: {ieee802154: 230, trel: 55}})")
+        r = eth(
+            "L.trelPeerView({same_network: true, preference: {ieee802154: 230, trel: 55}})"
+        )
         assert [r["prefTrel"], r["pref154"], r["trelLow"]] == [55, 230, True]
 
     def test_trel_at_or_above_the_radio_or_alone_is_not_low(self):
-        assert eth("L.trelPeerView({preference: {ieee802154: 200, trel: 255}}).trelLow") is False
-        assert eth("L.trelPeerView({preference: {ieee802154: null, trel: 55}}).trelLow") is False
+        assert (
+            eth("L.trelPeerView({preference: {ieee802154: 200, trel: 255}}).trelLow")
+            is False
+        )
+        assert (
+            eth("L.trelPeerView({preference: {ieee802154: null, trel: 55}}).trelLow")
+            is False
+        )
 
     def test_non_neighbour_has_no_preference(self):
         r = eth("L.trelPeerView({same_network: false, preference: null})")
@@ -1038,7 +1054,7 @@ class TestTrelCard:
         r = scenario(
             page("ethernet", routes(status_js=TREL_TWO_NETWORKS))
             + START
-            + """
+            + r"""
             const rows = t.el('trel-peerlist').children;
             return rows.map((tr) => [tr.children[1].allText().replace(/\s+/g, ' '), tr.children[1].children[0].className]);
         """
@@ -1071,7 +1087,7 @@ class TestTrelCard:
         r = scenario(
             page("ethernet", routes(status_js=TREL_STATUS))
             + START
-            + """
+            + r"""
             const cells = t.el('trel-peerlist').children.map((tr) => tr.children[2]);
             return cells.map((td) => [td.allText().replace(/\s+/g, ' '), td.findAll((e) => e.className === 'pref-low').length]);
         """

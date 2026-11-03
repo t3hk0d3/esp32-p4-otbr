@@ -164,9 +164,15 @@ static mesh_scan_result_t *transport_result(void)
     mesh_scan_result_t *r = sample_result();
 
     r->has_transport = true;
-    r->this_links[9] = (mesh_scan_transport_t) {.valid = true, .pref_154 = 230, .pref_trel = 55};
-    r->this_links[50] = (mesh_scan_transport_t) {.valid = true, .pref_154 = 255, .pref_trel = MESH_SCAN_PREF_NONE};
-    r->this_links[3] = (mesh_scan_transport_t) {.valid = true, .pref_154 = 200, .pref_trel = 200}; // no link from 34
+    r->this_links[9] = (mesh_scan_transport_t) {
+        .valid = true, .pref_154 = 230, .pref_trel = 55
+    };
+    r->this_links[50] = (mesh_scan_transport_t) {
+        .valid = true, .pref_154 = 255, .pref_trel = MESH_SCAN_PREF_NONE
+    };
+    r->this_links[3] = (mesh_scan_transport_t) {
+        .valid = true, .pref_154 = 200, .pref_trel = 200
+    }; // no link from 34
     return r;
 }
 

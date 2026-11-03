@@ -1577,10 +1577,15 @@ class TestTrelTransport:
             ("{ieee802154: 255, trel: null}", "15.4 255"),
             ("{ieee802154: null, trel: 255}", "TREL 255"),
             ("{ieee802154: 255, trel: 55}", "15.4 255 \u00b7 TREL 55, sends over 15.4"),
-            ("{ieee802154: 255, trel: 255}", "15.4 255 \u00b7 TREL 255, sends over TREL"),
+            (
+                "{ieee802154: 255, trel: 255}",
+                "15.4 255 \u00b7 TREL 255, sends over TREL",
+            ),
         ],
     )
-    def test_transport_text_names_both_preferences_and_the_radio_in_use(self, transport, text):
+    def test_transport_text_names_both_preferences_and_the_radio_in_use(
+        self, transport, text
+    ):
         assert plain(f"L.transportText({transport})") == text
 
 
@@ -1588,13 +1593,16 @@ class TestTrelTransport:
 class TestTrelMap:
     """TREL links of this board on the map, in the legend, the dialog and the device table"""
 
-    LOAD_TR = "save(60000, TR); await start(); t.el('t-show-last').click(); await t.flush();"
+    LOAD_TR = (
+        "save(60000, TR); await start(); t.el('t-show-last').click(); await t.flush();"
+    )
     TREL_EDGES = "t.el('t-map').findAll((e) => e.classes.has('t-trel-edge'))"
 
-    def test_link_over_both_radios_gets_a_straight_line_and_a_dashed_curve_through_the_home_box(self):
+    def test_link_over_both_radios_gets_a_straight_line_and_a_dashed_curve_through_the_home_box(
+        self,
+    ):
         r = run(
-            self.LOAD_TR
-            + f" const g = {self.TREL_EDGES};"
+            self.LOAD_TR + f" const g = {self.TREL_EDGES};"
             " const badge = (e) => e.findAll((x) => x.classes.has('t-badge-text'))[0].textContent;"
             " const path = g.map((e) => e.findAll((x) => x.tag === 'path')[0]);"
             " const home = t.el('t-map').findAll((e) => e.classes.has('t-uplink'))[0]"
@@ -1652,9 +1660,9 @@ class TestTrelMap:
 
     def test_connected_via_names_the_boards_transport_to_that_router(self):
         r = run(
-            self.LOAD_TR + " return [row('r9').children[2].allText().replace(/\\s+/g, ' '),"
+            self.LOAD_TR
+            + " return [row('r9').children[2].allText().replace(/\\s+/g, ' '),"
             " row('r23').children[2].allText()];"
         )
         assert r[0] == "3 router neighbors 15.4 230 \u00b7 TREL 55 , sends over 15.4"
         assert "TREL" not in r[1]
-
