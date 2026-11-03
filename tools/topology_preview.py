@@ -3,9 +3,10 @@
 
 Serves the frontend directory on localhost and answers the page's requests with canned data:
 GET and POST /device/topology a "done" state with the result of the test fixture (tools/tests/test_topology_page.py,
-evaluated with node), POST /ping a ping result, GET /device/status BR_RUNNING and GET /device/network no trial.
+evaluated with node: it has another border router and a child that didn't report its addresses), POST /ping a ping
+result, GET /device/status BR_RUNNING and GET /device/network no trial.
 With --running N the scan answers `running`, with growing progress, to the POST and the next N GETs, then `done`;
-every POST starts it over.
+the last GETs show the child address step. Every POST starts it over.
 
     python3 tools/topology_preview.py --port 8765                # then open http://localhost:8765/topology.html
     python3 tools/topology_preview.py --port 8765 --running 8    # to see the loading view
@@ -56,9 +57,19 @@ def fixture_result():
     return json.loads(out.stdout)
 
 
+def asked_children(result):
+    """The children the scan asks for their addresses: rx-on ones with no addresses."""
+    return [
+        c
+        for r in result["routers"]
+        for c in r.get("children", [])
+        if c.get("mode", {}).get("rx_on_when_idle") and not c.get("addresses")
+    ]
+
+
 class Scan:
     """The canned scan: `running` for the POST and the next `steps` GETs (routers found after the first quarter,
-    then queried one by one), then `done`."""
+    then queried one by one, then the rx-on children with no addresses asked in the last quarter), then `done`."""
 
     def __init__(self, steps, result):
         self.steps = steps
@@ -77,12 +88,24 @@ class Scan:
                 self.left -= 1
         routers = len(self.result["routers"])
         found = self.steps // 4
-        queried = (
-            0
-            if step < found
-            else min(routers, (step - found) * routers // max(1, self.steps - found))
-        )
-        progress = {"routers": 0 if step < found else routers, "queried": queried}
+        asking = self.steps - max(1, self.steps // 4)
+        kids = max(1, len(asked_children(self.result)))
+        children = {"total": 0, "queried": 0}
+        if step < found:
+            queried = 0
+        elif step < asking:
+            queried = min(routers, (step - found) * routers // max(1, asking - found))
+        else:
+            queried = routers
+            children = {
+                "total": kids,
+                "queried": (step - asking) * kids // max(1, self.steps - asking),
+            }
+        progress = {
+            "routers": 0 if step < found else routers,
+            "queried": queried,
+            "children": children,
+        }
         return {"state": "running", "progress": progress}
 
 

@@ -3,7 +3,10 @@
 import pytest
 from device_js import logic, needs_node, page, scenario
 
-# The sketch mesh as a JS literal. R: this board 0x8800 is a router. B: the same mesh with this board as a child.
+# The sketch mesh as a JS literal. R: this board 0x8800 is a router; 0xd400 is another border router and the REED
+# 0x5c01 didn't report its addresses. B: the same mesh with this board as a child. M: the real-mesh geometry of the
+# 2026-11-03 hardware pass (made-up identifiers): this board 0x3400 between the other border router 0x1000 and the
+# leader 0xe400, 0x3000 hanging off 0x1000 on a weak link, and a REED child of the board that didn't report.
 FIXTURE = r"""
 const mode = (rx) => ({rx_on_when_idle: rx, full_thread_device: false, full_network_data: false});
 const detail = {timeout_s: 240, age_s: 12, connected_s: 86400, rssi_avg: -61, rssi_last: -63, link_margin_db: 39,
@@ -25,7 +28,8 @@ const routers = () => [
    border_router: false, links: [{router_id: 9, lq_in: 2}, {router_id: 34, lq_in: 3}, {router_id: 99, lq_in: 1}],
    addresses: ['fdde:ad00:beef::ff:fe00:5c00'], responded: true, children_detail: false,
    children: [{rloc16: 0x5c02, mode: mode(false), lq_in: 2, addresses: []},
-              {rloc16: 0x5c01, mode: mode(true), lq_in: 3, addresses: ['2001:db8:4a2:1::5c01']}]},
+              {rloc16: 0x5c01, mode: {...mode(true), full_thread_device: true}, lq_in: 3, addresses: [],
+               addresses_reported: false}]},
   {rloc16: 0x8800, router_id: 34, ext_address: 'bb00000000008800', version: 5, leader: false, this_device: true,
    border_router: true, links: [{router_id: 9, lq_in: 3}, {router_id: 40, lq_in: 2}],
    addresses: ['fdde:ad00:beef::ff:fe00:8800', '2001:db8:4a2:1::1'], responded: true, children_detail: true,
@@ -41,7 +45,7 @@ const routers = () => [
    children: [{rloc16: 0xa001, ext_address: 'e1000000000a0001', mode: mode(false), lq_in: 3, ...detail,
                addresses: ['2001:db8:4a2:1:2be4:6c19:a0f7:3381']}]},
   {rloc16: 0xd400, router_id: 53, ext_address: 'ee0000000000d400', leader: false, this_device: false,
-   border_router: false, links: [], addresses: ['fdde:ad00:beef::ff:fe00:d400'], responded: true,
+   border_router: true, links: [], addresses: ['fdde:ad00:beef::ff:fe00:d400'], responded: true,
    children_detail: true, children: []},
   {rloc16: 0xdc00, router_id: 55, responded: false}
 ];
@@ -53,6 +57,24 @@ const B = (() => {
                       addresses: ['2001:db8:4a2:1::a002']});
   return {partial: false, network: {...NET, this_rloc16: 0xa002}, routers: r, srp_hosts: SRP};
 })();
+const M = {partial: false, srp_hosts: [],
+  network: {...NET, leader_router_id: 57, this_rloc16: 0x3400},
+  routers: [
+    {rloc16: 0x1000, router_id: 4, ext_address: 'a100000000001000', version: 5, leader: false, this_device: false,
+     border_router: true, links: [{router_id: 13, lq_in: 3}, {router_id: 57, lq_in: 1}, {router_id: 12, lq_in: 1}],
+     addresses: ['fdde:ad00:beef::ff:fe00:1000'], responded: true, children_detail: true, children: []},
+    {rloc16: 0x3000, router_id: 12, ext_address: 'a100000000003000', version: 5, leader: false, this_device: false,
+     border_router: false, links: [{router_id: 4, lq_in: 1}],
+     addresses: ['fdde:ad00:beef::ff:fe00:3000'], responded: true, children_detail: true, children: []},
+    {rloc16: 0x3400, router_id: 13, ext_address: 'a100000000003400', version: 5, leader: false, this_device: true,
+     border_router: true, links: [{router_id: 4, lq_in: 3}, {router_id: 57, lq_in: 3}],
+     addresses: ['fdde:ad00:beef::ff:fe00:3400'], responded: true, children_detail: true,
+     children: [{rloc16: 0x3401, ext_address: 'a100000000003401',
+                 mode: {rx_on_when_idle: true, full_thread_device: true, full_network_data: true}, lq_in: 3,
+                 ...detail, addresses: [], addresses_reported: false}]},
+    {rloc16: 0xe400, router_id: 57, ext_address: 'a10000000000e400', version: 5, leader: true, this_device: false,
+     border_router: false, links: [{router_id: 13, lq_in: 3}, {router_id: 4, lq_in: 2}],
+     addresses: ['fdde:ad00:beef::ff:fe00:e400'], responded: true, children_detail: true, children: []}]};
 const D = L.devices(R), DB = L.devices(B), LK = L.routerLinks(R);
 const byId = (ds, id) => ds.find((d) => d.id === id);
 const names = (ds, list) => list.map((d) => d.id);
@@ -61,6 +83,38 @@ const names = (ds, list) => list.map((d) => d.id);
 
 # The page's map labels for a device list: "This border router" for the board, else the display name.
 LABELS = "((ds) => Object.fromEntries(ds.map((d) => [d.id, d.thisBoard ? 'This border router' : L.displayName(d, {}, SRP)])))"
+
+
+# Node and label footprints as the layout models them (node shape, then the label under it, two lines for a stub),
+# relative to the node centre. (ds, m, labels) -> [[id, x0, x1, y0, y1]].
+FOOTPRINTS = """((ds, m, labels) => ds.filter((d) => m.pos[d.id]).map((d) => {
+  const half = L.nodeHalf(d), p = m.pos[d.id];
+  const w = Math.max(2 * half, L.mapLabel(labels[d.id]).length * (d.parentId === null ? 7 : 6.5));
+  return [d.id, p.x - w / 2, p.x + w / 2, p.y - half, p.y + half + 4 + 14 * (d.kind === 'stub' ? 2 : 1)];
+}))"""
+
+# (ds, lk) -> {hits: ids whose footprint the Home box overlaps, inside: the box lies inside the map}.
+HOME_HITS = f"""((ds, lk) => {{
+  const labels = {LABELS}(ds), m = L.layout(ds, lk, labels), h = m.home;
+  const x0 = h.x - h.w / 2, x1 = h.x + h.w / 2, y0 = h.y - h.h / 2, y1 = h.y + h.h / 2;
+  const hits = {FOOTPRINTS}(ds, m, labels).filter((b) => x0 < b[2] && b[1] < x1 && y0 < b[4] && b[3] < y1)
+                   .map((b) => b[0]);
+  return {{hits, inside: x0 >= 0 && y0 >= 0 && x1 <= m.width && y1 <= m.height}};
+}})"""
+
+# (ds, lk) -> {closer: a free box centre more than 12 px nearer the board than the box, or null}. Grid step 4 px.
+HOME_NEAREST = f"""((ds, lk) => {{
+  const labels = {LABELS}(ds), m = L.layout(ds, lk, labels), h = m.home;
+  const board = ds.find((d) => d.thisBoard), b = m.pos[board.id], fps = {FOOTPRINTS}(ds, m, labels);
+  const taken = Math.hypot(h.x - b.x, h.y - b.y);
+  const free = (x, y) => fps.every((f) => !(x - h.w / 2 < f[2] + 6 && f[1] < x + h.w / 2 + 6 &&
+                                            y - h.h / 2 < f[4] + 6 && f[3] < y + h.h / 2 + 6));
+  for (let dx = -taken; dx <= taken; dx += 4)
+    for (let dy = -taken; dy <= taken; dy += 4)
+      if (Math.hypot(dx, dy) < taken - 12 && free(b.x + dx, b.y + dy))
+        return {{closer: [dx, dy], taken}};
+  return {{closer: null, taken}};
+}})"""
 
 
 def js(expression):
@@ -190,6 +244,33 @@ class TestTopologyLogic:
         )
         assert got == [[["c40962", "br", "r40"]], 1]
 
+    def test_devices_flags_a_child_that_didnt_report_its_addresses(self):
+        # On a child with addresses_reported false: addrsReported false; true for every other device.
+        got = js(
+            "[byId(D, 'c23553').addrsReported, byId(D, 'c23554').addrsReported, byId(D, 'c34817').addrsReported,"
+            " byId(D, 'r23').addrsReported, byId(L.devices(M), 'c13313').addrsReported]"
+        )
+        assert got == [False, True, True, True, False]
+
+    def test_devices_marks_another_border_router_and_keeps_its_kind(self):
+        # On a router with border_router and not this_device: kind stays router/leader, otherBr true; this board,
+        # plain routers, stubs and children are not other border routers.
+        got = js(
+            "(() => { const X = {...R, routers: routers()}; X.routers[0].border_router = true; const DX = L.devices(X);"
+            " const DM = L.devices(M);"
+            " return [[byId(D, 'r53').kind, byId(D, 'r53').otherBr], [byId(DX, 'r9').kind, byId(DX, 'r9').otherBr],"
+            " [byId(DM, 'r4').kind, byId(DM, 'r4').otherBr],"
+            " ['r13', 'r12', 'r57', 'c13313'].map((id) => byId(DM, id).otherBr),"
+            " [byId(D, 'r55').otherBr, byId(D, 'r34').otherBr, byId(D, 'r9').otherBr]]; })()"
+        )
+        assert got == [
+            ["router", True],
+            ["leader", True],
+            ["router", True],
+            [False, False, False, False],
+            [False, False, False],
+        ]
+
     # routerLinks
 
     def test_routerlinks_pairs_two_sides_with_the_lower_id_first(self):
@@ -262,14 +343,14 @@ class TestTopologyLogic:
         # On an SRP host sharing an address: the host name.
         assert js("L.displayName(byId(D, 'c40961'), {}, SRP)") == "kitchen-plug"
 
-    def test_displayname_falls_back_to_unnamed_rloc16(self):
-        # Otherwise: "Unnamed 0xNNNN".
-        assert js("L.displayName(byId(D, 'c23553'), {}, SRP)") == "Unnamed 0x5c01"
+    def test_displayname_falls_back_to_unknown_rloc16(self):
+        # Otherwise: "Unknown 0xNNNN".
+        assert js("L.displayName(byId(D, 'c23553'), {}, SRP)") == "Unknown 0x5c01"
 
     def test_displayname_of_this_board_without_nickname_or_srp_host_is_this_border_router(
         self,
     ):
-        # On this board with no nickname and no SRP host: "This border router" (spec 4.6), never "Unnamed".
+        # On this board with no nickname and no SRP host: "This border router" (spec 4.6), never "Unknown".
         assert js("L.displayName(byId(D, 'r34'), {}, SRP)") == "This border router"
         assert js("L.displayName(byId(DB, 'c40962'), {}, SRP)") == "This border router"
 
@@ -443,6 +524,48 @@ class TestTopologyLogic:
             " return hits; })"
         )
         assert got == [[], []]
+
+    def test_nodehalf_counts_the_outer_ring_of_another_border_router(self):
+        # On another border router: its half height reaches the orange ring outside the disc (and the leader ring).
+        got = plain(
+            "[{kind: 'router', parentId: null, leader: false}, {kind: 'router', parentId: null, leader: false, otherBr: true},"
+            " {kind: 'leader', parentId: null, leader: true}, {kind: 'leader', parentId: null, leader: true, otherBr: true}]"
+            ".map(L.nodeHalf)"
+        )
+        assert got == [16, 21, 21, 26]
+
+    def test_home_box_clears_every_node_on_the_real_mesh(self):
+        # On the real-mesh geometry (the old layout put the box over 0x3000 and its label): the Home box overlaps no
+        # node or label footprint, and sits inside the map.
+        got = js(f"{HOME_HITS}(L.devices(M), L.routerLinks(M))")
+        assert got["hits"] == [], got
+        assert got["inside"] is True, got
+
+    def test_home_box_is_the_nearest_free_spot_around_the_board(self):
+        # On the fixtures: no free spot for the box (clear of every footprint by the layout's 6 px gap) is more than
+        # one ring step (12 px) closer to the board than the one taken.
+        got = js(
+            f"[[L.devices(M), L.routerLinks(M)], [D, LK], [DB, L.routerLinks(B)]].map(([ds, lk]) => {HOME_NEAREST}(ds, lk))"
+        )
+        assert all(g["closer"] is None for g in got), got
+
+    def test_home_box_crowded_on_every_side_still_finds_a_clear_spot_and_the_map_grows(
+        self,
+    ):
+        # On a board ringed by linked routers and many children: the box overlaps nothing, lies inside the map, and
+        # the map is larger than the same mesh's map without the box would need.
+        got = js(
+            "(() => { const ds = [{id: 'r0', kind: 'br', rloc16: 0, routerId: 0, parentId: null, thisBoard: true,"
+            " leader: false, addrs: []}];"
+            " const lk = [];"
+            " for (let i = 1; i <= 8; i++) { ds.push({id: 'r' + i, kind: 'router', rloc16: i << 10, routerId: i,"
+            "   parentId: null, thisBoard: false, leader: i === 1, addrs: []}); lk.push({a: 'r0', b: 'r' + i, lqAB: 3, lqBA: 3}); }"
+            " for (let k = 1; k <= 14; k++) ds.push({id: 'c' + k, kind: 'med', rloc16: k, routerId: 0, parentId: 'r0',"
+            "   thisBoard: false, leader: false, addrs: []});"
+            f" return {HOME_HITS}(ds, lk); }})()"
+        )
+        assert got["hits"] == [], got
+        assert got["inside"] is True, got
 
     def test_maplabel_cuts_long_names_with_an_ellipsis(self):
         # On a name longer than 18 characters: the first 17 and "…"; shorter names unchanged.
@@ -643,7 +766,8 @@ PRELUDE = (
     + FIXTURE
     + """
 const RF = {...R, partial: false};
-const RUNNING = (queried, routers) => ({state: 'running', progress: {routers, queried}});
+const RUNNING = (queried, routers, cq, ct) =>
+  ({state: 'running', progress: {routers, queried, ...(ct === undefined ? {} : {children: {total: ct, queried: cq}})}});
 const DONE = (result, age) => ({state: 'done', age_s: age || 0, result});
 const S = {gets: [{state: 'idle'}], post: {status: 202, body: RUNNING(0, 0)},
            ping: {error: 0, message: 'OK', result: {replies: [{rtt: 5}, {rtt: 7}, {rtt: 9}],
@@ -880,7 +1004,7 @@ class TestTopologyPage:
         )
         assert r[0] == "Network MyThread Channel 15 · partition 0x4a1f2c07"
         assert r[1] == "Devices 13 6 routers · 7 end devices, 5 of them sleepy"
-        assert r[2] == "Leader Unnamed 0x2400 0x2400"
+        assert r[2] == "Leader Unknown 0x2400 0x2400"
         assert (
             r[3]
             == "Routable prefixes 2001:db8:4a2:1::/64 global fd7a:91c3:22e0:1::/64 ULA"
@@ -894,7 +1018,7 @@ class TestTopologyPage:
             " t.el('t-map').findAll((e) => e.tag === 'g' && e.attrs.role === 'button').length];"
         )
         assert r[0]["tabindex"] == "0" and r[0]["role"] == "button"
-        assert r[0]["aria-label"] == "Unnamed 0x2400, Router"
+        assert r[0]["aria-label"] == "Unknown 0x2400, Router"
         assert r[1] == "This border router, Border router"
         assert r[2] == 13
 
@@ -903,7 +1027,7 @@ class TestTopologyPage:
         r = run(
             "await loaded(); node('r23').click(); return [t.el('t-dialog').open, txt('t-d-name')];"
         )
-        assert r == [True, "Unnamed 0x5c00"]
+        assert r == [True, "Unknown 0x5c00"]
 
     def test_map_node_opens_with_enter_and_space(self):
         # On Enter or Space on a focused node: the dialog opens; the key's default is prevented.
@@ -920,7 +1044,7 @@ class TestTopologyPage:
         r = run(
             "await loaded(); await pick('c34817'); return [t.el('t-dialog').open, txt('t-d-name')];"
         )
-        assert r == [True, "Unnamed 0x8801"]
+        assert r == [True, "Unknown 0x8801"]
 
     def test_open_dialog_dims_everything_outside_the_neighbourhood(self):
         # On a device picked: everything but the device, its neighbours, parent and children is dimmed.
@@ -982,17 +1106,17 @@ class TestTopologyPage:
         # On a neighbour, child or parent link: the dialog switches to that device and the map follows.
         r = run(
             "await loaded(); node('r40').click(); const a = [];"
-            " buttons(t.el('t-d-neighbors'), 'Unnamed 0x2400')[0].click(); a.push(txt('t-d-name'));"
-            " buttons(t.el('t-d-children'), 'Unnamed 0x2401')[0].click();"
+            " buttons(t.el('t-d-neighbors'), 'Unknown 0x2400')[0].click(); a.push(txt('t-d-name'));"
+            " buttons(t.el('t-d-children'), 'Unknown 0x2401')[0].click();"
             " a.push(txt('t-d-name'), node('r40').classes.has('t-dim'));"
-            " buttons(t.el('t-d-facts'), 'Unnamed 0x2400')[0].click();"
+            " buttons(t.el('t-d-facts'), 'Unknown 0x2400')[0].click();"
             " a.push(txt('t-d-name'), node('r40').classes.has('t-dim'), t.el('t-dialog').open); return a;"
         )
         assert r == [
-            "Unnamed 0x2400",
-            "Unnamed 0x2401",
+            "Unknown 0x2400",
+            "Unknown 0x2401",
             True,
-            "Unnamed 0x2400",
+            "Unknown 0x2400",
             False,
             True,
         ]
@@ -1003,9 +1127,9 @@ class TestTopologyPage:
             "await loaded(); node('r9').click(); return t.el('t-d-neighbors').children.map((c) => c.allText());"
         )
         assert r == [
-            "Unnamed 0x5c00 LQI 2",
+            "Unknown 0x5c00 LQI 2",
             "This border router LQI 3",
-            "Unnamed 0xa000 LQI 1 in / 3 out",
+            "Unknown 0xa000 LQI 1 in / 3 out",
         ]
 
     def test_map_badges_agree_with_the_dialog_in_the_first_routers_view(self):
@@ -1016,7 +1140,7 @@ class TestTopologyPage:
             ".map((e) => e.textContent); node('r9').click();"
             " return [badges, t.el('t-d-neighbors').children.map((c) => c.allText())[2]];"
         )
-        assert r == [["2", "3", "1/3", "3/0", "2"], "Unnamed 0xa000 LQI 1 in / 3 out"]
+        assert r == [["2", "3", "1/3", "3/0", "2"], "Unknown 0xa000 LQI 1 in / 3 out"]
 
     def test_stub_link_shows_the_known_side_on_the_map_and_a_dash_in_the_dialog(self):
         # On a link to a router that didn't answer: the badge shows only the known number in its colour, and the
@@ -1034,8 +1158,8 @@ class TestTopologyPage:
         )
         assert r[0] == ["2", "3", "1/3", "3", "3/0", "2"]
         assert r[1] is True
-        assert r[2][3] == "Unnamed 0xdc00 LQI 3 in / – out"
-        assert r[3] == ["Unnamed 0x2400 LQI – in / 3 out"]
+        assert r[2][3] == "Unknown 0xdc00 LQI 3 in / – out"
+        assert r[3] == ["Unknown 0x2400 LQI – in / 3 out"]
 
     def test_ping_posts_to_ping_and_shows_the_summary(self):
         # On Ping: POST /ping {address, count: 4, size: 32}, then the pingSummary lines.
@@ -1078,7 +1202,7 @@ class TestTopologyPage:
             " a.push(t.el('t-d-name-input').value); t.el('t-d-name-input').value = ''; t.el('t-d-save').click();"
             " a.push('topology:names' in t.storage.m, txt('t-d-name')); return a;"
         )
-        assert r == ["Hall light", "Hall light", False, "Unnamed 0xa000"]
+        assert r == ["Hall light", "Hall light", False, "Unknown 0xa000"]
 
     @pytest.mark.parametrize("how", sorted(CLOSE_BY))
     def test_close_keeps_the_selection_ring_and_row_tint(self, how):
@@ -1122,7 +1246,7 @@ class TestTopologyPage:
     def test_child_with_detail_lists_its_link_figures(self):
         # On a child with detail: parent, LQI, RSSI, link margin, error rates and attach time.
         r = run("await loaded(); await pick('c40961'); return txt('t-d-facts');")
-        assert "Parent Unnamed 0xa000" in r and "LQI 3" in r
+        assert "Parent Unknown 0xa000" in r and "LQI 3" in r
         assert "RSSI avg -61 dBm, last -63 dBm" in r and "Link margin 39 dB" in r
         assert "Frame errors 0.4%" in r and "Message errors 0.0%" in r
         assert "Attached for 1 d 0 h" in r
@@ -1161,6 +1285,99 @@ class TestTopologyPage:
             "Link-local fe80::d41a:7c03:f4e2:b918 Copy Ping",
         ]
         assert r[3] == "Hide internal addresses"
+
+    # unreported addresses and other border routers (spec 3.4)
+
+    def test_table_says_not_reported_in_grey_for_a_child_that_didnt_report(self):
+        # On a child with addrsReported false: the routable cell reads "Not reported" in grey, not the amber "None yet".
+        r = run(
+            "await loaded(); const cell = (id) => row(id).children[4];"
+            " return [cell('c23553').allText(), cell('c23553').children[0].classes.has('t-unreported'),"
+            " cell('c23553').children[0].classes.has('t-none'), cell('c23554').allText()];"
+        )
+        assert r == ["Not reported", True, False, "None yet"]
+
+    def test_dialog_says_the_device_didnt_report_its_addresses(self):
+        # On a child with addrsReported false: "This device didn't report its addresses." instead of the amber
+        # "No routable address yet" note.
+        r = run(
+            "await loaded(); await pick('c23553'); const a = [vis('t-d-noroute'), txt('t-d-noroute'),"
+            " t.el('t-d-noroute').classes.has('t-warn')]; await pick('c23554');"
+            " a.push(txt('t-d-noroute'), t.el('t-d-noroute').classes.has('t-warn')); return a;"
+        )
+        assert r == [
+            True,
+            "This device didn't report its addresses.",
+            False,
+            NO_ROUTE,
+            True,
+        ]
+
+    def test_table_types_another_border_router_as_border_router(self):
+        # On another border router: type "Border router"; a plain router stays "Router".
+        r = run(
+            "await loaded(); return ['r53', 'r9', 'r23'].map((id) => row(id).children[1].textContent);"
+        )
+        assert r == ["Border router", "Router", "Router"]
+
+    def test_dialog_shows_a_border_router_chip_for_another_border_router(self):
+        # On another border router: a "Border router" chip in the dialog header.
+        r = run(
+            "await loaded(); await pick('r53'); const a = [t.el('t-d-chips').children.map((c) => c.textContent)];"
+            " await pick('r23'); a.push(t.el('t-d-chips').children.map((c) => c.textContent)); return a;"
+        )
+        assert r == [["Border router"], ["Router"]]
+
+    def test_map_rings_another_border_router_in_orange_and_the_legend_names_it(self):
+        # On another border router: an orange outer ring on its node (not on a plain router), its accessible name
+        # says "Border router", and the legend has "Other border router".
+        r = run(
+            "await loaded(); const orange = (id) => node(id).findAll((e) => e.tag === 'circle'"
+            " && e.classes.has('t-br-ring') && e.attrs.stroke === '#b35c00').length;"
+            " return [orange('r53'), orange('r23'), orange('r34'), node('r53').attrs['aria-label']];"
+        )
+        assert r == [1, 0, 0, "Unknown 0xd400, Border router"]
+        from device_js import FRONTEND
+
+        html = (FRONTEND / "topology.html").read_text()
+        legend = html[
+            html.index('id="t-legend"') : html.index(
+                "</div>", html.index('id="t-legend"')
+            )
+        ]
+        assert (
+            '<span class="t-lg t-lg-otherbr" aria-hidden="true"></span>Other border router'
+            in legend
+        )
+
+    def test_map_keeps_both_rings_on_a_leader_that_is_a_border_router(self):
+        # On a leader that is also another border router: the blue leader ring and the orange ring outside it.
+        r = run(
+            "const X = {...R, routers: routers()}; X.routers[0].border_router = true;"
+            " save(60000, X); await start(); t.el('t-show-last').click(); await t.flush();"
+            " const circles = node('r9').findAll((e) => e.tag === 'circle' && !e.classes.has('t-ring'));"
+            " return circles.map((c) => [c.attrs.r, c.attrs.stroke, c.attrs.fill]);"
+        )
+        assert r == [
+            ["16", "#174a77", "#1f5f99"],
+            ["21", "#1f5f99", "none"],
+            ["26", "#b35c00", "none"],
+        ]
+
+    def test_loading_view_shows_the_child_address_step(self):
+        # On progress.children.total > 0: "Asking devices for their addresses: M of N" with the bar; with total 0 the
+        # router step text.
+        r = run(
+            "S.gets = [RUNNING(2, 5, 0, 0), RUNNING(5, 5, 1, 4), RUNNING(5, 5, 1, 4)]; await start();"
+            " const a = [txt('t-progress')]; await t.advance(1000);"
+            " a.push(txt('t-progress'), vis('t-progress-track'), t.el('t-progress-bar').style.width); return a;"
+        )
+        assert r == [
+            "Asking each router about its children: 2 of 5",
+            "Asking devices for their addresses: 1 of 4",
+            True,
+            "25%",
+        ]
 
     # storage unavailable
 

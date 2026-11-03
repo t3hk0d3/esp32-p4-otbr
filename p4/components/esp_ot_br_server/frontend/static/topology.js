@@ -122,8 +122,10 @@ function hex4(n) {
 /**
  * One entry per router, stub and child:
  * {id, kind (br|leader|router|stub|med|sed), rloc16, ext, routerId (the router itself, or a child's parent), parentId,
- *  thisBoard, leader, borderRouter, sleepy, responded, detail, child (the raw child object, or null), addrs, version,
- *  mode}. Routers come in router-id order, each followed by its children in RLOC16 order.
+ *  thisBoard, leader, borderRouter, otherBr (a border router that is not this board; its kind stays router/leader),
+ *  sleepy, responded, detail, child (the raw child object, or null), addrs, addrsReported (false only for a child that
+ *  was asked for its addresses and didn't answer), version, mode}. Routers come in router-id order, each followed by
+ *  its children in RLOC16 order.
  */
 function devices(result) {
   var out = [];
@@ -145,11 +147,13 @@ function devices(result) {
       thisBoard : r.this_device === true,
       leader : isLeader,
       borderRouter : r.border_router === true,
+      otherBr : r.border_router === true && r.this_device !== true,
       sleepy : false,
       responded : responded,
       detail : responded && r.children_detail !== false,
       child : null,
       addrs : r.addresses || [],
+      addrsReported : true,
       version : r.version === undefined ? null : r.version,
       mode : null
     });
@@ -167,11 +171,13 @@ function devices(result) {
         thisBoard : board,
         leader : false,
         borderRouter : board,
+        otherBr : false,
         sleepy : sleepy,
         responded : true,
         detail : c.timeout_s !== undefined,
         child : c,
         addrs : c.addresses || [],
+        addrsReported : c.addresses_reported !== false,
         version : c.version === undefined ? null : c.version,
         mode : mode
       });
@@ -248,14 +254,14 @@ function srpHostFor(device, srpHosts) {
   return null;
 }
 
-/** Nickname, else SRP host name, else "This border router" for this board and "Unnamed 0xNNNN" for the others. */
+/** Nickname, else SRP host name, else "This border router" for this board and "Unknown 0xNNNN" for the others. */
 function displayName(device, names, srpHosts) {
   if (device.ext && names && has(names, device.ext) && names[device.ext])
     return names[device.ext];
   var host = srpHostFor(device, srpHosts);
   if (host && host.name)
     return host.name;
-  return device.thisBoard ? BOARD_LABEL : 'Unnamed 0x' + hex4(device.rloc16);
+  return device.thisBoard ? BOARD_LABEL : UNKNOWN_PREFIX + hex4(device.rloc16);
 }
 
 /* ---- table rows ---- */
@@ -295,6 +301,7 @@ function rows(devs, filter, query, names, srpHosts) {
 /* ---- map layout ---- */
 
 var BOARD_LABEL = 'This border router';
+var UNKNOWN_PREFIX = 'Unknown 0x';
 var LABEL_CHARS = 18;                         /* map labels longer than this are cut with an ellipsis */
 var CHAR_W_ROUTER = 7, CHAR_W_CHILD = 6.5;    /* estimated px per character at 12 px and 11 px */
 var LABEL_GAP = 4, LABEL_H = 14, BOX_GAP = 6;
@@ -303,8 +310,8 @@ var STEPS = 60, STEP_MAX = 20, REPEL = 2000000, ATTRACT = 250;
 var FAN_R_MIN = 60, FAN_R_STEP = 15, FAN_R_MAX = 240, FAN_ARC_MAX = 270, FAN_STEP = 3 * Math.PI / 180;
 var RESOLVE_ROUNDS = 40;
 var HOME_W = 170, HOME_H = 26;
-/* Home-network box centres around the board, tried in this order: below, above, right, left, then the diagonals. */
-var HOME_SPOTS = [ [ 0, 78 ], [ 0, -62 ], [ 118, 0 ], [ -118, 0 ], [ 100, 55 ], [ -100, 55 ], [ 100, -50 ], [ -100, -50 ] ];
+var HOME_R_STEP = 12, HOME_ARC_STEP = 8;      /* Home-box search: ring spacing, and spacing of the spots on a ring */
+var BR_RING_GAP = 5;                          /* the orange ring of another border router, outside its disc or ring */
 var MARGIN = 16, MIN_WIDTH = 320, MIN_HEIGHT = 200;
 
 /** Half the height of a node's shape on the map. */
@@ -313,7 +320,7 @@ function nodeHalf(d) {
     return d.parentId === null ? 20 : 9;
   if (d.parentId !== null)
     return 9;
-  return d.leader ? 21 : 16;
+  return (d.leader ? 21 : 16) + (d.otherBr ? BR_RING_GAP : 0);
 }
 
 /** A map label: at most LABEL_CHARS characters, longer ones cut with "…". */
@@ -425,30 +432,37 @@ function resolve(devs, pos, fps, centre) {
   }
 }
 
-/** Centre of the Home-network box next to the board: a spot clear of every box, on its least crowded side. */
-function placeHome(board, devs, pos, fps, links) {
-  var p = pos[board.id];
-  var near = [];
-  devs.forEach(function(d) {
-    if (pos[d.id] && (d.parentId === board.id || d.id === board.parentId))
-      near.push(pos[d.id]);
+/*
+ * Centre of the Home-network box: the spot nearest the board where the box clears every node and label box. Rings of
+ * growing radius around the board; on each ring the spots go from straight below, alternating either side. Past the
+ * farthest box every spot is clear, so the search always ends; the map then grows to hold the box.
+ */
+function placeHome(p, boxes) {
+  function homeBox(at) {
+    return {x0 : at.x - HOME_W / 2, x1 : at.x + HOME_W / 2, y0 : at.y - HOME_H / 2, y1 : at.y + HOME_H / 2};
+  }
+  function clear(at) {
+    var box = homeBox(at);
+    return !boxes.some(function(b) { return overlaps(box, b); });
+  }
+  var far = 0;
+  boxes.forEach(function(b) {
+    var dx = Math.max(Math.abs(b.x0 - p.x), Math.abs(b.x1 - p.x));
+    var dy = Math.max(Math.abs(b.y0 - p.y), Math.abs(b.y1 - p.y));
+    far = Math.max(far, Math.sqrt(dx * dx + dy * dy));
   });
-  links.forEach(function(l) {
-    if (l.a === board.id && pos[l.b])
-      near.push(pos[l.b]);
-    if (l.b === board.id && pos[l.a])
-      near.push(pos[l.a]);
-  });
-  var best = null;
-  HOME_SPOTS.forEach(function(s) {
-    var at = {x : p.x + s[0], y : p.y + s[1]};
-    var box = {x0 : at.x - HOME_W / 2, x1 : at.x + HOME_W / 2, y0 : at.y - HOME_H / 2, y1 : at.y + HOME_H / 2};
-    var hits = devs.filter(function(d) { return pos[d.id] && overlaps(box, boxAt(fps[d.id], pos[d.id])); }).length;
-    var score = crowding(p, Math.atan2(s[1], s[0]), near);
-    if (best === null || hits < best.hits || (hits === best.hits && score < best.score - 1e-9))
-      best = {hits : hits, score : score, at : at};
-  });
-  return best.at;
+  var limit = far + HOME_W + BOX_GAP;
+  for (var r = HOME_R_STEP; r <= limit; r += HOME_R_STEP) {
+    var n = Math.max(8, Math.ceil(2 * Math.PI * r / HOME_ARC_STEP));
+    for (var k = 0; k < n; k++) {
+      var side = k % 2 === 0 ? 1 : -1;
+      var angle = Math.PI / 2 + side * Math.ceil(k / 2) * 2 * Math.PI / n;
+      var at = {x : p.x + r * Math.cos(angle), y : p.y + r * Math.sin(angle)};
+      if (clear(at))
+        return at;
+    }
+  }
+  return {x : p.x, y : p.y + limit}; /* not reached: the last ring lies past every box */
 }
 
 /*
@@ -462,7 +476,7 @@ function layout(devs, links, labels) {
     return {width : MIN_WIDTH, height : MIN_HEIGHT, pos : pos, home : null, ring : 0};
   var fps = {};
   devs.forEach(function(d) {
-    var label = labels && labels[d.id] ? labels[d.id] : d.thisBoard ? BOARD_LABEL : 'Unnamed 0x' + hex4(d.rloc16);
+    var label = labels && labels[d.id] ? labels[d.id] : d.thisBoard ? BOARD_LABEL : UNKNOWN_PREFIX + hex4(d.rloc16);
     fps[d.id] = footprint(d, label);
   });
 
@@ -554,7 +568,7 @@ function layout(devs, links, labels) {
   var board = devs.filter(function(d) { return d.thisBoard && pos[d.id]; })[0];
   var home = null;
   if (board) {
-    home = placeHome(board, devs, pos, fps, usable);
+    home = placeHome(pos[board.id], boxes);
     boxes.push({x0 : home.x - HOME_W / 2, x1 : home.x + HOME_W / 2, y0 : home.y - HOME_H / 2, y1 : home.y + HOME_H / 2});
   }
 
@@ -749,6 +763,8 @@ var NO_DETAIL = "Details unavailable: its parent didn't answer";
 var NOT_REPORTED = "Details unavailable: its parent didn't report it";
 var INTERRUPTED = 'The scan was interrupted (the board restarted). Load again.';
 var NO_ROUTE = "No routable address yet. Hosts on your home network can't reach this device.";
+var ADDRS_NOT_REPORTED = "This device didn't report its addresses.";
+var ACCENT = '#b35c00';
 var MORE_TEXT = 'Show internal addresses (mesh-local, RLOC, link-local)';
 var LESS_TEXT = 'Hide internal addresses';
 var TYPE_TEXT = {
@@ -817,6 +833,9 @@ function nameOf(d) { return L.displayName(d, names, model.srp); }
 function mapName(d) { return d.thisBoard ? BOARD_LABEL : nameOf(d); }
 
 function unnamed(d) { return !d.thisBoard && !(d.ext && names[d.ext]) && !L.srpHostFor(d, model.srp); }
+
+/* Table, dialog and map type: another border router reads "Border router" whatever its router kind. */
+function typeText(d) { return d.otherBr ? TYPE_TEXT.br : TYPE_TEXT[d.kind]; }
 
 function badgeText(d) { return d.thisBoard ? 'This board' : d.leader && d.parentId === null ? 'Leader' : ''; }
 
@@ -910,13 +929,17 @@ function renderStart(noteText) {
 
 function renderProgress(state) {
   var p = (state && state.progress) || {};
-  if (p.routers > 0) {
+  var kids = p.children || {};
+  if (kids.total > 0) {
+    setText('t-progress', 'Asking devices for their addresses: ' + kids.queried + ' of ' + kids.total);
+    $('t-progress-bar').style.width = Math.min(100, Math.round(100 * kids.queried / kids.total)) + '%';
+  } else if (p.routers > 0) {
     setText('t-progress', 'Asking each router about its children: ' + p.queried + ' of ' + p.routers);
     $('t-progress-bar').style.width = Math.min(100, Math.round(100 * p.queried / p.routers)) + '%';
   } else {
     setText('t-progress', 'Finding routers…');
   }
-  show('t-progress-track', p.routers > 0);
+  show('t-progress-track', p.routers > 0 || kids.total > 0);
   setText('t-elapsed', 'Elapsed: ' + Math.max(0, Math.round((env.now() - scanStarted) / 1000)) + ' s');
   view('loading');
 }
@@ -1108,12 +1131,12 @@ function neighbourhood(id) {
 /* Draws the node shape at the origin of `g`; returns its half height. */
 function drawShape(g, d) {
   if (d.kind === 'br' && d.parentId === null) {
-    svg('rect', {x : -20, y : -20, width : 40, height : 40, rx : 10, fill : '#b35c00', stroke : '#8a4700', 'stroke-width' : 2}, g);
+    svg('rect', {x : -20, y : -20, width : 40, height : 40, rx : 10, fill : ACCENT, stroke : '#8a4700', 'stroke-width' : 2}, g);
     svg('text', {'class' : 't-node-br', 'text-anchor' : 'middle', 'dominant-baseline' : 'central'}, g).textContent = 'BR';
     return 20;
   }
   if (d.kind === 'br') {
-    svg('rect', {x : -9, y : -9, width : 18, height : 18, rx : 4, fill : '#b35c00', stroke : '#8a4700', 'stroke-width' : 2}, g);
+    svg('rect', {x : -9, y : -9, width : 18, height : 18, rx : 4, fill : ACCENT, stroke : '#8a4700', 'stroke-width' : 2}, g);
     return 9;
   }
   if (d.parentId !== null) {
@@ -1125,18 +1148,19 @@ function drawShape(g, d) {
   }
   var stub = d.kind === 'stub';
   svg('circle', {r : 16, fill : stub ? '#9a9a9a' : '#1f5f99', stroke : stub ? '#7a7a7a' : '#174a77', 'stroke-width' : 2}, g);
-  if (d.leader) {
+  if (d.leader)
     svg('circle', {r : 21, fill : 'none', stroke : stub ? '#9a9a9a' : '#1f5f99', 'stroke-width' : 2}, g);
-    return 21;
-  }
-  return 16;
+  var half = L.nodeHalf(d);
+  if (d.otherBr) /* outside the leader ring when it has one, so both stay visible */
+    svg('circle', {r : half, fill : 'none', stroke : ACCENT, 'stroke-width' : 2.5, 'class' : 't-br-ring'}, g);
+  return half;
 }
 
 function drawNode(layer, d, p) {
   var g = svg('g', {'class' : 't-node', tabindex : 0, role : 'button', 'data-id' : d.id,
                     transform : 'translate(' + p.x + ',' + p.y + ')'},
               layer);
-  g.setAttribute('aria-label', mapName(d) + ', ' + TYPE_TEXT[d.kind]);
+  g.setAttribute('aria-label', mapName(d) + ', ' + typeText(d));
   var half = drawShape(g, d);
   var ring = d.kind === 'br' && d.parentId === null
                  ? svg('rect', {x : -26, y : -26, width : 52, height : 52, rx : 14, 'class' : 't-ring hidden'}, g)
@@ -1184,11 +1208,11 @@ function drawLink(layer, l, pos) {
 /* The dashed line from this board to the "Home network · Ethernet" box the layout placed next to it. */
 function drawUplink(layer, board, p, home) {
   var g = svg('g', {'class' : 't-uplink'}, layer);
-  svg('line', {x1 : p.x, y1 : p.y, x2 : home.x, y2 : home.y, stroke : '#b35c00', 'stroke-width' : 2,
+  svg('line', {x1 : p.x, y1 : p.y, x2 : home.x, y2 : home.y, stroke : ACCENT, 'stroke-width' : 2,
                'stroke-dasharray' : '6 4'},
       g);
   svg('rect', {x : home.x - home.w / 2, y : home.y - home.h / 2, width : home.w, height : home.h, rx : 6,
-               fill : '#fff8f0', stroke : '#b35c00', 'stroke-dasharray' : '4 3'},
+               fill : '#fff8f0', stroke : ACCENT, 'stroke-dasharray' : '4 3'},
       g);
   svg('text', {'class' : 't-uplink-text', x : home.x, y : home.y, 'text-anchor' : 'middle',
                'dominant-baseline' : 'central'},
@@ -1279,7 +1303,9 @@ function addressCell(d) {
     line.appendChild(copyButton(x.addr, 't-small-btn'));
     td.appendChild(line);
   });
-  if (routable.length === 0)
+  if (routable.length === 0 && !d.addrsReported)
+    td.appendChild(el('span', 'Not reported', 't-unreported'));
+  else if (routable.length === 0)
     td.appendChild(el('span', 'None yet', 't-none'));
   return td;
 }
@@ -1295,7 +1321,7 @@ function rowFor(d) {
     dev.appendChild(el('span', badge, 'chip chip-warn t-badge'));
   dev.appendChild(el('div', rlocText(d.rloc16) + ' · ' + (d.ext || '–'), 't-mono t-sub'));
   tr.appendChild(dev);
-  tr.appendChild(el('td', TYPE_TEXT[d.kind]));
+  tr.appendChild(el('td', typeText(d)));
   tr.appendChild(el('td', viaText(d)));
   var lq = d.child && typeof d.child.lq_in === 'number' ? d.child.lq_in : null;
   var lqCell = el('td', lq === null ? '–' : String(lq), 't-lq');
@@ -1459,7 +1485,10 @@ function renderAddresses(d) {
     line.appendChild(button('Ping', 't-small-btn', function() { ping(x.addr, d); }));
     box.appendChild(line);
   });
-  setText('t-d-noroute', routable.length === 0 ? NO_ROUTE : '');
+  var note = $('t-d-noroute');
+  setText('t-d-noroute', routable.length > 0 ? '' : d.addrsReported ? NO_ROUTE : ADDRS_NOT_REPORTED);
+  note.classList.toggle('t-warn', d.addrsReported);
+  note.classList.toggle('t-note', !d.addrsReported);
   show('t-d-noroute', routable.length === 0);
   show('t-d-more', internal.length > 0);
   setText('t-d-more', showInternal ? LESS_TEXT : MORE_TEXT);
@@ -1474,7 +1503,7 @@ function renderDialog() {
   setText('t-names-note', storageOk ? '' : NAMES_NOTE);
   var chips = $('t-d-chips');
   clear(chips);
-  chips.appendChild(el('span', TYPE_TEXT[d.kind], 'chip t-chip-type'));
+  chips.appendChild(el('span', typeText(d), 'chip t-chip-type'));
   if (badgeText(d))
     chips.appendChild(el('span', badgeText(d), 'chip chip-warn'));
   renderFacts(d);
