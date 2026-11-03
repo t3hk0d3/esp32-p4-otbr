@@ -292,7 +292,7 @@ TEST_CASE("On each router reported: stores ext address, rloc16, router id, versi
     mesh_scan_on_router(&r);
     mesh_scan_on_discover_done(MESH_SCAN_OT_ERROR_NONE);
     answer_router();
-    answer_child(RLOC16(9) + 1, 0); // rx-on without addresses: asked directly
+    drain_children(); // rx-on, asked directly, no answer: the deadline ends the step
 
     const mesh_scan_router_t *got = &done_result()->routers[9];
     TEST_ASSERT_TRUE(got->present);
@@ -416,7 +416,7 @@ TEST_CASE("On a child-table entry for an RLOC16 discover did not list: adds the 
     const mesh_scan_child_t entry = table_entry(RLOC16(3) + 7);
     mesh_scan_on_child_entry(&entry);
     answer_router();
-    answer_child(RLOC16(3) + 7, 0); // rx-on without addresses: asked directly
+    drain_children(); // rx-on, asked directly, no answer: the deadline ends the step
 
     const mesh_scan_router_t *r = &done_result()->routers[3];
     TEST_ASSERT_EQUAL(2, r->n_children);
@@ -1018,8 +1018,9 @@ TEST_CASE("On the deadline of a query: marks that child addresses_reported false
     TEST_ASSERT_EQUAL(5, g_fake.child_diag_calls);
     TEST_ASSERT_EQUAL(3000, g_fake.deadline_ms); // the earliest query still due at 6000 ms
 
-    expire(2999); // not due yet
+    expire(2999); // not due yet: an early delivery only re-arms, for the 1 ms left
     TEST_ASSERT_EQUAL(1, view().children_queried);
+    TEST_ASSERT_EQUAL(1, g_fake.deadline_ms);
 
     expire(1); // 6000 ms
     TEST_ASSERT_EQUAL(4, view().children_queried);
@@ -1034,6 +1035,20 @@ TEST_CASE("On the deadline of a query: marks that child addresses_reported false
         TEST_ASSERT_EQUAL(0, child_of(res, rloc16)->n_addrs);
     }
     TEST_ASSERT_FALSE(res->partial); // a child's flag does not set partial
+}
+
+TEST_CASE("On an answer without an address list from a waiting child: leaves it waiting, the deadline marks it not reported",
+          "[mesh_scan]")
+{
+    child_step(1);
+    answer_child(RLOC16(3) + 1, 0); // e.g. the REST API's own query answered through the shared callback slot
+    TEST_ASSERT_EQUAL(0, view().children_queried);
+    TEST_ASSERT_EQUAL(MESH_SCAN_RUNNING, view().state);
+
+    drain_children();
+    const mesh_scan_child_t *c = child_of(done_result(), RLOC16(3) + 1);
+    TEST_ASSERT_FALSE(c->addresses_reported);
+    TEST_ASSERT_EQUAL(0, c->n_addrs);
 }
 
 TEST_CASE("On the last answer: takes the snapshot, state done", "[mesh_scan]")

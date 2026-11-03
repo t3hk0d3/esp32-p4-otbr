@@ -10,10 +10,12 @@
 //
 // The child address step (spec 3.4, ruling R14) uses otThreadSendDiagnosticGet, which otMeshDiagCancel does not
 // cover. OpenThread's netdiag client keeps ONE callback slot: every send replaces the callback and its context, and
-// the vendored GUI/REST API (esp_br_web_api.c) sends through the same client. So the context carries only the scan
-// generation, an answer is matched to its child by the peer address (the child's RLOC), and errors are ignored: a
-// scan-owned deadline per query gives up on children that don't answer. If the GUI/REST sends during the step, our
-// answers may go to its callback; the deadline then marks those children not reported, which is accepted.
+// the vendored GUI/REST API (esp_br_web_api.c) sends through the same client. So the callback context carries the
+// generation of the LATEST send, not of the query being answered. An answer is matched to its child by the peer
+// address (the child's RLOC), and the scan's gen/phase check is a second guard. An answer without an IPv6 Address
+// List TLV is dropped, and errors are ignored: a scan-owned deadline per query gives up on children that don't
+// answer. If the GUI/REST sends during the step, our answers may go to its callback; the deadline then marks those
+// children not reported, which is accepted.
 #include <stdatomic.h>
 #include <stdint.h>
 #include <string.h>

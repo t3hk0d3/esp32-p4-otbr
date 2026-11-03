@@ -113,6 +113,7 @@ static void fail(mesh_scan_error_t error)
 {
     s.ops.disarm_cap();
     drop_result();
+    memset(s.slots, 0, sizeof(s.slots)); // no pointer into the freed children arrays survives
     s.state = MESH_SCAN_FAILED;
     s.error = error;
     s.current = NO_ROUTER;
@@ -379,6 +380,7 @@ esp_err_t mesh_scan_core_start(void)
         goto out;
     }
     drop_result();
+    memset(s.slots, 0, sizeof(s.slots));
     memset(s.children_capacity, 0, sizeof(s.children_capacity));
     s.routers = 0;
     s.queried = 0;
@@ -691,8 +693,10 @@ out:
 void mesh_scan_on_child_diag(uint32_t gen, uint16_t peer_rloc16, const uint8_t (*addrs)[16], uint8_t n)
 {
     lock();
-    if (gen != s.gen || !callback_enter(PHASE_CHILD_DIAG)) {
-        goto out; // a late answer of an older scan, or of this one after the step (otMeshDiagCancel can't stop it)
+    if (n == 0 || gen != s.gen || !callback_enter(PHASE_CHILD_DIAG)) {
+        // No address list (e.g. an answer to the REST API's own query), or a late answer of an older scan, or of this
+        // one after the step (otMeshDiagCancel can't stop it): not ours to close a child with.
+        goto out;
     }
     ask_slot_t *slot = NULL;
     for (int i = 0; i < MESH_SCAN_CHILD_QUERIES && !slot; i++) {

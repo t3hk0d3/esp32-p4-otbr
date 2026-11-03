@@ -99,7 +99,10 @@ HOME_HITS = f"""((ds, lk) => {{
   const x0 = h.x - h.w / 2, x1 = h.x + h.w / 2, y0 = h.y - h.h / 2, y1 = h.y + h.h / 2;
   const hits = {FOOTPRINTS}(ds, m, labels).filter((b) => x0 < b[2] && b[1] < x1 && y0 < b[4] && b[3] < y1)
                    .map((b) => b[0]);
-  return {{hits, inside: x0 >= 0 && y0 >= 0 && x1 <= m.width && y1 <= m.height}};
+  const fps = {FOOTPRINTS}(ds, m, labels), lo = (i) => Math.min(...fps.map((b) => b[i])), hi = (i) => Math.max(...fps.map((b) => b[i]));
+  const nodes = {{x0: lo(1), x1: hi(2), y0: lo(3), y1: hi(4)}};
+  return {{hits, inside: x0 >= 0 && y0 >= 0 && x1 <= m.width && y1 <= m.height, box: {{x0, x1, y0, y1}}, nodes,
+          width: m.width, height: m.height}};
 }})"""
 
 # (ds, lk) -> {closer: a free box centre more than 12 px nearer the board than the box, or null}. Grid step 4 px.
@@ -552,20 +555,30 @@ class TestTopologyLogic:
     def test_home_box_crowded_on_every_side_still_finds_a_clear_spot_and_the_map_grows(
         self,
     ):
-        # On a board ringed by linked routers and many children: the box overlaps nothing, lies inside the map, and
-        # the map is larger than the same mesh's map without the box would need.
+        # On a board ringed by fully linked routers and many children: the box overlaps nothing, lies inside the map,
+        # and the map grew for it (see below).
         got = js(
             "(() => { const ds = [{id: 'r0', kind: 'br', rloc16: 0, routerId: 0, parentId: null, thisBoard: true,"
             " leader: false, addrs: []}];"
             " const lk = [];"
             " for (let i = 1; i <= 8; i++) { ds.push({id: 'r' + i, kind: 'router', rloc16: i << 10, routerId: i,"
             "   parentId: null, thisBoard: false, leader: i === 1, addrs: []}); lk.push({a: 'r0', b: 'r' + i, lqAB: 3, lqBA: 3}); }"
+            " for (let i = 1; i <= 8; i++) for (let j = i + 1; j <= 8; j++) lk.push({a: 'r' + i, b: 'r' + j, lqAB: 3, lqBA: 3});"
             " for (let k = 1; k <= 14; k++) ds.push({id: 'c' + k, kind: 'med', rloc16: k, routerId: 0, parentId: 'r0',"
             "   thisBoard: false, leader: false, addrs: []});"
             f" return {HOME_HITS}(ds, lk); }})()"
         )
         assert got["hits"] == [], got
         assert got["inside"] is True, got
+        # The map grew for the box: it sticks out of the footprint box of every node and label, and the map
+        # encloses that grown box.
+        box, nodes = got["box"], got["nodes"]
+        grown_w = max(nodes["x1"], box["x1"]) - min(nodes["x0"], box["x0"])
+        grown_h = max(nodes["y1"], box["y1"]) - min(nodes["y0"], box["y0"])
+        assert got["width"] >= grown_w and got["height"] >= grown_h, got
+        assert (
+            grown_w > nodes["x1"] - nodes["x0"] or grown_h > nodes["y1"] - nodes["y0"]
+        ), got
 
     def test_maplabel_cuts_long_names_with_an_ellipsis(self):
         # On a name longer than 18 characters: the first 17 and "…"; shorter names unchanged.
