@@ -72,6 +72,20 @@ def test_the_idf_tree_is_left_alone(idf):
         assert (example / leftover).exists()
 
 
+def test_cli_builds_the_ot_cli_example(idf):
+    example = idf / "idf" / "examples" / "openthread" / "ot_cli"
+    example.mkdir(parents=True)
+    (example / "CLI_MARKER").write_text("")
+    reply = flash(idf, "cli")
+    assert reply.returncode == 0, reply.stderr
+    assert "CLI_MARKER" in (idf / "seen").read_text().split()
+
+
+def test_the_work_directory_is_removed_afterwards(idf):
+    flash(idf, "rcp")
+    assert list((idf / "tmp").iterdir()) == []
+
+
 def test_an_unknown_example_is_refused(idf):
     reply = flash(idf, "ncp")
     assert reply.returncode == 2
