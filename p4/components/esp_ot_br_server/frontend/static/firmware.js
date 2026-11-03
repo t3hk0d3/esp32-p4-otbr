@@ -262,7 +262,7 @@ function install(card) {
 /* ---- radio recovery ---- */
 
 function recover() {
-  if (kit.isBusy() || !env.confirm('Rewrite the C6 base image over the maintenance jumper? The Thread network stops ' +
+  if (kit.isBusy() || !env.confirm('Rewrite the radio co-processor base image over the maintenance jumper? The Thread network stops ' +
                                    'while it runs; the radio firmware may have to be installed again afterwards.'))
     return Promise.resolve(null);
   return kit.runOp(function() {
