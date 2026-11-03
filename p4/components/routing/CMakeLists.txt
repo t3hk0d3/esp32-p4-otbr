@@ -9,6 +9,9 @@ endif()
 
 # routing_types.h and settings.h sit next to the sources and are part of the public interface (routing.h includes
 # them), so "." is a public include directory.
-idf_component_register(SRCS ${pure_srcs} "ot_ops.c"
+# openthread is public: routing.h names otInstance (routing_on_border_router_up).
+idf_component_register(SRCS ${pure_srcs} "ot_ops.c" "task.c" "console.c"
                        INCLUDE_DIRS "include" "."
-                       PRIV_REQUIRES nvs_flash log openthread)
+                       REQUIRES openthread
+                       PRIV_REQUIRES nvs_flash log lwip esp_netif esp_timer freertos console board_cores br_core
+                                     netcfg)

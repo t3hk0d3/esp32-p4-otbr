@@ -53,6 +53,10 @@ CONFIG_LWIP_PPP_SUPPORT=y
 CONFIG_LWIP_PPP_SERVER_SUPPORT=y
 CONFIG_LWIP_NUM_NETIF_CLIENT_DATA=0
 
+# Sockets: the HTTP server takes most of the default 10; mesh routing needs up to 5 more (BGP: a listener and a current
+# plus a pending connection per peer; RIPng: one, never both methods at once).
+CONFIG_LWIP_MAX_SOCKETS=16
+
 # lwIP never forwards IPv4: no routing between interfaces (spec 5.13); NAT64 egress is generated locally by OpenThread.
 CONFIG_LWIP_IP_FORWARD=n
 
