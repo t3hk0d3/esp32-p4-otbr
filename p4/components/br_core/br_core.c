@@ -680,7 +680,7 @@ void br_core_get_trel(br_core_trel_t *out)
     const otTrelPeer *peer;
 
     out->state_valid = true;
-    out->active = otTrelIsEnabled(instance);
+    out->active = otTrelIsEnabled(instance) && otThreadGetDeviceRole(instance) != OT_DEVICE_ROLE_DISABLED;
     out->peers = otTrelGetNumberOfPeers(instance);
     if (counters) {
         out->tx_packets = counters->mTxPackets;

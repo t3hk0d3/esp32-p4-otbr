@@ -22,6 +22,53 @@ bool netcfg_ip6_udp_drop(bool input_is_mgmt, uint16_t dest_port, uint16_t trel_p
     return input_is_mgmt && trel_port != 0 && dest_port == trel_port;
 }
 
+#define IP6_FIXED_HLEN 40
+#define NEXTH_HOP_BY_HOP 0
+#define NEXTH_UDP 17
+#define NEXTH_ROUTING 43
+#define NEXTH_FRAGMENT 44
+#define NEXTH_DEST_OPTS 60
+#define EXT_HEADERS_MAX 8 // more than any real packet carries; bounds the walk
+
+bool netcfg_ip6_udp_dest_port(const uint8_t *pkt, size_t len, uint16_t *dest_port)
+{
+    if (len < IP6_FIXED_HLEN) {
+        return false;
+    }
+    uint8_t next = pkt[6];
+    size_t off = IP6_FIXED_HLEN;
+
+    for (int i = 0; i <= EXT_HEADERS_MAX; i++) {
+        switch (next) {
+        case NEXTH_UDP:
+            if (len < off + 8) {
+                return false;
+            }
+            *dest_port = (uint16_t)((pkt[off + 2] << 8) | pkt[off + 3]);
+            return true;
+        case NEXTH_HOP_BY_HOP:
+        case NEXTH_ROUTING:
+        case NEXTH_DEST_OPTS:
+            if (len < off + 2) {
+                return false;
+            }
+            next = pkt[off];
+            off += ((size_t)pkt[off + 1] + 1) * 8;
+            break;
+        case NEXTH_FRAGMENT:
+            if (len < off + 8 || (((pkt[off + 2] << 8) | pkt[off + 3]) & 0xfff8) != 0) {
+                return false;
+            }
+            next = pkt[off];
+            off += 8;
+            break;
+        default:
+            return false;
+        }
+    }
+    return false;
+}
+
 netcfg_route_choice_t netcfg_ip6_route_choice(bool split, bool src_is_mgmt, bool original_is_mgmt, bool original_is_null,
                                               bool dest_on_link_elsewhere)
 {

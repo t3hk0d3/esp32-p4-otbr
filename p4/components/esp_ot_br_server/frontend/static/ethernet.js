@@ -298,7 +298,8 @@ function trelView(trel, mode) {
   if (!trel.enabled) {
     v.chip = 'Off';
     v.chipClass = 'chip';
-    v.hint = 'Thread mesh links use the radio only.';
+    v.hint = trel.active === true ? 'Turning off: TREL still runs and stops at the next Thread start.'
+                                  : 'Thread mesh links use the radio only.';
   } else if (trel.active === null || trel.active === undefined) {
     v.chip = 'Unknown';
     v.chipClass = 'chip chip-warn';
@@ -502,7 +503,7 @@ function render() {
   show('ackRow', tagged.length > 0);
   setText('vlanList', tagged.map(function(t) { return 'VLAN ' + t; }).join(' and '));
   $('ackBox').checked = ack;
-  $('applyBtn').disabled = kit.isBusy() || !canApply();
+  $('applyBtn').disabled = kit.isBusy() || trelSending || !canApply();
   if (trel !== undefined)
     renderTrel();
 }
@@ -539,12 +540,20 @@ function renderTrel() {
 
 function refreshTrel() {
   return kit.request('GET', '/device/status', {timeoutMs : 5000}).then(function(r) {
-    if (r.status !== 200 || !r.body)
+    if (r.status !== 200 || !r.body) {
+      setText('trel-stale', 'The TREL state could not be read: ' + kit.failure(r));
+      show('trel-stale', true);
       return false;
+    }
+    show('trel-stale', false);
     trel = r.body.trel === undefined ? null : r.body.trel;
     renderTrel();
     return true;
-  }, function() { return false; });
+  }, function() {
+    setText('trel-stale', 'The TREL state could not be read: no answer from the device.');
+    show('trel-stale', true);
+    return false;
+  });
 }
 
 /* The Off/On switch. Alone it is sent at once (no trial); with other changes pending it joins them. */
@@ -669,7 +678,7 @@ function openReview() {
 }
 
 function apply() {
-  if (!draft || kit.isBusy() || !canApply())
+  if (!draft || kit.isBusy() || trelSending || !canApply())
     return Promise.resolve(null);
   var body, reach = L.reachText(draft);
   try {

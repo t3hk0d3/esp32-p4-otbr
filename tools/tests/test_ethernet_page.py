@@ -904,6 +904,15 @@ class TestTrelLogic:
         )
         assert r == [{"what": "TREL (Thread over Ethernet)", "from": "On", "to": "Off"}]
 
+    def test_off_while_still_running_says_so(self):
+        # On a saved Off that OpenThread has not applied yet (lock busy): Off, with a hint that TREL still runs.
+        r = eth(
+            "L.trelView({enabled: false, active: true, peers: 1, tx_packets: 0, tx_failures: 0, rx_packets: 0,"
+            " peer_list: []}, 'single')"
+        )
+        assert r["chip"] == "Off"
+        assert "still runs" in r["hint"]
+
     def test_request_body_carries_trel(self):
         d = draft() | {"trel": False}
         assert eth(f"L.requestBody({json.dumps(d)}).trel") is False
@@ -1075,6 +1084,53 @@ class TestTrelCard:
         """
         )
         assert r == [False, "TREL off.", False, True, "true"]
+
+    def test_failed_status_refresh_marks_the_card_stale(self):
+        # On a status poll that fails after a good one: the stale line names the failure; the next good poll hides it.
+        r = scenario(
+            page(
+                "ethernet",
+                "(() => { let n = 0; return (u, o) => o.method === 'PUT' ? ({status: 500, body: {}})"
+                " : u === '/device/status' ? (n++ === 1 ? ({status: 503, body: {error: 'busy', detail: 'try again'}})"
+                f" : ({{status: 200, body: {TREL_STATUS}}})) : u === '/device/diag' ? ({{status: 200, body: H.DIAG}})"
+                " : ({status: 200, body: H.NETWORK}); })()",
+            )
+            + START
+            + """
+            const before = t.el('trel-stale').hidden();
+            await t.page.refreshTrel();
+            const failed = [t.el('trel-stale').hidden(), t.el('trel-stale').textContent];
+            await t.page.refreshTrel();
+            return [before, failed, t.el('trel-stale').hidden()];
+        """
+        )
+        assert r[0] is True
+        assert r[1][0] is False
+        assert "could not be read" in r[1][1]
+        assert r[2] is True
+
+    def test_apply_waits_while_the_switch_is_being_sent(self):
+        # On Apply while the TREL PUT is still in flight: Apply sends nothing, so the trial never carries a stale trel.
+        r = scenario(
+            page(
+                "ethernet",
+                routes(
+                    status_js=TREL_STATUS,
+                    put="{status: 200, body: {status: 'applied'}}",
+                ),
+            )
+            + START
+            + """
+            const sending = t.page.setTrel(false);
+            t.el('if-single-edit').click(); t.el('if-single-staticbtn').click(); t.el('if-single-cidr').type('10.0.0.2/24');
+            t.el('reviewBtn').click();
+            const disabled = t.el('applyBtn').disabled;
+            await t.page.apply();
+            await sending;
+            return [disabled, t.calls.filter((c) => c.method === 'PUT').length];
+        """
+        )
+        assert r == [True, 1]
 
     def test_running_trel_off_is_shown_pressed_off(self):
         r = scenario(

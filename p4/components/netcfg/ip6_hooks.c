@@ -8,8 +8,6 @@
 #include "lwip/netif.h"
 #include "lwip/pbuf.h"
 #include "lwip/prot/ip6.h"
-#include "lwip/prot/udp.h"
-#include "lwip/def.h"
 #include "sdkconfig.h"
 #include "esp_netif.h"
 #include "esp_netif_net_stack.h"
@@ -66,18 +64,13 @@ static netcfg_dest_kind_t classify(struct netif *inp, const ip6_addr_t *dest)
 #define TREL_PORT 0
 #endif
 
-// UDP port rules (netcfg_ip6_udp_drop). Only a UDP header right after the fixed IPv6 header is looked at: TREL is
-// sent without extension headers, and a datagram with them is left to the other rules.
+// UDP port rules (netcfg_ip6_udp_drop). The UDP header is looked for behind any extension headers, as lwIP finds it.
 static bool udp_drop(const struct pbuf *p, bool input_is_mgmt)
 {
-    const struct ip6_hdr *header = p->payload;
+    uint16_t dest_port;
 
-    if (!input_is_mgmt || IP6H_NEXTH(header) != IP6_NEXTH_UDP || p->len < IP6_HLEN + UDP_HLEN) {
-        return false;
-    }
-    const struct udp_hdr *udp = (const struct udp_hdr *)((const uint8_t *)p->payload + IP6_HLEN);
-
-    return netcfg_ip6_udp_drop(true, lwip_ntohs(udp->dest), TREL_PORT);
+    return input_is_mgmt && netcfg_ip6_udp_dest_port(p->payload, p->len, &dest_port) &&
+           netcfg_ip6_udp_drop(true, dest_port, TREL_PORT);
 }
 
 int __wrap_lwip_hook_ip6_input(struct pbuf *p, struct netif *inp)

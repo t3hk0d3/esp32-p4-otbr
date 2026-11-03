@@ -1,3 +1,4 @@
+#include <string.h>
 #include "unity.h"
 #include "unity_test_runner.h"
 #include "netcfg_isolation.h"
@@ -88,4 +89,70 @@ TEST_CASE("On a build without TREL (port 0): nothing is dropped", "[netcfg]")
 {
     TEST_ASSERT_FALSE(netcfg_ip6_udp_drop(true, 0, 0));
     TEST_ASSERT_FALSE(netcfg_ip6_udp_drop(true, 12390, 0));
+}
+
+// IPv6 packet: fixed header with `next`, then `ext` (already laid out), then an 8-byte UDP header to `port`.
+static size_t build_packet(uint8_t *buf, uint8_t next, const uint8_t *ext, size_t ext_len, uint16_t port)
+{
+    memset(buf, 0, 40);
+    buf[0] = 0x60;
+    buf[6] = next;
+    memcpy(buf + 40, ext, ext_len);
+    uint8_t *udp = buf + 40 + ext_len;
+
+    memset(udp, 0, 8);
+    udp[2] = port >> 8;
+    udp[3] = port & 0xff;
+    return 40 + ext_len + 8;
+}
+
+TEST_CASE("On a UDP header right after the fixed header: its port is found", "[netcfg]")
+{
+    uint8_t buf[128];
+    uint16_t port = 0;
+    const size_t len = build_packet(buf, 17, NULL, 0, 12390);
+
+    TEST_ASSERT_TRUE(netcfg_ip6_udp_dest_port(buf, len, &port));
+    TEST_ASSERT_EQUAL_UINT16(12390, port);
+}
+
+TEST_CASE("On UDP behind Destination Options and Hop-by-Hop headers: its port is found", "[netcfg]")
+{
+    uint8_t buf[128];
+    uint16_t port = 0;
+    // Hop-by-Hop (8 bytes) -> Destination Options (16 bytes) -> UDP
+    const uint8_t ext[24] = {60, 0, [8] = 17, 1};
+    const size_t len = build_packet(buf, 0, ext, sizeof(ext), 12390);
+
+    TEST_ASSERT_TRUE(netcfg_ip6_udp_dest_port(buf, len, &port));
+    TEST_ASSERT_EQUAL_UINT16(12390, port);
+}
+
+TEST_CASE("On the first fragment of a UDP datagram: its port is found", "[netcfg]")
+{
+    uint8_t buf[128];
+    uint16_t port = 0;
+    const uint8_t ext[8] = {17, 0, 0x00, 0x01}; // offset 0, more fragments
+    const size_t len = build_packet(buf, 44, ext, sizeof(ext), 12390);
+
+    TEST_ASSERT_TRUE(netcfg_ip6_udp_dest_port(buf, len, &port));
+    TEST_ASSERT_EQUAL_UINT16(12390, port);
+}
+
+TEST_CASE("On a later fragment, a header past the end, or no UDP: no port", "[netcfg]")
+{
+    uint8_t buf[128];
+    uint16_t port = 0;
+    const uint8_t later[8] = {17, 0, 0x00, 0x08}; // offset 8
+    size_t len = build_packet(buf, 44, later, sizeof(later), 12390);
+
+    TEST_ASSERT_FALSE(netcfg_ip6_udp_dest_port(buf, len, &port));
+    len = build_packet(buf, 17, NULL, 0, 12390);
+    TEST_ASSERT_FALSE(netcfg_ip6_udp_dest_port(buf, len - 1, &port));
+    const uint8_t long_opts[8] = {17, 4}; // claims 40 bytes, only 8 + UDP present
+    len = build_packet(buf, 60, long_opts, sizeof(long_opts), 12390);
+    TEST_ASSERT_FALSE(netcfg_ip6_udp_dest_port(buf, len, &port));
+    len = build_packet(buf, 6, NULL, 0, 12390); // TCP
+    TEST_ASSERT_FALSE(netcfg_ip6_udp_dest_port(buf, len, &port));
+    TEST_ASSERT_FALSE(netcfg_ip6_udp_dest_port(buf, 20, &port));
 }
