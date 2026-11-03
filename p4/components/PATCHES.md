@@ -110,6 +110,8 @@ reason, spec reference.
    httpd refuses (and would shadow) any GET path registered after it, so `GET /device/status` and
    `GET /device/sniffer.pcap` could not be added from `app_main` after `esp_br_web_start`. `app_main` sets
    `device_api_register` as the callback before starting the server. (spec 5.7)
+   `EXTRA_HANDLER_SLOTS` (the handlers the callback and the catch-all may add to `max_uri_handlers`) is 20 since the
+   network names (`GET`/`PUT /device/names`, spec 2026-11-03-network-names-design.md).
 11. Applied (Task 18). `esp_ot_br_server`: the Thread REST background worker `thread_rest` (`rest_process_task`,
    `src/esp_br_web_api.c`) is created with `xTaskCreatePinnedToCore(..., 1)` instead of `xTaskCreate`. Reason: it takes
    the OpenThread lock every 100 ms and was unpinned, so it could run on core 0 next to the network path; it belongs to

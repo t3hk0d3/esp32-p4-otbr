@@ -10,9 +10,6 @@
 extern "C" {
 #endif
 
-/** Default DHCP client name (replaces lwIP's CONFIG_LWIP_LOCAL_HOSTNAME). */
-#define NETNAMES_DEFAULT_DHCP_NAME "esp-otbr"
-
 /** Which apply steps a save needs. */
 typedef struct {
     bool hostname;    /**< mdns_hostname_set */

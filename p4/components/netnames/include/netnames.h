@@ -14,6 +14,8 @@ extern "C" {
 
 /** Buffer size of every name: up to 63 characters (bytes of UTF-8 for the HA name) plus the terminator. */
 #define NETNAMES_NAME_LEN 64
+/** Default DHCP client name (replaces lwIP's CONFIG_LWIP_LOCAL_HOSTNAME). */
+#define NETNAMES_DEFAULT_DHCP_NAME "esp-otbr"
 
 /** What the user sets. Empty hostname / DHCP name = the default; ha_name is used only when it does not follow. */
 typedef struct {

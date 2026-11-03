@@ -18,6 +18,8 @@ Everything is on port 80, no authentication. Errors on `/device/*` are JSON `{"e
 | `GET /device/network` | active config, pending trial with remaining time, interface state | |
 | `PUT /device/network` | store a trial network config and reboot into it | 400 `invalid_config` (`detail` names the field); 409 `busy`; 413 |
 | `POST /device/network/confirm` | commit the trial config | 409 `no_trial`; 403 `wrong_interface` |
+| `GET /device/names` | network names: `hostname`, `hostname_default`, `hostname_live` (differs after an mDNS conflict rename), `ha_name_follows_hostname`, `ha_name`, `ha_name_effective`, `http_advert`, `http_advert_available` (false in split mode), `dhcp_name`, `dhcp_name_default`, `mode` | |
+| `PUT /device/names` | body `{hostname, ha_name_follows_hostname, ha_name, http_advert, dhcp_name}` (all required; empty hostname / DHCP name = default); applied live, no reboot; replies the GET body plus `applied` and, when a live step failed, `detail` | 400 `invalid_config` with `field` (`hostname`, `ha_name`, `dhcp_name`, or a missing / wrongly typed key, `body` for no JSON object); 413 `payload_too_large`; 500 `storage_failed` |
 | `POST /device/reboot` | reboot | 409 `busy` while an update or push runs |
 | `GET /metrics` | device health and Thread figures in the Prometheus text format, see [metrics](metrics.md) | 500 `no_memory` |
 
