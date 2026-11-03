@@ -1052,6 +1052,30 @@ class TestTrelCard:
         assert "confirm or revert" in r[0]
         assert r[1:] == ["true", False]
 
+    def test_review_left_with_only_trel_is_applied_without_a_reboot(self):
+        # An interface edit undone after TREL joined the draft: Apply sends a trel-only PUT, the board applies it live.
+        r = scenario(
+            page(
+                "ethernet",
+                routes(
+                    status_js=TREL_STATUS,
+                    put="{status: 200, body: {status: 'applied'}}",
+                ),
+            )
+            + START
+            + """
+            t.el('if-single-edit').click(); t.el('if-single-tagged').click(); t.el('if-single-vlan').type('7');
+            await t.page.setTrel(false);
+            t.el('if-single-untagged').click();
+            t.el('reviewBtn').click();
+            await t.page.apply();
+            const put = t.calls.find((c) => c.method === 'PUT');
+            return [JSON.parse(put.body).trel, t.el('netMsg').textContent, t.page.kit.isWaiting(),
+                    t.el('actionBar').hidden(), t.el('trel-off').getAttribute('aria-pressed')];
+        """
+        )
+        assert r == [False, "TREL off.", False, True, "true"]
+
     def test_running_trel_off_is_shown_pressed_off(self):
         r = scenario(
             page(

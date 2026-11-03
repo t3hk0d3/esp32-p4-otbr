@@ -685,6 +685,17 @@ function apply() {
             note('netMsg', kit.failure(r), true);
             return r;
           }
+          var status = r.body && r.body.status;
+          if (status === 'applied' || status === 'saved') {
+            // Only TREL differed from the running config: applied live, no trial and no reboot.
+            cur = clone(draft);
+            review = false;
+            ack = false;
+            note('netMsg', status === 'saved' ? r.body.detail : 'TREL ' + (draft.trel ? 'on.' : 'off.'), false);
+            render();
+            refreshTrel();
+            return r;
+          }
           note('netMsg', 'Saved as a trial. The board is rebooting: open ' + reach + ' and press Keep new settings ' +
                              'within 5 minutes.', false);
           kit.waitForBoard('netMsg', 'The board did not come back at this address. Open ' + reach + ' and press ' +

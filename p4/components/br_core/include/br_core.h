@@ -92,7 +92,8 @@ typedef struct {
 /**
  * Set whether TREL runs. Before br_core_start it only sets the value the start applies; afterwards it is applied to
  * OpenThread at once (otTrelSetEnabled; TREL then runs whenever Thread is up). Storing the setting is the caller's job
- * (netcfg_set_trel). ESP_ERR_NOT_SUPPORTED in a build without TREL; ESP_ERR_TIMEOUT when the OpenThread lock was not free
+ * (netcfg_set_trel). ESP_ERR_NOT_SUPPORTED in a build without TREL; ESP_ERR_INVALID_STATE when OpenThread is not up (the
+ * value is applied when it starts); ESP_ERR_TIMEOUT when the OpenThread lock was not free
  * within 1 s (the value is still applied at the next OpenThread start).
  */
 esp_err_t br_core_set_trel(bool enabled);

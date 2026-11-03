@@ -275,7 +275,9 @@ static void fill_trel(device_api_trel_t *out)
 
     memset(out, 0, sizeof(*out));
     if (!t) {
+#if CONFIG_OPENTHREAD_RADIO_TREL
         out->built = true; // state_valid false: the state is written as unknown
+#endif
         out->enabled = netcfg_trel_enabled();
         return;
     }
@@ -1176,6 +1178,12 @@ static esp_err_t network_put_trel(httpd_req_t *req, bool enabled)
     err = br_core_set_trel(enabled);
     if (err == ESP_ERR_TIMEOUT) {
         return send_json(req, "{\"status\":\"saved\",\"detail\":\"OpenThread is busy: the setting applies at its next start\"}");
+    }
+    if (err == ESP_ERR_INVALID_STATE) {
+        return send_json(req, "{\"status\":\"saved\",\"detail\":\"Thread is not running: the setting applies when it starts\"}");
+    }
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        return send_json(req, "{\"status\":\"saved\",\"detail\":\"this firmware is built without TREL\"}");
     }
     return send_json(req, "{\"status\":\"applied\"}");
 }

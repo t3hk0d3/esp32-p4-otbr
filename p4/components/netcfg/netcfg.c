@@ -145,6 +145,7 @@ static bool running_is_defaults(void)
     netcfg_config_t defaults;
 
     netcfg_defaults(&defaults);
+    defaults.trel = s.running.trel; // only the interfaces decide whether a fallback can help
     return netcfg_equal(&defaults, &s.running);
 }
 
@@ -185,7 +186,10 @@ esp_err_t netcfg_start(esp_eth_handle_t eth)
         ESP_LOGE(TAG, "the stored network config cannot be applied (%s): falling back to the defaults", esp_err_to_name(err));
         snprintf(s.fallback_error, sizeof(s.fallback_error), "%s", esp_err_to_name(err));
         netcfg_ifaces_destroy();
+        const bool trel = s.running.trel; // the stored TREL choice survives an interface fallback
+
         netcfg_defaults(&s.running);
+        s.running.trel = trel;
         s.fallback = true;
         err = bring_up(eth);
         action = netcfg_apply_decide(err == ESP_OK, false, true);

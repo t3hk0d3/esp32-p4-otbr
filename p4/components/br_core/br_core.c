@@ -636,11 +636,15 @@ esp_err_t br_core_set_trel(bool enabled)
 #if CONFIG_OPENTHREAD_RADIO_TREL
     atomic_store(&s_trel_wanted, enabled);
     if (!ot_callable()) {
-        return ESP_OK; // applied by the next esp_openthread_init
+        return ESP_ERR_INVALID_STATE; // stored, applied by the next esp_openthread_init
     }
     if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(TREL_SET_LOCK_MS))) {
         ESP_LOGW(TAG, "TREL %s: OpenThread busy, applied at the next start", enabled ? "on" : "off");
         return ESP_ERR_TIMEOUT;
+    }
+    if (!ot_callable()) { // OpenThread stopped while this task waited for the lock
+        esp_openthread_lock_release();
+        return ESP_ERR_INVALID_STATE;
     }
     otTrelSetEnabled(esp_openthread_get_instance(), enabled);
     esp_openthread_lock_release();
@@ -664,6 +668,10 @@ void br_core_get_trel(br_core_trel_t *out)
     out->built = true;
     out->enabled = br_core_trel_wanted();
     if (!ot_callable() || !esp_openthread_lock_acquire(pdMS_TO_TICKS(STATUS_LOCK_MS))) {
+        return;
+    }
+    if (!ot_callable()) { // OpenThread stopped while this task waited for the lock
+        esp_openthread_lock_release();
         return;
     }
     otInstance *instance = esp_openthread_get_instance();
