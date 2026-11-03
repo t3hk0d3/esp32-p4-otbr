@@ -33,8 +33,9 @@ is accepted while Thread runs (ot-br-posix answers 409): the board stops Thread,
 it (the old network's pending dataset is deleted); the dataset it already has is accepted without a restart. A partial dataset (e.g. only `channel`) still answers 409
 while Thread runs: use `/node/dataset/pending` to change a running network. The mode, fault reason
 and version information are in `/device/status`, which works in every mode. Home Assistant's OpenThread Border Router integration
-connects to `http://<board>` (verified with `python-otbr-api` by `tools/otbr_compat.py`; a run against a real Home Assistant is
-still open, see `docs/phase0/RESULTS.md`).
+connects to `http://<board>`: `tools/otbr_compat.py` checks the `python-otbr-api` calls it makes against the board
+(`delete_active_dataset`, its fallback for a router without factory reset, is not used here: the board supports
+`DELETE /node`); see [Home Assistant](home-assistant.md).
 
 ## Web UI
 
@@ -45,6 +46,8 @@ VLANs and addresses, with a review step before the reboot), `/firmware.html` (P4
 recovery with the jumper), `/capture.html` (packet capture) and `/diagnostics.html`. Every device page shows the trial
 banner with **Keep new settings** while network settings are on trial. They use only `/device/*`, so they also work in
 `RADIO_FAULT` and while sniffing.
+
+<img src="images/dashboard.png" width="640" alt="Dashboard: Border router running, with the Thread network, identifiers, board firmware, radio, Ethernet, prefix delegation, packet capture and load cards, and the Thread address table">
 
 ## Creating a Thread network
 

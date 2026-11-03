@@ -4,6 +4,8 @@
 per-task CPU share, core, priority, minimum free stack, internal RAM and PSRAM figures, OpenThread lock statistics (count,
 longest hold and wait, holder), uptime and last reset reason. The Diagnostics page (`/diagnostics.html`) shows it refreshed every 2 s.
 
+<img src="images/diagnostics.png" width="640" alt="Diagnostics page: CPU load per core over 1, 10 and 60 s, internal RAM and PSRAM, OpenThread lock statistics and the task table">
+
 - The lock statistics cover everything that takes the OpenThread lock through `esp_openthread_lock_acquire/release`
   (libopenthread, `br_core`, the Thread REST server). The border router internals in the prebuilt `libopenthread_br.a`
   only use the task-switching lock, which is not counted: their holds show up only as wait time of the others.

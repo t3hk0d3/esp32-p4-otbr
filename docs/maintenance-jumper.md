@@ -5,6 +5,8 @@ With it fitted the P4 can write the C6's bootloader, partition table and updater
 boot when the updater does not answer or its version differs from the one embedded in the P4 app (once per boot), or on
 demand with `make recover BOARD=<board>` (`POST /device/radio/recover`, also the "Recover C6" button on the Firmware page).
 
+![Radio recovery card on the Firmware page with the jumper fitted: Recover C6 and Show C6 console](images/firmware-recovery.png)
+
 The request answers 200 once the base image was rewritten, with `rcp` telling what is on the C6 afterwards
 (`no rcp firmware`, or the installed version); only a failed recovery answers 502 `recovery_failed`. Recovery restores the
 C6 base image only; the RCP firmware is left alone if its slot is intact, otherwise upload it again (`make radio`).

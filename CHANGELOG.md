@@ -14,12 +14,17 @@ release's `versions.txt`.
   over the P4-C6 SDIO lines; it installs the C6 bootloader, partition table and updater, after which `c6_rcp.bin` is
   uploaded as usual. Nothing is written to the C6 without that upload. Tested on the board with an ESP-Hosted 0.0.27
   stand-in, not yet on an untouched factory C6. See `docs/first-install.md`, Path 1.
+- `docs/home-assistant.md`: adding the board to Home Assistant, moving it onto the preferred Thread network, phones and
+  Matter, several boards, troubleshooting.
 
 ### Changed
 
 - `POST /device/radio/firmware` refuses `c6_installer.bin` on a C6 that already runs the updater (400 `invalid_image`),
   before anything is erased.
 - `docs/first-install.md`: the jumper path is now Path 2 and the USB-UART path Path 3.
+- The "settings on trial" banner (Dashboard and device pages) shows the time left as a countdown tile, with the
+  explanation next to it, **Keep new settings** on the right and a bar that drains over the 5 minutes. On a phone the
+  button goes below at full width.
 
 ## [0.2.1] - 2026-11-02
 

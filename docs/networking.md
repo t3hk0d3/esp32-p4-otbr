@@ -21,12 +21,27 @@ curl -X PUT http://<board>/device/network -d '{"mode":"split","mgmt":{"vlan":10,
 Shape: `{"mode": "single"|"split", "single"|"mgmt"|"thread_bb": {"vlan": 0|1..4094, "ipv4": {"dhcp": true} | {"dhcp": false, "addr", "mask", "gw", "dns"}}}`.
 `vlan: 0` is untagged. The switch port must carry the VLANs before you apply.
 
+<table>
+<tr>
+<td width="33%"><img src="images/ethernet.png" alt="Ethernet page: the Single port and Split management and Thread setup cards, with the live interface and its addresses"></td>
+<td width="33%"><img src="images/ethernet-edit.png" alt="Ethernet page while editing: Split is picked, VLAN 10 for management and VLAN 20 with a static address for the Thread backbone, and the bar says how many changes are not applied yet"></td>
+<td width="33%"><img src="images/ethernet-review.png" alt="Review of the changes: a table of each setting now and after apply, the steps after the reboot, and the tick that the switch port carries VLAN 10 and 20 tagged"></td>
+</tr>
+<tr>
+<td>1. Pick the setup.</td>
+<td>2. Edit the interfaces.</td>
+<td>3. Review, then apply and reboot.</td>
+</tr>
+</table>
+
 ## Confirm-or-revert
 
 The change is stored as a trial and the board reboots into it. You then have 5 minutes to call
 `POST /device/network/confirm` (or press **Keep new settings** on any device page) from the management side, that is the `single`
 interface or `mgmt` of the trial config. If you do not (or the board resets first), the trial is dropped and the board
 reboots into the previous config. If the board is unreachable after a network change: wait 5 minutes, or use the console.
+
+<img src="images/ethernet-trial.png" width="640" alt="Ethernet page after the reboot into split mode: a banner says these settings are on trial and the board goes back in 4:08 unless you keep them, with the Keep new settings button">
 
 Console (`make monitor`, USB-C port, 115200 baud, any build): `net show` prints the active config, trial and interfaces;
 `net reset` restores `single`, untagged, DHCPv4 and reboots.

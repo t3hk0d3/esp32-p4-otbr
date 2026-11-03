@@ -22,11 +22,17 @@
         </div>
     </div>
 
-    <div class="disabled-banner hidden" id="trialBanner">
-        <strong>New network settings are on trial.</strong>
-        The board goes back to the previous settings in <span id="trialRemaining">-</span> unless you keep them from the
-        management interface.
-        <button class="btn btn-primary btn-sm" id="confirmBtn" type="button">Keep new settings</button>
+    <div class="trial-banner hidden" id="trialBanner">
+        <div class="trial-row">
+            <div class="trial-clock"><span class="trial-time" id="trialRemaining">-</span><span class="trial-unit">left</span></div>
+            <div class="trial-text">
+                <strong>New network settings are on trial</strong>
+                <p>The board goes back to the previous settings unless you keep them from the management
+                    interface.</p>
+            </div>
+            <button class="btn btn-primary" id="confirmBtn" type="button">Keep new settings</button>
+        </div>
+        <div class="trial-track" aria-hidden="true"><div class="trial-fill" id="trialFill"></div></div>
     </div>
     <div class="form-hint" id="confirmMsg" role="status" aria-live="polite"></div>
     <div class="form-hint hidden" id="fw-stale" role="status" aria-live="polite"></div>

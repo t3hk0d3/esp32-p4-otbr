@@ -550,3 +550,24 @@ tr:hover td { background: var(--primary-light); }
 .console { background: #1e1e1e; color: #e6e6e6; border-radius: 6px; padding: 12px 14px; font-size: 13px; font-family: 'Courier New', Consolas, monospace; overflow-x: auto; white-space: pre; }
 .card h2.card-title { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
 .card-sub { font-size: 14px; color: var(--text-light); margin-bottom: 12px; }
+
+/* Trial banner (device pages and Dashboard): countdown tile, text, Keep button, and a bar that drains over the 5 minutes */
+.trial-banner { background: #fff8e6; border: 1px solid #f5c26b; border-radius: var(--radius); margin-bottom: 20px; overflow: hidden; }
+.trial-row { display: flex; align-items: center; gap: 18px; padding: 16px 18px; }
+.trial-clock { flex: 0 0 auto; min-width: 84px; display: flex; flex-direction: column; align-items: center; padding: 8px 12px;
+    border-radius: 6px; background: #fff; border: 1px solid #f5c26b; }
+.trial-time { font-size: 26px; font-weight: 700; line-height: 1.1; color: #8a4700; font-variant-numeric: tabular-nums; }
+.trial-unit { font-size: 12px; color: #a0661a; }
+.trial-text { flex: 1 1 auto; min-width: 0; }
+.trial-text strong { display: block; font-size: 15px; color: #6b3a00; margin-bottom: 2px; }
+.trial-text p { margin: 0; font-size: 14px; color: #7a5520; line-height: 1.45; }
+.trial-text a { font-weight: 600; white-space: nowrap; }
+.trial-row .btn { flex: 0 0 auto; }
+.trial-track { height: 4px; background: #fbe3b5; }
+.trial-fill { height: 100%; width: 100%; background: var(--primary); transition: width 1s linear; }
+@media (max-width: 600px) {
+    .trial-row { flex-wrap: wrap; gap: 12px; }
+    .trial-text { flex-basis: calc(100% - 110px); }
+    .trial-row .btn { flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .trial-fill { transition: none; } }

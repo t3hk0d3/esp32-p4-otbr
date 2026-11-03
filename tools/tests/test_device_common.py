@@ -1,9 +1,10 @@
 """Shared code of the device pages (BDD: DeviceCommon, DeviceKit). Runs static/device_common.js under node."""
 
+import json
 import re
 
 import pytest
-from device_js import REPO, kit, logic, needs_node, scenario
+from device_js import KIT_HTML, REPO, kit, logic, needs_node, scenario
 
 C6_BOARD = REPO / "common" / "c6_board" / "c6_board.h"
 PARTITIONS = REPO / "p4" / "partitions.csv"
@@ -48,6 +49,17 @@ class TestCommonLogic:
         # On 299 s: "4:59"; on 0: "0:00".
         assert common("L.formatRemaining(299)") == "4:59"
         assert common("L.formatRemaining(0)") == "0:00"
+
+    def test_trial_left_is_a_share_of_the_five_minute_trial(self):
+        # On 300 s: 100; 150 s: 50; 0 s: 0; outside 0..300 it is clamped; whole percent.
+        assert common("[300, 150, 0, 400, -5, 100].map(L.trialLeftPct)") == [
+            100,
+            50,
+            0,
+            100,
+            0,
+            33,
+        ]
 
     @pytest.mark.parametrize(
         ("seconds", "text"),
@@ -346,6 +358,19 @@ class TestKit:
         )
         assert r == ["1:40", "1:00", "1:30", True]
 
+    def test_trial_bar_shows_the_share_of_the_trial_left(self):
+        # On remaining_s 150 of the 300 s trial, then 60 s later: the bar is half full, then a third full.
+        r = scenario(
+            kit()
+            + f"""
+            const net = {NET};
+            t.kit.renderTrial(net(150).body); const first = t.el('trialFill').style.width;
+            await t.advance(60000); t.kit.tickTrial();
+            return [first, t.el('trialFill').style.width];
+        """
+        )
+        assert r == ["50%", "30%"]
+
     def test_no_trial_hides_the_banner(self):
         # On trial null after a trial: the banner is hidden.
         r = scenario(
@@ -416,6 +441,21 @@ class TestKitReview:
 @needs_node
 class TestKitPrReview:
     """PR review findings"""
+
+    def test_page_without_the_trial_bar_still_counts_down_and_hides_the_banner(self):
+        # On a cached page from before the bar (no #trialFill), remaining_s 5 and 6 s: the countdown ends and the
+        # banner is hidden, no error.
+        old_page = KIT_HTML.replace('<div id="trialFill"></div>', "")
+        r = scenario(
+            f"const t = H.makeEnv({{html: {json.dumps(old_page)}, absent: ['trialFill'], kit: {{actionIds: []}}}}, "
+            + "() => { throw new Error('rebooting'); });"
+            + f"""
+            t.kit.start(); t.kit.renderTrial(({NET})(5).body);
+            await t.advance(6000);
+            return [t.el('trialRemaining').textContent, t.el('trialBanner').hidden()];
+        """
+        )
+        assert r == ["0:00", True]
 
     def test_a_wake_while_a_request_runs_does_not_start_a_second_one(self):
         # On visibilitychange while the first request is pending: no second request until it answers.

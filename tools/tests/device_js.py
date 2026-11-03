@@ -48,7 +48,7 @@ def page(name, routes_js="() => ({status: 200, body: {}})"):
 
 
 KIT_HTML = (
-    '<div id="trialBanner" class="hidden"><span id="trialRemaining"></span>'
+    '<div id="trialBanner" class="hidden"><span id="trialRemaining"></span><div id="trialFill"></div>'
     '<button id="confirmBtn"></button><div id="confirmMsg"></div></div>'
     '<div id="sec"></div><button id="actA"></button><button id="actB"></button><div id="msg"></div>'
 )

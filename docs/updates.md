@@ -14,6 +14,8 @@ written to the inactive pair, the web image is read back and checked against its
 is switched. The reply is 200 and the board reboots about a second later. A new app that does not run for 60 s with the
 HTTP server listening is rolled back by the bootloader. `tools/make_bundle.py --help` shows how to inspect a bundle.
 
+<img src="images/firmware.png" width="640" alt="Firmware page: the Border router (ESP32-P4) and Radio (ESP32-C6) cards with the installed versions and an install box each, and the Radio recovery card with the jumper fitted">
+
 To let the board fetch the bundle itself: `curl -X POST -d '{"url": "http://host/otbr.bundle"}' http://<board>/device/ota/url`.
 Only `http://` URLs work (no certificate bundle is built in; `https://` gives 400 `https_not_supported`).
 
