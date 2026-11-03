@@ -238,6 +238,41 @@
         <div id="global-errors" role="alert"></div>
     </div>
 
+    <div class="hidden" id="trelSection">
+        <h2 class="section-title">Thread over Ethernet</h2>
+        <section class="card" id="trel">
+            <div class="iface-head">
+                <div>
+                    <div class="iface-title">
+                        <h3>TREL</h3>
+                        <span class="chip" id="trel-chip">-</span>
+                        <span class="chip" id="trel-where">-</span>
+                    </div>
+                    <p class="iface-role">Carries Thread mesh links over Ethernet to other border routers of the same
+                        Thread network on this link. Thread devices still use the radio.</p>
+                </div>
+                <div class="seg" role="group" aria-label="TREL">
+                    <button type="button" id="trel-off" aria-pressed="false">Off</button>
+                    <button type="button" id="trel-on" aria-pressed="true">On</button>
+                </div>
+            </div>
+            <dl class="stats" id="trel-stats">
+                <div><dt>Peers</dt><dd id="trel-peers">-</dd></div>
+                <div><dt>Sent</dt><dd id="trel-tx">-</dd></div>
+                <div><dt>Received</dt><dd id="trel-rx">-</dd></div>
+                <div><dt>Send failures</dt><dd id="trel-fail">-</dd></div>
+            </dl>
+            <div class="table-wrap hidden" id="trel-peerwrap">
+                <table class="diff-table">
+                    <thead><tr><th scope="col">Extended address</th><th scope="col">Address</th></tr></thead>
+                    <tbody id="trel-peerlist"></tbody>
+                </table>
+            </div>
+            <p class="form-hint" id="trel-hint"></p>
+            <div class="form-hint" id="trelMsg" role="status" aria-live="polite"></div>
+        </section>
+    </div>
+
     <div class="action-bar hidden" id="actionBar">
         <span class="action-bar-text" id="barText"></span>
         <button class="btn btn-outline" id="discardBtn" type="button">Discard changes</button>

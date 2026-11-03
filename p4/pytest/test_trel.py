@@ -73,7 +73,12 @@ def test_trel_switches_live_without_a_reboot(dut, stored_dataset, base_url):
         trel = status(base_url)
         assert trel["enabled"] is False
         assert trel["active"] in (False, None)
-        assert requests.get(f"{base_url}/device/network", timeout=REQUEST_TIMEOUT_S).json()["trial"] is None
+        assert (
+            requests.get(
+                f"{base_url}/device/network", timeout=REQUEST_TIMEOUT_S
+            ).json()["trial"]
+            is None
+        )
     finally:
         reply = put_trel(base_url, True)
     assert reply.status_code == 200, reply.text
