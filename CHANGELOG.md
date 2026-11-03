@@ -9,6 +9,11 @@ release's `versions.txt`.
 
 ### Added
 
+- TREL (Thread over Ethernet): Thread mesh links over the backbone interface to other border routers of the same Thread
+  network, next to the 15.4 radio. On by default; switched live (no trial, no reboot) on the Ethernet page or with
+  `"trel"` in `PUT /device/network`. State, peers and counters in `/device/status`, on the Ethernet page and as
+  `br_trel_*` metrics. In split mode the TREL port is dropped on `mgmt`. The app image grows by about 19 KB. See
+  `docs/networking.md`.
 - First install without wires: on a factory C6 (ESP-Hosted firmware, no jumper) the board reports `RADIO_FAULT`
   `esp-hosted firmware`, and uploading the new release file `c6_installer.bin` sends it through ESP-Hosted's own update
   over the P4-C6 SDIO lines; it installs the C6 bootloader, partition table and updater, after which `c6_rcp.bin` is

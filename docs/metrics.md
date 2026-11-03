@@ -73,6 +73,9 @@ Task names are FreeRTOS names. When two tasks share a name, the second one is la
 | `br_border_routing_ra_total`, `br_border_routing_rs_total` | counter | `event` = rx, tx_success, tx_failure |
 | `br_srp_server_state` | state set | `state` = disabled, running, stopped |
 | `br_srp_hosts`, `br_srp_services` | gauge | |
+| `br_trel_enabled`, `br_trel_active`, `br_trel_peers` | gauge | |
+| `br_trel_packets_total`, `br_trel_bytes_total` | counter | `direction` = tx, rx |
+| `br_trel_tx_failures_total` | counter | |
 | `br_thread_collect_age_seconds` | gauge | |
 | `br_thread_collect_failures_total` | counter | |
 

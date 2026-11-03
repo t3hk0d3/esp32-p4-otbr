@@ -2,7 +2,7 @@
 
 Building and flashing: [building.md](building.md). Conventions (naming, formatting, errors, tests): `STYLEGUIDE.md`. Design:
 `docs/superpowers/specs/2026-10-30-esp32-p4-otbr-design.md` (the whole firmware), plus the later feature specs in
-`docs/superpowers/specs/` (device pages, Prometheus metrics, network names) and the plans in `docs/superpowers/plans/` (among them the
+`docs/superpowers/specs/` (device pages, Prometheus metrics, network names, TREL) and the plans in `docs/superpowers/plans/` (among them the
 no-wires first install through ESP-Hosted).
 
 ## Repository layout
