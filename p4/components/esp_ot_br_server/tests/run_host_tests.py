@@ -33,11 +33,18 @@ def main():
     header = (ROOT / 'private_include/esp_br_web_api.h').read_text()
     state = api[api.index('static const char s_ot_state'):api.index('/*------', api.index('static const char s_ot_state'))]
     epskc = api[api.index('static const char *epskc_state_to_string'):api.index('/**', api.index('static const char *epskc_state_to_string'))]
-    api = state + epskc + api[api.index('#define THREAD_REST_COLLECTION_LIMIT'):]
+    # The /topology collector too (patch 17): the TLV-1 guard of its answer callback is tested through it.
+    collector = api[api.index('static thread_diagnosticTlv_set_t *s_diagnosticTlv_set'):api.index('static thread_node_information_t get_openthread_node_information')]
+    collect_start = api.index('cJSON *handle_ot_resource_network_diagnostics_request()')
+    collector += api[collect_start:api.index('/*------', collect_start)]
+    api = state + epskc + 'static SemaphoreHandle_t s_diagnostic_semaphore;\n' + collector + api[api.index('#define THREAD_REST_COLLECTION_LIMIT'):]
     web = web[web.index('#define THREAD_REST_MAX_BODY'):web.index('/*-----------------------------------------------------\nNote: Http Server WEB-GUI API')]
+    topology_base = base[base.index('esp_err_t initialize_thread_diagnosticTlv_list'):base.index('cJSON *Timestamp2Json')]
     base = base[base.index('cJSON *Timestamp2Json'):base.index('                       Set Thread dataset')]
     base = base[:base.rfind('/*------')]
     header = header[header.index('/** Internal Thread REST contract'):header.index('/*---------------------------------------------------------------------\n            ESP Thread Border Router Wer Server REST API')]
+    base_header = (ROOT / 'private_include/esp_br_web_base.h').read_text()
+    topology_types = '#define RLOC_STRING_MAX_SIZE 7\n' + base_header[base_header.index('typedef struct thread_diagnosticTlv_list {'):base_header.index('} thread_node_information_t;') + len('} thread_node_information_t;')]
     headers = set(re.findall(r'#include [<"](openthread/[^">]+)[">]', (ROOT / 'tests/host_platform.h').read_text()))
     cjson = IDF / 'components/json/cJSON'
     if not cjson.exists():
@@ -53,7 +60,7 @@ def main():
         functions(json.loads(ast_path.read_text()), table)
         # host_platform.c too: its netdiag_mux_send_get stub (patch 17) forwards to the mocked otThreadSendDiagnosticGet.
         platform = (ROOT / 'tests/host_platform.c').read_text()
-        used = set(re.findall(r'\bot[A-Z]\w*\b', api + web + base + platform))
+        used = set(re.findall(r'\bot[A-Z]\w*\b', api + web + base + topology_base + platform))
         mocks = '#include "host_platform.h"\n#include <string.h>\n'
         mocks += (ROOT / 'tests/openthread_mock.inc').read_text()
         custom = json.loads((ROOT / 'tests/mock_functions.json').read_text())
@@ -75,7 +82,7 @@ def main():
                 body = 'return 0;'
             mocks += f'{result} {name}({signature}) {{ {body} }}\n'
         (directory / 'openthread_mock.c').write_text(mocks)
-        (directory / 'rest_api.inc').write_text(header + '\n' + base + '\n' + api)
+        (directory / 'rest_api.inc').write_text(header + '\n' + topology_types + '\n' + topology_base + '\n' + base + '\n' + api)
         # Definitions the slice needs from before it (route slot counts, the patch 12 gate macro) are taken from the source.
         slot_defines = re.findall(r'^#define REST_(?:PATH_COUNT|METHOD_COUNT|ROUTE_SLOTS)\b.*$', web_full, re.M)
         gate = re.search(r'#define NETCFG_GATE\(.*?while \(0\)', web_full, re.S).group(0)

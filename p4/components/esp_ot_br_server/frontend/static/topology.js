@@ -949,7 +949,9 @@ function renderProgress(state) {
 
 function failedText(error) { return FAILED_TEXT[error] || 'The scan failed (' + (error || 'unknown') + ')'; }
 
-function follow(state) {
+/* `fromPost`: the state is the POST's own reply. Only then does the age rule decide between a fresh load and a saved
+   result; a scan this page followed while it ran is live whenever its done answer arrives. */
+function follow(state, fromPost) {
   if (state && state.state === 'running') {
     renderProgress(state);
     schedulePoll(POLL_MS);
@@ -962,7 +964,8 @@ function follow(state) {
     var at = env.now() - age * 1000;
     last = {savedAt : at, result : state.result};
     L.saveResult(storage, state.result, at);
-    showResult(last, age <= FRESH_AGE_S); /* an older one is the board's earlier scan: shown as saved, at its time */
+    /* a POST answered with an older done is the board's earlier scan: shown as saved, at its time */
+    showResult(last, !fromPost || age <= FRESH_AGE_S);
   } else if (wasScanning && state && state.state === 'idle') {
     /* The board forgot the scan this page was following: it restarted mid-scan. */
     renderStart(INTERRUPTED);
@@ -1014,7 +1017,7 @@ function load() {
   renderProgress(null);
   kit.request('POST', '/device/topology', {timeoutMs : 5000}).then(function(r) {
     if ((r.status === 202 || r.status === 200) && r.body) {
-      follow(r.body);
+      follow(r.body, true);
     } else {
       scanning = false;
       renderStart(L.conflictText(r.status, r.body));

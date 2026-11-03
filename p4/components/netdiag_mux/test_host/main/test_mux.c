@@ -33,7 +33,7 @@ typedef struct {
     void *ctx[MAX_CALLS];
 } record_t;
 
-static record_t s_rec[5];
+static record_t s_rec[9];
 
 static void record(record_t *r, otError error, otMessage *msg, const otMessageInfo *info, void *ctx)
 {
@@ -69,6 +69,38 @@ static void cb_d(otError e, otMessage *m, const otMessageInfo *i, void *c)
 static void cb_e(otError e, otMessage *m, const otMessageInfo *i, void *c)
 {
     record(&s_rec[4], e, m, i, c);
+}
+
+static void cb_f(otError e, otMessage *m, const otMessageInfo *i, void *c)
+{
+    record(&s_rec[5], e, m, i, c);
+}
+
+static void cb_g(otError e, otMessage *m, const otMessageInfo *i, void *c)
+{
+    record(&s_rec[6], e, m, i, c);
+}
+
+static void cb_h(otError e, otMessage *m, const otMessageInfo *i, void *c)
+{
+    record(&s_rec[7], e, m, i, c);
+}
+
+static void cb_i(otError e, otMessage *m, const otMessageInfo *i, void *c)
+{
+    record(&s_rec[8], e, m, i, c);
+}
+
+static const otIp6Address *rloc_0400(void);
+static const otIp6Address *rloc_0401(void);
+static otError send(const otIp6Address *dest, otReceiveDiagnosticGetCallback cb, void *ctx, bool filter_peer);
+
+/** A listener that records and then sends again (as the scan's child step does) from inside dispatch. */
+static void cb_resend(otError e, otMessage *m, const otMessageInfo *i, void *c)
+{
+    record(&s_rec[4], e, m, i, c);
+    send(rloc_0401(), cb_i, NULL, false); // a new callback and a re-send of a known one
+    send(rloc_0401(), cb_resend, c, false);
 }
 
 static const uint8_t TLVS[] = { 0, 1, 8 };
@@ -282,31 +314,30 @@ TEST_CASE("On a failed ops.send with a known callback: the context and filter st
     TEST_ASSERT_EQUAL_PTR((void *)1, s_rec[0].ctx[0]);
 }
 
-TEST_CASE("On a fifth distinct callback: returns OT_ERROR_NO_BUFS without calling ops.send", "[netdiag_mux]")
+TEST_CASE("On a ninth distinct callback: returns OT_ERROR_NO_BUFS without calling ops.send", "[netdiag_mux]")
 {
     reset();
-    send(rloc_0400(), cb_a, NULL, false);
-    send(rloc_0400(), cb_b, NULL, false);
-    send(rloc_0400(), cb_c, NULL, false);
-    send(rloc_0400(), cb_d, NULL, false);
-    TEST_ASSERT_EQUAL_INT(OT_ERROR_NO_BUFS, send(rloc_0400(), cb_e, NULL, false));
-    TEST_ASSERT_EQUAL_INT(4, s_send_calls);
+    otReceiveDiagnosticGetCallback cbs[] = { cb_a, cb_b, cb_c, cb_d, cb_e, cb_f, cb_g, cb_h, cb_i };
+    for (int i = 0; i < NETDIAG_MUX_MAX_LISTENERS; i++) {
+        TEST_ASSERT_EQUAL_INT(OT_ERROR_NONE, send(rloc_0400(), cbs[i], NULL, false));
+    }
+    TEST_ASSERT_EQUAL_INT(OT_ERROR_NO_BUFS, send(rloc_0400(), cbs[8], NULL, false));
+    TEST_ASSERT_EQUAL_INT(8, s_send_calls);
 }
 
-TEST_CASE("On a fifth distinct callback: the four listeners keep getting answers and it gets none", "[netdiag_mux]")
+TEST_CASE("On a ninth distinct callback: the eight listeners keep getting answers and it gets none", "[netdiag_mux]")
 {
     reset();
-    send(rloc_0400(), cb_a, NULL, false);
-    send(rloc_0400(), cb_b, NULL, false);
-    send(rloc_0400(), cb_c, NULL, false);
-    send(rloc_0400(), cb_d, NULL, false);
-    send(rloc_0400(), cb_e, NULL, false);
+    otReceiveDiagnosticGetCallback cbs[] = { cb_a, cb_b, cb_c, cb_d, cb_e, cb_f, cb_g, cb_h, cb_i };
+    for (int i = 0; i < 9; i++) {
+        send(rloc_0400(), cbs[i], NULL, false);
+    }
     otMessageInfo info = from(rloc_0400());
     netdiag_mux_core_dispatch(OT_ERROR_NONE, MSG, &info);
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 8; i++) {
         TEST_ASSERT_EQUAL_INT(1, s_rec[i].calls);
     }
-    TEST_ASSERT_EQUAL_INT(0, s_rec[4].calls);
+    TEST_ASSERT_EQUAL_INT(0, s_rec[8].calls);
 }
 
 TEST_CASE("On a NULL dest or callback: returns OT_ERROR_INVALID_ARGS without calling ops.send", "[netdiag_mux]")
@@ -341,6 +372,37 @@ TEST_CASE("On an answer: every matching listener gets OT_ERROR_NONE, the message
     }
 }
 
+TEST_CASE("On a listener that sends again from inside dispatch: the current answer still reaches the same listeners",
+          "[netdiag_mux]")
+{
+    reset();
+    send(rloc_0400(), cb_a, NULL, false);
+    send(rloc_0400(), cb_resend, (void *)1, false);
+    send(rloc_0400(), cb_b, NULL, false); // after the re-sender
+    otMessageInfo info = from(rloc_0400());
+    netdiag_mux_core_dispatch(OT_ERROR_NONE, MSG, &info);
+    TEST_ASSERT_EQUAL_INT(1, s_rec[0].calls);
+    TEST_ASSERT_EQUAL_INT(1, s_rec[4].calls);
+    TEST_ASSERT_EQUAL_INT(1, s_rec[1].calls); // a later listener still gets it
+    TEST_ASSERT_EQUAL_INT(0, s_rec[8].calls); // the listener registered by the re-send does not get this answer
+}
+
+TEST_CASE("On a unicast address with byte 14 == 0xfc whose IID is not the locator form: still filtered",
+          "[netdiag_mux]")
+{
+    reset();
+    otIp6Address fc = locator(0x0400);
+    fc.mFields.m8[14] = 0xfc; // byte 14 looks like an ALOC, but the IID is ff:fe00 only in bytes 11-13
+    fc.mFields.m8[8] = 0x02;  // a non-zero IID start: not the locator form
+    send(&fc, cb_a, NULL, true);
+    otMessageInfo other = from(rloc_0401());
+    netdiag_mux_core_dispatch(OT_ERROR_NONE, MSG, &other);
+    TEST_ASSERT_EQUAL_INT(0, s_rec[0].calls);
+    otMessageInfo same = from(&fc);
+    netdiag_mux_core_dispatch(OT_ERROR_NONE, MSG, &same);
+    TEST_ASSERT_EQUAL_INT(1, s_rec[0].calls);
+}
+
 TEST_CASE("On an error: no listener is called", "[netdiag_mux]")
 {
     reset();
@@ -366,7 +428,7 @@ TEST_CASE("On an answer with no listeners: nothing is called", "[netdiag_mux]")
     reset();
     otMessageInfo info = from(rloc_0400());
     netdiag_mux_core_dispatch(OT_ERROR_NONE, MSG, &info);
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 9; i++) {
         TEST_ASSERT_EQUAL_INT(0, s_rec[i].calls);
     }
 }

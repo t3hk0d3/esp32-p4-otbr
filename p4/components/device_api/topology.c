@@ -39,7 +39,11 @@ void device_api_topology_start_reply(esp_err_t start_err, int mode, bool long_op
         set_reply(out, 202, NULL, "");
         break;
     case ESP_ERR_NOT_ALLOWED: // the mode left BR_RUNNING before the start; `mode` was read after the refusal
-        set_mode_reply(out, mode);
+        if (mode == BR_MODE_BR_RUNNING) { // and is back by now: it flickered, so a retry may work
+            set_reply(out, 503, "busy", "OpenThread is busy, retry");
+        } else {
+            set_mode_reply(out, mode);
+        }
         break;
     case ESP_ERR_NOT_FINISHED:
         set_reply(out, 409, "busy", "mesh diagnostics are in use");

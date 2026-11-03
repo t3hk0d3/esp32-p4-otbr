@@ -215,7 +215,7 @@ diagnostics take each other's answers. A new component, `netdiag_mux`, owns that
 - **Sending:** every sender calls `netdiag_mux_send_get(dest, tlvs, count, cb, ctx, filter_peer)` instead of the
   OpenThread call. It runs on the OpenThread task, or with the OpenThread lock held.
 - **Listeners:** the mux keeps one listener per callback function, with the latest context it was sent with. When
-  `filter_peer` is set and `dest` is unicast, the listener also keeps `dest`. The table holds at most 4 listeners.
+  `filter_peer` is set and `dest` is unicast, the listener also keeps `dest`. The table holds at most 8 listeners.
 - **Answers** (no error, with a message) go to every listener that either has no peer filter or whose `dest` equals
   the answer's peer address. A CoAP response comes from the address the request was sent to.
 - **Errors** (timeouts, no message) are dropped. Every current callback ignores them already.

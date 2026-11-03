@@ -586,11 +586,14 @@ class TestTopologyLogic:
             "[L.mapLabel('a-very-long-device-name'), L.mapLabel('This border router')]"
         ) == ["a-very-long-devic…", "This border router"]
 
-    def test_source_defines_the_board_label_once(self):
-        # On the page half: it uses TopologyLogic's board label instead of a copy of its own.
-        from device_js import STATIC
-
-        assert (STATIC / "topology.js").read_text().count("'This border router'") == 1
+    def test_board_map_label_is_the_logic_boards_label(self):
+        # On the map: the board's node label is TopologyLogic's BOARD_LABEL, "This border router".
+        r = run(
+            "await loaded(); return [L.BOARD_LABEL,"
+            " node('r34').findAll((e) => e.tag === 'text').map((e) => e.textContent)];"
+        )
+        assert r[0] == "This border router"
+        assert r[0] in r[1], r
 
     def test_source_has_no_random_numbers(self):
         # On any input: the layout does not use Math.random.
@@ -949,6 +952,17 @@ class TestTopologyPage:
         assert r[1] == f"Saved result from {r[5]}, 10 min ago"
         assert r[2:5] == [True, False, "Load fresh"]
         assert r[6] is True
+
+    def test_followed_scan_done_by_polling_is_live_whatever_its_age(self):
+        # On a scan the page followed while running whose done poll arrives with age_s 20: the green pill (the age
+        # rule is for the POST's own reply only).
+        r = run(
+            "await start(); S.post = {status: 202, body: RUNNING(0, 0)};"
+            " S.gets = [RUNNING(1, 2), DONE(RF, 20)]; t.el('t-load').click(); await t.advance(3000);"
+            " return [vis('t-loaded'), t.el('t-pill').classes.has('t-pill-live'),"
+            " t.el('t-pill').classes.has('t-pill-saved')];"
+        )
+        assert r == [True, True, False], r
 
     def test_failed_scan_shows_its_error_and_keeps_the_last_result(self):
         # On failed: the error in the start view; the last result stays.

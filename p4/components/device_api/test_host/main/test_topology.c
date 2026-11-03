@@ -99,11 +99,17 @@ TEST_CASE("On ESP_ERR_NOT_ALLOWED (the mode left BR_RUNNING before the start): 4
     TEST_ASSERT_EQUAL_STRING("busy", r.error);
     TEST_ASSERT_EQUAL_STRING("mode SNIFFER", r.detail);
 
-    // Even when the mode passed reads BR_RUNNING again by then.
+}
+
+TEST_CASE("On ESP_ERR_NOT_ALLOWED with the re-read mode BR_RUNNING (the mode flickered): 503 busy, OpenThread is busy, "
+          "retry", "[device_api][topology]")
+{
+    device_api_topology_reply_t r;
+
     device_api_topology_start_reply(ESP_ERR_NOT_ALLOWED, BR_MODE_BR_RUNNING, false, "", false, "", &r);
-    TEST_ASSERT_EQUAL_INT(409, r.status);
+    TEST_ASSERT_EQUAL_INT(503, r.status);
     TEST_ASSERT_EQUAL_STRING("busy", r.error);
-    TEST_ASSERT_EQUAL_STRING("mode BR_RUNNING", r.detail);
+    TEST_ASSERT_EQUAL_STRING("OpenThread is busy, retry", r.detail);
 }
 
 TEST_CASE("On ESP_ERR_NOT_FINISHED: 409 busy, detail mesh diagnostics are in use", "[device_api][topology]")

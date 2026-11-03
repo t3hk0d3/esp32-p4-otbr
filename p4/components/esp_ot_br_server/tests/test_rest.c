@@ -367,7 +367,7 @@ static void test_actions(void)
     assert(s_rest_mesh_action && s_rest_mesh_action->active);
     /* Patch 17: discovery sends through netdiag_mux with the peer filter (multicast: unfiltered in the mux anyway). */
     assert(mock_netdiag_sends == 1 && mock_netdiag_filtered_sends == 1);
-    /* An answer without the Ext Address TLV (the scan asks for TLV 8 only) creates no device. */
+    /* An answer without TLV 0 creates no device. */
     unsigned devices = rest_count(s_rest_devices);
     mock_deliver_diagnostic(s_rest_mesh_action->token);
     assert(rest_count(s_rest_devices) == devices);
@@ -571,6 +571,48 @@ static void test_netcfg_gate(void)
     }
 }
 
+/* Patch 17: /topology collects an answer only when it has the Address16 TLV; others would land under "0xffee". */
+static void deliver_with_tlvs(const otNetworkDiagTlv *tlvs, unsigned count)
+{
+    memcpy(mock_diag_tlvs, tlvs, count * sizeof(*tlvs));
+    mock_diag_tlv_count = count;
+    mock_deliver_diagnostic(0);
+}
+static void deliver_answers(void)
+{
+    otNetworkDiagTlv without_address16[] = {{.mType = OT_NETWORK_DIAGNOSTIC_TLV_MODE}};
+    otNetworkDiagTlv with_address16[] = {{.mType = OT_NETWORK_DIAGNOSTIC_TLV_SHORT_ADDRESS, .mData.mAddr16 = 0x0400}};
+    deliver_with_tlvs(without_address16, 1);
+    deliver_with_tlvs(with_address16, 1);
+}
+static void deliver_only_without_address16(void)
+{
+    otNetworkDiagTlv without_address16[] = {{.mType = OT_NETWORK_DIAGNOSTIC_TLV_MODE}};
+    deliver_with_tlvs(without_address16, 1);
+}
+static void test_topology_collector(void)
+{
+    mock_reset();
+    s_diagnostic_semaphore = xSemaphoreCreateBinary();
+    xSemaphoreGive(s_diagnostic_semaphore);
+    /* An answer without TLV 1 is skipped: nothing under "0xffee", and it does not count towards the router count. */
+    mock_on_delay = deliver_answers;
+    cJSON *result = handle_ot_resource_network_diagnostics_request();
+    assert(cJSON_GetArraySize(result) == 1);
+    assert(cJSON_GetObjectItem(cJSON_GetArrayItem(result, 0), "Rloc16")->valueint == 0x0400);
+    assert(s_diag_response_count == 1);
+    cJSON_Delete(result);
+    /* Only such answers: no entry, and the collection is not ended early by them (it runs to the hard cap). */
+    mock_reset();
+    xSemaphoreGive(s_diagnostic_semaphore);
+    mock_on_delay = deliver_only_without_address16;
+    result = handle_ot_resource_network_diagnostics_request();
+    assert(cJSON_GetArraySize(result) == 0);
+    assert(s_diag_response_count == 0);
+    assert(mock_ticks >= DIAG_MAX_TIMEOUT_MS);
+    cJSON_Delete(result);
+}
+
 int main(void)
 {
     mock_reset();
@@ -590,6 +632,7 @@ int main(void)
     test_worker_does_not_touch_the_lock_when_not_ready();
     test_worker_polls_under_the_lock_when_ready();
     test_netcfg_gate();
+    test_topology_collector();
     rest_collection_delete(&s_rest_actions, NULL, esp_openthread_get_instance());
     rest_collection_delete(&s_rest_devices, NULL, esp_openthread_get_instance());
     rest_collection_delete(&s_rest_diagnostics, NULL, esp_openthread_get_instance());

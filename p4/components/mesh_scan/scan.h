@@ -61,8 +61,8 @@ void mesh_scan_set_ops(const mesh_scan_ops_t *ops);
 
 /**
  * Start a scan. ESP_OK when discover started; ESP_ERR_NOT_ALLOWED when the mode is not BR_RUNNING;
- * ESP_ERR_INVALID_STATE when a scan runs (or the scan mutex was never created); ESP_ERR_NO_MEM (failed, no_memory); ESP_ERR_NOT_FINISHED on OT_ERROR_BUSY (failed, busy); ESP_FAIL on any other
- * discover error (failed, stopped).
+ * ESP_ERR_INVALID_STATE when a scan runs (or the scan mutex was never created); ESP_ERR_NO_MEM (failed, no_memory);
+ * ESP_ERR_NOT_FINISHED on OT_ERROR_BUSY (failed, busy); ESP_FAIL on any other discover error (failed, stopped).
  */
 esp_err_t mesh_scan_core_start(void);
 

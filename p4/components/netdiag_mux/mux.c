@@ -78,8 +78,12 @@ void netdiag_mux_core_dispatch(otError error, otMessage *msg, const otMessageInf
     if (error != OT_ERROR_NONE || !msg || !info) {
         return; // timeouts and failures: every listener ignores them
     }
+    // A snapshot of the table: a callback may send again, which can register a listener or change one; neither
+    // changes who gets this answer.
+    listener_t snapshot[NETDIAG_MUX_MAX_LISTENERS];
+    memcpy(snapshot, s_listeners, sizeof(snapshot));
     for (size_t i = 0; i < NETDIAG_MUX_MAX_LISTENERS; i++) {
-        const listener_t l = s_listeners[i]; // a copy: the callback may send again
+        const listener_t l = snapshot[i];
         if (!l.cb || (l.filtered && memcmp(l.peer.mFields.m8, info->mPeerAddr.mFields.m8, sizeof(l.peer)))) {
             continue;
         }

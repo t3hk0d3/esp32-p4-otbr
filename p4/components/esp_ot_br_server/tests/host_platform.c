@@ -112,9 +112,26 @@ int xTaskCreate(void (*task)(void *), const char *name, unsigned stack, void *ar
     }
     return 1;
 }
+TickType_t mock_ticks;
+void (*mock_on_delay)(void);
+otNetworkDiagTlv mock_diag_tlvs[8];
+unsigned mock_diag_tlv_count;
 void vTaskDelay(uint32_t ticks)
 {
-    (void)ticks;
+    mock_ticks += ticks;
+    if (mock_on_delay) {
+        void (*hook)(void) = mock_on_delay;
+        mock_on_delay = NULL;
+        hook();
+    }
+}
+TickType_t xTaskGetTickCount(void)
+{
+    return mock_ticks;
+}
+uint32_t esp_get_free_heap_size(void)
+{
+    return 1000000;
 }
 size_t strlcpy(char *dest, const char *src, size_t length)
 {

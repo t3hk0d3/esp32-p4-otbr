@@ -973,27 +973,37 @@ static void update_diagnosticTlv(char *key, thread_diagnosticTlv_list_t *diag_li
  * @param[in]  aMessageInfo  A pointer to the message info for @param aMessage. Available only when
  *                           @param aError is `OT_ERROR_NONE`.
  */
-static void get_diagnosticTlv_information(otError aError, const otMessage *aMessage, const otMessageInfo *aMessageInfo)
+static bool get_diagnosticTlv_information(otError aError, const otMessage *aMessage,
+                                          const otMessageInfo *aMessageInfo)
 {
     thread_diagnosticTlv_list_t *diag_list = (thread_diagnosticTlv_list_t *)malloc(sizeof(thread_diagnosticTlv_list_t));
     if (diag_list == NULL) {
         ESP_LOGW(API_TAG, "Diagnostic: out of memory, skipping node");
-        return;
+        return false;
     }
     otNetworkDiagTlv diagTlv;
     otNetworkDiagIterator iterator = OT_NETWORK_DIAGNOSTIC_ITERATOR_INIT;
     otError error;
     char rloc[7];
     char keyRloc[7] = "0xffee";
+    bool has_address16 = false;
     initialize_thread_diagnosticTlv_list(diag_list);
     while ((error = otThreadGetNextDiagnosticTlv(aMessage, &iterator, &diagTlv)) == OT_ERROR_NONE) {
         if (diagTlv.mType == OT_NETWORK_DIAGNOSTIC_TLV_SHORT_ADDRESS) {
             sprintf(rloc, "0x%04x", diagTlv.mData.mAddr16);
             strcpy(keyRloc, rloc);
+            has_address16 = true;
         }
         append_thread_diagnosticTlv_list(diag_list, diagTlv);
     }
+    /* Patch 17: an answer without Address16 (TLV 1), e.g. one meant for another sender, is not a router entry: skip it
+       instead of storing it under "0xffee" and counting it (it could end the collection early). */
+    if (!has_address16) {
+        destroy_thread_diagnosticTlv_list(diag_list);
+        return false;
+    }
     update_diagnosticTlv(keyRloc, diag_list);
+    return true;
 }
 
 /**
@@ -1035,9 +1045,10 @@ static void diagnosticTlv_result_handler(otError aError, otMessage *aMessage, co
         }
         if (xSemaphoreTake(s_diagnostic_semaphore, pdMS_TO_TICKS(1000)) == pdTRUE) {
             if (s_diag_collecting) {
-                get_diagnosticTlv_information(aError, aMessage, aMessageInfo);
-                s_diag_response_count++;
-                s_diag_last_response_tick = xTaskGetTickCount();
+                if (get_diagnosticTlv_information(aError, aMessage, aMessageInfo)) {
+                    s_diag_response_count++;
+                    s_diag_last_response_tick = xTaskGetTickCount();
+                }
             }
             xSemaphoreGive(s_diagnostic_semaphore);
         } else {
