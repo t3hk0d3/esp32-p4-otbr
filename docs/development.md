@@ -91,7 +91,9 @@ make lan-ping-down
   was on.
 - `pd_router`: delegating server in Docker, env `PD_HOST_IF`.
 - `routing_rig`: FRR and BIRD routers in Docker for the mesh routing tests, env `ROUTING_HOST_IF` (and `TIMEOUT=5400`:
-  the 500k-route feed alone takes minutes).
+  the 500k-route feed alone takes minutes). Flash once (`make build-test && make flash`) and pass
+  `TARGET_PYTEST=".venv/bin/pytest --skip-autoflash y"`: without it every test would flash the board again, so
+  `test_routing.py` refuses to run. The PUT validation tests (`test_routing_api.py`) need no rig and run unmarked.
 
 `test_hosted_install.py` (the no-wires first install) skips unless `OTBR_C6_STOCK_URL`, `OTBR_C6_INSTALLER` and
 `OTBR_RCP_IMAGE` are set. `OTBR_C6_STOCK_URL` is an HTTP server on the build directory of an ESP-Hosted C6 slave (e.g.
@@ -100,7 +102,10 @@ jumper (console `c6_stock_restore`, with the C6 held in reset) and hides the jum
 The board ends up in `BR_RUNNING` with the given RCP.
 
 A test that kills the radio (`rcp_kill`, `c6_hold`) leaves a flag: after an aborted run use the console `c6_hold 0` and
-reboot (and `c6_jumper_ignore 0` after an aborted `test_hosted_install.py`). A Thread peer that stops answering is fixed by an RTS reset. Test builds add console commands (`p4/main/test_cmds.c`)
+reboot (and `c6_jumper_ignore 0` after an aborted `test_hosted_install.py`). A killed `test_routing.py` or
+`test_routing_api.py` run (for example by the `timeout`) leaves the board's routing settings changed and the ones it found in
+`p4/pytest/.routing-restore.json`; put them back and delete the file (the next run refuses to start while it exists):
+`curl -X PUT http://<board>/device/routing -H 'Content-Type: application/json' -d @p4/pytest/.routing-restore.json && rm p4/pytest/.routing-restore.json`. A Thread peer that stops answering is fixed by an RTS reset. Test builds add console commands (`p4/main/test_cmds.c`)
 that the on-board tests use; never ship them.
 
 ## CI and releases

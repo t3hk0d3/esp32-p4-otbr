@@ -6,9 +6,20 @@ The routers are FRR and BIRD 2 containers on a Docker macvlan network built on t
 the LAN router's advertisements, as the board does. Every test configures the board with PUT /device/routing and
 puts back the settings it found (GET before, PUT after). No host network change.
 
+Flash once (make build-test && make flash), then run without the per-test autoflash (the module refuses to run
+without --skip-autoflash y; in a worktree point TARGET_PYTEST at the main checkout's .venv):
 Run: make test-target TEST=p4/pytest/test_routing.py MARK=routing_rig TIMEOUT=5400
+         TARGET_PYTEST=".venv/bin/pytest --skip-autoflash y"
 The 500k-route feed alone takes several minutes. The custom-prefix test needs the Thread peer (PEER_PORT) and joins it
 to the board's current Thread network as a child. The sniffer test stops Thread on the board for a few seconds.
+
+Recovery after a killed run (timeout, SIGTERM): each test writes the settings it found to
+p4/pytest/.routing-restore.json (gitignored) before changing them and deletes it once they are back. If the file is
+left over, put them back and delete it (the next run refuses to start while it exists):
+    curl -X PUT http://<board>/device/routing -H 'Content-Type: application/json' -d @p4/pytest/.routing-restore.json
+    rm p4/pytest/.routing-restore.json
+
+The PUT validation tests of spec section 9 are in test_routing_api.py (no rig, normal on-board suite).
 
 The link-local next-hop tests need a backbone without IPv6 prefixes in its router advertisements: the board sends the
 16-byte next-hop only while it has no global address there. On a LAN with SLAAC prefixes they skip.
@@ -30,6 +41,8 @@ import requests
 from conftest import start_capture, stop_capture
 
 pytestmark = pytest.mark.routing_rig
+
+RESTORE_FILE = Path(__file__).resolve().parent / ".routing-restore.json"
 
 FRR_IMAGE = "quay.io/frrouting/frr:10.4.1"
 BIRD_BASE_IMAGE = "debian:12.8-slim"
@@ -119,13 +132,32 @@ def settings_of(routing):
     return {key: routing[key] for key in ("method", "omr", "announce_ula", "bgp")}
 
 
+@pytest.fixture(scope="module", autouse=True)
+def autoflash_skipped(request):
+    """The rig tests run on a board flashed once: without --skip-autoflash y every test would flash it again."""
+    value = request.config.getoption("skip_autoflash", default=None)
+    if str(value).lower() not in ("y", "yes", "true"):
+        pytest.fail(
+            "run with --skip-autoflash y after flashing once "
+            '(TARGET_PYTEST=".venv/bin/pytest --skip-autoflash y"; see the module docstring)'
+        )
+
+
 @pytest.fixture
 def original_routing(base_url):
-    """The board's routing settings before the test; put back afterwards."""
+    """The board's routing settings before the test; put back afterwards. Also kept in RESTORE_FILE until they are back,
+    for recovery after a killed run (module docstring)."""
+    if RESTORE_FILE.exists():
+        pytest.fail(
+            f"{RESTORE_FILE} is left over from a killed run: put those settings back first (module docstring)"
+        )
     original = settings_of(get_routing(base_url))
+    RESTORE_FILE.write_text(json.dumps(original))
+    print(f"routing settings to restore saved in {RESTORE_FILE}")
     yield original
     response = put_routing(base_url, original)
     assert response.status_code == requests.codes.ok, response.text
+    RESTORE_FILE.unlink()
 
 
 def configure(base_url, original, method, omr=None, announce_ula=False, bgp=None):
@@ -874,41 +906,3 @@ class TestCustomPrefix:
                 return
             time.sleep(3)
         pytest.fail(f"the C6 has no address in both {CUSTOM} and {ula}: {addresses}")
-
-
-class TestPut:
-    """routing, PUT /device/routing on the board"""
-
-    def test_bgp_with_no_peers_is_400(self, base_url, original_routing):
-        # put: bgp with no peers is 400
-        body = {
-            "method": "bgp",
-            "omr": {"mode": "auto"},
-            "announce_ula": False,
-            "bgp": {
-                "local_asn": BOARD_ASN,
-                "router_id": None,
-                "hold_time": 90,
-                "peers": [],
-            },
-        }
-        response = put_routing(base_url, body)
-        assert response.status_code == requests.codes.bad_request, response.text
-        assert response.json() == {"error": "invalid_request", "detail": "bgp.peers"}
-        assert settings_of(get_routing(base_url)) == original_routing
-
-    @pytest.mark.parametrize("method", ["ripng", "bgp", "off"])
-    def test_every_method_but_pd_shows_pd_state_disabled(
-        self, base_url, original_routing, method
-    ):
-        # put: every method but pd shows pd.state disabled
-        bgp = bgp_settings(UNREACHABLE_PEER, BOARD_ASN) if method == "bgp" else None
-        configure(base_url, original_routing, method, bgp=bgp)
-        deadline = time.monotonic() + STATUS_TIMEOUT_S
-        pd = None
-        while time.monotonic() < deadline:
-            pd = device_status(base_url)["pd"]
-            if pd["state"] == "disabled":
-                return
-            time.sleep(1)
-        pytest.fail(f"pd is {pd} with method {method}")
