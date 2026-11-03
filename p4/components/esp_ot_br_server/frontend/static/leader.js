@@ -52,7 +52,7 @@ function view(thread, node, pendingAdj) {
   var isLeader = state === 'leader';
   var attached = attachedState(state);
   var reported = node && node.leaderData && isNum(node.leaderData.weighting) ? node.leaderData.weighting : null;
-  var leaderWeight = isLeader && ownWeight !== null ? ownWeight : reported;
+  var leaderWeight = reported !== null ? reported : isLeader ? ownWeight : null; // the partition's own figure first
   var shown = hasWeight && attached && leaderWeight !== null;
   var dirty = !!thread && isNum(pendingAdj) && pendingAdj !== adjustment;
   var shownAdj = isNum(pendingAdj) ? pendingAdj : adjustment;
@@ -213,7 +213,7 @@ function save() {
         thread = r.body;
         pending = null;
         if (r.body.applied === false)
-          note('ld-save-msg', 'Saved. ' + (r.body.detail || 'It is applied when Thread starts.'), false);
+          note('ld-save-msg', 'Saved. ' + (r.body.detail || 'It is applied within seconds or when Thread starts.'), false);
         else
           note('ld-save-msg', 'Saved.', false);
       }, function(e) { note('ld-save-msg', e.message, true); })

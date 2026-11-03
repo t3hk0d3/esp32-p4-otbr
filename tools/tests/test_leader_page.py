@@ -84,6 +84,17 @@ class TestLeaderLogic:
         assert v["leaderName"] == "this board"
         assert v["role"] == "leader"
 
+    def test_the_leader_board_shows_the_partitions_weight(self):
+        # On state leader with the adjustment changed (own 73, partition still 65): leader weight 65 from /node.
+        v = view(thread(adj=8), node("leader", 65))
+        assert v["leaderWeight"] == 65
+        assert v["ownWeight"] == 73
+
+    def test_the_leader_board_falls_back_to_its_own_weight(self):
+        # On state leader without leaderData.weighting: the leader weight is the board's own.
+        n = {"state": "leader", "leaderData": {}}
+        assert view(thread(adj=8), n)["leaderWeight"] == 73
+
     def test_an_unsaved_slider_value_asks_to_save_first(self):
         # On a pending value other than the saved one: dirty, Save enabled, button disabled, save-first hint.
         v = view(thread(adj=8), node(), pending=3)
