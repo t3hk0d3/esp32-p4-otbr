@@ -65,6 +65,7 @@ static void child(mesh_scan_router_t *r, uint16_t rloc16, uint64_t ext_addr, boo
     c->csl = false;
     ip6(c->addrs[0], addr);
     c->n_addrs = 1;
+    c->addresses_reported = true;
 }
 
 mesh_scan_result_t *sample_result(void)

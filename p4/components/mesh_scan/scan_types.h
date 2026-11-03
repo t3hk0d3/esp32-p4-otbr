@@ -47,6 +47,8 @@ typedef struct {
     bool csl;
     mesh_scan_ip6_t addrs[MESH_SCAN_MAX_CHILD_ADDRS];
     uint8_t n_addrs;
+    bool addresses_reported; /**< false: asked directly (spec 3.4) and gave no answer; true otherwise */
+    bool ask_pending;        /**< internal to scan.c: picked for the child address step, not answered yet */
 } mesh_scan_child_t;
 
 typedef struct {
@@ -108,6 +110,8 @@ typedef struct {
     mesh_scan_error_t error; /**< failed only */
     uint8_t routers;         /**< running: routers discovered, 0 until discover ends */
     uint8_t queried;         /**< running: routers finished */
+    uint16_t children_total;   /**< running: children asked for their addresses, 0 before that step */
+    uint16_t children_queried; /**< running: of those, answered or given up */
     uint32_t age_s;          /**< done and failed: seconds since the scan ended */
     const mesh_scan_result_t *result; /**< done only, non-NULL then */
 } mesh_scan_view_t;

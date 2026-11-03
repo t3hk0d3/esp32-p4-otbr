@@ -16,6 +16,8 @@ extern "C" {
 #endif
 
 #define MESH_SCAN_CAP_MS 60000
+#define MESH_SCAN_CHILD_DEADLINE_MS 5000 /**< per child address query (ruling R14) */
+#define MESH_SCAN_CHILD_QUERIES 4        /**< child address queries in flight at most */
 
 // OpenThread error codes, as plain ints so the host tests need no OpenThread headers (static-asserted in ot_ops.c).
 #define MESH_SCAN_OT_ERROR_NONE 0
@@ -31,6 +33,13 @@ struct mesh_scan_ops {
     int (*discover)(void);                         /**< start discover; OpenThread error code */
     int (*query_child_table)(uint16_t rloc16);     /**< start a child-table query; OpenThread error code */
     int (*query_child_addrs)(uint16_t rloc16);     /**< start a children-addresses query; OpenThread error code */
+    /**
+     * Start a Network Diagnostic Get of the IPv6 Address List TLV to the child's RLOC address; its answer reaches
+     * mesh_scan_on_child_diag() with `gen`. OpenThread error code.
+     */
+    int (*query_child_diag)(uint16_t rloc16, uint32_t gen);
+    /** One-shot: mesh_scan_on_child_deadline(gen) from the OT task after `ms`; re-arming replaces the previous one. */
+    void (*arm_child_deadline)(uint32_t ms, uint32_t gen);
     void (*cancel)(void);                          /**< cancel whatever mesh-diag operation runs */
     /** The local router table: fills both arrays, returns the count. */
     uint8_t (*router_table)(uint16_t rloc16_out[MESH_SCAN_MAX_ROUTERS], uint8_t ids_out[MESH_SCAN_MAX_ROUTERS]);
@@ -42,7 +51,7 @@ struct mesh_scan_ops {
      * mode watchdog, which calls mesh_scan_on_mode_lost(gen) once the mode is not BR_RUNNING.
      */
     void (*arm_cap)(uint32_t ms, uint32_t gen);
-    void (*disarm_cap)(void);                      /**< stops the cap and the watchdog */
+    void (*disarm_cap)(void);                      /**< stops the cap, the watchdog and the child deadline */
     void *(*alloc)(size_t size);                   /**< zeroed memory (PSRAM on target), NULL on failure */
     void (*release)(void *p);                      /**< frees what alloc returned; never called with NULL */
 };
@@ -75,6 +84,13 @@ void mesh_scan_on_child_entry(const mesh_scan_child_t *c);
 void mesh_scan_on_child_table_done(int ot_error);
 void mesh_scan_on_child_addrs(uint16_t child_rloc16, const uint8_t (*addrs)[16], uint8_t n);
 void mesh_scan_on_child_addrs_done(int ot_error);
+/**
+ * An answer to a child address query of the scan of generation `gen`, from the child with RLOC16 `peer_rloc16`.
+ * Dropped unless that child's query is in flight in this scan.
+ */
+void mesh_scan_on_child_diag(uint32_t gen, uint16_t peer_rloc16, const uint8_t (*addrs)[16], uint8_t n);
+/** The child deadline armed for the scan of generation `gen` expired: gives up on the overdue queries. */
+void mesh_scan_on_child_deadline(uint32_t gen);
 void mesh_scan_on_cap(void);
 
 /**
@@ -82,6 +98,12 @@ void mesh_scan_on_cap(void);
  * "stopped" if it still runs. Takes only the scan mutex and never calls ops.cancel: OpenThread may be gone.
  */
 void mesh_scan_on_mode_lost(uint32_t gen);
+
+/**
+ * The RLOC16 of `peer` when it is an RLOC address in the mesh-local prefix `ml_prefix` (IID 0:ff:fe00:xxxx); false
+ * otherwise.
+ */
+bool mesh_scan_rloc16_from_peer(const uint8_t peer[16], const uint8_t ml_prefix[8], uint16_t *rloc16);
 
 #ifdef __cplusplus
 }

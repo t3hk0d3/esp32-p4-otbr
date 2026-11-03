@@ -34,6 +34,27 @@ static int fake_query_child_addrs(uint16_t rloc16)
     return g_fake.child_addrs_ret;
 }
 
+static int fake_query_child_diag(uint16_t rloc16, uint32_t gen)
+{
+    const int i = g_fake.child_diag_calls++;
+
+    g_fake.ops_calls++;
+    if (i >= FAKE_MAX_QUERIES) {
+        return MESH_SCAN_OT_ERROR_NONE;
+    }
+    g_fake.child_diag_rloc16[i] = rloc16;
+    g_fake.child_diag_gen[i] = gen;
+    return g_fake.child_diag_rets[i];
+}
+
+static void fake_arm_child_deadline(uint32_t ms, uint32_t gen)
+{
+    g_fake.ops_calls++;
+    g_fake.deadline_calls++;
+    g_fake.deadline_ms = ms;
+    g_fake.deadline_gen = gen;
+}
+
 static void fake_cancel(void)
 {
     g_fake.ops_calls++;
@@ -116,6 +137,8 @@ static const mesh_scan_ops_t FAKE_OPS = {
     .discover = fake_discover,
     .query_child_table = fake_query_child_table,
     .query_child_addrs = fake_query_child_addrs,
+    .query_child_diag = fake_query_child_diag,
+    .arm_child_deadline = fake_arm_child_deadline,
     .cancel = fake_cancel,
     .router_table = fake_router_table,
     .snapshot = fake_snapshot,

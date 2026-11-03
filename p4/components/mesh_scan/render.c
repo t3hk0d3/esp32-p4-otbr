@@ -288,6 +288,9 @@ static void write_child(writer_t *w, const mesh_scan_router_t *r, const mesh_sca
     }
     raw(w, ",\"addresses\":");
     addr_list(w, c->addrs, c->n_addrs);
+    if (!c->addresses_reported) {
+        raw(w, ",\"addresses_reported\":false"); // asked directly and gave no answer (spec 3.4)
+    }
     raw(w, "}");
 }
 
@@ -420,7 +423,9 @@ esp_err_t mesh_scan_render_view(const mesh_scan_view_t *view, mesh_scan_sink_t s
         raw(&w, "{\"state\":\"running\",\"progress\":{\"routers\":");
         u64(&w, view->routers);
         key_u64(&w, ",\"queried\":", view->queried);
-        raw(&w, "}}");
+        key_u64(&w, ",\"children\":{\"total\":", view->children_total);
+        key_u64(&w, ",\"queried\":", view->children_queried);
+        raw(&w, "}}}");
         break;
     case MESH_SCAN_DONE:
         key_u64(&w, "{\"state\":\"done\",\"age_s\":", view->age_s);

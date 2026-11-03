@@ -16,7 +16,14 @@ typedef enum {
     PHASE_DISCOVER,
     PHASE_CHILD_TABLE,
     PHASE_CHILD_ADDRS,
+    PHASE_CHILD_DIAG, /**< asking rx-on children without addresses directly (spec 3.4) */
 } phase_t;
+
+/** A child address query in flight. */
+typedef struct {
+    mesh_scan_child_t *child; /**< NULL: the slot is free */
+    int64_t due_ms;
+} ask_slot_t;
 
 /**
  * One scan's result. The scan holds one reference while it is current; each render in flight holds another. The
@@ -41,6 +48,12 @@ static struct {
     int64_t end_ms;
     uint32_t gen;     /**< bumped by every scan start: cap and watchdog events carry it */
     uint16_t children_capacity[MESH_SCAN_MAX_ROUTERS];
+    // Child address step
+    ask_slot_t slots[MESH_SCAN_CHILD_QUERIES];
+    uint8_t ask_router;        /**< cursor: the next child to ask is at or after (ask_router, ask_index) */
+    uint16_t ask_index;
+    uint16_t children_total;   /**< children picked for the step */
+    uint16_t children_queried; /**< of those, answered or given up */
 } s;
 
 // Result memory
@@ -127,9 +140,33 @@ static void finish(bool cap_hit)
     ESP_LOGI(TAG, "scan done (%u routers queried%s)", (unsigned)s.queried, partial ? ", partial" : "");
 }
 
-/** Cap hit: the router being queried and every responding router not reached yet have no children detail. */
+/** Cap hit in the child address step: every child still owed an answer is not reported. */
+static void mark_unanswered(void)
+{
+    mesh_scan_result_t *r = &s.block->result;
+
+    for (int id = 0; id < MESH_SCAN_MAX_ROUTERS; id++) {
+        for (uint16_t i = 0; i < r->routers[id].n_children; i++) {
+            mesh_scan_child_t *c = &r->routers[id].children[i];
+            if (c->ask_pending) {
+                c->ask_pending = false;
+                c->addresses_reported = false;
+            }
+        }
+    }
+    memset(s.slots, 0, sizeof(s.slots));
+}
+
+/**
+ * Cap hit: the router being queried and every responding router not reached yet have no children detail; in the
+ * child address step, the children still owed an answer are not reported.
+ */
 static void mark_unfinished(void)
 {
+    if (s.phase == PHASE_CHILD_DIAG) {
+        mark_unanswered();
+        return;
+    }
     mesh_scan_result_t *r = &s.block->result;
     const int from = s.phase == PHASE_DISCOVER ? 0 : s.current;
 
@@ -161,7 +198,110 @@ static bool query_started(int err)
     return false;
 }
 
-/** Query the lowest responding router with an ID of `from` or above; finish after the last. */
+// Child address step (spec 3.4, ruling R14): rx-on children without addresses are asked directly, at most
+// MESH_SCAN_CHILD_QUERIES at a time in router ID and child order, each with a deadline of MESH_SCAN_CHILD_DEADLINE_MS.
+
+/** Close the child's query; `reported` false: no answer. */
+static void close_child(mesh_scan_child_t *c, bool reported)
+{
+    c->ask_pending = false;
+    c->addresses_reported = reported;
+    s.children_queried++;
+}
+
+static void close_slot(ask_slot_t *slot, bool reported)
+{
+    close_child(slot->child, reported);
+    slot->child = NULL;
+}
+
+/** The next child picked for the step and not asked yet, advancing the cursor past it; NULL when none is left. */
+static mesh_scan_child_t *next_unasked(void)
+{
+    mesh_scan_result_t *r = &s.block->result;
+
+    for (; s.ask_router < MESH_SCAN_MAX_ROUTERS; s.ask_router++, s.ask_index = 0) {
+        mesh_scan_router_t *router = &r->routers[s.ask_router];
+        while (s.ask_index < router->n_children) {
+            mesh_scan_child_t *c = &router->children[s.ask_index++];
+            if (c->ask_pending) {
+                return c;
+            }
+        }
+    }
+    return NULL;
+}
+
+/** Arm the child deadline for the earliest query in flight. */
+static void arm_deadline(void)
+{
+    int64_t due = INT64_MAX;
+
+    for (int i = 0; i < MESH_SCAN_CHILD_QUERIES; i++) {
+        if (s.slots[i].child && s.slots[i].due_ms < due) {
+            due = s.slots[i].due_ms;
+        }
+    }
+    if (due == INT64_MAX) {
+        return;
+    }
+    const int64_t wait = due - s.ops.now_ms();
+    s.ops.arm_child_deadline(wait > 0 ? (uint32_t)wait : 0, s.gen);
+}
+
+/** Fill the free slots with the next children and arm the deadline; finish once nothing is in flight or left. */
+static void fill_slots(void)
+{
+    bool in_flight = false;
+
+    for (int i = 0; i < MESH_SCAN_CHILD_QUERIES; i++) {
+        ask_slot_t *slot = &s.slots[i];
+        mesh_scan_child_t *c;
+
+        while (!slot->child && (c = next_unasked()) != NULL) {
+            int err = s.ops.query_child_diag(c->rloc16, s.gen);
+            if (err == MESH_SCAN_OT_ERROR_NONE) {
+                slot->child = c;
+                slot->due_ms = s.ops.now_ms() + MESH_SCAN_CHILD_DEADLINE_MS;
+            } else if (err == MESH_SCAN_OT_ERROR_INVALID_STATE) {
+                fail(MESH_SCAN_ERR_STOPPED);
+                return;
+            } else {
+                close_child(c, false); // NO_BUFS, BUSY: move on
+            }
+        }
+        in_flight |= slot->child != NULL;
+    }
+    if (in_flight) {
+        arm_deadline();
+    } else {
+        finish(false);
+    }
+}
+
+/** After the last router: pick the rx-on children without addresses and start asking them. */
+static void start_child_step(void)
+{
+    mesh_scan_result_t *r = &s.block->result;
+
+    s.phase = PHASE_CHILD_DIAG;
+    s.current = NO_ROUTER;
+    s.ask_router = 0;
+    s.ask_index = 0;
+    memset(s.slots, 0, sizeof(s.slots));
+    for (int id = 0; id < MESH_SCAN_MAX_ROUTERS; id++) {
+        for (uint16_t i = 0; i < r->routers[id].n_children; i++) {
+            mesh_scan_child_t *c = &r->routers[id].children[i];
+            c->ask_pending = c->rx_on_when_idle && c->n_addrs == 0;
+            if (c->ask_pending) {
+                s.children_total++;
+            }
+        }
+    }
+    fill_slots();
+}
+
+/** Query the lowest responding router with an ID of `from` or above; the child address step after the last. */
 static void next_router(int from)
 {
     const mesh_scan_result_t *r = &s.block->result;
@@ -179,7 +319,7 @@ static void next_router(int from)
             return;
         }
     }
-    finish(false);
+    start_child_step();
 }
 
 /** Every callback starts here: false when the callback must be ignored (not running, wrong phase, mode left). */
@@ -242,6 +382,8 @@ esp_err_t mesh_scan_core_start(void)
     memset(s.children_capacity, 0, sizeof(s.children_capacity));
     s.routers = 0;
     s.queried = 0;
+    s.children_total = 0;
+    s.children_queried = 0;
     s.current = NO_ROUTER;
     s.block = s.ops.alloc(sizeof(*s.block));
     if (!s.block) {
@@ -294,6 +436,8 @@ static void view_locked(mesh_scan_view_t *out)
     case MESH_SCAN_RUNNING:
         out->routers = s.routers;
         out->queried = s.queried;
+        out->children_total = s.children_total;
+        out->children_queried = s.children_queried;
         break;
     case MESH_SCAN_DONE:
     case MESH_SCAN_FAILED: {
@@ -400,6 +544,7 @@ void mesh_scan_on_router(const mesh_scan_router_t *in)
             c->full_thread_device = in->children[i].full_thread_device;
             c->full_network_data = in->children[i].full_network_data;
             c->lq_in = in->children[i].lq_in;
+            c->addresses_reported = true;
         }
         r->n_children = n;
     }
@@ -474,6 +619,7 @@ void mesh_scan_on_child_entry(const mesh_scan_child_t *in)
         c->full_thread_device = in->full_thread_device;
         c->full_network_data = in->full_network_data;
         c->lq_in = in->lq_in;
+        c->addresses_reported = true;
     }
     memcpy(c->ext, in->ext, sizeof(c->ext));
     c->has_ext = true;
@@ -540,6 +686,65 @@ void mesh_scan_on_child_addrs_done(int ot_error)
     next_router(s.current + 1);
 out:
     unlock();
+}
+
+void mesh_scan_on_child_diag(uint32_t gen, uint16_t peer_rloc16, const uint8_t (*addrs)[16], uint8_t n)
+{
+    lock();
+    if (gen != s.gen || !callback_enter(PHASE_CHILD_DIAG)) {
+        goto out; // a late answer of an older scan, or of this one after the step (otMeshDiagCancel can't stop it)
+    }
+    ask_slot_t *slot = NULL;
+    for (int i = 0; i < MESH_SCAN_CHILD_QUERIES && !slot; i++) {
+        if (s.slots[i].child && s.slots[i].child->rloc16 == peer_rloc16) {
+            slot = &s.slots[i];
+        }
+    }
+    if (!slot) {
+        goto out; // no query to that peer in flight: given up already, never asked, or another sender's answer
+    }
+    mesh_scan_child_t *c = slot->child;
+    for (uint8_t i = 0; i < n && c->n_addrs < MESH_SCAN_MAX_CHILD_ADDRS; i++) {
+        memcpy(c->addrs[c->n_addrs++], addrs[i], sizeof(c->addrs[0]));
+    }
+    close_slot(slot, true);
+    fill_slots();
+out:
+    unlock();
+}
+
+void mesh_scan_on_child_deadline(uint32_t gen)
+{
+    lock();
+    if (gen != s.gen || !callback_enter(PHASE_CHILD_DIAG)) {
+        goto out;
+    }
+    const int64_t now = s.ops.now_ms();
+    bool closed = false;
+    for (int i = 0; i < MESH_SCAN_CHILD_QUERIES; i++) {
+        if (s.slots[i].child && s.slots[i].due_ms <= now) {
+            close_slot(&s.slots[i], false);
+            closed = true;
+        }
+    }
+    if (closed) {
+        fill_slots();
+    } else {
+        arm_deadline(); // early: armed for a query that has answered since
+    }
+out:
+    unlock();
+}
+
+bool mesh_scan_rloc16_from_peer(const uint8_t peer[16], const uint8_t ml_prefix[8], uint16_t *rloc16)
+{
+    static const uint8_t RLOC_IID_HEAD[6] = { 0, 0, 0, 0xff, 0xfe, 0 };
+
+    if (memcmp(peer, ml_prefix, 8) || memcmp(peer + 8, RLOC_IID_HEAD, sizeof(RLOC_IID_HEAD))) {
+        return false;
+    }
+    *rloc16 = (uint16_t)(peer[14] << 8 | peer[15]);
+    return true;
 }
 
 void mesh_scan_on_cap(void)

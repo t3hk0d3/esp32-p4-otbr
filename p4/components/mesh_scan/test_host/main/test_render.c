@@ -92,7 +92,8 @@ TEST_CASE("On running before discover ends: writes progress {\"routers\":0,\"que
     const mesh_scan_view_t view = { .state = MESH_SCAN_RUNNING }; // result stays NULL: it is never read
     sink_t s;
 
-    TEST_ASSERT_EQUAL_STRING("{\"state\":\"running\",\"progress\":{\"routers\":0,\"queried\":0}}", render(&view, &s));
+    TEST_ASSERT_EQUAL_STRING("{\"state\":\"running\",\"progress\":{\"routers\":0,\"queried\":0,"
+                             "\"children\":{\"total\":0,\"queried\":0}}}", render(&view, &s));
     sink_free(&s);
 }
 
@@ -102,7 +103,8 @@ TEST_CASE("On running during queries: writes progress with routers = discovered 
     const mesh_scan_view_t view = { .state = MESH_SCAN_RUNNING, .routers = 5, .queried = 3 };
     sink_t s;
 
-    TEST_ASSERT_EQUAL_STRING("{\"state\":\"running\",\"progress\":{\"routers\":5,\"queried\":3}}", render(&view, &s));
+    TEST_ASSERT_EQUAL_STRING("{\"state\":\"running\",\"progress\":{\"routers\":5,\"queried\":3,"
+                             "\"children\":{\"total\":0,\"queried\":0}}}", render(&view, &s));
     sink_free(&s);
 }
 
@@ -281,6 +283,38 @@ TEST_CASE("On done: omits frame_error_pct and message_error_pct of a child that 
                     "\"full_thread_device\":false,\"full_network_data\":false},\"lq_in\":3,\"timeout_s\":240,"
                     "\"age_s\":12,\"connected_s\":86400,\"rssi_avg\":-61,\"rssi_last\":-63,\"link_margin_db\":39,"
                     "\"version\":4,\"csl\":false,");
+    assert_json(out);
+    sink_free(&s);
+}
+
+TEST_CASE("On running in the child address step: writes progress {\"routers\",\"queried\",\"children\":"
+          "{\"total\",\"queried\"}}", "[mesh_scan]")
+{
+    const mesh_scan_view_t view = {
+        .state = MESH_SCAN_RUNNING, .routers = 5, .queried = 5, .children_total = 7, .children_queried = 2
+    };
+    sink_t s;
+
+    TEST_ASSERT_EQUAL_STRING("{\"state\":\"running\",\"progress\":{\"routers\":5,\"queried\":5,"
+                             "\"children\":{\"total\":7,\"queried\":2}}}", render(&view, &s));
+    sink_free(&s);
+}
+
+TEST_CASE("On a child with addresses_reported false: writes \"addresses_reported\":false after \"addresses\"",
+          "[mesh_scan]")
+{
+    mesh_scan_result_t *result = sample_result();
+    mesh_scan_child_t *c = &result->routers[9].children[1]; // 0x2402, rx-on
+
+    c->n_addrs = 0;
+    c->addresses_reported = false;
+    const mesh_scan_view_t view = done_view(result);
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "\"csl\":false,\"addresses\":[],\"addresses_reported\":false},{\"rloc16\":9219,");
+    const char *first = strstr(out, "addresses_reported");
+    TEST_ASSERT_NULL(strstr(first + 1, "addresses_reported")); // the other children leave the key out
     assert_json(out);
     sink_free(&s);
 }

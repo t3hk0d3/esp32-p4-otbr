@@ -7,6 +7,13 @@
 // operation runs afterwards, and the callbacks below need no guard of their own. The one path that fails a scan
 // without cancelling (the mode watchdog) relies on OpenThread's single mesh-diag slot instead: a new discover gets
 // OT_ERROR_BUSY until the abandoned operation has ended.
+//
+// The child address step (spec 3.4, ruling R14) uses otThreadSendDiagnosticGet, which otMeshDiagCancel does not
+// cover. OpenThread's netdiag client keeps ONE callback slot: every send replaces the callback and its context, and
+// the vendored GUI/REST API (esp_br_web_api.c) sends through the same client. So the context carries only the scan
+// generation, an answer is matched to its child by the peer address (the child's RLOC), and errors are ignored: a
+// scan-owned deadline per query gives up on children that don't answer. If the GUI/REST sends during the step, our
+// answers may go to its callback; the deadline then marks those children not reported, which is accepted.
 #include <stdatomic.h>
 #include <stdint.h>
 #include <string.h>
@@ -23,6 +30,7 @@
 #include "openthread/error.h"
 #include "openthread/link.h"
 #include "openthread/mesh_diag.h"
+#include "openthread/netdiag.h"
 #include "openthread/netdata.h"
 #include "openthread/srp_server.h"
 #include "openthread/thread.h"
@@ -56,6 +64,7 @@ extern esp_err_t esp_openthread_task_queue_post(ot_task_fn_t task, void *arg);
 static bool s_initialised;
 static esp_timer_handle_t s_cap_timer;
 static esp_timer_handle_t s_watchdog_timer;
+static esp_timer_handle_t s_child_timer;
 /** Children of the router in a discover callback (OpenThread task only); PSRAM, MESH_SCAN_MAX_CHILDREN entries. */
 static mesh_scan_child_t *s_children;
 
@@ -70,6 +79,7 @@ static mesh_scan_child_t *s_children;
 static uint32_t s_cap_gen;          // OpenThread lock
 static int64_t s_cap_deadline_us;   // OpenThread lock
 static atomic_uint_fast32_t s_cap_armed_gen;
+static atomic_uint_fast32_t s_child_armed_gen; // child deadline: the generation it was armed for
 
 static otInstance *instance(void)
 {
@@ -191,6 +201,31 @@ static void on_child_addrs(otError error, uint16_t child_rloc16, otMeshDiagIp6Ad
     }
 }
 
+/** Network Diagnostic Get answer of a child address query; `ctx` is the scan generation. Errors are ignored. */
+static void on_child_diag(otError error, otMessage *msg, const otMessageInfo *info, void *ctx)
+{
+    static otNetworkDiagTlv tlv; // OpenThread task only; a few hundred bytes, kept off its stack
+    uint8_t addrs[MESH_SCAN_MAX_CHILD_ADDRS][16];
+    uint8_t n = 0;
+    uint16_t rloc16;
+
+    if (error != OT_ERROR_NONE || !msg || !info ||
+            !mesh_scan_rloc16_from_peer(info->mPeerAddr.mFields.m8, otThreadGetMeshLocalPrefix(instance())->m8,
+                                        &rloc16)) {
+        return;
+    }
+    otNetworkDiagIterator it = OT_NETWORK_DIAGNOSTIC_ITERATOR_INIT;
+    while (otThreadGetNextDiagnosticTlv(msg, &it, &tlv) == OT_ERROR_NONE) {
+        if (tlv.mType != OT_NETWORK_DIAGNOSTIC_TLV_IP6_ADDR_LIST) {
+            continue;
+        }
+        for (uint8_t i = 0; i < tlv.mData.mIp6AddrList.mCount && n < MESH_SCAN_MAX_CHILD_ADDRS; i++) {
+            memcpy(addrs[n++], tlv.mData.mIp6AddrList.mList[i].mFields.m8, sizeof(addrs[0]));
+        }
+    }
+    mesh_scan_on_child_diag((uint32_t)(uintptr_t)ctx, rloc16, (const uint8_t (*)[16])addrs, n);
+}
+
 // Cap timer
 
 static void cap_on_ot_task(void *arg)
@@ -203,17 +238,17 @@ static void cap_on_ot_task(void *arg)
     mesh_scan_on_cap();
 }
 
-/** Start the one-shot; a concurrent re-arm from the timer callback (retry) makes the first start fail once. */
-static void cap_timer_start(uint64_t us)
+/** Start a one-shot; a concurrent re-arm from the timer callback (retry) makes the first start fail once. */
+static void one_shot_start(esp_timer_handle_t timer, uint64_t us)
 {
-    esp_timer_stop(s_cap_timer);
-    esp_err_t err = esp_timer_start_once(s_cap_timer, us);
+    esp_timer_stop(timer);
+    esp_err_t err = esp_timer_start_once(timer, us);
     if (err == ESP_ERR_INVALID_STATE) {
-        esp_timer_stop(s_cap_timer);
-        err = esp_timer_start_once(s_cap_timer, us);
+        esp_timer_stop(timer);
+        err = esp_timer_start_once(timer, us);
     }
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "cap timer: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "one-shot timer: %s", esp_err_to_name(err));
     }
 }
 
@@ -233,6 +268,33 @@ static void cap_timer_cb(void *arg)
     if (esp_openthread_task_queue_post(cap_on_ot_task, (void *)(uintptr_t)gen) != ESP_OK) {
         // ESP_ERR_INVALID_STATE: a new scan armed the timer meanwhile, which supersedes this cap.
         esp_timer_start_once(s_cap_timer, (uint64_t)CAP_POST_RETRY_MS * 1000);
+    }
+}
+
+// Child deadline: the same hand-over as the cap. scan.c checks the generation and which queries are overdue, so an
+// early or stale delivery does no harm.
+
+static void child_deadline_on_ot_task(void *arg)
+{
+    const uint32_t gen = (uint32_t)(uintptr_t)arg;
+
+    if (gen == s_cap_gen) {
+        mesh_scan_on_child_deadline(gen);
+    }
+}
+
+/** esp_timer task: hand the child deadline to the OpenThread task (or fail the scan outside BR_RUNNING). */
+static void child_timer_cb(void *arg)
+{
+    (void)arg;
+    const uint32_t gen = (uint32_t)atomic_load(&s_child_armed_gen);
+
+    if (br_core_get_mode() != BR_MODE_BR_RUNNING) {
+        mesh_scan_on_mode_lost(gen);
+        return;
+    }
+    if (esp_openthread_task_queue_post(child_deadline_on_ot_task, (void *)(uintptr_t)gen) != ESP_OK) {
+        esp_timer_start_once(s_child_timer, (uint64_t)CAP_POST_RETRY_MS * 1000);
     }
 }
 
@@ -264,6 +326,26 @@ static int op_query_child_table(uint16_t rloc16)
 static int op_query_child_addrs(uint16_t rloc16)
 {
     return otMeshDiagQueryChildrenIp6Addrs(instance(), rloc16, on_child_addrs, NULL);
+}
+
+static int op_query_child_diag(uint16_t rloc16, uint32_t gen)
+{
+    static const uint8_t tlvs[] = { OT_NETWORK_DIAGNOSTIC_TLV_IP6_ADDR_LIST };
+    otIp6Address dest = { 0 };
+
+    // The child's RLOC: mesh-local prefix + 0:ff:fe00:<rloc16>.
+    memcpy(dest.mFields.m8, otThreadGetMeshLocalPrefix(instance())->m8, OT_MESH_LOCAL_PREFIX_SIZE);
+    dest.mFields.m8[11] = 0xff;
+    dest.mFields.m8[12] = 0xfe;
+    dest.mFields.m8[14] = (uint8_t)(rloc16 >> 8);
+    dest.mFields.m8[15] = (uint8_t)rloc16;
+    return otThreadSendDiagnosticGet(instance(), &dest, tlvs, sizeof(tlvs), on_child_diag, (void *)(uintptr_t)gen);
+}
+
+static void op_arm_child_deadline(uint32_t ms, uint32_t gen)
+{
+    atomic_store(&s_child_armed_gen, gen);
+    one_shot_start(s_child_timer, (uint64_t)ms * 1000);
 }
 
 static void op_cancel(void)
@@ -387,7 +469,7 @@ static void op_arm_cap(uint32_t ms, uint32_t gen)
     s_cap_gen = gen;
     s_cap_deadline_us = esp_timer_get_time() + (int64_t)ms * 1000;
     atomic_store(&s_cap_armed_gen, gen);
-    cap_timer_start((uint64_t)ms * 1000);
+    one_shot_start(s_cap_timer, (uint64_t)ms * 1000);
     esp_timer_stop(s_watchdog_timer);
     esp_err_t err = esp_timer_start_periodic(s_watchdog_timer, (uint64_t)WATCHDOG_PERIOD_MS * 1000);
     if (err != ESP_OK) {
@@ -400,6 +482,7 @@ static void op_disarm_cap(void)
     // ESP_ERR_INVALID_STATE when not running (the cap already fired): the generation checks cover that.
     esp_timer_stop(s_cap_timer);
     esp_timer_stop(s_watchdog_timer);
+    esp_timer_stop(s_child_timer);
 }
 
 static void *op_alloc(size_t size)
@@ -416,6 +499,8 @@ static const mesh_scan_ops_t real_ops = {
     .discover = op_discover,
     .query_child_table = op_query_child_table,
     .query_child_addrs = op_query_child_addrs,
+    .query_child_diag = op_query_child_diag,
+    .arm_child_deadline = op_arm_child_deadline,
     .cancel = op_cancel,
     .router_table = op_router_table,
     .snapshot = op_snapshot,
@@ -446,9 +531,15 @@ esp_err_t mesh_scan_init(void)
         .dispatch_method = ESP_TIMER_TASK,
         .name = "mesh_scan_wdog",
     };
+    const esp_timer_create_args_t child_args = {
+        .callback = child_timer_cb,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "mesh_scan_child",
+    };
     esp_err_t ret = ESP_OK;
     ESP_GOTO_ON_ERROR(esp_timer_create(&cap_args, &s_cap_timer), fail, TAG, "cap timer");
     ESP_GOTO_ON_ERROR(esp_timer_create(&watchdog_args, &s_watchdog_timer), fail, TAG, "mode watchdog");
+    ESP_GOTO_ON_ERROR(esp_timer_create(&child_args, &s_child_timer), fail, TAG, "child deadline");
 
     mesh_scan_set_ops(&real_ops);
     s_initialised = true;
@@ -458,6 +549,10 @@ fail:
     if (s_cap_timer) {
         esp_timer_delete(s_cap_timer);
         s_cap_timer = NULL;
+    }
+    if (s_watchdog_timer) {
+        esp_timer_delete(s_watchdog_timer);
+        s_watchdog_timer = NULL;
     }
     heap_caps_free(s_children);
     s_children = NULL;
