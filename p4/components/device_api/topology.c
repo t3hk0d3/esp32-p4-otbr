@@ -35,6 +35,9 @@ void device_api_topology_start_reply(esp_err_t start_err, int mode, bool long_op
     case ESP_ERR_NO_MEM:
         set_reply(out, 500, "no_memory", "out of memory");
         break;
+    case ESP_ERR_NOT_SUPPORTED: // mesh_scan was never initialised
+        set_reply(out, 503, "busy", "topology scan unavailable");
+        break;
     default: // ESP_ERR_TIMEOUT (OpenThread lock), ESP_FAIL (discover error)
         set_reply(out, 503, "busy", "OpenThread is busy, retry");
         break;

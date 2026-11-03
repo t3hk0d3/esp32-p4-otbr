@@ -90,7 +90,10 @@ typedef struct {
     uint8_t n_omr;
 } mesh_scan_network_t;
 
-/** Tens of KB: allocated by scan.c through `ops.alloc` (PSRAM on target), never on a stack. */
+/**
+ * About 100 KB (the SRP host array alone is 64 x ~1.2 KB): allocated by scan.c through `ops.alloc` (PSRAM on target),
+ * never on a stack. Up to two can exist at once: a new scan allocates its result while a render still holds the old one.
+ */
 typedef struct {
     mesh_scan_network_t network;
     mesh_scan_router_t routers[MESH_SCAN_MAX_ROUTERS]; /**< by router ID; absent entries have present == false */

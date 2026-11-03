@@ -466,7 +466,7 @@ fail:
 
 esp_err_t mesh_scan_start(void)
 {
-    ESP_RETURN_ON_FALSE(s_initialised, ESP_ERR_INVALID_STATE, TAG, "not initialised");
+    ESP_RETURN_ON_FALSE(s_initialised, ESP_ERR_NOT_SUPPORTED, TAG, "not initialised");
     if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(LOCK_WAIT_MS))) {
         ESP_LOGW(TAG, "start: OpenThread lock not free within %d ms", LOCK_WAIT_MS);
         return ESP_ERR_TIMEOUT;

@@ -31,7 +31,7 @@ typedef esp_err_t (*mesh_scan_sink_t)(void *ctx, const char *data, size_t len);
 
 esp_err_t mesh_scan_init(void);
 
-/** Start a scan. ESP_ERR_INVALID_STATE while one runs. */
+/** Start a scan. ESP_ERR_INVALID_STATE while one runs; ESP_ERR_NOT_SUPPORTED when mesh_scan_init never succeeded. */
 esp_err_t mesh_scan_start(void);
 
 /** Cancel a running scan; it ends failed with error "stopped". */

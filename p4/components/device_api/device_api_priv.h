@@ -170,8 +170,9 @@ typedef struct {
 /**
  * Reply of POST /device/topology. Checks in order: `mode`, a br_core_mode_t (not BR_RUNNING: 409 busy "mode <MODE>"), `long_op_busy` (409 busy
  * with `long_op_detail`), then `start_err`, the result of mesh_scan_start: ESP_OK and ESP_ERR_INVALID_STATE (a scan already
- * runs; the caller joins it) 202; ESP_ERR_NOT_FINISHED 409 busy; ESP_ERR_NO_MEM 500 no_memory; anything else
- * (ESP_ERR_TIMEOUT, ESP_FAIL) 503 busy "OpenThread is busy, retry".
+ * runs; the caller joins it) 202; ESP_ERR_NOT_FINISHED 409 busy; ESP_ERR_NO_MEM 500 no_memory; ESP_ERR_NOT_SUPPORTED
+ * (mesh_scan never initialised) 503 busy "topology scan unavailable"; anything else (ESP_ERR_TIMEOUT, ESP_FAIL) 503 busy
+ * "OpenThread is busy, retry".
  */
 void device_api_topology_start_reply(esp_err_t start_err, int mode, bool long_op_busy, const char *long_op_detail,
                                      device_api_topology_reply_t *out);

@@ -103,6 +103,16 @@ TEST_CASE("On ESP_ERR_TIMEOUT: 503 busy, detail OpenThread is busy, retry", "[de
     TEST_ASSERT_EQUAL_STRING("OpenThread is busy, retry", r.detail);
 }
 
+TEST_CASE("On ESP_ERR_NOT_SUPPORTED (mesh_scan never initialised): 503 busy, detail topology scan unavailable",
+          "[device_api][topology]")
+{
+    const device_api_topology_reply_t r = reply_for(ESP_ERR_NOT_SUPPORTED);
+
+    TEST_ASSERT_EQUAL_INT(503, r.status);
+    TEST_ASSERT_EQUAL_STRING("busy", r.error);
+    TEST_ASSERT_EQUAL_STRING("topology scan unavailable", r.detail);
+}
+
 TEST_CASE("On ESP_FAIL: 503 busy, detail OpenThread is busy, retry", "[device_api][topology]")
 {
     const device_api_topology_reply_t r = reply_for(ESP_FAIL);
