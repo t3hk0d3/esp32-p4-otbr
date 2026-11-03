@@ -4,20 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "routing_util.h"
 #include "settings.h"
 
 #define FEED_ROUNDS 4 /* an event plus the follow-ups its actions raise (connect failed, connection lost) */
-
-/* Wrap-safe: true once `now` has reached `at`. */
-static bool due(uint32_t now, uint32_t at)
-{
-    return (int32_t)(now - at) >= 0;
-}
-
-static bool prefix_equal(const routing_prefix64_t *a, const routing_prefix64_t *b)
-{
-    return memcmp(a->b, b->b, sizeof(a->b)) == 0;
-}
 
 /* --- connections --- */
 
@@ -523,7 +513,7 @@ static void compute_set(const routing_engine_t *e, routing_prefix_set_t *out)
         .ula_known = e->state.ula_known,
         .ula = e->state.ula,
         /* read for the custom prefix of the last poll: a new prefix counts once a poll has seen it */
-        .custom_in_netdata = e->state.custom_in_netdata && prefix_equal(&e->state_custom, &s->omr_prefix),
+        .custom_in_netdata = e->state.custom_in_netdata && routing_prefix64_eq(&e->state_custom, &s->omr_prefix),
                                      .ula_in_netdata = e->state.ula_in_netdata,
                                      .br_up = e->have_state && e->state.br_up,
     };
@@ -763,8 +753,9 @@ void routing_engine_tick(routing_engine_t *e, uint32_t now_ms)
         if (!p->in_use) {
             continue;
         }
+        routing_bgp_fsm_clock(&p->fsm, now_ms); /* a hold time of 0 arms no timer: the uptime still has to fold */
         uint32_t at = routing_bgp_fsm_next_deadline_ms(&p->fsm);
-        if (at != UINT32_MAX && due(now_ms, at)) {
+        if (at != UINT32_MAX && routing_due(now_ms, at)) {
             feed_simple(e, p, ROUTING_BGP_EV_TICK, now_ms);
         }
     }

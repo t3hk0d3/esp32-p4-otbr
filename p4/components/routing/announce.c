@@ -3,15 +3,12 @@
 
 #include <string.h>
 
-static bool prefix_equal(const routing_prefix64_t *a, const routing_prefix64_t *b)
-{
-    return memcmp(a->b, b->b, sizeof(a->b)) == 0;
-}
+#include "routing_util.h"
 
 static bool set_contains(const routing_prefix_set_t *set, const routing_prefix64_t *prefix)
 {
     for (uint8_t i = 0; i < set->count; i++) {
-        if (prefix_equal(&set->p[i], prefix)) {
+        if (routing_prefix64_eq(&set->p[i], prefix)) {
             return true;
         }
     }

@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "announce.h"
+#include "routing_util.h"
 
 #define CMD_REQUEST 1
 #define CMD_RESPONSE 2
@@ -14,29 +15,10 @@
 #define RTE_PLEN_OFF 18
 #define RTE_METRIC_OFF 19
 
-/* Wrap-safe: true once `now` has reached `at` (deadlines lie well within 2^31 ms of now). */
-static bool due(uint32_t now, uint32_t at)
-{
-    return (int32_t)(now - at) >= 0;
-}
-
-/* now + delay, moved 1 ms later when it would equal UINT32_MAX, which next_deadline_ms reserves for "none". */
-static uint32_t deadline(uint32_t now, uint32_t delay_ms)
-{
-    uint32_t at = now + delay_ms;
-
-    return at == UINT32_MAX ? 0 : at;
-}
-
-static bool same(const routing_prefix64_t *a, const routing_prefix64_t *b)
-{
-    return memcmp(a->b, b->b, sizeof(a->b)) == 0;
-}
-
 static bool in_set(const routing_prefix_set_t *set, const routing_prefix64_t *p)
 {
     for (size_t i = 0; i < set->count; i++) {
-        if (same(&set->p[i], p)) {
+        if (routing_prefix64_eq(&set->p[i], p)) {
             return true;
         }
     }
@@ -176,7 +158,7 @@ static void withdrawn_remove(routing_ripng_sched_t *s, size_t i)
 static int withdrawn_find(const routing_ripng_sched_t *s, const routing_prefix64_t *p)
 {
     for (size_t i = 0; i < s->withdrawn_count; i++) {
-        if (same(&s->withdrawn[i].prefix, p)) {
+        if (routing_prefix64_eq(&s->withdrawn[i].prefix, p)) {
             return (int)i;
         }
     }
@@ -207,7 +189,7 @@ static void withdrawn_add(routing_ripng_sched_t *s, const routing_prefix64_t *p)
  * runs at least once per regular update). */
 static void expire_trigger_gap(routing_ripng_sched_t *s, uint32_t now_ms)
 {
-    if (s->trigger_gap && due(now_ms, s->last_trigger_ms + ROUTING_RIPNG_TRIGGER_GAP_MS)) {
+    if (s->trigger_gap && routing_due(now_ms, s->last_trigger_ms + ROUTING_RIPNG_TRIGGER_GAP_MS)) {
         s->trigger_gap = false;
     }
 }
@@ -222,7 +204,7 @@ void routing_ripng_sched_start(routing_ripng_sched_t *s, const routing_prefix_se
     if (s->announced.count > ROUTING_MAX_ANNOUNCED) {
         s->announced.count = ROUTING_MAX_ANNOUNCED;
     }
-    s->regular_at = deadline(now_ms, 0);
+    s->regular_at = routing_deadline(now_ms, 0);
 }
 
 void routing_ripng_sched_set_changed(routing_ripng_sched_t *s, const routing_prefix_set_t *set, uint32_t now_ms)
@@ -253,7 +235,7 @@ void routing_ripng_sched_set_changed(routing_ripng_sched_t *s, const routing_pre
         }
         next_changed[i] = true;
         for (size_t j = 0; j < s->announced.count; j++) {
-            if (same(&s->announced.p[j], &next.p[i])) {
+            if (routing_prefix64_eq(&s->announced.p[j], &next.p[i])) {
                 next_changed[i] = s->announced_changed[j];
             }
         }
@@ -264,8 +246,8 @@ void routing_ripng_sched_set_changed(routing_ripng_sched_t *s, const routing_pre
     if (!s->trigger_pending) {
         expire_trigger_gap(s, now_ms);
         s->trigger_pending = true;
-        s->trigger_at = s->trigger_gap ? deadline(s->last_trigger_ms, ROUTING_RIPNG_TRIGGER_GAP_MS)
-                        : deadline(now_ms, 0);
+        s->trigger_at = s->trigger_gap ? routing_deadline(s->last_trigger_ms, ROUTING_RIPNG_TRIGGER_GAP_MS)
+                        : routing_deadline(now_ms, 0);
     }
 }
 
@@ -292,7 +274,7 @@ static size_t send_regular(routing_ripng_sched_t *s, uint32_t now_ms, routing_ri
         i++;
     }
     s->trigger_pending = false;
-    s->regular_at = deadline(now_ms, ROUTING_RIPNG_UPDATE_MS + s->rand32() % (ROUTING_RIPNG_UPDATE_JITTER_MS + 1));
+    s->regular_at = routing_deadline(now_ms, ROUTING_RIPNG_UPDATE_MS + s->rand32() % (ROUTING_RIPNG_UPDATE_JITTER_MS + 1));
     return n;
 }
 
@@ -325,10 +307,10 @@ size_t routing_ripng_sched_poll(routing_ripng_sched_t *s, uint32_t now_ms, routi
         return 0;
     }
     expire_trigger_gap(s, now_ms);
-    if (due(now_ms, s->regular_at)) {
+    if (routing_due(now_ms, s->regular_at)) {
         return send_regular(s, now_ms, out, out_cap);
     }
-    if (s->trigger_pending && due(now_ms, s->trigger_at)) {
+    if (s->trigger_pending && routing_due(now_ms, s->trigger_at)) {
         return send_triggered(s, now_ms, out, out_cap);
     }
     return 0;

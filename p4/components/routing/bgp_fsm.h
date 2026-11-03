@@ -168,7 +168,8 @@ typedef struct {
     uint32_t hold_at;
     bool keepalive_armed;
     uint32_t keepalive_at;
-    uint32_t established_at;
+    uint32_t uptime_s; /**< whole seconds in Established up to uptime_mark (wrap-safe past 2^32 ms) */
+    uint32_t uptime_mark;
     char last_error[ROUTING_LAST_ERROR_LEN];
     uint32_t received_dropped;
     uint32_t resets;
@@ -194,6 +195,12 @@ uint16_t routing_bgp_fsm_hold_time(const routing_bgp_fsm_t *f);
 
 /** Seconds since the session reached Established; 0 when not Established. */
 uint32_t routing_bgp_fsm_uptime_s(const routing_bgp_fsm_t *f, uint32_t now_ms);
+
+/**
+ * Folds the whole seconds elapsed in Established into the uptime, so that it keeps counting past the 2^32 ms wrap of
+ * the clock. Call at least once per 2^32 ms (the engine does on every tick); routing_bgp_fsm_handle also calls it.
+ */
+void routing_bgp_fsm_clock(routing_bgp_fsm_t *f, uint32_t now_ms);
 
 /**
  * The last failure, "" when none: "hold timer expired", "notification <c>/<s> received", "notification <c>/<s> sent",

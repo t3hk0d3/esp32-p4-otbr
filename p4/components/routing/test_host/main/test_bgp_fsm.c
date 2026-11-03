@@ -544,6 +544,18 @@ TEST_CASE("Established for 125 s: uptime_s is 125", "[routing]")
     TEST_ASSERT_EQUAL_UINT32(0, routing_bgp_fsm_uptime_s(&f, 141000));
 }
 
+TEST_CASE("Established past the 2^32 ms clock wrap: uptime_s keeps counting", "[routing]")
+{
+    const uint32_t step = 0x80000000u; /* 2^31 ms, folded each step */
+
+    fsm_init(0);
+    to_openconfirm(0, 1000); /* hold time 0: no timer, so only the clock calls fold */
+    simple(ROUTING_BGP_EV_KEEPALIVE_RX, 10000);
+    routing_bgp_fsm_clock(&f, 10000 + step);
+    routing_bgp_fsm_clock(&f, 10000 + 2 * step);
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)(3ull * step / 1000), routing_bgp_fsm_uptime_s(&f, 10000 + 3 * step));
+}
+
 TEST_CASE("Established for 125 s: resets counts every drop from Established", "[routing]")
 {
     uint32_t now = 0;

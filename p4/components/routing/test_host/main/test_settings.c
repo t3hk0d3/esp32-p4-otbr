@@ -167,12 +167,13 @@ TEST_CASE("Unknown method, or omr.mode not auto/custom: returns ESP_ERR_INVALID_
     assert_rejects("omr.mode", make_body(METHOD_BGP, "{}", BGP_ONE_PEER), NULL);
 }
 
-TEST_CASE("Custom mode without a prefix, or a prefix that is not a /64, link-local or multicast: returns "
+TEST_CASE("Custom mode without a prefix, or a prefix that is not a /64, unspecified, link-local or multicast: returns "
           "ESP_ERR_INVALID_ARG with bad_field omr.prefix", "[routing]")
 {
     static const char *const bad_prefixes[] = {
         "{\"mode\":\"custom\"}",
         "{\"mode\":\"custom\",\"prefix\":null}",
+        "{\"mode\":\"custom\",\"prefix\":\"::/64\"}",
         "{\"mode\":\"custom\",\"prefix\":\"fe80::/64\"}",
         "{\"mode\":\"custom\",\"prefix\":\"ff02::/64\"}",
         "{\"mode\":\"custom\",\"prefix\":\"2001:db8::/48\"}",

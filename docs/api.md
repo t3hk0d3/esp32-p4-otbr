@@ -71,8 +71,8 @@ Settings (defaults: `pd`, `auto`, `false`, local ASN 4200000001, router ID `null
 
 - `method`: `pd`, `ripng`, `bgp` or `off`. Required.
 - `omr`: required. `mode` `auto` or `custom`; `prefix` is required for `custom` and ignored for `auto` (GET shows
-  `null`). The prefix is a /64 with the host bits zero, not link-local (`fe80::/10`), not multicast, and not on-link on
-  the backbone.
+  `null`). The prefix is a /64 with the host bits zero, not `::/64`, not link-local (`fe80::/10`), not multicast, and
+  not on-link on the backbone.
 - `announce_ula`: `true` or `false`. Required.
 - `bgp`: optional; left out, the stored BGP settings stay (their peers still get the address checks below, so a peer
   that has become one of the board's own addresses is refused with `bgp.peers`). When present it is checked whatever the method, so the

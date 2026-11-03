@@ -29,6 +29,7 @@
 #include "openthread/border_routing.h"
 #include "openthread/thread.h"
 #include "publisher.h"
+#include "routing_util.h"
 
 static const char *TAG = "routing";
 
@@ -834,14 +835,14 @@ static bool wait_sockets(uint32_t timeout_ms)
 
 static void log_changes(const routing_status_t *st)
 {
-    static const char *const names[] = {"idle", "connect", "active", "opensent", "openconfirm", "established"};
     const routing_settings_t *s = routing_engine_settings(&s_engine);
 
     for (int i = 0; i < s->peer_count && i < ROUTING_MAX_PEERS; i++) {
         routing_bgp_state_t state = st->peers[i].state;
         if (s->method == ROUTING_METHOD_BGP && state != s_logged_state[i] &&
                 (state == ROUTING_BGP_ESTABLISHED || s_logged_state[i] == ROUTING_BGP_ESTABLISHED)) {
-            ESP_LOGI(TAG, "BGP peer %d: %s -> %s%s%s", i, names[s_logged_state[i]], names[state],
+            ESP_LOGI(TAG, "BGP peer %d: %s -> %s%s%s", i, routing_bgp_state_name(s_logged_state[i]),
+                     routing_bgp_state_name(state),
                      st->peers[i].last_error[0] ? ", last error: " : "", st->peers[i].last_error);
         }
         s_logged_state[i] = state;
@@ -864,11 +865,6 @@ static void publish_status(uint32_t now)
 
 /* --- task --- */
 
-static bool reached(uint32_t now, uint32_t at)
-{
-    return (int32_t)(now - at) >= 0;
-}
-
 /*
  * The status is rebuilt only when something can have changed it (a settings change, a state poll, a due BGP or RIPng
  * deadline, a socket event) and otherwise once per STATUS_PERIOD_MS, for the ages and uptimes in it.
@@ -887,7 +883,7 @@ static void routing_task(void *arg)
             changed = true;
         }
         uint32_t now = now_ms();
-        if (reached(now, next_state)) {
+        if (routing_due(now, next_state)) {
             /* a busy OpenThread lock skips the read: retried after 100 ms, so withdrawal stays within 1 s */
             bool polled = poll_state(now);
             next_state = now + (polled ? STATE_PERIOD_MS : STATE_RETRY_MS);
@@ -895,9 +891,9 @@ static void routing_task(void *arg)
         }
         now = now_ms();
         uint32_t due = routing_engine_next_deadline_ms(&s_engine);
-        changed |= due != UINT32_MAX && reached(now, due);
+        changed |= due != UINT32_MAX && routing_due(now, due);
         routing_engine_tick(&s_engine, now);
-        if (changed || reached(now, next_status)) {
+        if (changed || routing_due(now, next_status)) {
             publish_status(now);
             next_status = now + STATUS_PERIOD_MS;
             changed = false;
@@ -906,9 +902,9 @@ static void routing_task(void *arg)
         uint32_t wait = WAKE_MAX_MS;
         uint32_t deadline = routing_engine_next_deadline_ms(&s_engine);
         if (deadline != UINT32_MAX) {
-            wait = reached(now, deadline) ? 0 : MIN(wait, deadline - now);
+            wait = routing_due(now, deadline) ? 0 : MIN(wait, deadline - now);
         }
-        wait = reached(now, next_state) ? 0 : MIN(wait, next_state - now);
+        wait = routing_due(now, next_state) ? 0 : MIN(wait, next_state - now);
         changed = wait_sockets(wait);
     }
 }

@@ -3,19 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Wrap-safe: true once `now` has reached `at` (deadlines lie well within 2^31 ms of now). */
-static bool due(uint32_t now, uint32_t at)
-{
-    return (int32_t)(now - at) >= 0;
-}
-
-/* now + delay, moved 1 ms later when it would equal UINT32_MAX, which next_deadline_ms reserves for "none". */
-static uint32_t deadline(uint32_t now, uint32_t delay_ms)
-{
-    uint32_t at = now + delay_ms;
-
-    return at == UINT32_MAX ? 0 : at;
-}
+#include "routing_util.h"
 
 static void push(routing_bgp_actions_t *out, routing_bgp_action_type_t type, uint8_t code, uint8_t subcode)
 {
@@ -44,7 +32,7 @@ static void disarm_timers(routing_bgp_fsm_t *f)
 static void schedule_retry(routing_bgp_fsm_t *f, uint32_t now)
 {
     f->retry_armed = true;
-    f->retry_at = deadline(now, f->backoff_ms);
+    f->retry_at = routing_deadline(now, f->backoff_ms);
     f->backoff_ms *= 2;
     if (f->backoff_ms > ROUTING_BGP_BACKOFF_MAX_MS) {
         f->backoff_ms = ROUTING_BGP_BACKOFF_MAX_MS;
@@ -60,7 +48,7 @@ static void restart_hold(routing_bgp_fsm_t *f, uint32_t now)
 {
     /* with hold time 0 this ends the handshake guard of OpenConfirm (see accept_open) */
     f->hold_armed = f->hold_time != 0;
-    f->hold_at = deadline(now, hold_ms(f));
+    f->hold_at = routing_deadline(now, hold_ms(f));
 }
 
 static void enter_connect(routing_bgp_fsm_t *f, uint32_t now, routing_bgp_actions_t *out)
@@ -68,7 +56,7 @@ static void enter_connect(routing_bgp_fsm_t *f, uint32_t now, routing_bgp_action
     push(out, ROUTING_BGP_ACT_CONNECT, 0, 0);
     f->state = ROUTING_BGP_CONNECT;
     disarm_timers(f);
-    f->connect_at = deadline(now, ROUTING_BGP_CONNECT_TIMEOUT_MS);
+    f->connect_at = routing_deadline(now, ROUTING_BGP_CONNECT_TIMEOUT_MS);
     f->current_incoming = false;
 }
 
@@ -83,7 +71,7 @@ static void enter_opensent(routing_bgp_fsm_t *f, uint32_t now, bool incoming, bo
     f->state = ROUTING_BGP_OPENSENT;
     disarm_timers(f);
     f->hold_armed = true;
-    f->hold_at = deadline(now, ROUTING_BGP_OPENSENT_HOLD_S * 1000u);
+    f->hold_at = routing_deadline(now, ROUTING_BGP_OPENSENT_HOLD_S * 1000u);
 }
 
 /* A valid OPEN on the current connection in OpenSent. */
@@ -96,12 +84,12 @@ static void accept_open(routing_bgp_fsm_t *f, const routing_bgp_open_t *open, ui
     disarm_timers(f);
     f->hold_armed = true;
     if (f->hold_time != 0) {
-        f->hold_at = deadline(now, hold_ms(f));
+        f->hold_at = routing_deadline(now, hold_ms(f));
         f->keepalive_armed = true;
-        f->keepalive_at = deadline(now, hold_ms(f) / 3u);
+        f->keepalive_at = routing_deadline(now, hold_ms(f) / 3u);
     } else {
         /* no hold timer once Established, but a peer that never confirms must not keep OpenConfirm forever */
-        f->hold_at = deadline(now, ROUTING_BGP_OPENSENT_HOLD_S * 1000u);
+        f->hold_at = routing_deadline(now, ROUTING_BGP_OPENSENT_HOLD_S * 1000u);
     }
 }
 
@@ -232,7 +220,8 @@ static void on_keepalive(routing_bgp_fsm_t *f, uint32_t now, routing_bgp_actions
         break;
     case ROUTING_BGP_OPENCONFIRM:
         f->state = ROUTING_BGP_ESTABLISHED;
-        f->established_at = now;
+        f->uptime_s = 0;
+        f->uptime_mark = now;
         f->backoff_ms = ROUTING_BGP_BACKOFF_MIN_MS;
         restart_hold(f, now);
         push(out, ROUTING_BGP_ACT_SEND_FULL_SET, 0, 0);
@@ -253,24 +242,24 @@ static void on_tick(routing_bgp_fsm_t *f, uint32_t now, routing_bgp_actions_t *o
     switch (f->state) {
     case ROUTING_BGP_IDLE:
     case ROUTING_BGP_ACTIVE:
-        if (f->retry_armed && due(now, f->retry_at)) {
+        if (f->retry_armed && routing_due(now, f->retry_at)) {
             enter_connect(f, now, out);
         }
         break;
     case ROUTING_BGP_CONNECT:
-        if (due(now, f->connect_at)) {
+        if (routing_due(now, f->connect_at)) {
             connect_failed(f, now, "timed out", out);
         }
         break;
     case ROUTING_BGP_OPENSENT:
     case ROUTING_BGP_OPENCONFIRM:
     case ROUTING_BGP_ESTABLISHED:
-        if (f->hold_armed && due(now, f->hold_at)) {
+        if (f->hold_armed && routing_due(now, f->hold_at)) {
             snprintf(f->last_error, sizeof(f->last_error), "hold timer expired");
             drop(f, now, true, ROUTING_BGP_ERR_HOLD_TIMER, 0, out);
-        } else if (f->keepalive_armed && due(now, f->keepalive_at)) {
+        } else if (f->keepalive_armed && routing_due(now, f->keepalive_at)) {
             push(out, ROUTING_BGP_ACT_SEND_KEEPALIVE, 0, 0);
-            f->keepalive_at = deadline(now, hold_ms(f) / 3u);
+            f->keepalive_at = routing_deadline(now, hold_ms(f) / 3u);
         }
         break;
     }
@@ -288,6 +277,7 @@ void routing_bgp_fsm_handle(routing_bgp_fsm_t *f, const routing_bgp_event_t *ev,
                             routing_bgp_actions_t *out)
 {
     out->count = 0;
+    routing_bgp_fsm_clock(f, now_ms);
     switch (ev->type) {
     case ROUTING_BGP_EV_START:
         if (!f->started) {
@@ -410,7 +400,18 @@ uint16_t routing_bgp_fsm_hold_time(const routing_bgp_fsm_t *f)
 
 uint32_t routing_bgp_fsm_uptime_s(const routing_bgp_fsm_t *f, uint32_t now_ms)
 {
-    return f->state == ROUTING_BGP_ESTABLISHED ? (now_ms - f->established_at) / 1000u : 0;
+    return f->state == ROUTING_BGP_ESTABLISHED ? f->uptime_s + (now_ms - f->uptime_mark) / 1000u : 0;
+}
+
+void routing_bgp_fsm_clock(routing_bgp_fsm_t *f, uint32_t now_ms)
+{
+    if (f->state != ROUTING_BGP_ESTABLISHED) {
+        return;
+    }
+    uint32_t whole_s = (now_ms - f->uptime_mark) / 1000u;
+
+    f->uptime_s += whole_s;
+    f->uptime_mark += whole_s * 1000u;
 }
 
 const char *routing_bgp_fsm_last_error(const routing_bgp_fsm_t *f)

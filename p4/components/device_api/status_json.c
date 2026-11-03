@@ -29,22 +29,6 @@ static const char *pd_state_name(int state)
     return state >= 0 && state < 4 ? names[state] : "unknown";
 }
 
-static const char *routing_method_name(int method)
-{
-    switch (method) {
-    case ROUTING_METHOD_PD:
-        return "pd";
-    case ROUTING_METHOD_RIPNG:
-        return "ripng";
-    case ROUTING_METHOD_BGP:
-        return "bgp";
-    case ROUTING_METHOD_OFF:
-        return "off";
-    default:
-        return "unknown";
-    }
-}
-
 // The peer figures only mean something with method bgp: null otherwise.
 static void routing_peer_figure(json_out_t *w, const device_api_status_t *s, uint8_t value)
 {

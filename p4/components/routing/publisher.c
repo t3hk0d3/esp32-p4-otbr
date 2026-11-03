@@ -5,14 +5,10 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "routing_util.h"
 
 static const char *TAG = "routing";
 static const routing_prefix64_t NO_PREFIX;
-
-static bool prefix_eq(const routing_prefix64_t *a, const routing_prefix64_t *b)
-{
-    return memcmp(a->b, b->b, sizeof(a->b)) == 0;
-}
 
 static void learn_ula(routing_publisher_t *p)
 {
@@ -29,7 +25,7 @@ static void learn_ula(routing_publisher_t *p)
 static bool ula_wanted(const routing_publisher_t *p)
 {
     return p->have_settings && p->want_omr_mode == ROUTING_OMR_CUSTOM && p->want_announce_ula && p->ula_known &&
-           !prefix_eq(&p->ula, &p->want_custom);
+           !routing_prefix64_eq(&p->ula, &p->want_custom);
 }
 
 // The entry may go in only once OpenThread has the wanted custom config: before that, the ULA is OpenThread's own
@@ -37,7 +33,7 @@ static bool ula_wanted(const routing_publisher_t *p)
 static bool ula_addable(const routing_publisher_t *p)
 {
     return ula_wanted(p) && p->omr_applied && p->omr_mode == ROUTING_OMR_CUSTOM &&
-           prefix_eq(&p->omr_prefix, &p->want_custom);
+           routing_prefix64_eq(&p->omr_prefix, &p->want_custom);
 }
 
 static void note_ula_result(routing_publisher_t *p, int err, const char *what)
@@ -104,7 +100,7 @@ static bool apply_omr(routing_publisher_t *p)
     bool custom = p->want_omr_mode == ROUTING_OMR_CUSTOM;
 
     if (p->omr_applied && p->omr_mode == p->want_omr_mode &&
-            (!custom || prefix_eq(&p->omr_prefix, &p->want_custom))) {
+            (!custom || routing_prefix64_eq(&p->omr_prefix, &p->want_custom))) {
         return true;
     }
     int err = p->ops->set_omr_config(p->want_omr_mode, custom ? &p->want_custom : NULL, ROUTING_PREF_MED);

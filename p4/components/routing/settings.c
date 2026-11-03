@@ -8,6 +8,7 @@
 
 #include "cJSON.h"
 #include "ipv6_text.h"
+#include "routing_util.h"
 
 #ifndef CONFIG_IDF_TARGET_LINUX
 #include "esp_check.h"
@@ -62,6 +63,21 @@ static const char *const BGP_STATE_NAMES[] = {
 };
 
 #define COUNT_OF(a) (sizeof(a) / sizeof((a)[0]))
+
+static const routing_prefix64_t NO_PREFIX; /* ::/64 */
+
+_Static_assert(COUNT_OF(METHOD_NAMES) == ROUTING_METHOD_COUNT, "a method without a name");
+_Static_assert(COUNT_OF(BGP_STATE_NAMES) == ROUTING_BGP_STATE_COUNT, "a BGP state without a name");
+
+const char *routing_method_name(int method)
+{
+    return method >= 0 && method < ROUTING_METHOD_COUNT ? METHOD_NAMES[method] : "unknown";
+}
+
+const char *routing_bgp_state_name(int state)
+{
+    return state >= 0 && state < ROUTING_BGP_STATE_COUNT ? BGP_STATE_NAMES[state] : "unknown";
+}
 
 /*
  * ---- address text ----
@@ -362,7 +378,8 @@ static esp_err_t parse_omr(const cJSON *omr, const routing_validate_ctx_t *ctx, 
     const cJSON *prefix = cJSON_GetObjectItemCaseSensitive(omr, "prefix");
 
     if (!cJSON_IsString(prefix) || !parse_prefix64(prefix->valuestring, &s->omr_prefix) ||
-            is_link_local(s->omr_prefix.b) || is_multicast(s->omr_prefix.b)) {
+            routing_prefix64_eq(&s->omr_prefix, &NO_PREFIX) || is_link_local(s->omr_prefix.b) ||
+            is_multicast(s->omr_prefix.b)) {
         return fail(bad_field, FIELD_OMR_PREFIX);
     }
     for (int i = 0; ctx && i < ctx->onlink_count && i < ROUTING_MAX_ONLINK; i++) {

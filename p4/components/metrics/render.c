@@ -13,9 +13,6 @@ static const char *const srp_state_names[] = {"disabled", "running", "stopped"};
 static const char *const directions[] = {"inbound", "outbound"};
 static const char *const casts[] = {"unicast", "multicast"};
 static const char *const events[] = {"rx", "tx_success", "tx_failure"};
-// Indexed by routing_method_t and routing_bgp_state_t.
-static const char *const routing_method_names[] = {"pd", "ripng", "bgp", "off"};
-static const char *const bgp_state_names[] = {"idle", "connect", "active", "opensent", "openconfirm", "established"};
 
 #define COUNT(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -457,12 +454,12 @@ static void render_bgp(metrics_writer_t *w, const routing_metrics_view_t *r)
     }
     family(w, "br_bgp_peer_state", "gauge", "BGP session state per configured peer.");
     for (uint8_t i = 0; i < r->peer_count; i++) {
-        for (size_t k = 0; k < COUNT(bgp_state_names); k++) {
+        for (int k = 0; k < ROUTING_BGP_STATE_COUNT; k++) {
             sample_t s = begin(w, "br_bgp_peer_state");
 
             peer_label(&s, &r->peers[i]);
-            label(&s, "state", bgp_state_names[k]);
-            end_u64(&s, (int)k == (int)r->peers[i].state ? 1 : 0);
+            label(&s, "state", routing_bgp_state_name(k));
+            end_u64(&s, k == (int)r->peers[i].state ? 1 : 0);
         }
         uptime[i] = r->peers[i].uptime_s;
         dropped[i] = r->peers[i].received_dropped;
@@ -476,8 +473,13 @@ static void render_bgp(metrics_writer_t *w, const routing_metrics_view_t *r)
 
 static void render_routing(metrics_writer_t *w, const routing_metrics_view_t *r)
 {
-    state_set(w, "br_routing_method", "How the route into the mesh is announced on the backbone.", "method",
-              routing_method_names, COUNT(routing_method_names), (int)r->method);
+    const char *methods[ROUTING_METHOD_COUNT];
+
+    for (int i = 0; i < ROUTING_METHOD_COUNT; i++) {
+        methods[i] = routing_method_name(i);
+    }
+    state_set(w, "br_routing_method", "How the route into the mesh is announced on the backbone.", "method", methods,
+              ROUTING_METHOD_COUNT, (int)r->method);
     single(w, "br_routing_announced_prefixes", "gauge", "Prefixes announced on the backbone.", r->announced_count);
     single(w, "br_routing_omr_custom", "gauge", "A custom OMR prefix is configured.", r->omr_custom);
     if (r->method == ROUTING_METHOD_BGP) {

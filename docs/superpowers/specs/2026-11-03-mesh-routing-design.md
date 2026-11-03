@@ -235,7 +235,7 @@ ULA, each null when unknown. `status.announced` is the current announcement set 
 Validation. A PUT that fails any of these checks returns 400 naming the field and changes nothing:
 
 - `method`: `pd`, `ripng`, `bgp` or `off`;
-- `omr.mode`: `auto` or `custom`. `omr.prefix`: required for `custom`, ignored for `auto`; a /64, not link-local
+- `omr.mode`: `auto` or `custom`. `omr.prefix`: required for `custom`, ignored for `auto`; a /64, not `::/64`, not link-local
   (`fe80::/10`) or multicast (`ff00::/8`);
 - `bgp` is validated whenever present, whatever the method, so stored BGP settings are always valid:
   - `local_asn` and `asn`: 1..4294967295, excluding 23456 (AS_TRANS);

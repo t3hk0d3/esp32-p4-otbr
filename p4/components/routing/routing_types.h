@@ -24,6 +24,8 @@ typedef enum {
     ROUTING_METHOD_OFF,
 } routing_method_t;
 
+#define ROUTING_METHOD_COUNT 4
+
 typedef enum {
     ROUTING_OMR_AUTO,
     ROUTING_OMR_CUSTOM,
@@ -75,6 +77,8 @@ typedef enum {
     ROUTING_BGP_OPENCONFIRM,
     ROUTING_BGP_ESTABLISHED,
 } routing_bgp_state_t;
+
+#define ROUTING_BGP_STATE_COUNT 6
 
 typedef struct {
     uint8_t addr[16]; /**< the peer this entry is for */
@@ -129,6 +133,12 @@ typedef struct {
     uint32_t ripng_requests_answered;
     uint32_t ripng_responses_dropped;
 } routing_metrics_view_t;
+
+/** The JSON and metrics name of a method ("pd", "ripng", "bgp", "off"); "unknown" out of range. In settings.c. */
+const char *routing_method_name(int method);
+
+/** The JSON and metrics name of a BGP state ("idle" ... "established"); "unknown" out of range. In settings.c. */
+const char *routing_bgp_state_name(int state);
 
 #ifdef __cplusplus
 }
