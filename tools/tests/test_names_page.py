@@ -120,6 +120,28 @@ class TestNamesLogic:
                 is True
             ), k
 
+    def test_dirty_of_one_section_looks_only_at_its_fields(self):
+        # On a DHCP change: the host section is dirty, mDNS is not; on a hostname change: the other way round.
+        dhcp = json.dumps(form(dhcp_name="router"))
+        host = json.dumps(form(hostname="garage"))
+        base = json.dumps(FORM)
+        assert names(
+            f"[L.dirty({base}, {dhcp}, 'mdns'), L.dirty({base}, {dhcp}, 'host')]"
+        ) == [False, True]
+        assert names(
+            f"[L.dirty({base}, {host}, 'mdns'), L.dirty({base}, {host}, 'host')]"
+        ) == [True, False]
+
+    def test_merge_takes_one_sections_fields_from_the_form(self):
+        # On merge(saved, form, part): the part's fields from the form, every other field from saved.
+        edited = json.dumps(form(hostname="garage", dhcp_name="router"))
+        assert names(f"L.merge({json.dumps(FORM)}, {edited}, 'host')") == form(
+            dhcp_name="router"
+        )
+        assert names(f"L.merge({json.dumps(FORM)}, {edited}, 'mdns')") == form(
+            hostname="garage"
+        )
+
     def test_request_body_has_the_five_fields_without_local(self):
         # On a form with a pasted ".local" hostname: the PUT body with the five API fields.
         got = names(
@@ -226,9 +248,9 @@ class TestNamesPage:
             + START
             + """
             return [t.el('nm-hostname').value, t.el('nm-follows').checked, t.el('nm-ha').disabled, t.el('nm-ha').value,
-                    t.el('nm-http').checked, t.el('nm-dhcp').value, t.el('nm-save').disabled, t.el('nm-discard').disabled,
+                    t.el('nm-http').checked, t.el('hn-dhcp').value, t.el('nm-save').disabled, t.el('nm-discard').disabled,
                     t.el('nm-hostname-hint').textContent.includes('esp-otbr-a1b2c3'),
-                    t.el('nm-dhcp-hint').textContent.includes('esp-otbr')];
+                    t.el('hn-dhcp-hint').textContent.includes('esp-otbr'), t.el('hn-save').disabled];
         """
         )
         assert r == [
@@ -238,6 +260,7 @@ class TestNamesPage:
             "kitchen",
             False,
             "",
+            True,
             True,
             True,
             True,
@@ -345,7 +368,7 @@ class TestNamesPage:
             page("names", routes())
             + START
             + """
-            t.el('nm-hostname').type('Garage.local'); t.el('nm-dhcp').type('router');
+            t.el('nm-hostname').type('Garage.local');
             const before = t.calls.length;
             t.el('nm-save').click();
             await t.advance(2500);
@@ -360,7 +383,7 @@ class TestNamesPage:
             "ha_name_follows_hostname": True,
             "ha_name": "",
             "http_advert": False,
-            "dhcp_name": "router",
+            "dhcp_name": "",
         }
         assert r[2][0] == "PUT /device/names"
         assert "GET /device/names" in r[2][1:]
@@ -456,11 +479,49 @@ class TestNamesPage:
             )
             + START
             + """
-            t.el('nm-dhcp').type('router'); t.el('nm-save').click(); await t.advance(2500);
-            return t.el('nm-msg').textContent;
+            t.el('hn-dhcp').type('router'); t.el('hn-save').click(); await t.advance(2500);
+            return t.el('hn-msg').textContent;
         """
         )
         assert "DHCP name not applied" in r
+
+    def test_each_section_enables_only_its_own_save(self):
+        # On a DHCP edit: the Hostname section's Save and Discard enabled, the mDNS ones still disabled.
+        r = scenario(
+            page("names", routes())
+            + START
+            + """
+            t.el('hn-dhcp').type('router');
+            return [t.el('hn-save').disabled, t.el('hn-discard').disabled, t.el('nm-save').disabled, t.el('nm-discard').disabled];
+        """
+        )
+        assert r == [False, False, True, True]
+
+    def test_hostname_save_sends_only_its_field_and_keeps_mdns_edits(self):
+        # On an unsaved mDNS edit and Save in the Hostname section: the PUT carries the saved mDNS values and the new
+        # DHCP name; afterwards the mDNS edit is still in its field.
+        r = scenario(
+            page("names", routes())
+            + START
+            + """
+            t.el('nm-hostname').type('garage'); t.el('hn-dhcp').type('router');
+            t.el('hn-save').click(); await t.advance(2500);
+            const put = t.calls.find((c) => c.method === 'PUT');
+            return [JSON.parse(put.body).hostname, JSON.parse(put.body).dhcp_name, t.el('nm-hostname').value,
+                    t.el('nm-save').disabled];
+        """
+        )
+        assert r == ["kitchen", "router", "garage", False]
+
+    def test_dhcp_error_shows_under_the_hostname_section(self):
+        # On a DHCP name "bad.name": the error under the DHCP field, its Save disabled.
+        r = scenario(
+            page("names", routes())
+            + START
+            + "t.el('hn-dhcp').type('bad.name'); return [t.el('hn-dhcp-err').allText(), t.el('hn-save').disabled];"
+        )
+        assert "letters, digits and hyphens" in r[0]
+        assert r[1] is True
 
     def test_polls_do_not_overwrite_an_edit(self):
         # On an edit followed by a poll: the edit stays.

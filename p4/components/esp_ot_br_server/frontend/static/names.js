@@ -1,8 +1,8 @@
 /*
- * ESP Thread Border Router - Names section of the Ethernet page (GET/PUT /device/names)
+ * ESP Thread Border Router - mDNS and Hostname sections of the Ethernet page (GET/PUT /device/names)
  *
- * NamesLogic is pure and runs under node too (tools/tests/test_names_page.py). NamesPage is the section: an always-open
- * form with its own Save, applied live by the board (no review, no reboot). The form is
+ * NamesLogic is pure and runs under node too (tools/tests/test_names_page.py). NamesPage is the two sections: always-open
+ * forms, each with its own Save, applied live by the board (no review, no reboot). The form is
  * {hostname, follows, ha_name, http_advert, dhcp_name} with the strings as typed.
  */
 'use strict';
@@ -83,9 +83,20 @@ function validate(form) {
   return {count : Object.keys(errors).length, errors : errors};
 }
 
-function dirty(a, b) {
-  return a.hostname !== b.hostname || a.follows !== b.follows || a.ha_name !== b.ha_name ||
-         a.http_advert !== b.http_advert || a.dhcp_name !== b.dhcp_name;
+/* The form fields of each section of the page. */
+var PARTS = {mdns : [ 'hostname', 'follows', 'ha_name', 'http_advert' ], host : [ 'dhcp_name' ]};
+
+/* Does `b` differ from `a`: in the fields of section `part`, or in any field without one. */
+function dirty(a, b, part) {
+  var fields = part ? PARTS[part] : PARTS.mdns.concat(PARTS.host);
+  return fields.some(function(f) { return a[f] !== b[f]; });
+}
+
+/* `saved` with the fields of section `part` taken from `form`: what saving that one section sends. */
+function merge(saved, form, part) {
+  var out = JSON.parse(JSON.stringify(saved));
+  PARTS[part].forEach(function(f) { out[f] = form[f]; });
+  return out;
 }
 
 function toBody(form) {
@@ -121,7 +132,9 @@ return {
   utf8Bytes : utf8Bytes,
   fromApi : fromApi,
   validate : validate,
+  PARTS : PARTS,
   dirty : dirty,
+  merge : merge,
   toBody : toBody,
   effectiveHostname : effectiveHostname,
   conflict : conflict,
@@ -129,12 +142,17 @@ return {
 };
 })();
 
-/* opts.isBlocked(): true while the Ethernet page runs a trial or waits for its reboot. */
+/*
+ * opts.isBlocked(): true while the Ethernet page runs a trial or waits for its reboot. Two sections, mDNS (ids nm-*) and
+ * Hostname (ids hn-*), each with its own Save and Discard: saving one sends the other's saved values and keeps its edits.
+ */
 function NamesPage(env, opts) {
 var C = typeof DeviceCommon !== 'undefined' ? DeviceCommon : require('./device_common.js');
 var L = NamesLogic;
 var SETTLE_MS = 2000; // the mDNS library probes a new name for about a second before it answers to it
-var FIELDS = {hostname : 'nm-hostname', ha_name : 'nm-ha', dhcp_name : 'nm-dhcp'};
+var FIELDS = {hostname : 'nm-hostname', ha_name : 'nm-ha', dhcp_name : 'hn-dhcp'};
+var IDS = {mdns : 'nm', host : 'hn'}; // id prefix of each section's buttons and message line
+var OTHER = {mdns : 'host', host : 'mdns'};
 var api = null;   // last GET /device/names
 var saved = null; // form of `api`
 var form = null;  // what the person edits
@@ -162,6 +180,16 @@ function messages(id, text) {
     box.appendChild(el('p', text, 'error-text'));
 }
 
+function partErrors(v, part) {
+  return L.PARTS[part].filter(function(f) { return v.errors[f]; }).length;
+}
+
+/* Can section `part` be saved: changed (or, for mDNS, the board renamed itself and the same name can be retried) and valid. */
+function canSave(part, v) {
+  var wanted = L.dirty(saved, form, part) || (part === 'mdns' && L.conflict(api));
+  return !blocked() && wanted && partErrors(v, part) === 0;
+}
+
 function render() {
   if (!form)
     return;
@@ -171,16 +199,15 @@ function render() {
   $('nm-follows').checked = form.follows;
   setValue('nm-ha', haShown);
   $('nm-http').checked = form.http_advert;
-  setValue('nm-dhcp', form.dhcp_name);
-  [ 'nm-hostname', 'nm-follows', 'nm-dhcp' ].forEach(function(id) { $(id).disabled = off; });
+  setValue('hn-dhcp', form.dhcp_name);
+  [ 'nm-hostname', 'nm-follows', 'hn-dhcp' ].forEach(function(id) { $(id).disabled = off; });
   $('nm-ha').disabled = off || form.follows;
   $('nm-http').disabled = off || !api.http_advert_available;
   show('nm-http-split', !api.http_advert_available);
   show('nm-hostname-split', split);
   setText('nm-hostname-hint', 'Letters, digits and hyphens, up to 63. Leave empty for the default ' +
                                   api.hostname_default + '.');
-  setText('nm-dhcp-hint', 'What your router lists for this board: letters, digits and hyphens, up to 32. Leave empty ' +
-                              'for the default ' +
+  setText('hn-dhcp-hint', 'Letters, digits and hyphens, up to 32. Leave empty for the default ' +
                               api.dhcp_name_default + '. The router sees it at the lease renewal the board asks for on ' +
                               'Save; it only matters with an automatic (DHCP) address.');
   Object.keys(FIELDS).forEach(function(f) { messages(FIELDS[f] + '-err', v.errors[f] || serverErrors[f]); });
@@ -192,10 +219,10 @@ function render() {
                                        '.local. Pick a different name, or rename the other device.'
                                  : '');
   show('nm-conflict', renamed);
-  var changed = L.dirty(saved, form);
-  // After a conflict rename, saving the same name again asks the board to try it again.
-  $('nm-save').disabled = off || !(changed || renamed) || v.count > 0;
-  $('nm-discard').disabled = off || !changed;
+  Object.keys(IDS).forEach(function(part) {
+    $(IDS[part] + '-save').disabled = !canSave(part, v);
+    $(IDS[part] + '-discard').disabled = off || !L.dirty(saved, form, part);
+  });
 }
 
 function load(body) {
@@ -222,27 +249,32 @@ function refresh() {
   });
 }
 
+function clearMessages() {
+  serverErrors = {};
+  note('nm-msg', '', false);
+  note('hn-msg', '', false);
+}
+
 function edit(fn) {
   return function(ev) {
     if (!form || blocked())
       return;
     fn(ev);
-    serverErrors = {};
-    note('nm-msg', '', false);
+    clearMessages();
     render();
   };
 }
 
-function discard() {
+function discard(part) {
   if (!saved || blocked())
     return;
-  form = JSON.parse(JSON.stringify(saved));
-  serverErrors = {};
-  note('nm-msg', '', false);
+  form = L.merge(form, saved, part);
+  clearMessages();
   render();
 }
 
-function settleThenReload(before, reply) {
+/* After a save: wait for the new name to settle, read the names again, move to the new .local name if needed. */
+function settleThenReload(part, before, reply) {
   return new Promise(function(resolve) { env.setTimeout(resolve, SETTLE_MS); }).then(function() {
     return kit.request('GET', '/device/names', {timeoutMs : 5000});
   }).then(function(r) { return r.status === 200 && r.body ? r.body : reply; }, function() {
@@ -251,40 +283,45 @@ function settleThenReload(before, reply) {
   }).then(function(after) {
     var target = L.redirectTarget(env.location || {}, before, after);
     if (target) {
-      note('nm-msg', 'Saved. Moving to ' + target + ' ...', false);
+      note(IDS[part] + '-msg', 'Saved. Moving to ' + target + ' ...', false);
       env.navigate(target);
       return;
     }
-    form = null;
-    load(after);
+    // The other section keeps what is being typed there.
+    var keep = form;
+    api = after;
+    saved = L.fromApi(after);
+    form = L.merge(saved, keep, OTHER[part]);
   });
 }
 
-function save() {
-  if (!form || blocked() || L.validate(form).count || !(L.dirty(saved, form) || L.conflict(api)))
+function save(part) {
+  var msg = IDS[part] + '-msg';
+  if (!form || !canSave(part, L.validate(form)))
     return Promise.resolve(null);
   var before = api;
   saving = true;
   render();
   return kit.request('PUT', '/device/names', {headers : {'Content-Type' : 'application/json'},
-                                               body : JSON.stringify(L.toBody(form)), timeoutMs : 10000})
+                                               body : JSON.stringify(L.toBody(L.merge(saved, form, part))),
+                                               timeoutMs : 10000})
       .then(function(r) {
         if (r.status === 400 && r.body && FIELDS[r.body.field]) {
           serverErrors = {};
           serverErrors[r.body.field] = r.body.detail;
-          note('nm-msg', 'The board refused the names: see the field above.', true);
+          note(msg, 'The board refused the name: see the field above.', true);
           return null;
         }
         if (r.status !== 200 || !r.body) {
-          note('nm-msg', kit.failure(r), true);
+          note(msg, kit.failure(r), true);
           return null;
         }
         if (r.body.applied === false)
-          note('nm-msg', 'Saved, but not everything took effect yet: ' + r.body.detail, true);
+          note(msg, 'Saved, but not everything took effect yet: ' + r.body.detail, true);
         else
-          note('nm-msg', 'Saved.', false);
-        return settleThenReload(before, r.body);
-      }, function(e) { note('nm-msg', e.message, true); })
+          note(msg, 'Saved.', false);
+        return settleThenReload(part, before, r.body);
+      }, function(e) { note(msg, e.message, true); })
       .then(function() {
         saving = false;
         render();
@@ -300,9 +337,11 @@ function init() {
   }));
   $('nm-ha').addEventListener('input', edit(function(ev) { form.ha_name = ev.target.value; }));
   $('nm-http').addEventListener('change', edit(function(ev) { form.http_advert = ev.target.checked; }));
-  $('nm-dhcp').addEventListener('input', edit(function(ev) { form.dhcp_name = ev.target.value; }));
-  $('nm-discard').addEventListener('click', discard);
-  $('nm-save').addEventListener('click', save);
+  $('hn-dhcp').addEventListener('input', edit(function(ev) { form.dhcp_name = ev.target.value; }));
+  Object.keys(IDS).forEach(function(part) {
+    $(IDS[part] + '-discard').addEventListener('click', function() { discard(part); });
+    $(IDS[part] + '-save').addEventListener('click', function() { save(part); });
+  });
   kit.poller(function() { return saving ? Promise.resolve(true) : refresh(); }, 10000, 'namesSection');
 }
 

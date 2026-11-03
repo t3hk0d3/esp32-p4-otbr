@@ -46,36 +46,46 @@ reboots into the previous config. If the board is unreachable after a network ch
 Console (`make monitor`, USB-C port, 115200 baud, any build): `net show` prints the active config, trial and interfaces;
 `net reset` restores `single`, untagged, DHCPv4 and reboots.
 
-## Names
+## mDNS and hostname
 
-The **Names** section at the end of the Ethernet page (or `GET`/`PUT /device/names`, see [API](api.md)) sets how the
-board is named on the network. A save takes effect at once: no reboot, no trial, and the IPv4 lease is kept.
+Two sections at the end of the Ethernet page (or `GET`/`PUT /device/names`, see [API](api.md)) set how the board is
+named on the network. Each has its own Save; a save takes effect at once: no reboot, no trial, and the IPv4 lease is
+kept.
 
-<img src="images/ethernet-names.png" width="640" alt="The Names section of the Ethernet page: hostname kitchen with the .local suffix, Same as hostname ticked for the Home Assistant name, Advertise the web UI unticked, an empty DHCP client name with the default esp-otbr in its hint, and the Discard and Save buttons">
+### mDNS
+
+<img src="images/ethernet-mdns.png" width="640" alt="The mDNS section of the Ethernet page with an Announced chip: hostname kitchen with the .local suffix, Same as hostname ticked for the Home Assistant name, Advertise the web UI unticked, and the Discard and Save buttons">
 
 | Setting | What it is | Default |
 | --- | --- | --- |
 | Hostname | the mDNS name, `<name>.local` | `esp-otbr-<last six hex digits of the MAC>` |
-| Name in Home Assistant | the `_meshcop._udp` instance name Home Assistant's Thread panel shows (Thread adds ` #XXXX`) | follows the hostname |
+| Name in Home Assistant | the `_meshcop._udp` instance name Home Assistant's Thread panel shows | follows the hostname |
 | Advertise the web UI | an `_http._tcp` record (port 80, `path=/`) so that network browsers find the web UI | off |
-| DHCP client name | the name the board sends with its DHCP requests, which routers list | `esp-otbr` |
 
-Hostname and DHCP name: letters, digits and hyphens, at most 63 (DHCP name: 32), not starting or ending with a
-hyphen; upper case is stored in lower case. The Home Assistant name: at most 63 bytes of UTF-8, no control characters. An empty hostname or
-DHCP name means the default.
+The hostname: letters, digits and hyphens, at most 63, not starting or ending with a hyphen; upper case is stored in
+lower case; empty means the default. The Home Assistant name: at most 63 bytes of UTF-8, no control characters.
 
-- **Conflicts:** when another device already uses the hostname, the board answers as `<name>-2.local`. The page shows
-  a **Renamed** chip and the name in use (`hostname_live`). Saving the same name again tries it again.
+- **Conflicts:** when another device already uses the hostname, the board answers as `<name>-2.local`. The section
+  shows a **Renamed** chip (**Announced** otherwise) and the name in use (`hostname_live`). Saving the same name again
+  tries it again.
 
-  <img src="images/ethernet-names-conflict.png" width="640" alt="The Names section after a conflict: a Renamed chip and a banner saying another device already uses kitchen.local, so the board answers as kitchen-2.local; Save is enabled to try the name again">
+  <img src="images/ethernet-mdns-conflict.png" width="640" alt="The mDNS section after a conflict: a Renamed chip and a banner saying another device already uses kitchen.local, so the board answers as kitchen-2.local; Save is enabled to try the name again">
 
 - **Moving to the new name:** a page opened at the old `.local` name moves to the new one after a save.
-- **DHCP name:** the board asks for a lease renewal on save, so the router learns the name without the address
-  changing. With a static IPv4 address there is no DHCP and the setting has no effect.
 - **Split mode:** the hostname resolves on `thread_bb` only (mDNS runs there), while the web UI is on `mgmt`: open the
   page by the management address. For the same reason the web UI advert is not available in split mode (the setting is
   kept and applies again in single mode).
-- `net reset` does not touch the names.
+
+### Hostname
+
+<img src="images/ethernet-hostname.png" width="640" alt="The Hostname section of the Ethernet page: an empty DHCP client name with the default esp-otbr in its hint, and the Discard and Save buttons">
+
+The DHCP client name is the name the board sends with its DHCP requests, which routers list. Default `esp-otbr`
+(lwIP's `espressif` before); letters, digits and hyphens, at most 32 (the `esp_netif` limit). The board asks for a lease
+renewal on save, so the router learns the name without the address changing. With a static IPv4 address there is no
+DHCP and the setting has no effect.
+
+`net reset` touches neither section.
 
 ## DHCPv6 prefix delegation
 

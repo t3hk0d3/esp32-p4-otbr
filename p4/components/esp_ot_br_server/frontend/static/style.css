@@ -532,6 +532,9 @@ tr:hover td { background: var(--primary-light); }
 .steps li { margin-bottom: 4px; }
 .ack { display: flex; gap: 10px; align-items: flex-start; background: #f3f7fb; border: 1px solid #cfe0f0; border-radius: var(--radius); padding: 12px 14px; font-size: 14px; cursor: pointer; margin: 12px 0; }
 .ack input { width: 18px; height: 18px; margin-top: 2px; flex: none; }
+.section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.section-head .section-title { margin-bottom: 0; }
+#hostnameSection { margin-top: 24px; }
 .names-form { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 16px; }
 .names-form fieldset { border: 0; padding: 0; margin: 0 0 18px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .names-form legend { font-size: 15px; font-weight: 600; margin-bottom: 6px; padding: 0; }

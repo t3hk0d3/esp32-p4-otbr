@@ -18,7 +18,7 @@
         <div>
             <h1 class="page-title">Ethernet</h1>
             <p class="page-desc">How the board connects to your network: one port for everything, or management and Thread
-                traffic on separate VLANs of the same cable. And the names it uses on the network.</p>
+                traffic on separate VLANs of the same cable. And the names it uses on the network (mDNS and hostname).</p>
         </div>
     </div>
 
@@ -272,21 +272,20 @@
         </div>
         <div class="form-hint" id="netMsg" role="status" aria-live="polite"></div>
     </section>
-    <section id="namesSection" aria-labelledby="namesTitle">
-        <h2 class="section-title" id="namesTitle">Names</h2>
+    <section id="namesSection" aria-labelledby="mdnsTitle">
+        <div class="section-head">
+            <h2 class="section-title" id="mdnsTitle">mDNS</h2>
+            <span class="chip chip-ok hidden" id="nm-announced">Announced</span>
+            <span class="chip chip-warn hidden" id="nm-renamed">Renamed</span>
+        </div>
         <div class="card">
-            <div class="iface-title">
-                <h3>Names on the network</h3>
-                <span class="chip chip-ok hidden" id="nm-announced">Announced</span>
-                <span class="chip chip-warn hidden" id="nm-renamed">Renamed</span>
-            </div>
-            <p class="iface-role">How the board shows up in browsers, in Home Assistant and in your router.</p>
+            <p class="iface-role">How the board shows up in browsers, discovery apps and Home Assistant.</p>
             <div class="disabled-banner hidden" id="nm-conflict" role="status"></div>
             <div class="names-form">
                 <fieldset>
                     <legend>Hostname</legend>
                     <span class="input-suffix"><input type="text" id="nm-hostname" size="22" autocomplete="off"
-                        spellcheck="false" aria-label="Hostname"><span class="suffix">.local</span></span>
+                        spellcheck="false" aria-label="mDNS hostname"><span class="suffix">.local</span></span>
                     <p class="form-hint" id="nm-hostname-hint"></p>
                     <p class="form-hint hidden" id="nm-hostname-split">In split mode this name resolves on the Thread
                         backbone only. Open this page by its management IP address.</p>
@@ -309,18 +308,32 @@
                     <p class="form-hint hidden" id="nm-http-split">Not available in split mode: the web UI is on the
                         management VLAN, and mDNS runs only on the Thread backbone.</p>
                 </fieldset>
-                <fieldset>
-                    <legend>Name shown to your router (DHCP)</legend>
-                    <input type="text" id="nm-dhcp" size="22" autocomplete="off" spellcheck="false"
-                        aria-label="DHCP client name">
-                    <p class="form-hint" id="nm-dhcp-hint"></p>
-                    <div id="nm-dhcp-err" role="alert"></div>
-                </fieldset>
                 <div class="actions-end">
                     <button class="btn btn-outline" id="nm-discard" type="button" disabled>Discard</button>
                     <button class="btn btn-primary" id="nm-save" type="button" disabled>Save</button>
                 </div>
                 <div class="form-hint" id="nm-msg" role="status" aria-live="polite"></div>
+            </div>
+        </div>
+    </section>
+
+    <section id="hostnameSection" aria-labelledby="hostnameTitle">
+        <h2 class="section-title" id="hostnameTitle">Hostname</h2>
+        <div class="card">
+            <p class="iface-role">The name the board gives your router when it asks for an address (DHCP).</p>
+            <div class="names-form">
+                <fieldset>
+                    <legend>DHCP client name</legend>
+                    <input type="text" id="hn-dhcp" size="22" autocomplete="off" spellcheck="false"
+                        aria-label="DHCP client name">
+                    <p class="form-hint" id="hn-dhcp-hint"></p>
+                    <div id="hn-dhcp-err" role="alert"></div>
+                </fieldset>
+                <div class="actions-end">
+                    <button class="btn btn-outline" id="hn-discard" type="button" disabled>Discard</button>
+                    <button class="btn btn-primary" id="hn-save" type="button" disabled>Save</button>
+                </div>
+                <div class="form-hint" id="hn-msg" role="status" aria-live="polite"></div>
             </div>
         </div>
     </section>
