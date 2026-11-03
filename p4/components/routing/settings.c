@@ -63,7 +63,14 @@ static const char *const BGP_STATE_NAMES[] = {
 
 #define COUNT_OF(a) (sizeof(a) / sizeof((a)[0]))
 
-/* ---- address text ---- */
+/*
+ * ---- address text ----
+ *
+ * Not inet_pton / inet_ntop: on the target they are lwIP's (ip6addr_aton / ip6addr_ntoa_r, ESP-IDF 6.1), which accept
+ * a zone, a "/len", trailing text, a trailing colon, embedded IPv4 and groups of more than 4 digits, and print upper case
+ * with the first (not the longest) zero run compressed; the host tests would also run glibc's instead. The tests pin
+ * both behaviours.
+ */
 
 static int hex_value(char c)
 {

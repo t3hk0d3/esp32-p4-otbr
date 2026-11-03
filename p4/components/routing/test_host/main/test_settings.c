@@ -349,6 +349,24 @@ TEST_CASE("Body without bgp, current peers valid in the context: keeps them", "[
     TEST_ASSERT_EQUAL_MEMORY(current.peers, out.peers, sizeof(out.peers));
 }
 
+/* lwIP's inet_pton (ip6addr_aton) accepts every one of these; the settings parser must not. */
+TEST_CASE("Peer address with a 5-digit group, embedded IPv4, a trailing colon or trailing text: bad_field bgp.peers",
+          "[routing]")
+{
+    static const char *const bad_addrs[] = {"2001:db8::12345", "::ffff:192.168.1.1",
+                                            "2001:db8:42::1:", "2001:db8:42::1 ", "2001:db8:42::g"
+                                           };
+    char fields[256];
+
+    for (size_t i = 0; i < sizeof(bad_addrs) / sizeof(bad_addrs[0]); i++) {
+        snprintf(fields, sizeof(fields), "\"local_asn\":65010,\"hold_time\":90,"
+                 "\"peers\":[{\"address\":\"%s\",\"asn\":65010}]", bad_addrs[i]);
+        assert_rejects("bgp.peers", make_body(METHOD_BGP, OMR_CUSTOM, bgp_with(fields)), NULL);
+    }
+    assert_accepts(make_body(METHOD_BGP, OMR_CUSTOM, bgp_with("\"local_asn\":65010,\"hold_time\":90,"
+                                                              "\"peers\":[{\"address\":\"2001:DB8:42::1\",\"asn\":65010}]")), NULL);
+}
+
 TEST_CASE("Method bgp with no peers: bad_field bgp.peers", "[routing]")
 {
     const char *no_peers = bgp_with("\"local_asn\":65010,\"hold_time\":90,\"peers\":[]");
@@ -668,6 +686,15 @@ TEST_CASE("Any address: lower case, no leading zeros, the first longest zero run
     TEST_ASSERT_EQUAL_STRING("2001:db8:0:1:1:1:1:1", ipv6_text("20010db8000000010001000100010001"));
     TEST_ASSERT_EQUAL_STRING("2001:0:0:1::1", ipv6_text("20010000000000010000000000000001"));
     TEST_ASSERT_EQUAL_STRING("abcd::", ipv6_text("abcd0000000000000000000000000000"));
+}
+
+/* lwIP's inet_ntop (ip6addr_ntoa_r) gets these wrong: upper case, the first zero run, ::FFFF:a.b.c.d. */
+TEST_CASE("Address with an earlier shorter zero run, hex letters, or IPv4-mapped: RFC 5952 text", "[routing]")
+{
+    TEST_ASSERT_EQUAL_STRING("2001:0:0:1::1", ipv6_text("20010000000000010000000000000001"));
+    TEST_ASSERT_EQUAL_STRING("fd98:2656:4740:1::abcd", ipv6_text("fd98265647400001000000000000abcd"));
+    TEST_ASSERT_EQUAL_STRING("::ffff:c0a8:101", ipv6_text("00000000000000000000ffffc0a80101"));
+    TEST_ASSERT_EQUAL_STRING("1:0:2::", ipv6_text("00010000000200000000000000000000"));
 }
 
 TEST_CASE("The longest address: fits ROUTING_IPV6_TEXT_MAX", "[routing]")
