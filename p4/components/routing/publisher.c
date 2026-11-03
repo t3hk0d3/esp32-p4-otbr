@@ -32,6 +32,14 @@ static bool ula_wanted(const routing_publisher_t *p)
            !prefix_eq(&p->ula, &p->want_custom);
 }
 
+// The entry may go in only once OpenThread has the wanted custom config: before that, the ULA is OpenThread's own
+// auto OMR prefix in the same local Network Data, and adding ours would overwrite its entry.
+static bool ula_addable(const routing_publisher_t *p)
+{
+    return ula_wanted(p) && p->omr_applied && p->omr_mode == ROUTING_OMR_CUSTOM &&
+           prefix_eq(&p->omr_prefix, &p->want_custom);
+}
+
 static void note_ula_result(routing_publisher_t *p, int err, const char *what)
 {
     if (err == 0) {
@@ -72,10 +80,10 @@ static void remove_ula_if_unwanted(routing_publisher_t *p)
     }
 }
 
-// Add the entry when it is wanted and missing; with `follow_flag`, also re-add it when the ::/0 flag changed.
+// Add the entry when it is wanted, addable and missing; with `follow_flag`, also re-add it when the ::/0 flag changed.
 static void add_ula_if_wanted(routing_publisher_t *p, bool follow_flag)
 {
-    if (!ula_wanted(p)) {
+    if (!ula_addable(p)) {
         return;
     }
     if (!p->ula_published) {

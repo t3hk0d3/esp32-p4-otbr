@@ -2,12 +2,14 @@
 
 #include <string.h>
 
+#include "unity.h"
+
 fake_ops_state_t g_fake;
 
 static fake_call_t *record(fake_op_t op, const routing_prefix64_t *prefix)
 {
     if (g_fake.call_count >= FAKE_MAX_CALLS) {
-        return NULL;
+        TEST_FAIL_MESSAGE("fake_ops: more than FAKE_MAX_CALLS calls recorded");
     }
     fake_call_t *c = &g_fake.calls[g_fake.call_count++];
     memset(c, 0, sizeof(*c));

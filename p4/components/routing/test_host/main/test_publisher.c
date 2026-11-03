@@ -389,6 +389,34 @@ TEST_CASE("An OMR config or PD call failed: the next apply issues it again", "[r
     TEST_ASSERT_EQUAL(0, g_fake.call_count);
 }
 
+TEST_CASE("OMR config failed with the box ticked: adds no ULA entry", "[routing]")
+{
+    start();
+    g_fake.ret[FAKE_SET_OMR_CONFIG] = 7; /* OT_ERROR_INVALID_ARGS */
+    apply(ROUTING_METHOD_BGP, ROUTING_OMR_CUSTOM, &CUSTOM, true);
+    routing_publisher_sync_default_route(&s_pub);
+
+    TEST_ASSERT_EQUAL(1, fake_ops_count(FAKE_SET_OMR_CONFIG));
+    TEST_ASSERT_EQUAL(0, fake_ops_count(FAKE_ADD_ON_MESH)); /* OpenThread's own ULA entry stays untouched */
+    TEST_ASSERT_EQUAL(0, fake_ops_count(FAKE_REGISTER_NETDATA));
+}
+
+TEST_CASE("OMR config failed with the box ticked: a later successful apply adds the ULA entry", "[routing]")
+{
+    start();
+    g_fake.ret[FAKE_SET_OMR_CONFIG] = 7;
+    apply(ROUTING_METHOD_BGP, ROUTING_OMR_CUSTOM, &CUSTOM, true);
+    g_fake.ret[FAKE_SET_OMR_CONFIG] = 0;
+    fake_ops_clear_calls();
+    apply(ROUTING_METHOD_BGP, ROUTING_OMR_CUSTOM, &CUSTOM, true);
+
+    TEST_ASSERT_EQUAL(1, fake_ops_count(FAKE_SET_OMR_CONFIG));
+    TEST_ASSERT_EQUAL(1, fake_ops_count(FAKE_ADD_ON_MESH));
+    TEST_ASSERT_TRUE(call_has_prefix(fake_ops_find(FAKE_ADD_ON_MESH, 0), &ULA));
+    TEST_ASSERT_TRUE(fake_ops_index(FAKE_ADD_ON_MESH, 0) > fake_ops_index(FAKE_SET_OMR_CONFIG, 0));
+    TEST_ASSERT_TRUE(fake_ops_index(FAKE_REGISTER_NETDATA, 0) > fake_ops_index(FAKE_ADD_ON_MESH, 0));
+}
+
 TEST_CASE("Adding the ULA entry failed: sync_default_route adds it again without registering the failure",
           "[routing]")
 {
