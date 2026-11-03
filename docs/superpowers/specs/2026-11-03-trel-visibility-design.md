@@ -109,7 +109,7 @@ Anti-goals (a failure even if it technically works):
 
 - Styleguide: `STYLEGUIDE.md` (naming, formatting, errors, tests). Frontend follows the existing page code
   (`topology.js`, `ethernet.js`) and its host-test harness in `tools/tests/`.
-- `/device/status` still fits its 2048-byte buffer with 8 peers carrying the two new fields (host test).
+- `/device/status` still fits its 2048-byte buffer with 8 peers carrying the three new fields (host test).
 - Web image budget: 384 KB (`tools/tests/test_device_pages.py`).
 - Hardware: one batched on-board pass after review (see the hardware budget rule): the TREL peer rig
   (`tools/trel_peer`) for 3.1, 3.2 and the map; a foreign-network peer can be made with a second `ot-ctl` network on the
