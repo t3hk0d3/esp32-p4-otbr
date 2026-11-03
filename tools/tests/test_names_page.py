@@ -187,12 +187,18 @@ class TestNamesLogic:
     def test_conflict_when_the_live_name_differs(self):
         # On live = effective hostname: false; on a renamed host, or the default renamed: true.
         assert names(f"L.conflict({json.dumps(GET)})") is False
-        assert names(f"L.conflict({json.dumps(GET | {'hostname_live': 'kitchen-2'})})") is True
+        assert (
+            names(f"L.conflict({json.dumps(GET | {'hostname_live': 'kitchen-2'})})")
+            is True
+        )
         default = GET | {"hostname": "", "hostname_live": "esp-otbr-a1b2c3"}
         assert names(f"L.conflict({json.dumps(default)})") is False
 
 
-def routes(get_js="H.fixture(H.NAMES)", put="{status: 200, body: H.fixture(H.NAMES, {applied: true})}"):
+def routes(
+    get_js="H.fixture(H.NAMES)",
+    put="{status: 200, body: H.fixture(H.NAMES, {applied: true})}",
+):
     return (
         f"(u, o) => u === '/device/names' ? (o.method === 'PUT' ? ({put}) : ({{status: 200, body: {get_js}}}))"
         " : ({status: 200, body: H.NETWORK})"
@@ -218,7 +224,18 @@ class TestNamesPage:
                     t.el('nm-dhcp-hint').textContent.includes('esp-otbr')];
         """
         )
-        assert r == ["kitchen", True, True, "kitchen", False, "", True, True, True, True]
+        assert r == [
+            "kitchen",
+            True,
+            True,
+            "kitchen",
+            False,
+            "",
+            True,
+            True,
+            True,
+            True,
+        ]
 
     def test_an_edit_enables_save_and_discard(self):
         # On typing a new hostname: Save and Discard enabled, the following HA input shows the new name.
@@ -274,7 +291,9 @@ class TestNamesPage:
         r = scenario(
             page(
                 "names",
-                routes("H.fixture(H.NAMES, {mode: 'split', http_advert_available: false})"),
+                routes(
+                    "H.fixture(H.NAMES, {mode: 'split', http_advert_available: false})"
+                ),
             )
             + START
             + """

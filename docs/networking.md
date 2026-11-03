@@ -46,6 +46,32 @@ reboots into the previous config. If the board is unreachable after a network ch
 Console (`make monitor`, USB-C port, 115200 baud, any build): `net show` prints the active config, trial and interfaces;
 `net reset` restores `single`, untagged, DHCPv4 and reboots.
 
+## Names
+
+The **Names** section at the end of the Ethernet page (or `GET`/`PUT /device/names`, see [API](api.md)) sets how the
+board is named on the network. A save takes effect at once: no reboot, no trial, and the IPv4 lease is kept.
+
+| Setting | What it is | Default |
+| --- | --- | --- |
+| Hostname | the mDNS name, `<name>.local` | `esp-otbr-<last six hex digits of the MAC>` |
+| Name in Home Assistant | the `_meshcop._udp` instance name Home Assistant's Thread panel shows (Thread adds ` #XXXX`) | follows the hostname |
+| Advertise the web UI | an `_http._tcp` record (port 80, `path=/`) so that network browsers find the web UI | off |
+| DHCP client name | the name the board sends with its DHCP requests, which routers list | `esp-otbr` |
+
+Hostname and DHCP name: letters, digits and hyphens, at most 63, not starting or ending with a hyphen; upper case is
+stored in lower case. The Home Assistant name: at most 63 bytes of UTF-8, no control characters. An empty hostname or
+DHCP name means the default.
+
+- **Conflicts:** when another device already uses the hostname, the board answers as `<name>-2.local`. The page shows
+  a **Renamed** chip and the name in use (`hostname_live`). Saving the same name again tries it again.
+- **Moving to the new name:** a page opened at the old `.local` name moves to the new one after a save.
+- **DHCP name:** the board asks for a lease renewal on save, so the router learns the name without the address
+  changing. With a static IPv4 address there is no DHCP and the setting has no effect.
+- **Split mode:** the hostname resolves on `thread_bb` only (mDNS runs there), while the web UI is on `mgmt`: open the
+  page by the management address. For the same reason the web UI advert is not available in split mode (the setting is
+  kept and applies again in single mode).
+- `net reset` does not touch the names.
+
 ## DHCPv6 prefix delegation
 
 Always on. `pd.state` and `pd.prefix` in `/device/status` are `null` when OpenThread was busy and its state could not be

@@ -54,7 +54,9 @@ Open the Thread panel: **Settings > Devices & services > Thread > Configure**.
 </tr>
 </table>
 
-1. Find the board under **Other networks**. The board is listed by its mDNS name, `esp-otbr-<last six hex digits of the MAC>`.
+1. Find the board under **Other networks**. The board is listed by its Home Assistant name, which follows its mDNS
+   hostname, `esp-otbr-<last six hex digits of the MAC>`, unless you set one on the Ethernet page (**Names**, see
+   [Networking](networking.md#names)).
 2. Open its ⋮ menu (it offers **Reset border router**, **Change channel** and **Add to preferred network**), choose
    **Add to preferred network**, and confirm **Reconfigure border router?** with **OK**.
    Home Assistant writes the preferred network's dataset to the board. The board stops Thread, stores the new network,
