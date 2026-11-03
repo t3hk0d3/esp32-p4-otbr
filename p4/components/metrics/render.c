@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "diag.h"
+#include "ipv6_text.h"
 
 static const char *const mode_names[] = {"STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT"};
 static const char *const role_names[METRICS_ROLE_COUNT] = {"disabled", "detached", "child", "router", "leader"};
@@ -437,11 +438,83 @@ static void render_thread(metrics_writer_t *w, const metrics_thread_t *t)
     }
 }
 
+// ---- routing ----
+
+static void peer_label(sample_t *s, const routing_metrics_peer_t *p)
+{
+    char text[ROUTING_IPV6_TEXT_MAX];
+
+    routing_ipv6_to_text(p->addr, text, sizeof(text));
+    label(s, "peer", text);
+}
+
+// One family with a sample per peer; values[i] belongs to peers[i].
+static void peer_family(metrics_writer_t *w, const routing_metrics_view_t *r, const char *name, const char *type,
+                        const char *help, const uint32_t values[ROUTING_MAX_PEERS])
+{
+    family(w, name, type, help);
+    for (uint8_t i = 0; i < r->peer_count; i++) {
+        sample_t s = begin(w, name);
+
+        peer_label(&s, &r->peers[i]);
+        end_u64(&s, values[i]);
+    }
+}
+
+// Only the configured peers; a family with no peers is left out.
+static void render_bgp(metrics_writer_t *w, const routing_metrics_view_t *r)
+{
+    uint32_t uptime[ROUTING_MAX_PEERS], dropped[ROUTING_MAX_PEERS], resets[ROUTING_MAX_PEERS];
+
+    if (r->peer_count == 0 || r->peer_count > ROUTING_MAX_PEERS) {
+        return;
+    }
+    family(w, "br_bgp_peer_state", "gauge", "BGP session state per configured peer.");
+    for (uint8_t i = 0; i < r->peer_count; i++) {
+        for (int k = 0; k < ROUTING_BGP_STATE_COUNT; k++) {
+            sample_t s = begin(w, "br_bgp_peer_state");
+
+            peer_label(&s, &r->peers[i]);
+            label(&s, "state", routing_bgp_state_name(k));
+            end_u64(&s, k == (int)r->peers[i].state ? 1 : 0);
+        }
+        uptime[i] = r->peers[i].uptime_s;
+        dropped[i] = r->peers[i].received_dropped;
+        resets[i] = r->peers[i].resets;
+    }
+    peer_family(w, r, "br_bgp_peer_uptime_seconds", "gauge", "Seconds since the BGP session was established, 0 when down.",
+                uptime);
+    peer_family(w, r, "br_bgp_received_dropped_total", "counter", "Routes received from the peer and dropped.", dropped);
+    peer_family(w, r, "br_bgp_session_resets_total", "counter", "Times the BGP session dropped from Established.", resets);
+}
+
+static void render_routing(metrics_writer_t *w, const routing_metrics_view_t *r)
+{
+    const char *methods[ROUTING_METHOD_COUNT];
+
+    for (int i = 0; i < ROUTING_METHOD_COUNT; i++) {
+        methods[i] = routing_method_name(i);
+    }
+    state_set(w, "br_routing_method", "How the route into the mesh is announced on the backbone.", "method", methods,
+              ROUTING_METHOD_COUNT, (int)r->method);
+    single(w, "br_routing_announced_prefixes", "gauge", "Prefixes announced on the backbone.", r->announced_count);
+    single(w, "br_routing_omr_custom", "gauge", "A custom OMR prefix is configured.", r->omr_custom);
+    if (r->method == ROUTING_METHOD_BGP) {
+        render_bgp(w, r);
+    } else if (r->method == ROUTING_METHOD_RIPNG) {
+        single(w, "br_ripng_updates_sent_total", "counter", "RIPng update messages sent, regular and triggered.",
+               r->ripng_updates_sent);
+        single(w, "br_ripng_requests_answered_total", "counter", "RIPng requests answered.", r->ripng_requests_answered);
+        single(w, "br_ripng_responses_dropped_total", "counter", "RIPng responses and invalid packets received and dropped.",
+               r->ripng_responses_dropped);
+    }
+}
+
 esp_err_t metrics_render(metrics_writer_t *w, const metrics_input_t *in)
 {
     const metrics_collector_view_t *c = in->collector;
     const bool collector_ok = c && c->started;
-    const bool partial = !in->diag || !collector_ok;
+    const bool partial = !in->diag || !collector_ok || !in->routing;
 
     render_device(w, in, partial);
     if (collector_ok && c->valid && c->age_ms < METRICS_FRESH_MS) {
@@ -454,6 +527,9 @@ esp_err_t metrics_render(metrics_writer_t *w, const metrics_input_t *in)
         }
         single(w, "br_thread_collect_failures_total", "counter",
                "Thread collections skipped because the OpenThread lock was busy.", c->failures);
+    }
+    if (in->routing) {
+        render_routing(w, in->routing);
     }
     return w->err;
 }

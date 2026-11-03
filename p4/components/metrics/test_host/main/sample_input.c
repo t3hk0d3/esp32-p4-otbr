@@ -118,8 +118,29 @@ void sample_input(sample_input_t *s)
     s->collector.valid = true;
     s->collector.age_ms = 4200;
     s->collector.failures = 1;
+
+    static const uint8_t peers[ROUTING_MAX_PEERS][16] = {
+        {0x20, 0x01, 0x0d, 0xb8, [15] = 0x01},
+        {0xfe, 0x80, [8] = 0x02, 0x11, 0x22, 0xff, 0xfe, 0x33, 0x44, 0x55},
+    };
+    routing_metrics_view_t *r = &s->routing;
+
+    r->method = ROUTING_METHOD_BGP;
+    r->announced_count = 2;
+    r->omr_custom = true;
+    r->peer_count = ROUTING_MAX_PEERS;
+    for (int i = 0; i < ROUTING_MAX_PEERS; i++) {
+        memcpy(r->peers[i].addr, peers[i], 16);
+        r->peers[i].state = i == 0 ? ROUTING_BGP_ESTABLISHED : ROUTING_BGP_ACTIVE;
+        r->peers[i].uptime_s = i == 0 ? 7200 : 0;
+        r->peers[i].received_dropped = 40 + (uint32_t)i;
+        r->peers[i].resets = 3 + (uint32_t)i;
+    }
+    r->ripng_updates_sent = 120;
+    r->ripng_requests_answered = 5;
+    r->ripng_responses_dropped = 9;
     s->in = (metrics_input_t) {
-        .device = &s->device, .diag = &s->diag, .collector = &s->collector
+        .device = &s->device, .diag = &s->diag, .collector = &s->collector, .routing = &s->routing
     };
 }
 

@@ -17,6 +17,7 @@
 #include "eth.h"
 #include "netcfg.h"
 #include "netnames.h"
+#include "routing.h"
 #include "storage.h"
 
 static const char *TAG = "app";
@@ -82,6 +83,14 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    // Mesh routing (after metrics_start and NVS, before the border router can come up): br_core hands the
+    // post-init steps (OMR config, DHCPv6-PD) to routing_on_border_router_up. Not essential to boot: without the task
+    // the hook still applies the stored settings, and the route methods other than PD do not run.
+    br_core_set_border_router_up_cb(routing_on_border_router_up);
+    err = routing_start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "routing_start: %s, RIPng and BGP do not run", esp_err_to_name(err));
+    }
 
     // The HTTP server starts in every mode, RADIO_FAULT and failed network or mDNS start included, and before
     // the radio sync so that it is reachable during a long RCP push. It listens on any address, so it needs no

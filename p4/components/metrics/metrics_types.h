@@ -8,6 +8,7 @@
 
 #include "diag.h"
 #include "metrics.h"
+#include "routing_types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -63,6 +64,7 @@ typedef struct {
     const metrics_device_t *device;
     const diag_metrics_view_t *diag;              /**< NULL: diag not started or busy */
     const metrics_collector_view_t *collector;    /**< NULL: the cache could not be copied */
+    const routing_metrics_view_t *routing;        /**< NULL: routing not started */
 } metrics_input_t;
 
 #define METRICS_FRESH_MS 30000 /**< Thread series are left out once the cache is this old */

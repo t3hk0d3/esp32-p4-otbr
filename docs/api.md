@@ -7,7 +7,7 @@ below, any of them can answer 500 `internal` or `no_memory`.
 
 | Method and path | Purpose | Notable errors |
 | --- | --- | --- |
-| `GET /device/status` | mode, app version and slot, `rcp`, `jumper`, `eth` addresses, `pd`, `sniffer` stats, `fault_reason`, `storage_ok`, `trel` (`enabled`, `active`, `peers`, `tx_packets`, `tx_failures`, `rx_packets`, `peer_list`; `null` in a build without TREL; `active`, `peers` and the counters `null` when OpenThread's state could not be read) | |
+| `GET /device/status` | mode, app version and slot, `rcp`, `jumper`, `eth` addresses, `pd`, `routing`, `sniffer` stats, `fault_reason`, `storage_ok`, `trel` (`enabled`, `active`, `peers`, `tx_packets`, `tx_failures`, `rx_packets`, `peer_list`; `null` in a build without TREL; `active`, `peers` and the counters `null` when OpenThread's state could not be read) | |
 | `GET /device/sniffer.pcap?channel=&duration=` | stream a pcap capture | 400 `invalid_channel`, `invalid_duration`, `no_channel`; 409 `busy` (not `BR_RUNNING`); 503 `busy` (no channel given and OpenThread's state could not be read within 100 ms: retry); 500 `sniffer_failed` |
 | `DELETE /device/sniffer` | stop the running capture | 404 `not_found` |
 | `POST /device/ota` | upload an `otbr.bundle`, then reboot | 400 `length_required`, `invalid_bundle`; 413 `payload_too_large`; 409 `busy` |
@@ -23,10 +23,94 @@ below, any of them can answer 500 `internal` or `no_memory`.
 | `PUT /device/names` | body `{hostname, ha_name_follows_hostname, ha_name, http_advert, dhcp_name}` (all required; empty hostname / DHCP name = default); applied live, no reboot; replies the GET body plus `applied` and, when a live step failed, `detail` | 400 `invalid_config` with `field` (`hostname`, `ha_name`, `dhcp_name`, or a missing / wrongly typed key, `body` for no JSON object), `length_required`, `invalid_request`; 413 `payload_too_large`; 500 `storage_failed` |
 | `POST /device/topology` | start a mesh scan (or join the running one); 202 with the state object | 409 `busy` (`mode <MODE>`, an update or radio job running, `a capture stream is already running` while a capture stream holds the pcap slot, `mesh diagnostics are in use`); 503 `busy` (`OpenThread is busy, retry`, or `topology scan unavailable` when the scan component failed to start at boot); 500 `no_memory` |
 | `GET /device/topology` | the scan state, progress and the last result (no mesh traffic) | |
+| `GET /device/routing` | routing settings and status, see [Routing](#routing) | 503 `not_started` |
+| `PUT /device/routing` | store the routing settings and apply them live (no reboot) | 400 `invalid_request` (`detail` names the field), `length_required`; 413 `payload_too_large` (over 2048 bytes); 500 `storage_failed` (nothing changed), `internal` (the body could not be checked, `detail` is the error; nothing changed), `no_memory` (the settings were stored and applied, the answer could not be built); 503 `not_started` |
 | `POST /device/reboot` | reboot | 409 `busy` while an update or push runs |
 | `GET /metrics` | device health and Thread figures in the Prometheus text format, see [metrics](metrics.md) | 500 `no_memory` |
 
 `/device/status` modes: `STARTING`, `BR_RUNNING`, `SNIFFER`, `RADIO_FAULT`.
+
+### Routing
+
+How the core router learns the route into the mesh (see [Routing to the mesh](networking.md#routing-to-the-mesh)).
+`GET /device/routing` returns this shape; `PUT /device/routing` takes the same body, without `status` (ignored if sent),
+and answers 200 with the new GET shape:
+
+```
+{
+  "method": "bgp",
+  "omr": {"mode": "custom", "prefix": "2001:db8:42:100::/64"},
+  "announce_ula": true,
+  "bgp": {
+    "local_asn": 4200000001,
+    "router_id": null,
+    "hold_time": 90,
+    "peers": [ {"address": "2001:db8:42::1", "asn": 4200000001} ]
+  },
+  "status": {
+    "omr_prefix": "2001:db8:42:100::/64",
+    "ula_prefix": "fd98:2656:4740:1::/64",
+    "announced": ["2001:db8:42:100::/64", "fd98:2656:4740:1::/64"],
+    "bgp": {
+      "router_id": "192.168.20.15",
+      "blocked": null,
+      "peers": [ {
+        "address": "2001:db8:42::1",
+        "state": "established",
+        "uptime_s": 8123,
+        "last_error": null,
+        "received_dropped": 3
+      } ]
+    },
+    "ripng": null
+  }
+}
+```
+
+Settings (defaults: `pd`, `auto`, `false`, local ASN 4200000001, router ID `null`, hold time 90, no peers):
+
+- `method`: `pd`, `ripng`, `bgp` or `off`. Required.
+- `omr`: required. `mode` `auto` or `custom`; `prefix` is required for `custom` and ignored for `auto` (GET shows
+  `null`). The prefix is a /64 with the host bits zero, not `::/64`, not link-local (`fe80::/10`), not multicast, and
+  not on-link on the backbone.
+- `announce_ula`: `true` or `false`. Required.
+- `bgp`: optional; left out, the stored BGP settings stay (their peers still get the address checks below, so a peer
+  that has become one of the board's own addresses is refused with `bgp.peers`). When present it is checked whatever the method, so the
+  stored BGP settings are always valid, and it must be complete (`null` is refused):
+  - `local_asn` and each peer's `asn`: 1..4294967295, not 23456 (AS_TRANS);
+  - `router_id`: `null` (use the backbone IPv4 address) or a dotted IPv4 address other than `0.0.0.0`; the backbone
+    address wins when there is one;
+  - `hold_time`: 0 or 3..65535;
+  - `peers`: 0..2 entries with distinct addresses, not multicast, not `::`, not one of the board's own addresses. A
+    link-local address is on the backbone interface.
+- Method `bgp` needs at least one peer.
+
+A body that fails a check answers 400 `{"error": "invalid_request", "detail": "<field>"}` and changes nothing. The
+field is one of `body` (not a JSON object), `method`, `omr`, `omr.mode`, `omr.prefix`, `announce_ula`, `bgp`,
+`bgp.local_asn`, `bgp.router_id`, `bgp.hold_time`, `bgp.peers`.
+
+Status:
+
+- `omr_prefix`: the local OMR prefix in use (custom, delegated or ULA); `ula_prefix`: the self-generated ULA. Each is
+  `null` while unknown.
+- `announced`: what RIPng or BGP announces now; empty with `pd` and `off` and while the border router is not running.
+- `bgp`: `null` unless the method is `bgp`. `router_id` is the one in use (`null`: none). `blocked` is `null` or why
+  sessions do not run: `"no router id"`, `"no link-local address"`. One entry in `peers` per configured peer: `state`
+  is `idle`, `connect`, `active`, `opensent`, `openconfirm` or `established`; `uptime_s` counts from Established (0
+  when down); `received_dropped` counts the routes received and dropped; `last_error` is `null` or, for example,
+  `"notification 6/2 received"`, `"notification 4/0 sent"`, `"connect: refused"`, `"connect: host unreachable"`,
+  `"hold timer expired"`, `"connection lost"`.
+- `ripng`: `null` unless the method is `ripng`, else `{"last_update_s_ago", "updates_sent", "requests_answered",
+  "responses_dropped"}`. `last_update_s_ago` is `null` before the first update.
+
+`/device/status` carries a summary, `null` while routing is not running:
+
+```
+"routing": {"method": "bgp", "omr_mode": "custom", "announced_count": 2, "peers_established": 1, "peers_configured": 1}
+```
+
+`peers_established` and `peers_configured` are `null` unless the method is `bgp`. The `pd` object stays as it is; with
+any method but `pd` its `state` is `disabled`.
 
 ## Thread REST API
 
@@ -48,7 +132,8 @@ connects to `http://<board>`: `tools/otbr_compat.py` checks the `python-otbr-api
 About). The Topology page runs a mesh scan (`/device/topology`) and shows a map of the routers and their links, a device table with search and filters, and a device dialog with its addresses and a ping; the last result is kept in the browser. The Dashboard (`/`) is the status page: mode, versions, radio, Ethernet, prefix delegation, load, and while the
 border router runs the Thread network, identifiers and Thread addresses. Its Home Assistant tile shows the URL to enter
 in the integration (the Thread backbone address in split mode) and the mDNS name. The "Device" menu holds `/ethernet.html` (single or split setup,
-VLANs and addresses, with a review step before the reboot), `/firmware.html` (P4 bundle and C6 radio firmware, radio
+VLANs and addresses, with a review step before the reboot), `/routing.html` (route method, OMR prefix, BGP peers and
+sessions, RIPng status; saved live), `/firmware.html` (P4 bundle and C6 radio firmware, radio
 recovery with the jumper), `/capture.html` (packet capture) and `/diagnostics.html`. Every device page shows the trial
 banner with **Keep new settings** while network settings are on trial. They use only `/device/*`, so they also work in
 `RADIO_FAULT` and while sniffing.

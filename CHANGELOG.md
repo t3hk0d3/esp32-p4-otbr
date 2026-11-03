@@ -25,6 +25,13 @@ release's `versions.txt`.
   hostname, the name Home Assistant shows (the `_meshcop._udp` instance, by default the hostname), an optional
   `_http._tcp` advertisement of the web UI (off by default, not in split mode) and the DHCP client name. Applied live, stored
   across reboots and updates. The page shows when an mDNS conflict renamed the board. See `docs/networking.md`.
+- Routing to the mesh for networks without DHCPv6 prefix delegation: a custom OMR prefix (one /64 you choose, optionally
+  with the self-generated ULA kept beside it) and a route method, `pd` (default, as before), `ripng`, `bgp` or `off`.
+  RIPng (RFC 2080) and an announce-only BGP speaker (up to 2 peers, iBGP or eBGP, IPv6 transport) announce the custom
+  prefix and the ULA to the core router on the backbone; routes they receive are counted and dropped. Settings apply
+  live on the new Routing page (Device menu) or with `GET/PUT /device/routing`; `/device/status` gains a `routing`
+  object, `/metrics` the `br_routing_*`, `br_bgp_*` and `br_ripng_*` series, the console `routing show`. See
+  `docs/networking.md`.
 
 ### Changed
 
@@ -35,6 +42,10 @@ release's `versions.txt`.
 - The "settings on trial" banner (Dashboard and device pages) shows the time left as a countdown tile, with the
   explanation next to it, **Keep new settings** on the right and a bar that drains over the 5 minutes. On a phone the
   button goes below at full width.
+- DHCPv6-PD is on only with the route method `pd` (the default, so nothing changes without routing settings); with any
+  other method the client is off and `pd.state` reads `disabled`.
+- lwIP sockets 10 → 18 (web server 10, mesh routing up to 7, one HTTP client). An existing `p4/sdkconfig` keeps the old
+  value and the build stops with an `#error` in `routing/task.c`: delete `p4/sdkconfig` after pulling and build again.
 
 ## [0.2.1] - 2026-11-02
 

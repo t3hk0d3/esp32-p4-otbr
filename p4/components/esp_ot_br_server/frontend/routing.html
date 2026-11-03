@@ -1,0 +1,177 @@
+<!--
+  SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Thread Border Router - Routing</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="/favicon.ico">
+</head>
+<body class="device-page">
+<nav class="nav" id="nav"></nav>
+<div class="container">
+    <div class="page-head">
+        <div>
+            <h1 class="page-title">Routing</h1>
+            <p class="page-desc">Which IPv6 prefixes the Thread mesh uses, and how your router learns to reach them. Changes
+                apply right away: no reboot, no trial.</p>
+        </div>
+    </div>
+
+    <div class="trial-banner hidden" id="trialBanner">
+        <div class="trial-row">
+            <div class="trial-clock"><span class="trial-time" id="trialRemaining">-</span><span class="trial-unit">left</span></div>
+            <div class="trial-text">
+                <strong>New network settings are on trial</strong>
+                <p>The board goes back to the previous settings unless you keep them from the management
+                    interface.</p>
+            </div>
+            <button class="btn btn-primary" id="confirmBtn" type="button">Keep new settings</button>
+        </div>
+        <div class="trial-track" aria-hidden="true"><div class="trial-fill" id="trialFill"></div></div>
+    </div>
+    <div class="form-hint" id="confirmMsg" role="status" aria-live="polite"></div>
+    <div class="form-hint hidden" id="r-stale" role="status" aria-live="polite"></div>
+
+    <div id="routingSection">
+        <h2 class="section-title">How your router reaches the mesh</h2>
+        <section class="card">
+            <div class="mode-cards four">
+                <button type="button" class="mode-card" id="method-pd" aria-pressed="false">
+                    <span class="mode-card-head">DHCPv6 PD</span>
+                    <span class="mode-card-text">Asks your router for a prefix over DHCPv6. The router then routes it here by
+                        itself. Right for most homes.</span>
+                    <span class="chip now off" id="method-pd-now">In use now</span>
+                </button>
+                <button type="button" class="mode-card" id="method-ripng" aria-pressed="false">
+                    <span class="mode-card-head">RIPng</span>
+                    <span class="mode-card-text">Announces the prefixes below to routers on the backbone every 30 seconds.
+                        Nothing to set up on the board.</span>
+                    <span class="chip now off" id="method-ripng-now">In use now</span>
+                </button>
+                <button type="button" class="mode-card" id="method-bgp" aria-pressed="false">
+                    <span class="mode-card-head">BGP</span>
+                    <span class="mode-card-text">Announces the prefixes below to one or two BGP peers, for routers that already
+                        speak BGP.</span>
+                    <span class="chip now off" id="method-bgp-now">In use now</span>
+                </button>
+                <button type="button" class="mode-card" id="method-off" aria-pressed="false">
+                    <span class="mode-card-head">Off</span>
+                    <span class="mode-card-text">Nothing. Use this if you add a static route on your router yourself.</span>
+                    <span class="chip now off" id="method-off-now">In use now</span>
+                </button>
+            </div>
+            <p class="form-hint mt-8" id="methodHint" role="status" aria-live="polite"></p>
+            <p class="error-text hidden" id="err-method" role="alert"></p>
+        </section>
+
+        <h2 class="section-title mt-16">OMR prefix</h2>
+        <section class="card">
+            <p class="iface-role">The prefix Thread devices take their routable address from.</p>
+            <div class="mode-cards">
+                <button type="button" class="mode-card" id="omr-auto" aria-pressed="false">
+                    <span class="mode-card-head">Automatic <span class="chip chip-ok hidden" id="omr-auto-now">In use now</span></span>
+                    <span class="mode-card-text">The delegated prefix while DHCPv6 PD is in use and your router gives
+                        one, otherwise the board's own ULA.</span>
+                </button>
+                <button type="button" class="mode-card" id="omr-custom" aria-pressed="false">
+                    <span class="mode-card-head">Custom <span class="chip chip-ok hidden" id="omr-custom-now">In use now</span></span>
+                    <span class="mode-card-text">A /64 you choose, for example from your own address space. Overrides prefix
+                        delegation.</span>
+                </button>
+            </div>
+            <label class="field mt-8 hidden" id="customField" for="customPrefix">Custom prefix (/64)
+                <input type="text" id="customPrefix" placeholder="2001:db8:1:2::/64" size="28" class="mono">
+            </label>
+            <p class="error-text hidden" id="err-omr" role="alert"></p>
+
+            <label class="ack mt-16" for="ulaBox">
+                <input type="checkbox" id="ulaBox">
+                <span><strong>Also use and announce the board's own ULA</strong> (<span class="mono" id="ulaInline">-</span>).
+                    <span class="form-hint" id="ulaHint"></span></span>
+            </label>
+
+            <dl class="facts mt-16">
+                <dt>OMR prefix in use</dt><dd class="mono" id="omrInUse">-</dd>
+                <dt>Board's own ULA</dt><dd class="mono" id="ulaPrefix">-</dd>
+                <dt>Announced</dt><dd class="mono lines" id="announced">-</dd>
+            </dl>
+            <p class="form-hint">Prefixes added on the Addresses page stay as they are and are not announced.</p>
+        </section>
+
+        <div id="bgpArea" class="hidden">
+            <h2 class="section-title mt-16">BGP</h2>
+            <section class="card">
+                <fieldset>
+                    <legend>This board</legend>
+                    <div class="field-row">
+                        <label class="field" for="localAsn">Local ASN
+                            <input type="text" inputmode="numeric" id="localAsn" size="12">
+                            <span class="error-text hidden" id="err-asn" role="alert"></span>
+                        </label>
+                        <label class="field" for="routerId">Router ID (optional)
+                            <input type="text" id="routerId" placeholder="from IPv4" size="18">
+                            <span class="error-text hidden" id="err-routerid" role="alert"></span>
+                        </label>
+                        <label class="field" for="holdTime">Hold time (s)
+                            <input type="text" inputmode="numeric" id="holdTime" size="6">
+                            <span class="error-text hidden" id="err-hold" role="alert"></span>
+                        </label>
+                    </div>
+                </fieldset>
+
+                <fieldset class="mt-16">
+                    <legend>Peers (up to 2)</legend>
+                    <div id="peerRows"></div>
+                    <p class="error-text hidden" id="err-peers" role="alert"></p>
+                    <p class="form-hint">Same ASN as this board: iBGP. Different: eBGP. No password: lwIP has no TCP-MD5, so
+                        limit this peer with a prefix-list on the router. Routes the peer sends are counted and dropped.</p>
+                    <button class="btn btn-outline btn-sm mt-8" id="addPeerBtn" type="button">Add peer</button>
+                </fieldset>
+
+                <h3 class="section-title mt-16">Sessions</h3>
+                <p class="form-hint hidden" id="bgpNote"></p>
+                <div class="table-wrap" id="sessionsWrap">
+                    <table class="diff-table">
+                        <thead><tr><th scope="col">Peer</th><th scope="col">State</th><th scope="col">Up for</th>
+                            <th scope="col">Received (dropped)</th><th scope="col">Last error</th></tr></thead>
+                        <tbody id="sessionsBody"></tbody>
+                    </table>
+                </div>
+                <p class="form-hint">Refreshes every 5 seconds.</p>
+            </section>
+        </div>
+
+        <div id="ripngArea" class="hidden">
+            <h2 class="section-title mt-16">RIPng</h2>
+            <section class="card">
+                <p class="form-hint hidden" id="ripngNote"></p>
+                <dl class="facts" id="ripngFacts">
+                    <dt>Last update sent</dt><dd id="ripLast">-</dd>
+                    <dt>Updates sent</dt><dd class="num" id="ripSent">-</dd>
+                    <dt>Requests answered</dt><dd class="num" id="ripRequests">-</dd>
+                    <dt>Responses from routers (dropped)</dt><dd class="num" id="ripDropped">-</dd>
+                </dl>
+                <p class="form-hint">Your router keeps the route for 3 minutes after the last update, so if the board goes
+                    away, traffic stops coming here after that. RIPng has no password: limit what your router accepts.</p>
+            </section>
+        </div>
+        <div class="form-hint" id="saveMsg" role="status" aria-live="polite"></div>
+    </div>
+
+    <div class="action-bar hidden" id="actionBar">
+        <span class="action-bar-text" id="barText"></span>
+        <button class="btn btn-outline" id="discardBtn" type="button">Discard changes</button>
+        <button class="btn btn-primary" id="saveBtn" type="button">Save</button>
+    </div>
+</div>
+<div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
+<script src="/static/api.js"></script>
+<script src="/static/device_common.js"></script>
+<script src="/static/routing.js"></script>
+</body>
+</html>

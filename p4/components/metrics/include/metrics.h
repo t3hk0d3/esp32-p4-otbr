@@ -41,9 +41,9 @@ typedef esp_err_t (*metrics_flush_fn)(void *ctx, const char *data, size_t len);
 esp_err_t metrics_start(void);
 
 /**
- * Write the whole body through `flush` in chunks of at most 2 KB. Copies the diag view and the collector cache once
- * (never the OpenThread lock). ESP_ERR_NO_MEM before anything was flushed; otherwise the first flush error, or ESP_OK.
- * The caller ends the response.
+ * Write the whole body through `flush` in chunks of at most 2 KB. Copies the diag view, the collector cache and the
+ * routing view once (never the OpenThread lock). ESP_ERR_NO_MEM before anything was flushed; otherwise the first flush
+ * error, or ESP_OK. The caller ends the response.
  */
 esp_err_t metrics_write(const metrics_device_t *device, metrics_flush_fn flush, void *ctx);
 

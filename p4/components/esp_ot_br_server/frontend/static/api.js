@@ -133,6 +133,7 @@ var pages = [
     label : 'Device',
     children : [
       {href : '/ethernet.html', label : 'Ethernet'},
+      {href : '/routing.html', label : 'Routing'},
       {href : '/firmware.html', label : 'Firmware'},
       {href : '/capture.html', label : 'Packet capture'},
       {href : '/diagnostics.html', label : 'Diagnostics'}

@@ -8,7 +8,8 @@
 //                  (CONFIG_MDNS_TASK_AFFINITY_CPU0), esp_timer task.
 //   MGMT_CORE (1)  management: HTTP server (httpd_config_t.core_id, patch 1), thread_rest worker (patch 11),
 //                  device_api workers (pcap_stream, ota_http, radio_fw, rom_recover), C6 log receiver,
-//                  diag sampler, console_repl (main/console.c), the rest of app_main (CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1).
+//                  diag sampler, console_repl (main/console.c), the rest of app_main (CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1),
+//                  routing (the BGP and RIPng sockets).
 //
 // Note: the C6 log UART driver is first installed from net_init (core 0); after a pause/resume handoff the log task
 // (core 1) reinstalls it, so its ISR then lives on core 1. Harmless: it is management traffic.

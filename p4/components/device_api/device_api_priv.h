@@ -173,6 +173,12 @@ typedef struct {
     uint32_t sniffer_duration_s;
     const char *fault_reason;   /**< "" = none (JSON null) */
     bool storage_ok;            /**< false: NVS did not initialise (degraded boot) */
+    bool routing_started;       /**< false: routing is not running, "routing" is null */
+    int routing_method;         /**< routing_method_t */
+    int routing_omr_mode;       /**< routing_omr_mode_t */
+    uint8_t routing_announced_count;
+    uint8_t routing_peers_established; /**< written only with ROUTING_METHOD_BGP (null otherwise) */
+    uint8_t routing_peers_configured;  /**< written only with ROUTING_METHOD_BGP (null otherwise) */
     device_api_trel_t trel;
 } device_api_status_t;
 

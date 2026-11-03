@@ -1,16 +1,16 @@
-"""GET /metrics body: the host test's full sample render parses with prometheus_client and matches the catalogue.
+"""GET /metrics body: the host test's full sample renders parse with prometheus_client and match the catalogue.
 
-The sample is written by p4/components/metrics/test_host (make test-host); make test runs that first.
+The samples are written by p4/components/metrics/test_host (make test-host); make test runs that first. sample.prom
+renders with routing method bgp, sample-ripng.prom with ripng: BGP peer and RIPng series exclude each other.
 """
 
 from pathlib import Path
 
 import pytest
-
-parser = pytest.importorskip("prometheus_client.parser")
+from prometheus_client import parser
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-SAMPLE = ROOT / "p4" / "components" / "metrics" / "test_host" / "build" / "sample.prom"
+BUILD = ROOT / "p4" / "components" / "metrics" / "test_host" / "build"
 
 # Spec section 4 (br_jumper_present and the NAT64 families dropped). prometheus_client names a counter family
 # without its _total suffix.
@@ -69,21 +69,55 @@ CATALOGUE = {
     "br_trel_tx_failures": "counter",
     "br_thread_collect_age_seconds": "gauge",
     "br_thread_collect_failures": "counter",
+    # Mesh routing spec section 8.
+    "br_routing_method": "gauge",
+    "br_routing_announced_prefixes": "gauge",
+    "br_routing_omr_custom": "gauge",
+}
+
+BGP = {
+    "br_bgp_peer_state": "gauge",
+    "br_bgp_peer_uptime_seconds": "gauge",
+    "br_bgp_received_dropped": "counter",
+    "br_bgp_session_resets": "counter",
+}
+
+RIPNG = {
+    "br_ripng_updates_sent": "counter",
+    "br_ripng_requests_answered": "counter",
+    "br_ripng_responses_dropped": "counter",
+}
+
+# sample file, the families it must have exactly
+SAMPLES = {
+    "sample.prom": CATALOGUE | BGP,
+    "sample-ripng.prom": CATALOGUE | RIPNG,
 }
 
 
-@pytest.fixture(scope="module")
-def families():
-    if not SAMPLE.exists():
-        pytest.fail(f"{SAMPLE} is missing: run make test-host first")
-    return list(parser.text_string_to_metric_families(SAMPLE.read_text()))
+def parse(name):
+    path = BUILD / name
+    if not path.exists():
+        pytest.fail(f"{path} is missing: run make test-host first")
+    return list(parser.text_string_to_metric_families(path.read_text()))
+
+
+@pytest.fixture(scope="module", params=sorted(SAMPLES))
+def sample(request):
+    return request.param, parse(request.param)
+
+
+@pytest.fixture
+def families(sample):
+    return sample[1]
 
 
 class TestMetricsFormat:
     """metrics_render output, read by the reference parser"""
 
-    def test_full_render_has_exactly_the_catalogue_families_and_types(self, families):
-        assert {f.name: f.type for f in families} == CATALOGUE
+    def test_full_render_has_exactly_the_catalogue_families_and_types(self, sample):
+        name, families = sample
+        assert {f.name: f.type for f in families} == SAMPLES[name]
 
     def test_full_render_has_no_two_samples_with_the_same_name_and_labels(
         self, families
@@ -103,5 +137,16 @@ class TestMetricsFormat:
             "br_border_routing_state",
             "br_dhcp6_pd_state",
             "br_srp_server_state",
+            "br_routing_method",
         ):
             assert [s.value for s in by_name[name].samples].count(1.0) == 1, name
+
+    def test_bgp_peer_state_has_exactly_one_series_at_1_per_peer(self):
+        by_name = {f.name: f for f in parse("sample.prom")}
+        peers = {}
+        for s in by_name["br_bgp_peer_state"].samples:
+            peers.setdefault(s.labels["peer"], []).append(s.value)
+        assert len(peers) == 2
+        for peer, values in peers.items():
+            assert len(values) == 6, peer
+            assert values.count(1.0) == 1, peer

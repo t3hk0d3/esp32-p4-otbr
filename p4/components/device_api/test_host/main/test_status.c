@@ -3,6 +3,7 @@
 #include "unity.h"
 #include "unity_test_runner.h"
 #include "device_api_priv.h"
+#include "routing_types.h"
 
 static device_api_status_t sample(void)
 {
@@ -256,7 +257,7 @@ TEST_CASE("On TREL switched off: enabled false, active false", "[device_api]")
     TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":{\"enabled\":false,\"active\":false,\"peers\":0,"));
 }
 
-TEST_CASE("On a full status (8 TREL peers, 6 IPv6 addresses): fits the 2048-byte handler buffer", "[device_api]")
+TEST_CASE("On a full status (8 TREL peers, 6 IPv6 addresses, BGP routing): fits the 2048-byte handler buffer", "[device_api]")
 {
     device_api_status_t s = sample();
     char full[2048];
@@ -265,6 +266,12 @@ TEST_CASE("On a full status (8 TREL peers, 6 IPv6 addresses): fits the 2048-byte
         strcpy(s.ipv6[i], "2001:db8:1234:5678:9abc:def0:1234:5678");
     }
     s.ipv6_count = DEVICE_API_MAX_IPV6;
+    s.routing_started = true;
+    s.routing_method = ROUTING_METHOD_BGP;
+    s.routing_omr_mode = ROUTING_OMR_CUSTOM;
+    s.routing_announced_count = UINT8_MAX;
+    s.routing_peers_established = UINT8_MAX;
+    s.routing_peers_configured = UINT8_MAX;
     s.trel = (device_api_trel_t) {
         .built = true, .enabled = true, .state_valid = true, .active = true, .peers = 8, .peer_count = 8,
         .tx_packets = UINT64_MAX, .tx_failures = UINT64_MAX, .rx_packets = UINT64_MAX,
@@ -274,4 +281,44 @@ TEST_CASE("On a full status (8 TREL peers, 6 IPv6 addresses): fits the 2048-byte
         strcpy(s.trel.peer_list[i].address, "[2001:db8:1234:5678:9abc:def0:1234:5678]:12390");
     }
     TEST_ASSERT_GREATER_THAN(0, device_api_status_json(full, sizeof(full), &s));
+}
+
+TEST_CASE("routing bgp: renders method, counts and peers", "[routing]")
+{
+    device_api_status_t s = sample();
+
+    s.routing_started = true;
+    s.routing_method = ROUTING_METHOD_BGP;
+    s.routing_omr_mode = ROUTING_OMR_CUSTOM;
+    s.routing_announced_count = 2;
+    s.routing_peers_established = 1;
+    s.routing_peers_configured = 2;
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"routing\":{\"method\":\"bgp\",\"omr_mode\":\"custom\",\"announced_count\":2,"
+                                "\"peers_established\":1,\"peers_configured\":2}"));
+}
+
+TEST_CASE("routing ripng: peer fields are null", "[routing]")
+{
+    device_api_status_t s = sample();
+
+    s.routing_started = true;
+    s.routing_method = ROUTING_METHOD_RIPNG;
+    s.routing_omr_mode = ROUTING_OMR_AUTO;
+    s.routing_announced_count = 1;
+    s.routing_peers_established = 1; // a stale figure: not written outside bgp
+    s.routing_peers_configured = 2;
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"routing\":{\"method\":\"ripng\",\"omr_mode\":\"auto\",\"announced_count\":1,"
+                                "\"peers_established\":null,\"peers_configured\":null}"));
+}
+
+TEST_CASE("routing not started: routing is null", "[routing]")
+{
+    device_api_status_t s = sample();
+
+    s.routing_started = false;
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"routing\":null"));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"pd\":{\"state\":\"running\",\"prefix\":\"fd00:1::/64\"}"));
 }
