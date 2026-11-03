@@ -10,6 +10,8 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_net_stack.h"
+#include "freertos/FreeRTOS.h"
+#include "lwip/dhcp.h"
 #include "lwip/sockets.h"
 #include "mdns.h"
 #include "netcfg_glue.h"
@@ -57,6 +59,10 @@ static struct {
     bool handlers;       /* ETH / IP event handlers registered */
 } s_net = {.mode = NETCFG_MODE_SINGLE};
 
+/* DHCP client name of every interface (option 12); empty = lwIP's default. Set from any task, read when a netif is made. */
+static char s_dhcp_name[NETCFG_DHCP_NAME_MAX + 1];
+static portMUX_TYPE s_dhcp_name_lock = portMUX_INITIALIZER_UNLOCKED;
+
 /* ---- creation ---- */
 
 static esp_err_t apply_static(esp_netif_t *netif, const netcfg_iface_cfg_t *cfg)
@@ -91,6 +97,14 @@ static esp_err_t add_iface(const char *name, const char *key, int route_prio, ne
     iface->vlan = cfg->vlan;
     iface->netif = esp_netif_new(&config);
     ESP_RETURN_ON_FALSE(iface->netif, ESP_ERR_NO_MEM, TAG, "creating netif %s failed", name);
+    char dhcp_name[sizeof(s_dhcp_name)];
+
+    taskENTER_CRITICAL(&s_dhcp_name_lock);
+    strlcpy(dhcp_name, s_dhcp_name, sizeof(dhcp_name));
+    taskEXIT_CRITICAL(&s_dhcp_name_lock);
+    if (dhcp_name[0]) {
+        ESP_RETURN_ON_ERROR(esp_netif_set_hostname(iface->netif, dhcp_name), TAG, "DHCP name of %s failed", name);
+    }
     s_net.count++; // counted from here on, so that netcfg_ifaces_destroy also undoes a half-built interface
     if (cfg->vlan == NETCFG_VLAN_UNTAGGED) {
         iface->stock_glue = esp_eth_new_netif_glue(s_net.eth);
@@ -299,6 +313,38 @@ esp_netif_t *netcfg_backbone_netif(void)
 esp_netif_t *netcfg_mgmt_netif(void)
 {
     return s_net.created ? s_net.iface[s_net.mgmt].netif : NULL;
+}
+
+/* Runs on the TCP/IP thread: a DHCPREQUEST that carries the new name, the lease and its address stay. */
+static esp_err_t renew_lease(void *ctx)
+{
+    struct netif *netif = esp_netif_get_netif_impl(ctx);
+
+    return netif && dhcp_renew(netif) == ERR_OK ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t netcfg_ifaces_set_dhcp_name(const char *name)
+{
+    esp_err_t result = ESP_OK;
+
+    taskENTER_CRITICAL(&s_dhcp_name_lock);
+    strlcpy(s_dhcp_name, name, sizeof(s_dhcp_name));
+    taskEXIT_CRITICAL(&s_dhcp_name_lock);
+    for (size_t i = 0; i < s_net.count; i++) {
+        esp_netif_t *netif = s_net.iface[i].netif;
+        esp_netif_dhcp_status_t status = ESP_NETIF_DHCP_INIT;
+        esp_err_t err = esp_netif_set_hostname(netif, name);
+
+        if (err == ESP_OK && esp_netif_dhcpc_get_status(netif, &status) == ESP_OK && status == ESP_NETIF_DHCP_STARTED &&
+                esp_netif_is_netif_up(netif)) {
+            err = esp_netif_tcpip_exec(renew_lease, netif);
+        }
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "DHCP name of %s: %s", s_net.iface[i].name, esp_err_to_name(err));
+            result = err;
+        }
+    }
+    return result;
 }
 
 netcfg_mode_t netcfg_ifaces_mode(void)

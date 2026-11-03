@@ -11,6 +11,7 @@
 #include "netcfg_vlan.h"
 
 #define NETCFG_IFACE_NAME_MAX 12
+#define NETCFG_DHCP_NAME_MAX 63
 #define NETCFG_IP6_MAX CONFIG_LWIP_IPV6_NUM_ADDRESSES
 
 /* ---- vlan_glue.c: driver-level 802.1Q ---- */
@@ -46,6 +47,11 @@ void netcfg_ifaces_destroy(void);
 size_t netcfg_ifaces_state(netcfg_iface_state_t out[NETCFG_MAX_IFACES]);
 /** Side of the request by its local address; false when it matches no interface. */
 bool netcfg_ifaces_request_side(httpd_req_t *req, netcfg_side_t *side);
+/**
+ * DHCP client name of the interfaces made from now on and of the existing ones; an interface with a running DHCP client
+ * renews its lease to send it (the address stays). Returns the last error of an existing interface, the name is kept anyway.
+ */
+esp_err_t netcfg_ifaces_set_dhcp_name(const char *name);
 /** Running mode (SINGLE before netcfg_ifaces_create). */
 netcfg_mode_t netcfg_ifaces_mode(void);
 

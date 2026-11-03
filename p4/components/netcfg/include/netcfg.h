@@ -63,6 +63,16 @@ esp_err_t netcfg_confirm(httpd_req_t *req);
 /** Erase the stored configs and reboot: the next boot uses the defaults. */
 esp_err_t netcfg_reset(void);
 
+/**
+ * DHCP client name (option 12) of every interface: taken by the interfaces netcfg_start makes, and applied at once to the
+ * running ones, whose DHCP client renews its lease to send it without giving up the address. Empty = lwIP's default.
+ * Callable before netcfg_start. ESP_ERR_INVALID_ARG when NULL or longer than 63 characters.
+ */
+esp_err_t netcfg_set_dhcp_hostname(const char *name);
+
+/** The running mode; NETCFG_MODE_SINGLE before netcfg_start. */
+netcfg_mode_t netcfg_running_mode(void);
+
 /** A trial configuration waits for confirmation. false before netcfg_start. */
 bool netcfg_trial_pending(void);
 
