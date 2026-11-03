@@ -85,7 +85,7 @@ static SemaphoreHandle_t s_join_done_semaphore;
 static SemaphoreHandle_t s_diagnostic_semaphore;
 static SemaphoreHandle_t s_ping_done_semaphore;
 static SemaphoreHandle_t s_ping_mutex;
-static bool ot_wait_callback(SemaphoreHandle_t semaphore, uint32_t timeout_ms); /* patch 16 */
+static bool ot_wait_callback(SemaphoreHandle_t semaphore, uint32_t timeout_ms); /* patch 18 */
 
 void esp_br_web_api_init(void)
 {
@@ -561,7 +561,7 @@ static otError get_openthread_available_networks(void)
         ESP_GOTO_ON_FALSE(OT_ERROR_NONE == (ret = otIp6SetEnabled(ins, true)), ret, exit, API_TAG,
                           "Failed to enable IPv6 interface for scanning");
     }
-    xSemaphoreTake(s_discover_done_semaphore, 0); /* patch 16: drop the end of an earlier scan whose wait timed out */
+    xSemaphoreTake(s_discover_done_semaphore, 0); /* patch 18: drop the end of an earlier scan whose wait timed out */
     ESP_GOTO_ON_FALSE(OT_ERROR_NONE ==
                           (ret = otThreadDiscover(ins, scanChannels, OT_PANID_BROADCAST, false, false,
                                                   &handle_active_scan_event, NULL)),
@@ -599,7 +599,7 @@ cJSON *handle_openthread_available_network_request(void)
     ESP_GOTO_ON_FALSE(!get_openthread_available_networks(), OT_ERROR_FAILED, exit, API_TAG,
                       "Failed to get thread network list");
     ESP_GOTO_ON_FALSE(ot_wait_callback(s_discover_done_semaphore, SCAN_WAIT_MS), OT_ERROR_FAILED, exit, API_TAG,
-                      "Scan did not end"); /* patch 16 */
+                      "Scan did not end"); /* patch 18 */
 
     ESP_GOTO_ON_FALSE(s_networkList, OT_ERROR_INVALID_ARGS, exit, API_TAG, "Invalid network list");
 
@@ -782,7 +782,7 @@ otError handle_openthread_join_network_request(const cJSON *request, cJSON *log)
 
         /* Release lock while waiting for joiner callback to avoid blocking other requests */
         esp_openthread_lock_release();
-        if (!ot_wait_callback(s_join_done_semaphore, 10000)) { /* patch 16 */
+        if (!ot_wait_callback(s_join_done_semaphore, 10000)) { /* patch 18 */
             ESP_LOGW(API_TAG, "Joiner timed out waiting for callback");
             ret = OT_ERROR_RESPONSE_TIMEOUT;
             goto exit_no_unlock;
@@ -1201,7 +1201,7 @@ cJSON *handle_ot_resource_network_diagnostics_request()
         TickType_t elapsed = now - start;
         TickType_t quiet = now - s_diag_last_response_tick;
 
-        if (!esp_br_web_openthread_ready()) { /* patch 16: OpenThread is being stopped (radio push) or a capture started */
+        if (!esp_br_web_openthread_ready()) { /* patch 18: OpenThread is being stopped (radio push) or a capture started */
             ESP_LOGW(API_TAG, "Diagnostic collection: OpenThread no longer ready (%d responses)", s_diag_response_count);
             break;
         }
@@ -1347,7 +1347,7 @@ cJSON *handle_openthread_ping_request(const cJSON *request)
     }
 
     /* Wait for ping to complete. Timeout: count * interval + extra timeout + margin */
-    if (!ot_wait_callback(s_ping_done_semaphore, (count * config.mInterval) + config.mTimeout + 1000)) { /* patch 16 */
+    if (!ot_wait_callback(s_ping_done_semaphore, (count * config.mInterval) + config.mTimeout + 1000)) { /* patch 18 */
         ESP_LOGW(API_TAG, "Ping timed out waiting for statistics callback");
         /* Stop any in-progress ping */
         esp_openthread_lock_acquire(portMAX_DELAY);
@@ -2255,7 +2255,7 @@ static void rest_dataset(const esp_br_thread_rest_request_t *request, esp_br_thr
     }
     /* The permanent callback context also absorbs responses after the HTTP timeout. */
     esp_openthread_lock_release();
-    bool done = ot_wait_callback(s_rest_pending_done, 30000); /* patch 16 */
+    bool done = ot_wait_callback(s_rest_pending_done, 30000); /* patch 18 */
     esp_openthread_lock_acquire(portMAX_DELAY);
     if (!done || s_rest_pending_result == OT_ERROR_RESPONSE_TIMEOUT) {
         response->status = 504;

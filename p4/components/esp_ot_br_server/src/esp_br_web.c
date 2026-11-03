@@ -145,7 +145,7 @@ static httpd_uri_t s_resource_handlers[] = {
 };
 
 /*----------------------------------------------------------------------
-                    OpenThread sessions (patch 16)
+                    OpenThread sessions (patch 18)
 ----------------------------------------------------------------------*/
 /* Patch 16: every Web GUI handler runs inside a br_core OpenThread session, so that a radio push or ROM
  * recovery cannot delete the OpenThread lock and instance while the handler waits for the lock or, with the lock

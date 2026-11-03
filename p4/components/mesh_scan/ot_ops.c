@@ -566,12 +566,18 @@ fail:
 esp_err_t mesh_scan_start(void)
 {
     ESP_RETURN_ON_FALSE(s_initialised, ESP_ERR_NOT_SUPPORTED, TAG, "not initialised");
+    // The session keeps a radio push from deleting the lock and the instance under this call.
+    if (!br_core_ot_session_begin()) {
+        return ESP_ERR_NOT_ALLOWED; // OpenThread is stopping or not up: the mode is no longer BR_RUNNING
+    }
     if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(LOCK_WAIT_MS))) {
+        br_core_ot_session_end();
         ESP_LOGW(TAG, "start: OpenThread lock not free within %d ms", LOCK_WAIT_MS);
         return ESP_ERR_TIMEOUT;
     }
     esp_err_t err = mesh_scan_core_start();
     esp_openthread_lock_release();
+    br_core_ot_session_end();
     return err;
 }
 
@@ -580,7 +586,13 @@ esp_err_t mesh_scan_cancel(void)
     if (!s_initialised) {
         return ESP_OK;
     }
+    // No session: OpenThread is stopping or not up, so there is no lock to take. Fail the scan (scan mutex only).
+    if (!br_core_ot_session_begin()) {
+        mesh_scan_core_fail_stopped();
+        return ESP_OK;
+    }
     if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(LOCK_WAIT_MS))) {
+        br_core_ot_session_end();
         // Fail the scan anyway (scan mutex only), so the caller never runs alongside a live scan.
         ESP_LOGW(TAG, "cancel: OpenThread lock not free within %d ms; stopping without telling OpenThread",
                  LOCK_WAIT_MS);
@@ -589,5 +601,6 @@ esp_err_t mesh_scan_cancel(void)
     }
     mesh_scan_core_cancel();
     esp_openthread_lock_release();
+    br_core_ot_session_end();
     return ESP_OK;
 }
