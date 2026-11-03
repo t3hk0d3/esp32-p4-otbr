@@ -32,7 +32,9 @@ def node(state="router", weighting=65, router_id=11):
     }
 
 
-LOWER_HINT = "Needs a weight above 65 (the leader’s). Raise the adjustment to +1 or more."
+LOWER_HINT = (
+    "Needs a weight above 65 (the leader’s). Raise the adjustment to +1 or more."
+)
 
 
 @needs_node
@@ -52,7 +54,8 @@ class TestLeaderLogic:
         v = view(thread(adj=0), node())
         assert v["verdictKind"] == "warn"
         assert (
-            v["verdict"] == "Equal: the next merge is decided by the random partition ID."
+            v["verdict"]
+            == "Equal: the next merge is decided by the random partition ID."
         )
         assert v["buttonEnabled"] is False
         assert v["hint"] == LOWER_HINT
@@ -134,7 +137,10 @@ class TestLeaderLogic:
 
     def test_leader_name(self):
         # On state leader: "this board"; on leaderRouterId 11: "router 0x2c00".
-        assert logic("leader", f"L.leaderName({json.dumps(node('leader'))})") == "this board"
+        assert (
+            logic("leader", f"L.leaderName({json.dumps(node('leader'))})")
+            == "this board"
+        )
         assert logic("leader", f"L.leaderName({json.dumps(node())})") == "router 0x2c00"
         assert (
             logic("leader", f"L.leaderName({json.dumps(node(router_id=0))})")
@@ -142,9 +148,17 @@ class TestLeaderLogic:
         )
 
 
-def routes(put="{status: 200, body: H.fixture(H.THREAD)}", thread="H.fixture(H.THREAD)", nd="H.fixture(H.NODE)"):
+def routes(
+    put="{status: 200, body: H.fixture(H.THREAD)}",
+    thread="H.fixture(H.THREAD)",
+    nd="H.fixture(H.NODE)",
+):
     return (
-        "(u, o) => u === '/device/thread' ? (o.method === 'PUT' ? (" + put + ") : ({status: 200, body: " + thread + "}))"
+        "(u, o) => u === '/device/thread' ? (o.method === 'PUT' ? ("
+        + put
+        + ") : ({status: 200, body: "
+        + thread
+        + "}))"
         " : u === '/node' ? ({status: 200, body: " + nd + "})"
         " : u === '/device/status' ? ({status: 200, body: H.STATUS}) : ({status: 404, body: {}})"
     )
@@ -175,7 +189,17 @@ class TestLeaderPage:
                     t.el('ld-save').disabled, t.el('ld-role').textContent];
         """
         )
-        assert r == ["73", "65 base · +8 adjustment", "65", "router 0x2c00", "8", False, False, True, "router"]
+        assert r == [
+            "73",
+            "65 base · +8 adjustment",
+            "65",
+            "router 0x2c00",
+            "8",
+            False,
+            False,
+            True,
+            "router",
+        ]
 
     def test_moving_the_slider_enables_save_and_disables_the_button(self):
         # On a slider moved to +8: Save enabled, label shows the pending weight, Become leader disabled.
@@ -284,20 +308,21 @@ class TestLeaderPage:
             + """
             t.el('ld-become').click(); t.el('ld-confirm').click(); await t.advance(100);
             const put = t.calls.filter(c => c.method === 'PUT').map(c => c.body);
-            const before = %s;
+            const before = @READS@;
             await t.advance(3000);
-            const during = %s - before;
+            const during = @READS@ - before;
             state = 'leader'; await t.advance(1100);
-            const atLeader = %s;
+            const atLeader = @READS@;
             await t.advance(3000);
-            return [put, during >= 6 && during <= 8, %s - atLeader <= 2, t.el('ld-verdict').textContent,
+            return [put, during >= 6 && during <= 8, @READS@ - atLeader <= 2, t.el('ld-verdict').textContent,
                     t.el('ld-become-msg').textContent, t.el('ld-role').textContent];
-        """
-            % (READS, READS, READS, READS)
+        """.replace("@READS@", READS)
         )
         assert r[0] == ['{"become_leader":true}']
         assert r[1] is True
-        assert r[2] is True  # the 1 s polling stopped once the node was leader: only the 5 s poll is left
+        assert (
+            r[2] is True
+        )  # the 1 s polling stopped once the node was leader: only the 5 s poll is left
         assert r[3] == "This board is the leader."
         assert r[5] == "leader"
 
@@ -314,10 +339,9 @@ class TestLeaderPage:
             + START
             + """
             t.el('ld-become').click(); t.el('ld-confirm').click(); await t.advance(31000);
-            const n = %s; await t.advance(3000);
-            return [t.el('ld-become-msg').textContent, %s - n < 4];
-        """
-            % (READS, READS)
+            const n = @READS@; await t.advance(3000);
+            return [t.el('ld-become-msg').textContent, @READS@ - n < 4];
+        """.replace("@READS@", READS)
         )
         assert "30" in r[0]
         assert r[1] is True
@@ -334,12 +358,11 @@ class TestLeaderPage:
             )
             + START
             + """
-            const n = %s;
+            const n = @READS@;
             t.el('ld-become').click(); t.el('ld-confirm').click(); await t.advance(100);
-            return [t.el('ld-become-msg').textContent, %s - n, t.el('ld-modal').classes.has('active'),
+            return [t.el('ld-become-msg').textContent, @READS@ - n, t.el('ld-modal').classes.has('active'),
                     t.calls.filter(c => c.url === '/node').length];
-        """
-            % (READS, READS)
+        """.replace("@READS@", READS)
         )
         assert "weight not higher" in r[0]
         assert r[1] == 2
@@ -354,7 +377,10 @@ class TestLeaderPage:
                 thread="H.fixture(H.THREAD, {leader_weight_adjustment: 8, leader_weight: 73})",
             )
             + ";"
-            + page("leader", "(u, o) => u === '/node' ? {status: 503, body: {}} : base(u, o)")
+            + page(
+                "leader",
+                "(u, o) => u === '/node' ? {status: 503, body: {}} : base(u, o)",
+            )
             + START
             + """
             const shown = [t.el('ld-adj').value, t.el('ld-comparison').hidden(), t.el('ld-become').disabled,
@@ -393,10 +419,9 @@ class TestLeaderPage:
             page("leader", routes())
             + START
             + """
-            const n = %s; await t.advance(10500);
-            return %s - n;
-        """
-            % (READS, READS)
+            const n = @READS@; await t.advance(10500);
+            return @READS@ - n;
+        """.replace("@READS@", READS)
         )
         assert r == 4
 
@@ -407,11 +432,10 @@ class TestLeaderPage:
             + START
             + """
             t.doc.hidden = true; await t.advance(1000);
-            const n = %s; await t.advance(20000);
-            const hiddenReads = %s - n;
+            const n = @READS@; await t.advance(20000);
+            const hiddenReads = @READS@ - n;
             t.doc.hidden = false; t.doc.fire('visibilitychange'); await t.advance(100);
-            return [hiddenReads, %s - n > 0];
-        """
-            % (READS, READS, READS)
+            return [hiddenReads, @READS@ - n > 0];
+        """.replace("@READS@", READS)
         )
         assert r == [0, True]
