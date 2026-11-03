@@ -563,11 +563,12 @@ static bool nexthop_equal(const routing_bgp_nexthop_t *a, const routing_bgp_next
 
 /*
  * The backbone next-hop changed (typically a global address appearing after the session came up on link-local
- * alone): every Established session announces what it announced again with the new next-hop. No reset.
+ * alone): every Established session announces what it announced again with the new next-hop. No reset. Without a
+ * link-local address there is no valid next-hop: bgp_reconcile stops the sessions instead.
  */
 static void nexthop_update(routing_engine_t *e, uint32_t now)
 {
-    if (!e->bgp_running) {
+    if (!e->bgp_running || !e->state.have_link_local) {
         return;
     }
     for (int i = 0; i < ROUTING_MAX_PEERS; i++) {

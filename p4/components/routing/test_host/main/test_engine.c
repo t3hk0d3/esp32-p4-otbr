@@ -664,6 +664,34 @@ TEST_CASE("Next-hop changes with nothing announced: sends nothing", "[routing]")
     TEST_ASSERT_EQUAL(0, fake_io_sends_on(h));
 }
 
+/* The backbone link-local address disappears while P1 is Established (global address kept). */
+static int link_local_lost(void)
+{
+    routing_settings_t s = base_settings(ROUTING_METHOD_BGP);
+    int h = bgp_established(&s);
+    routing_engine_state_t st = up_state();
+
+    st.have_link_local = false;
+    memset(st.nexthop.link_local, 0, 16);
+    routing_engine_poll(&s_e, &st, T0 + 500);
+    return h;
+}
+
+TEST_CASE("Link-local address disappears after Established: sends no UPDATE", "[routing]")
+{
+    int h = link_local_lost();
+
+    TEST_ASSERT_EQUAL(0, fake_io_bgp_sends(h, ROUTING_BGP_MSG_UPDATE));
+}
+
+TEST_CASE("Link-local address disappears after Established: stops the session", "[routing]")
+{
+    int h = link_local_lost();
+
+    TEST_ASSERT_EQUAL(1, fake_io_closes(h));
+    TEST_ASSERT_EQUAL_STRING("no link-local address", status_at(T0 + 500).bgp_blocked);
+}
+
 TEST_CASE("Keepalive timer: sends KEEPALIVE a third of the hold time later", "[routing]")
 {
     routing_settings_t s = base_settings(ROUTING_METHOD_BGP);
