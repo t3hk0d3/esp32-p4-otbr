@@ -93,7 +93,7 @@ httpd_handle_t esp_br_web_get_server(void)
 #define REST_PATH_COUNT     4 /* esp_otbr_thread_rest_register: paths x methods, asserted there */
 #define REST_METHOD_COUNT   7
 #define REST_ROUTE_SLOTS    (REST_PATH_COUNT * REST_METHOD_COUNT)
-#define EXTRA_HANDLER_SLOTS 24      /* device_api (20 routes) and the catch-all, plus headroom (patch 18) */
+#define EXTRA_HANDLER_SLOTS 24      /* device_api (20 routes) and the catch-all, plus headroom (patch 19) */
 /* Patch 12: per-interface policy (spec 5.13). netcfg_request_allowed sends the 403 itself; failing the handler makes the
  * server close the connection. Single mode (the default) allows everything. */
 #define NETCFG_GATE(req, svc)                       \
@@ -1564,7 +1564,7 @@ static httpd_handle_t *start_esp_br_http_server(const char *base_path)
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.stack_size = 8 * 1024;
     config.core_id = 1; /* patch 1: management core (core 0 runs the network path) */
-    config.max_open_sockets = ESP_BR_WEB_MAX_OPEN_SOCKETS; /* patch 20 */
+    config.max_open_sockets = ESP_BR_WEB_MAX_OPEN_SOCKETS; /* patch 21 */
     config.lru_purge_enable = true;
     s_server.port = config.server_port;
 

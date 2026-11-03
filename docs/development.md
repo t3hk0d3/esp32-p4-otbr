@@ -25,7 +25,7 @@ no-wires first install through ESP-Hosted).
 
 `esp_ot_br_server` and `esp_br_http_ota` come from esp-thread-br commit `1f5af46d0ccb22fe01465ba6d16a33b276c20c1b`. Every
 change to them and the link-time mDNS filter for `espressif/mdns` is listed in
-[`p4/components/PATCHES.md`](../p4/components/PATCHES.md) (patches 1 to 15; 4 and 6 were not applied, 13 is the mDNS
+[`p4/components/PATCHES.md`](../p4/components/PATCHES.md) (patches 1 to 21; 4 and 6 were not applied, 13 is the mDNS
 filter), together with the REST guard table (which endpoint answers 409 or 503 in which mode). They stay under Apache-2.0.
 
 ## sdkconfig

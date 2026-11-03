@@ -112,7 +112,7 @@ reason, spec reference.
    `device_api_register` as the callback before starting the server. (spec 5.7)
    `EXTRA_HANDLER_SLOTS` (the handlers the callback and the catch-all may add to `max_uri_handlers`) was 20 since the
    network names (`GET`/`PUT /device/names`, spec 2026-11-03-network-names-design.md) and is 24 since mesh routing
-   (patch 18).
+   (patch 19).
 11. Applied (Task 18). `esp_ot_br_server`: the Thread REST background worker `thread_rest` (`rest_process_task`,
    `src/esp_br_web_api.c`) is created with `xTaskCreatePinnedToCore(..., 1)` instead of `xTaskCreate`. Reason: it takes
    the OpenThread lock every 100 ms and was unpinned, so it could run on core 0 next to the network path; it belongs to
@@ -216,22 +216,7 @@ reason, spec reference.
    `otThreadGetNextDiagnosticTlv` and a tick clock that `vTaskDelay` advances) for `test_topology_collector`, and scans `tests/host_platform.c` for the OpenThread functions to mock; `tests/test_rest.c` `test_actions` asserts
    the filtered sends and that a discovery answer without TLV 0 adds no device. The mux itself is tested in
    `p4/components/netdiag_mux/test_host/`.
-18. Applied (mesh routing, Task 8). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 20 -> 24, the slots
-   patch 10 reserves for the `device_api` routes and the catch-all `/*` GET handler. With `GET`/`PUT /device/routing`
-   `device_api` registers 20 routes (18 before: the names and topology routes), plus the catch-all: 21, which 20 slots
-   no longer cover (only the `+30` slack of `max_uri_handlers` hides the shortfall; running out silently drops the later
-   registrations, the catch-all first). 24 leaves 3 slots of headroom.
-   (docs/superpowers/specs/2026-11-03-mesh-routing-design.md sections 5, 6)
-19. Applied (mesh routing, Task 10). `esp_ot_br_server` frontend: Routing page. New files `frontend/routing.html` and
-   `frontend/static/routing.js` (pure logic exported for node, page code guarded by `typeof document`, text only through
-   `textContent`), built from the approved mockup `docs/superpowers/specs/2026-11-03-routing-page-mockup.html`. It reads
-   and writes `GET`/`PUT /device/routing` (no reboot, no trial), reads the PD state from `GET /device/status` while the
-   saved method is `pd`, refreshes every 5 s keeping unsaved edits, and shows a 400's field next to its input. Edits:
-   `frontend/static/api.js`, "Routing" after "Ethernet" in the Device dropdown; `frontend/static/style.css`, new rules
-   appended (`.mode-cards.four`, `.now.off`, `.peer-row`; no existing rule changed). Host tests:
-   `tools/tests/test_routing_page.py`. (docs/superpowers/specs/2026-11-03-mesh-routing-design.md section 8)
-
-17. Applied (2026-11). `esp_ot_br_server` frontend, upstream pages: new
+18. Applied (2026-11). `esp_ot_br_server` frontend, upstream pages: new
    `frontend/static/mgmt.js` (pure logic exported for node: mode banner, random network parameters, Form Network and
    PSKd validation, the replace-network confirm; page code guarded by `typeof document`), loaded after `api.js` by
    `network.html`, `commission.html`, `addresses.html`, `tools.html`, whose `checkThreadState`
@@ -244,7 +229,21 @@ reason, spec reference.
    text/plain). `commission.html`: no default PSKd. `addresses.html`: confirms for remove/delete, no default prefix.
    `about.html`: project texts and links, `/device/status` fields. Every upstream page gets the project footer instead
    of the Espressif copyright line. Host tests: `tools/tests/test_mgmt_pages.py`.
-20. Applied (mesh routing, review fix). `esp_ot_br_server`: `include/esp_br_web.h` defines
+19. Applied (mesh routing, Task 8). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 20 -> 24, the slots
+   patch 10 reserves for the `device_api` routes and the catch-all `/*` GET handler. With `GET`/`PUT /device/routing`
+   `device_api` registers 20 routes (18 before: the names and topology routes), plus the catch-all: 21, which 20 slots
+   no longer cover (only the `+30` slack of `max_uri_handlers` hides the shortfall; running out silently drops the later
+   registrations, the catch-all first). 24 leaves 3 slots of headroom.
+   (docs/superpowers/specs/2026-11-03-mesh-routing-design.md sections 5, 6)
+20. Applied (mesh routing, Task 10). `esp_ot_br_server` frontend: Routing page. New files `frontend/routing.html` and
+   `frontend/static/routing.js` (pure logic exported for node, page code guarded by `typeof document`, text only through
+   `textContent`), built from the approved mockup `docs/superpowers/specs/2026-11-03-routing-page-mockup.html`. It reads
+   and writes `GET`/`PUT /device/routing` (no reboot, no trial), reads the PD state from `GET /device/status` while the
+   saved method is `pd`, refreshes every 5 s keeping unsaved edits, and shows a 400's field next to its input. Edits:
+   `frontend/static/api.js`, "Routing" after "Ethernet" in the Device dropdown; `frontend/static/style.css`, new rules
+   appended (`.mode-cards.four`, `.now.off`, `.peer-row`; no existing rule changed). Host tests:
+   `tools/tests/test_routing_page.py`. (docs/superpowers/specs/2026-11-03-mesh-routing-design.md section 8)
+21. Applied (mesh routing, review fix). `esp_ot_br_server`: `include/esp_br_web.h` defines
    `ESP_BR_WEB_MAX_OPEN_SOCKETS` (7, the upstream value), and `src/esp_br_web.c` sets `config.max_open_sockets` from it.
    Reason: the routing task's compile-time lwIP socket budget (`p4/components/routing/task.c`, `SOCKETS_NEEDED` against
    `CONFIG_LWIP_MAX_SOCKETS`) counts the web server's sockets; with one definition, raising it trips that check
