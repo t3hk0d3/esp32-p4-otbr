@@ -43,7 +43,7 @@ make case-test    # the model's tests (about 1.5 min)
 - the board can be fitted (drop in, slide forward, settle);
 - the lid clears the SMA, a ribbon plug and its ribbon;
 - the screw heads have room behind the keyholes, and the board-screw nuts have room on top;
-- the lid seats on the base without overlap, and the LED shows through it;
+- the lid seats on the base without overlap;
 - no opening is wider than 3.5 mm;
 - both parts are closed solids;
 - both parts print without supports (bridges up to 18 mm).
@@ -114,4 +114,4 @@ After a change, run `make case` again. Its checks catch a change that breaks a f
 - The fit is checked against Waveshare's 3D model (`ESP32-P4-WIFI6-POE-ETH_3d-20251213`), not yet against a printed case
   with a real board.
 - The camera and display ribbon sockets, the two 4-pin sockets and the battery socket stay covered.
-- There's no light pipe for the LED; it shows through the grille.
+- The power LED stays covered by the lid's frame.
