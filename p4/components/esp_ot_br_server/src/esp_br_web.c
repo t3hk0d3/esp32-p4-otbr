@@ -151,11 +151,6 @@ static httpd_uri_t s_resource_handlers[] = {
  * recovery cannot delete the OpenThread lock and instance while the handler waits for the lock or, with the lock
  * released, for an OpenThread callback (scan, join, ping, pending dataset). Without a session (OpenThread stopped or
  * about to stop) the guard treats OpenThread as not ready. httpd runs one handler at a time, so one flag suffices. */
-typedef struct {
-    esp_err_t (*handler)(httpd_req_t *req);
-    void *user_ctx;
-} ot_session_route_t;
-
 static bool s_in_ot_session;
 
 /* The readiness the guard sees in a handler: the REST flag, and only inside a session. */
@@ -164,9 +159,10 @@ static bool ot_ready_for_request(void)
     return s_in_ot_session && esp_br_web_openthread_ready();
 }
 
+/* user_ctx is the static httpd_uri_t entry the handler was registered from. */
 static esp_err_t ot_session_handler(httpd_req_t *req)
 {
-    const ot_session_route_t *route = req->user_ctx;
+    const httpd_uri_t *route = req->user_ctx;
     req->user_ctx = route->user_ctx;
     s_in_ot_session = br_core_ot_session_begin();
     esp_err_t ret = route->handler(req);
@@ -177,14 +173,12 @@ static esp_err_t ot_session_handler(httpd_req_t *req)
     return ret;
 }
 
-/* Registers `uri` behind ot_session_handler; `route` must outlive the server. */
-static esp_err_t register_ot_session_handler(httpd_handle_t server, const httpd_uri_t *uri, ot_session_route_t *route)
+/* Registers `uri` (a static table entry: it must outlive the server) behind ot_session_handler. */
+static esp_err_t register_ot_session_handler(httpd_handle_t server, const httpd_uri_t *uri)
 {
-    route->handler = uri->handler;
-    route->user_ctx = uri->user_ctx;
     httpd_uri_t wrapped = *uri;
     wrapped.handler = ot_session_handler;
-    wrapped.user_ctx = route;
+    wrapped.user_ctx = (void *)uri;
     return httpd_register_uri_handler(server, &wrapped);
 }
 
@@ -674,13 +668,12 @@ static cJSON *resource_status(char *error, char *msg)
     return root;
 }
 
-/* Patch 16: `routes` (one per URI, outliving the server) hold the handlers behind the OpenThread session wrapper. */
-static esp_err_t httpd_server_register_http_uri(const http_server_t *server, httpd_uri_t *uris, uint8_t size,
-                                                ot_session_route_t *routes)
+/* Patch 16: every handler goes behind the OpenThread session wrapper. */
+static esp_err_t httpd_server_register_http_uri(const http_server_t *server, httpd_uri_t *uris, uint8_t size)
 {
-    ESP_RETURN_ON_FALSE((server->handle && uris && routes), ESP_ERR_INVALID_ARG, WEB_TAG, "Invalid argument");
+    ESP_RETURN_ON_FALSE((server->handle && uris), ESP_ERR_INVALID_ARG, WEB_TAG, "Invalid argument");
     for (int i = 0; i < size; i++) {
-        ESP_RETURN_ON_ERROR(register_ot_session_handler(server->handle, &uris[i], &routes[i]), WEB_TAG,
+        ESP_RETURN_ON_ERROR(register_ot_session_handler(server->handle, &uris[i]), WEB_TAG,
                             "Failed to register %s for %d", uris[i].uri, i);
     }
     return ESP_OK;
@@ -1635,12 +1628,8 @@ static httpd_handle_t *start_esp_br_http_server(const char *base_path)
         s_server.handle = NULL;
         return NULL;
     }
-    static ot_session_route_t resource_routes[sizeof(s_resource_handlers) / sizeof(httpd_uri_t)]; /* patch 16 */
-    static ot_session_route_t gui_routes[sizeof(s_web_gui_handlers) / sizeof(httpd_uri_t)];
-    httpd_server_register_http_uri(&s_server, s_resource_handlers, sizeof(s_resource_handlers) / sizeof(httpd_uri_t),
-                                   resource_routes);
-    httpd_server_register_http_uri(&s_server, s_web_gui_handlers, sizeof(s_web_gui_handlers) / sizeof(httpd_uri_t),
-                                   gui_routes);
+    httpd_server_register_http_uri(&s_server, s_resource_handlers, sizeof(s_resource_handlers) / sizeof(httpd_uri_t));
+    httpd_server_register_http_uri(&s_server, s_web_gui_handlers, sizeof(s_web_gui_handlers) / sizeof(httpd_uri_t));
     if (s_extra_handlers_cb) { /* patch 10 */
         esp_err_t extra_err = s_extra_handlers_cb(s_server.handle);
         if (extra_err != ESP_OK) {

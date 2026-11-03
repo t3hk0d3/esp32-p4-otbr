@@ -52,7 +52,8 @@ static const char *TAG = "br_core";
 #define BOOT_WAIT_MS 180000
 #define BRINGUP_WAIT_MS 60000
 #define LOOP_STOP_WAIT_MS 5000
-// Longest OpenThread session a push waits for: above the longest HTTP handler wait (pending dataset, topology: 30 s).
+// Longest a push waits for the open OpenThread sessions. The web server's callback waits end within ~0.25 s of the
+// REST flag going off, so this only bounds a session held by slow HTTP I/O or a stuck OpenThread call.
 #define SESSION_DRAIN_MS 45000
 #define STATUS_LOCK_MS 100
 #define REBOOT_DELAY_MS 1500 // lets the caller of a push report its result before the reboot
@@ -85,7 +86,6 @@ typedef struct {
     bool border_router_up;
     bool loop_running;
     bool push_pending;         // a firmware push asked the OpenThread task to leave its main loop
-    bool job_stopped_ot;       // the running C6 job has started tearing OpenThread down
     uint32_t ot_sessions;      // open br_core_ot_session_begin sessions; teardown waits for 0
     atomic_bool push_busy;     // a firmware push is running (one long operation at a time)
     bool started;
@@ -108,6 +108,8 @@ static struct {
 } s_saved;
 // The platform config must outlive esp_openthread_init: OpenThread keeps pointers into it.
 static esp_openthread_platform_config_t s_platform_config;
+
+static bool ot_ready_now(void);
 
 static void set_reason(const char *reason)
 {
@@ -170,7 +172,8 @@ static void set_compatible(bool compatible)
 static void on_coprocessor_reset_failure(void)
 {
     set_compatible(false);
-    fault_and_park(s_core.ot_ready ? "RCP did not answer its reset" : FAULT_INCOMPATIBLE);
+    // loop_running, not ot_ready: a push clears ot_ready while OpenThread still runs.
+    fault_and_park(s_core.loop_running ? "RCP did not answer its reset" : FAULT_INCOMPATIBLE);
 }
 
 static void on_compatibility_error(void)
@@ -207,9 +210,10 @@ static esp_err_t op_reset_rcp(void)
 // wait) it only resets the C6.
 static void on_rcp_failure(void)
 {
-    if (atomic_load(&s_core.push_busy)) {
-        return; // the push owns the C6 and resets it itself
+    if (atomic_load(&s_core.push_busy) && !s_core.loop_running) {
+        return; // the push stopped OpenThread: it owns the C6 and resets it itself
     }
+    // While a push waits for the OpenThread sessions to end (the mode is STARTING) the C6 is only reset, below.
     if (!s_core.ot_ready || br_core_get_mode() == BR_MODE_STARTING) {
         op_reset_rcp();
         return;
@@ -257,11 +261,19 @@ static void bringup_task(void *arg)
     otInstance *instance = esp_openthread_get_instance();
 
     ESP_LOGI(TAG, "starting the border router");
+    // The session keeps a push from tearing OpenThread down under the border router start.
+    if (!br_core_ot_session_begin()) {
+        ESP_LOGW(TAG, "OpenThread is being stopped: no border router start");
+        xSemaphoreGive(s_core.bringup_done);
+        vTaskDelete(NULL);
+        return;
+    }
     esp_openthread_lock_acquire(portMAX_DELAY);
     esp_err_t err = esp_openthread_border_router_init();
     if (err != ESP_OK) {
         // The radio works, the border router does not: not a radio fault, the mode stays STARTING.
         esp_openthread_lock_release();
+        br_core_ot_session_end();
         ESP_LOGE(TAG, "border router init: %s", esp_err_to_name(err));
         set_reason("border router init failed");
         xSemaphoreGive(s_core.bringup_done);
@@ -284,10 +296,13 @@ static void bringup_task(void *arg)
     } else {
         ESP_LOGI(TAG, "no stored dataset, Thread stays idle");
     }
+    // A radio fault entered meanwhile (e.g. the boot wait timed out) stays. Under the lock, where a push changes the
+    // mode: a push that began meanwhile (mode STARTING, ot_ready cleared) keeps its STARTING.
+    if (ot_ready_now()) {
+        mode_fsm_set_started(&s_fsm);
+    }
     esp_openthread_lock_release();
-
-    // A radio fault entered meanwhile (e.g. the boot wait timed out) stays.
-    mode_fsm_set_started(&s_fsm);
+    br_core_ot_session_end();
     xSemaphoreGive(s_core.bringup_done);
     vTaskDelete(NULL);
 }
@@ -459,7 +474,7 @@ static void ot_task(void *arg)
     xSemaphoreTake(s_core.mutex, portMAX_DELAY);
     s_core.ot_ready = true;
     if (!atomic_load(&s_core.push_busy)) {
-        // During a push the mode is transiently RADIO_FAULT; br_core_push_radio_firmware sets the flag from the final state.
+        // During a push the mode is transiently STARTING; br_core_push_radio_firmware sets the flag from the final state.
         esp_br_web_set_openthread_ready(br_core_get_mode() != BR_MODE_RADIO_FAULT);
     }
     if (backbone_has_ip6()) {
@@ -890,7 +905,6 @@ static esp_err_t op_radio_job(const rcp_fw_source_t *source, char *err_detail, s
     }
 
     ESP_LOGI(TAG, "%s: stopping OpenThread", what);
-    s_core.job_stopped_ot = true;
     teardown_openthread();
     xSemaphoreTake(s_core.mutex, portMAX_DELAY);
     s_core.ot_ready = false;
@@ -1106,20 +1120,26 @@ static esp_err_t run_radio_job(const rcp_fw_source_t *source, char *err_detail, 
     ESP_RETURN_ON_ERROR(mode_fsm_push_allowed(br_core_get_mode(), xTaskGetCurrentTaskHandle() == s_core.ot_task), TAG,
                         "radio job not allowed in this mode or task");
     // After a boot timeout ("radio boot timed out") the OpenThread task may still be in boot_radio, driving the C6 link.
-    ESP_RETURN_ON_FALSE(!(s_core.ot_task && !s_core.loop_running), ESP_ERR_INVALID_STATE, TAG, "the radio is still booting");
+    if (s_core.ot_task && !s_core.loop_running) {
+        if (err_detail && err_cap > 0) {
+            strlcpy(err_detail, "the radio is still booting", err_cap);
+        }
+        ESP_LOGW(TAG, "radio job refused: the radio is still booting");
+        return ESP_ERR_INVALID_STATE;
+    }
     bool expected = false;
     ESP_RETURN_ON_FALSE(atomic_compare_exchange_strong(&s_core.push_busy, &expected, true), ESP_ERR_INVALID_STATE, TAG,
                         "a firmware push or ROM recovery is already running");
-    s_core.job_stopped_ot = false;
 
-    // Guard: under the OpenThread lock, re-check the mode and make ot_ready false, so that the sniffer entry points
-    // (which re-check it under the same lock) cannot start while OpenThread is torn down. The lock only exists while
-    // OpenThread is initialised.
+    // Begin the job under the OpenThread lock: the mode becomes STARTING (the REST guard and the Web GUI refuse Thread
+    // access, an RCP failure only resets the C6, a border router start does not complete) and ot_ready goes false, so
+    // that no new OpenThread session opens and the sniffer entry points (which re-check it under the same lock) cannot
+    // start. The lock only exists while OpenThread is initialised.
     const bool had_openthread = ot_ready_now();
     if (had_openthread) {
         esp_openthread_lock_acquire(portMAX_DELAY);
     }
-    esp_err_t err = mode_fsm_push_allowed(br_core_get_mode(), false);
+    esp_err_t err = mode_fsm_begin_radio_job(&s_fsm);
     if (err == ESP_OK) {
         esp_br_web_set_openthread_ready(false); // Thread REST off before Thread stops
         xSemaphoreTake(s_core.mutex, portMAX_DELAY);
@@ -1130,30 +1150,27 @@ static esp_err_t run_radio_job(const rcp_fw_source_t *source, char *err_detail, 
         esp_openthread_lock_release();
     }
     // Tasks inside an OpenThread session may still wait for the lock or for an OpenThread callback: teardown deletes
-    // the lock and the instance, so it waits for them (the main loop keeps running meanwhile).
+    // the lock and the instance, so it waits for them. The main loop keeps running meanwhile, and the long waits of the
+    // web server end early once the REST flag is off.
     if (err == ESP_OK && had_openthread && !wait_sessions_closed()) {
-        err = ESP_ERR_TIMEOUT;
+        err = ESP_ERR_INVALID_STATE; // busy: nothing was stopped
         if (err_detail && err_cap > 0) {
             strlcpy(err_detail, "OpenThread is busy, try again", err_cap);
         }
+        esp_openthread_lock_acquire(portMAX_DELAY);
+        mode_fsm_cancel_radio_job(&s_fsm);
         xSemaphoreTake(s_core.mutex, portMAX_DELAY);
-        s_core.ot_ready = true; // nothing was stopped
+        s_core.ot_ready = true;
         xSemaphoreGive(s_core.mutex);
         esp_br_web_set_openthread_ready(mode_fsm_rest_ready_after_push(br_core_get_mode(), true));
+        esp_openthread_lock_release();
     }
 
     if (err == ESP_OK) {
         // No OpenThread lock: the operation deletes and re-creates it.
         err = source ? mode_fsm_push_firmware(&s_fsm, source, err_detail, err_cap)
               : mode_fsm_rom_recover(&s_fsm, err_detail, err_cap);
-        if (err == ESP_ERR_INVALID_STATE && had_openthread && !s_core.job_stopped_ot) {
-            // Refused before anything was stopped (the mode check in mode_fsm): put the flag back. A job that already
-            // tore OpenThread down can fail with the same code (rom_flash busy, no base image): that restart decided ot_ready.
-            xSemaphoreTake(s_core.mutex, portMAX_DELAY);
-            s_core.ot_ready = true;
-            xSemaphoreGive(s_core.mutex);
-        }
-        // The flag follows the final state on every path, never the transient RADIO_FAULT of the job.
+        // The flag follows the final state on every path, never the transient STARTING of the job.
         esp_br_web_set_openthread_ready(mode_fsm_rest_ready_after_push(br_core_get_mode(), ot_ready_now()));
     }
     atomic_store(&s_core.push_busy, false);

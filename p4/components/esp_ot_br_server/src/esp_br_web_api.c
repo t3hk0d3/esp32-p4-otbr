@@ -85,6 +85,7 @@ static SemaphoreHandle_t s_join_done_semaphore;
 static SemaphoreHandle_t s_diagnostic_semaphore;
 static SemaphoreHandle_t s_ping_done_semaphore;
 static SemaphoreHandle_t s_ping_mutex;
+static bool ot_wait_callback(SemaphoreHandle_t semaphore, uint32_t timeout_ms); /* patch 16 */
 
 void esp_br_web_api_init(void)
 {
@@ -597,8 +598,8 @@ cJSON *handle_openthread_available_network_request(void)
 
     ESP_GOTO_ON_FALSE(!get_openthread_available_networks(), OT_ERROR_FAILED, exit, API_TAG,
                       "Failed to get thread network list");
-    ESP_GOTO_ON_FALSE(xSemaphoreTake(s_discover_done_semaphore, pdMS_TO_TICKS(SCAN_WAIT_MS)) == pdTRUE, OT_ERROR_FAILED,
-                      exit, API_TAG, "Scan did not end within %d ms", SCAN_WAIT_MS); /* patch 16 */
+    ESP_GOTO_ON_FALSE(ot_wait_callback(s_discover_done_semaphore, SCAN_WAIT_MS), OT_ERROR_FAILED, exit, API_TAG,
+                      "Scan did not end"); /* patch 16 */
 
     ESP_GOTO_ON_FALSE(s_networkList, OT_ERROR_INVALID_ARGS, exit, API_TAG, "Invalid network list");
 
@@ -781,7 +782,7 @@ otError handle_openthread_join_network_request(const cJSON *request, cJSON *log)
 
         /* Release lock while waiting for joiner callback to avoid blocking other requests */
         esp_openthread_lock_release();
-        if (xSemaphoreTake(s_join_done_semaphore, pdMS_TO_TICKS(10000)) != pdTRUE) {
+        if (!ot_wait_callback(s_join_done_semaphore, 10000)) { /* patch 16 */
             ESP_LOGW(API_TAG, "Joiner timed out waiting for callback");
             ret = OT_ERROR_RESPONSE_TIMEOUT;
             goto exit_no_unlock;
@@ -1200,6 +1201,11 @@ cJSON *handle_ot_resource_network_diagnostics_request()
         TickType_t elapsed = now - start;
         TickType_t quiet = now - s_diag_last_response_tick;
 
+        if (!esp_br_web_openthread_ready()) { /* patch 16: OpenThread is being stopped (radio push) or a capture started */
+            ESP_LOGW(API_TAG, "Diagnostic collection: OpenThread no longer ready (%d responses)", s_diag_response_count);
+            break;
+        }
+
         if (elapsed >= max_timeout_ticks) {
             ESP_LOGW(API_TAG, "Diagnostic collection: max timeout reached (%d responses)", s_diag_response_count);
             break;
@@ -1341,8 +1347,7 @@ cJSON *handle_openthread_ping_request(const cJSON *request)
     }
 
     /* Wait for ping to complete. Timeout: count * interval + extra timeout + margin */
-    TickType_t wait_ticks = pdMS_TO_TICKS((count * config.mInterval) + config.mTimeout + 1000);
-    if (xSemaphoreTake(s_ping_done_semaphore, wait_ticks) != pdTRUE) {
+    if (!ot_wait_callback(s_ping_done_semaphore, (count * config.mInterval) + config.mTimeout + 1000)) { /* patch 16 */
         ESP_LOGW(API_TAG, "Ping timed out waiting for statistics callback");
         /* Stop any in-progress ping */
         esp_openthread_lock_acquire(portMAX_DELAY);
@@ -1685,6 +1690,25 @@ void handle_ot_resource_node_epskc_key_delete_request(void)
 ----------------------------------------------------------------------*/
 
 #define THREAD_REST_COLLECTION_LIMIT 200
+
+/* Patch 16: wait up to timeout_ms for `semaphore` (given by an OpenThread callback) in slices, and give up early once
+ * the Thread REST flag is off: a radio push turns it off, then waits for this request's br_core session to close
+ * before it tears OpenThread down. A sniffer start also turns it off and interrupts the wait. */
+#define OT_WAIT_SLICE_MS 250
+static bool ot_wait_callback(SemaphoreHandle_t semaphore, uint32_t timeout_ms)
+{
+    uint32_t waited = 0;
+    while (true) {
+        const uint32_t slice = timeout_ms - waited < OT_WAIT_SLICE_MS ? timeout_ms - waited : OT_WAIT_SLICE_MS;
+        if (xSemaphoreTake(semaphore, pdMS_TO_TICKS(slice)) == pdTRUE) {
+            return true;
+        }
+        waited += slice;
+        if (waited >= timeout_ms || !esp_br_web_openthread_ready()) {
+            return false;
+        }
+    }
+}
 #define THREAD_REST_JSON_API "application/vnd.api+json"
 
 /* All collections and action state are protected by the OpenThread lock. */
@@ -2231,7 +2255,7 @@ static void rest_dataset(const esp_br_thread_rest_request_t *request, esp_br_thr
     }
     /* The permanent callback context also absorbs responses after the HTTP timeout. */
     esp_openthread_lock_release();
-    bool done = xSemaphoreTake(s_rest_pending_done, pdMS_TO_TICKS(30000)) == pdTRUE;
+    bool done = ot_wait_callback(s_rest_pending_done, 30000); /* patch 16 */
     esp_openthread_lock_acquire(portMAX_DELAY);
     if (!done || s_rest_pending_result == OT_ERROR_RESPONSE_TIMEOUT) {
         response->status = 504;

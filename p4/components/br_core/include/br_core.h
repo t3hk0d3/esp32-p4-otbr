@@ -77,7 +77,8 @@ void br_core_get_status_brief(br_core_status_t *out);
  * long waits for OpenThread callbacks. Returns false while OpenThread is not running or a push is about to stop it:
  * then nothing is open and the caller must not touch OpenThread. Does not take the OpenThread lock. Sessions nest.
  * Every task other than the OpenThread task opens one around its OpenThread access. Close it with
- * br_core_ot_session_end; a push waits up to 45 s for the open sessions to close and is refused if they do not.
+ * br_core_ot_session_end; a push waits up to 45 s for the open sessions to close and is refused if they do not. A holder
+ * that waits for an OpenThread callback should give up once the Thread REST flag (esp_br_web_openthread_ready) is off.
  */
 bool br_core_ot_session_begin(void);
 
@@ -124,9 +125,9 @@ void br_core_sniffer_keepalive(void);
  * OpenThread with the previous firmware and returns the push error. Blocks for seconds to minutes; it runs on
  * the caller's (management) task and takes the OpenThread lock only around the stop/start. Not callable from
  * the OpenThread task. The Thread REST API is switched off before OpenThread stops.
- * ESP_ERR_INVALID_STATE in SNIFFER and STARTING, while the boot of the radio is still running, or while another
- * push runs (nothing is started then); ESP_ERR_TIMEOUT when OpenThread sessions (br_core_ot_session_begin) stay open
- * for 45 s (nothing was stopped then);
+ * The mode is STARTING while the job runs. ESP_ERR_INVALID_STATE (nothing is started then) in SNIFFER and STARTING,
+ * while the boot of the radio is still running, while another push runs, or when OpenThread sessions
+ * (br_core_ot_session_begin) stay open for 45 s ("OpenThread is busy, try again");
  * ESP_ERR_INVALID_ARG for a NULL source or read. `err_detail` (may be NULL) gets a short reason on failure.
  * Refused with ESP_ERR_INVALID_STATE as well when called from the OpenThread task, before anything is touched.
  * Refusal in STARTING also covers a border router start that failed (the mode stays STARTING): reboot instead.

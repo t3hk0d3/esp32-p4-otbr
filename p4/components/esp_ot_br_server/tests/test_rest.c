@@ -576,6 +576,18 @@ static void test_no_openthread_without_a_session(void)
     release(&req, json);
     assert(mock_sessions_open == 0);
 }
+/* Patch 16: a callback wait ends early once the REST flag is off (a radio push waits for the session), and still
+ * returns what the callback gave while it is on. */
+static void test_callback_wait_ends_when_not_ready(void)
+{
+    SemaphoreHandle_t semaphore = xSemaphoreCreateBinary();
+    xSemaphoreTake(semaphore, 0);
+    guard_enter_mode(BR_MODE_STARTING, false);
+    assert(!ot_wait_callback(semaphore, 30000));
+    guard_enter_mode(BR_MODE_BR_RUNNING, true);
+    xSemaphoreGive(semaphore);
+    assert(ot_wait_callback(semaphore, 30000));
+}
 /* Patch 12: a request the per-interface policy refuses never reaches the dispatcher; GET/HEAD read, the rest writes. */
 static void test_netcfg_gate(void)
 {
@@ -655,6 +667,7 @@ int main(void)
     test_worker_does_not_touch_the_lock_when_not_ready();
     test_worker_polls_under_the_lock_when_ready();
     test_no_openthread_without_a_session();
+    test_callback_wait_ends_when_not_ready();
     test_netcfg_gate();
     test_topology_collector();
     rest_collection_delete(&s_rest_actions, NULL, esp_openthread_get_instance());
