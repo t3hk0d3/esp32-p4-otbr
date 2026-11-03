@@ -82,6 +82,8 @@ make lan-ping-down
 - **Settings are erased:** the fixtures erase the board's NVS and form a new network, so the board leaves any network it
   was on.
 - `pd_router`: delegating server in Docker, env `PD_HOST_IF`.
+- `routing_rig`: FRR and BIRD routers in Docker for the mesh routing tests, env `ROUTING_HOST_IF` (and `TIMEOUT=5400`:
+  the 500k-route feed alone takes minutes).
 
 `test_hosted_install.py` (the no-wires first install) skips unless `OTBR_C6_STOCK_URL`, `OTBR_C6_INSTALLER` and
 `OTBR_RCP_IMAGE` are set. `OTBR_C6_STOCK_URL` is an HTTP server on the build directory of an ESP-Hosted C6 slave (e.g.
