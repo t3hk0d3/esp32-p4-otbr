@@ -80,7 +80,7 @@ esp_err_t device_api_thread_parse(const char *body, device_api_thread_put_t *out
         if (adj) {
             // cJSON keeps one number type: accept any whole value, so 8.0 is 8 and 8.5 is not.
             if (!cJSON_IsNumber(adj) || !(adj->valuedouble >= -1000 && adj->valuedouble <= 1000) ||
-                (double)(int)adj->valuedouble != adj->valuedouble || !br_core_leader_adjustment_valid((int)adj->valuedouble)) {
+                    (double)(int)adj->valuedouble != adj->valuedouble || !br_core_leader_adjustment_valid((int)adj->valuedouble)) {
                 *field = KEY_ADJUSTMENT;
             } else {
                 put.has_adjustment = true;
