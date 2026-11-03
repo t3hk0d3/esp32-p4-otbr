@@ -205,6 +205,17 @@ class TestTopologyLogic:
         got = js("LK.filter((l) => l.a === 'r23' && l.b === 'r34')")
         assert got == [{"a": "r23", "b": "r34", "lqAB": 0, "lqBA": 3}]
 
+    def test_routerlinks_leaves_a_stub_routers_side_unknown(self):
+        # On a link to a router that didn't answer (a stub): its side is null (unknown), not 0.
+        got = plain(
+            "L.routerLinks({routers: [{router_id: 9, responded: true, links: [{router_id: 55, lq_in: 2}]},"
+            " {router_id: 55, responded: false}, {router_id: 3, responded: true, links: [{router_id: 55, lq_in: 1}]}]})"
+        )
+        assert got == [
+            {"a": "r3", "b": "r55", "lqAB": None, "lqBA": 1},
+            {"a": "r9", "b": "r55", "lqAB": None, "lqBA": 2},
+        ]
+
     def test_routerlinks_drops_a_link_to_an_unknown_router(self):
         # On a link to a router id that is in no router entry: no link.
         got = js("[LK.some((l) => l.a === 'r99' || l.b === 'r99'), LK.length]")
@@ -216,9 +227,27 @@ class TestTopologyLogic:
         # On equal sides: "3".
         assert plain("L.linkText({a: 'r1', b: 'r2', lqAB: 3, lqBA: 3})") == "3"
 
-    def test_linktext_shows_a_first_on_different_sides(self):
-        # On different sides: "3/2" (a's view first).
-        assert plain("L.linkText({a: 'r1', b: 'r2', lqAB: 3, lqBA: 2})") == "3/2"
+    def test_linktext_shows_in_slash_out_in_as_view_on_different_sides(self):
+        # On different sides: "in/out" in a's view, i.e. lqBA (into a) then lqAB (out of a).
+        assert plain("L.linkText({a: 'r1', b: 'r2', lqAB: 3, lqBA: 2})") == "2/3"
+
+    def test_linktext_shows_only_the_known_side_of_a_stub_link(self):
+        # On one side unknown (null): only the known number.
+        assert plain(
+            "[L.linkText({a: 'r1', b: 'r2', lqAB: null, lqBA: 2}), L.linkText({a: 'r1', b: 'r2', lqAB: 1, lqBA: null})]"
+        ) == ["2", "1"]
+
+    # linkQuality
+
+    def test_linkquality_is_the_lower_side(self):
+        # On two known sides: the lower one.
+        assert plain("L.linkQuality({a: 'r1', b: 'r2', lqAB: 3, lqBA: 1})") == 1
+
+    def test_linkquality_uses_the_known_side_of_a_stub_link(self):
+        # On one side unknown (null): the known side, never 0.
+        assert plain(
+            "[L.linkQuality({a: 'r1', b: 'r2', lqAB: null, lqBA: 3}), L.linkQuality({a: 'r1', b: 'r2', lqAB: 2, lqBA: null})]"
+        ) == [3, 2]
 
     # displayName
 
@@ -788,6 +817,25 @@ class TestTopologyPage:
             2,
         ]
 
+    def test_board_restart_mid_scan_says_the_scan_was_interrupted(self):
+        # On a GET answering idle while the page follows a scan (the board restarted): the start view says the scan
+        # was interrupted, polling stops, and Load topology works again.
+        r = run(
+            "await start(); S.gets = [RUNNING(1, 5), {state: 'idle'}]; t.el('t-load').click(); await t.advance(2000);"
+            " const gets = () => calls('GET', '/device/topology').length;"
+            " const a = [vis('t-start'), vis('t-loading'), txt('t-start-note'), gets()]; await t.advance(5000);"
+            " a.push(gets()); t.el('t-load').click(); await t.flush(); a.push(calls('POST', '/device/topology').length);"
+            " return a;"
+        )
+        assert r == [
+            True,
+            False,
+            "The scan was interrupted (the board restarted). Load again.",
+            3,
+            3,
+            2,
+        ]
+
     def test_a_success_after_four_failed_polls_carries_on(self):
         # On 4 failed GETs then answers: polling goes on and the scan ends in the loaded view.
         r = run(
@@ -960,6 +1008,35 @@ class TestTopologyPage:
             "Unnamed 0xa000 LQI 1 in / 3 out",
         ]
 
+    def test_map_badges_agree_with_the_dialog_in_the_first_routers_view(self):
+        # On differing sides: the badge reads in/out in the lower router's view, the same as its dialog
+        # (r9 hears r40 at 1, r40 hears r9 at 3: badge "1/3", dialog "LQI 1 in / 3 out").
+        r = run(
+            "await loaded(); const badges = t.el('t-map').findAll((e) => e.classes.has('t-badge-text'))"
+            ".map((e) => e.textContent); node('r9').click();"
+            " return [badges, t.el('t-d-neighbors').children.map((c) => c.allText())[2]];"
+        )
+        assert r == [["2", "3", "1/3", "3/0", "2"], "Unnamed 0xa000 LQI 1 in / 3 out"]
+
+    def test_stub_link_shows_the_known_side_on_the_map_and_a_dash_in_the_dialog(self):
+        # On a link to a router that didn't answer: the badge shows only the known number in its colour, and the
+        # dialog shows "–" for the unknown side.
+        r = run(
+            "const X = {...R, routers: routers()}; X.routers[0].links.push({router_id: 55, lq_in: 3});"
+            " save(60000, X); await start(); t.el('t-show-last').click(); await t.flush();"
+            " const edge = t.el('t-map').findAll((e) => e.classes.has('t-link-edge'))"
+            ".find((g) => g.findAll((e) => e.classes.has('t-badge-text'))[0].textContent === '3'"
+            " && g.findAll((e) => e.tag === 'line')[0].attrs['stroke-dasharray'] === undefined"
+            " && g.findAll((e) => e.tag === 'line')[0].attrs.stroke === '#1e7e34');"
+            " const badges = t.el('t-map').findAll((e) => e.classes.has('t-badge-text')).map((e) => e.textContent);"
+            " node('r9').click(); const a = [badges, !!edge, t.el('t-d-neighbors').children.map((c) => c.allText())];"
+            " node('r55').click(); a.push(t.el('t-d-neighbors').children.map((c) => c.allText())); return a;"
+        )
+        assert r[0] == ["2", "3", "1/3", "3", "3/0", "2"]
+        assert r[1] is True
+        assert r[2][3] == "Unnamed 0xdc00 LQI 3 in / – out"
+        assert r[3] == ["Unnamed 0x2400 LQI – in / 3 out"]
+
     def test_ping_posts_to_ping_and_shows_the_summary(self):
         # On Ping: POST /ping {address, count: 4, size: 32}, then the pingSummary lines.
         r = run(
@@ -1023,9 +1100,23 @@ class TestTopologyPage:
         assert r == [False, 1]
 
     def test_child_without_detail_says_its_parent_didnt_answer(self):
-        # On a child whose parent gave no detail: "Details unavailable: its parent didn't answer", no detail rows.
+        # On a child whose parent gave no detail (children_detail false): "Details unavailable: its parent didn't
+        # answer", no detail rows.
         r = run("await loaded(); await pick('c23553'); return txt('t-d-facts');")
         assert "Details unavailable: its parent didn't answer" in r
+        assert "RSSI" not in r
+
+    def test_child_left_out_of_an_answering_parents_table_says_it_wasnt_reported(self):
+        # On a child without detail under a router that did give detail (the child table left it out):
+        # "Details unavailable: its parent didn't report it", no detail rows.
+        r = run(
+            "const X = {...R, routers: routers()};"
+            " X.routers[4].children = [{rloc16: 0xd401, mode: mode(true), lq_in: 3, addresses: []}];"
+            " save(60000, X); await start(); t.el('t-show-last').click(); await t.flush(); await pick('c54273');"
+            " return txt('t-d-facts');"
+        )
+        assert "Details unavailable: its parent didn't report it" in r
+        assert "didn't answer" not in r
         assert "RSSI" not in r
 
     def test_child_with_detail_lists_its_link_figures(self):

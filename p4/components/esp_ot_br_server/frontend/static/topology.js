@@ -180,11 +180,15 @@ function devices(result) {
   return out;
 }
 
-/** [{a, b, lqAB, lqBA}] with a the lower router id; lqAB is b's lq_in for a. Links to unknown routers are dropped. */
+/**
+ * [{a, b, lqAB, lqBA}] with a the lower router id; lqAB is b's lq_in for a (LQ out of a), lqBA is a's lq_in for b
+ * (LQ into a). A side owned by a router that didn't answer (a stub) is unknown: null, not 0. Links to unknown routers
+ * are dropped.
+ */
 function routerLinks(result) {
   var routers = (result && result.routers) || [];
   var known = {};
-  routers.forEach(function(r) { known[r.router_id] = true; });
+  routers.forEach(function(r) { known[r.router_id] = {responded : r.responded !== false}; });
   var byKey = {};
   routers.forEach(function(r) {
     (r.links || []).forEach(function(l) {
@@ -193,7 +197,8 @@ function routerLinks(result) {
         return;
       var lo = Math.min(r.router_id, other), hi = Math.max(r.router_id, other);
       var key = lo + ':' + hi;
-      var link = byKey[key] || (byKey[key] = {a : 'r' + lo, b : 'r' + hi, lqAB : 0, lqBA : 0, lo : lo, hi : hi});
+      var link = byKey[key] || (byKey[key] = {a : 'r' + lo, b : 'r' + hi, lqAB : known[hi].responded ? 0 : null,
+                                                   lqBA : known[lo].responded ? 0 : null, lo : lo, hi : hi});
       if (r.router_id === lo)
         link.lqBA = l.lq_in;
       else
@@ -205,9 +210,18 @@ function routerLinks(result) {
   }).map(function(l) { return {a : l.a, b : l.b, lqAB : l.lqAB, lqBA : l.lqBA}; });
 }
 
-/** "3" when both sides agree, else "3/2" in a's view first. */
+/** "3" when both sides agree or only one is known, else "in/out" in a's view: lqBA + "/" + lqAB. */
 function linkText(link) {
-  return link.lqAB === link.lqBA ? String(link.lqAB) : link.lqAB + '/' + link.lqBA;
+  if (link.lqAB === null || link.lqBA === null)
+    return String(link.lqAB === null ? link.lqBA : link.lqAB);
+  return link.lqAB === link.lqBA ? String(link.lqAB) : link.lqBA + '/' + link.lqAB;
+}
+
+/** The LQI a link is drawn with: the lower of its known sides. */
+function linkQuality(link) {
+  if (link.lqAB === null || link.lqBA === null)
+    return link.lqAB === null ? link.lqBA : link.lqAB;
+  return Math.min(link.lqAB, link.lqBA);
 }
 
 /** Colour of an LQI: 3 green, 2 amber, 1 red, anything else grey. */
@@ -692,6 +706,7 @@ return {
   devices : devices,
   routerLinks : routerLinks,
   linkText : linkText,
+  linkQuality : linkQuality,
   lqColor : lqColor,
   displayName : displayName,
   srpHostFor : srpHostFor,
@@ -731,6 +746,8 @@ var NO_SAVED = 'No saved result in this browser yet.';
 var STOPPED_ANSWERING = "The board stopped answering. Load again when it's back.";
 var NAMES_NOTE = "This browser can't save names. They last until the page is reloaded.";
 var NO_DETAIL = "Details unavailable: its parent didn't answer";
+var NOT_REPORTED = "Details unavailable: its parent didn't report it";
+var INTERRUPTED = 'The scan was interrupted (the board restarted). Load again.';
 var NO_ROUTE = "No routable address yet. Hosts on your home network can't reach this device.";
 var MORE_TEXT = 'Show internal addresses (mesh-local, RLOC, link-local)';
 var LESS_TEXT = 'Hide internal addresses';
@@ -914,12 +931,16 @@ function follow(state) {
     schedulePoll(POLL_MS);
     return;
   }
+  var wasScanning = scanning;
   scanning = false;
   if (state && state.state === 'done' && state.result) {
     var at = env.now() - (Number(state.age_s) || 0) * 1000;
     last = {savedAt : at, result : state.result};
     L.saveResult(storage, state.result, at);
     showResult(last, true);
+  } else if (wasScanning && state && state.state === 'idle') {
+    /* The board forgot the scan this page was following: it restarted mid-scan. */
+    renderStart(INTERRUPTED);
   } else {
     renderStart(state && state.state === 'failed' ? failedText(state.error) : '');
   }
@@ -1142,7 +1163,7 @@ function drawNode(layer, d, p) {
 
 function drawLink(layer, l, pos) {
   var a = pos[l.a], b = pos[l.b];
-  var q = Math.min(l.lqAB, l.lqBA);
+  var q = L.linkQuality(l);
   var color = L.lqColor(q);
   var g = svg('g', {'class' : 't-link-edge'}, layer);
   var line = {x1 : a.x, y1 : a.y, x2 : b.x, y2 : b.y, stroke : color, 'stroke-width' : q >= 3 ? 3 : 2};
@@ -1376,7 +1397,7 @@ function renderFacts(d) {
     lqText.style.color = L.lqColor(lq);
   fact(dl, 'LQI', lqText);
   if (!d.detail) {
-    box.appendChild(el('p', NO_DETAIL, 't-warn'));
+    box.appendChild(el('p', model.byId[d.parentId].detail ? NOT_REPORTED : NO_DETAIL, 't-warn'));
     return;
   }
   var c = d.child;
@@ -1386,6 +1407,9 @@ function renderFacts(d) {
   fact(dl, 'Message errors', pctText(c.message_error_pct));
   fact(dl, 'Attached for', typeof c.connected_s === 'number' ? C.durationText(c.connected_s) : '–');
 }
+
+/* One side of a router link: its LQI, or "–" when the router on that side didn't answer. */
+function lqSide(q) { return q === null ? '–' : String(q); }
 
 function renderRouterColumn(d) {
   show('t-d-router', d.parentId === null);
@@ -1402,8 +1426,8 @@ function renderRouterColumn(d) {
     var qin = mine ? l.lqBA : l.lqAB, qout = mine ? l.lqAB : l.lqBA;
     var line = el('div', null, 't-d-item');
     line.appendChild(linkButton(other));
-    var q = el('span', qin === qout ? 'LQI ' + qin : 'LQI ' + qin + ' in / ' + qout + ' out');
-    q.style.color = L.lqColor(Math.min(qin, qout));
+    var q = el('span', qin === qout ? 'LQI ' + qin : 'LQI ' + lqSide(qin) + ' in / ' + lqSide(qout) + ' out');
+    q.style.color = L.lqColor(L.linkQuality(l));
     line.appendChild(q);
     nbBox.appendChild(line);
   });
