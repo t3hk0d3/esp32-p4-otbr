@@ -23,7 +23,18 @@ BOOT_TIMEOUT_S = 60
 PUSH_TIMEOUT_S = 240
 OTA_TIMEOUT_S = 240
 BACK_TO_BR_S = 2
-STATUS_KEYS = {"mode", "app", "rcp", "jumper", "eth", "pd", "sniffer", "fault_reason"}
+STATUS_KEYS = {
+    "mode",
+    "app",
+    "rcp",
+    "jumper",
+    "eth",
+    "pd",
+    "routing",
+    "sniffer",
+    "fault_reason",
+    "storage_ok",
+}
 CHANNEL = 15
 RCP_OFFSET_MID = 100_000
 

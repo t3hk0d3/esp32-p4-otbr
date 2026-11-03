@@ -110,6 +110,14 @@ esp_err_t br_core_enter_sniffer(uint8_t channel, otLinkRawReceiveDone receive_cb
 void br_core_set_sniffer_end_cb(void (*cb)(void));
 
 /**
+ * Register (NULL clears) the hook that runs once the border router is initialised, at boot, before Thread starts. It
+ * runs on the bring-up task with the OpenThread lock held and owns what follows border router init: the DHCPv6-PD
+ * client stays off unless it turns it on (the routing component registers routing_on_border_router_up). Register it
+ * before br_core_start.
+ */
+void br_core_set_border_router_up_cb(void (*cb)(otInstance *instance));
+
+/**
  * SNIFFER to BR_RUNNING: raw link off, dataset checked, netif up, Thread restarted as before. If that fails the
  * device reboots (sniffer mode is never persisted). ESP_ERR_INVALID_STATE unless SNIFFER.
  */

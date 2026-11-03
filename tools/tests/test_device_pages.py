@@ -1,4 +1,4 @@
-"""Device pages as a whole (BDD: api.js nav, Pages). Static checks of the five pages and their scripts."""
+"""Device pages as a whole (BDD: api.js nav, Pages). Static checks of the six pages and their scripts."""
 
 import json
 import re
@@ -14,11 +14,13 @@ WEB_API = (
     FRONTEND.parent / "private_include" / "esp_br_web_api.h"
 )  # Thread web GUI routes (/get_properties, ...)
 WEB_BUDGET_BYTES = (
-    320 * 1024
-)  # of the 2 MB web partition; raised from 256 KB for the topology page (about 265 KB in all)
+    384 * 1024
+)  # of the 2 MB web partition; raised from 256 KB for the topology page, then from 320 KB for the Routing page
+# (about 330 KB in all with both)
 
 DEVICE_MENU = [
     ["/ethernet.html", "Ethernet"],
+    ["/routing.html", "Routing"],
     ["/firmware.html", "Firmware"],
     ["/capture.html", "Packet capture"],
     ["/diagnostics.html", "Diagnostics"],
@@ -43,6 +45,7 @@ PAGES = {
     # /ping is the Thread web GUI's, registered in esp_br_web_api.h like /get_properties above.
     "topology": ("topology", ["/device/topology", "/ping"]),
     "ethernet": ("ethernet", ["/device/network", "/device/names"]),
+    "routing": ("routing", ["/device/routing", "/device/status"]),
     "firmware": (
         "firmware",
         [
@@ -136,8 +139,8 @@ def nav_html(pathname):
 class TestNav:
     """api.js nav"""
 
-    def test_device_is_a_dropdown_with_the_four_pages_in_order(self):
-        # On any page: the Device toggle is followed by its four entries in order (the status is the Dashboard).
+    def test_device_is_a_dropdown_with_its_pages_in_order(self):
+        # On any page: the Device toggle is followed by its entries in order (the status is the Dashboard).
         html = nav_html("/index.html")
         menu = html.split('nav-dropdown-toggle">Device</a>', 1)[1].split("</ul>", 1)[0]
         assert [
@@ -158,7 +161,7 @@ class TestNav:
 
     @pytest.mark.parametrize("path", [p for p, _ in DEVICE_MENU])
     def test_device_toggle_is_active_on_each_device_page(self, path):
-        # On each of the four paths: the Device toggle and that entry are marked active.
+        # On each device page path: the Device toggle and that entry are marked active.
         html = nav_html(path)
         assert 'nav-dropdown-toggle active">Device</a>' in html
         assert f'<a href="{path}" class="active">' in html

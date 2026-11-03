@@ -21,10 +21,11 @@ typedef struct {
     metrics_device_t device;
     diag_metrics_view_t diag;
     metrics_collector_view_t collector;
+    routing_metrics_view_t routing;
     metrics_input_t in;
 } sample_input_t;
 
-/** Every source available, a fresh valid cache, every field non-zero where it can be. */
+/** Every source available, a fresh valid cache, routing method bgp with two peers, every field non-zero where it can be. */
 void sample_input(sample_input_t *s);
 
 /** Render `in` through a writer with a `cap`-byte buffer into a NUL-terminated heap string. */

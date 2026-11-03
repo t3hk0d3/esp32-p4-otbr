@@ -25,8 +25,17 @@ no-wires first install through ESP-Hosted).
 
 `esp_ot_br_server` and `esp_br_http_ota` come from esp-thread-br commit `1f5af46d0ccb22fe01465ba6d16a33b276c20c1b`. Every
 change to them and the link-time mDNS filter for `espressif/mdns` is listed in
-[`p4/components/PATCHES.md`](../p4/components/PATCHES.md) (patches 1 to 15; 4 and 6 were not applied, 13 is the mDNS
+[`p4/components/PATCHES.md`](../p4/components/PATCHES.md) (patches 1 to 21; 4 and 6 were not applied, 13 is the mDNS
 filter), together with the REST guard table (which endpoint answers 409 or 503 in which mode). They stay under Apache-2.0.
+
+## sdkconfig
+
+`p4/sdkconfig` (like the C6 projects' `sdkconfig`) is generated from `sdkconfig.defaults` and not tracked. ESP-IDF
+applies the defaults only to options the existing `sdkconfig` does not set, so `make build` and `make build-test`
+delete a project's `sdkconfig` when one of its `sdkconfig.defaults*` files is newer and let ESP-IDF generate it again.
+Local `menuconfig` changes are lost then; keep them in the defaults. A plain `idf.py build` does not do this: after
+pulling a change to the defaults, delete `sdkconfig` yourself. `routing/task.c` stops the build with an `#error` when
+the socket limit (`CONFIG_LWIP_MAX_SOCKETS`) is below what the image needs.
 
 ## Testing
 
@@ -82,6 +91,13 @@ make lan-ping-down
 - **Settings are erased:** the fixtures erase the board's NVS and form a new network, so the board leaves any network it
   was on.
 - `pd_router`: delegating server in Docker, env `PD_HOST_IF`.
+- `routing_rig`: FRR and BIRD routers in Docker for the mesh routing tests, env `ROUTING_HOST_IF` (and `TIMEOUT=1800`;
+  `ROUTING_FEED_ROUTES` sets the size of the received-route feed, default 10k). `ROUTING_NETWORK` uses an existing docker
+  network instead of creating a macvlan one (for a VLAN whose host interface already carries ipvlan), and
+  `ROUTING_BOARD_URL` (for example `http://192.168.10.104`) points the tests at the board's management address in split
+  mode. Flash once (`make build-test && make flash`) and pass
+  `TARGET_PYTEST=".venv/bin/pytest --skip-autoflash y"`: without it every test would flash the board again, so
+  `test_routing.py` refuses to run. The PUT validation tests (`test_routing_api.py`) need no rig and run unmarked.
 
 `test_hosted_install.py` (the no-wires first install) skips unless `OTBR_C6_STOCK_URL`, `OTBR_C6_INSTALLER` and
 `OTBR_RCP_IMAGE` are set. `OTBR_C6_STOCK_URL` is an HTTP server on the build directory of an ESP-Hosted C6 slave (e.g.
@@ -90,7 +106,10 @@ jumper (console `c6_stock_restore`, with the C6 held in reset) and hides the jum
 The board ends up in `BR_RUNNING` with the given RCP.
 
 A test that kills the radio (`rcp_kill`, `c6_hold`) leaves a flag: after an aborted run use the console `c6_hold 0` and
-reboot (and `c6_jumper_ignore 0` after an aborted `test_hosted_install.py`). A Thread peer that stops answering is fixed by an RTS reset. Test builds add console commands (`p4/main/test_cmds.c`)
+reboot (and `c6_jumper_ignore 0` after an aborted `test_hosted_install.py`). A killed `test_routing.py` or
+`test_routing_api.py` run (for example by the `timeout`) leaves the board's routing settings changed and the ones it found in
+`p4/pytest/.routing-restore.json`; put them back and delete the file (the next run refuses to start while it exists):
+`curl -X PUT http://<board>/device/routing -H 'Content-Type: application/json' -d @p4/pytest/.routing-restore.json && rm p4/pytest/.routing-restore.json`. A Thread peer that stops answering is fixed by an RTS reset. Test builds add console commands (`p4/main/test_cmds.c`)
 that the on-board tests use; never ship them.
 
 ## CI and releases

@@ -39,6 +39,7 @@
 #include "names_json.h"
 #include "netnames.h"
 #include "rcp_sync.h"
+#include "routing.h"
 #include "sniffer.h"
 
 static const char *TAG = "device_api";
@@ -273,6 +274,30 @@ static void base_expected_version(char *out, size_t cap)
     out[len] = '\0';
 }
 
+// The routing figures of /device/status from the task's last published status (no OpenThread lock). Routing not
+// running: routing_started stays false and "routing" is null.
+static void fill_routing(device_api_status_t *s)
+{
+    routing_settings_t settings;
+    routing_status_t status;
+
+    if (routing_get(&settings, &status) != ESP_OK) {
+        return;
+    }
+    s->routing_started = true;
+    s->routing_method = settings.method;
+    s->routing_omr_mode = settings.omr_mode;
+    s->routing_announced_count = status.announced.count;
+    s->routing_peers_configured = settings.peer_count;
+    for (size_t i = 0; i < settings.peer_count && i < ROUTING_MAX_PEERS; i++) {
+        /* by address: right after a PUT the status can still be the one of the previous peers */
+        const routing_bgp_peer_status_t *p = routing_status_peer(&status, settings.peers[i].addr);
+        if (p && p->state == ROUTING_BGP_ESTABLISHED) {
+            s->routing_peers_established++;
+        }
+    }
+}
+
 // Works in every mode and never waits long: br_core_get_status uses a short lock timeout and skips the lock in a fault.
 static esp_err_t status_get_handler(httpd_req_t *req)
 {
@@ -316,6 +341,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     s->sniffer_duration_s = ss.duration_s;
     s->fault_reason = bs.fault_reason;
     s->storage_ok = !bs.storage_degraded;
+    fill_routing(s);
 
     esp_err_t err;
 
@@ -1247,6 +1273,88 @@ static esp_err_t names_put_handler(httpd_req_t *req)
     return send_names(req, &res);
 }
 
+/* ---- /device/routing (mesh routing spec section 6) ---- */
+
+#define ROUTING_BODY_MAX 2048
+
+// 200 with the GET /device/routing shape: the stored settings and the task's last status.
+static esp_err_t send_routing_state(httpd_req_t *req)
+{
+    routing_settings_t settings;
+    routing_status_t status;
+
+    if (routing_get(&settings, &status) != ESP_OK) {
+        return send_error(req, 503, "not_started", "routing is not running", false);
+    }
+    char *json = routing_settings_to_json(&settings, &status);
+
+    if (!json) {
+        return send_error(req, 500, "no_memory", "out of memory", false);
+    }
+    const esp_err_t err = send_json(req, json);
+
+    free(json);
+    return err;
+}
+
+static esp_err_t routing_get_handler(httpd_req_t *req)
+{
+    return send_routing_state(req);
+}
+
+// Validates the body against the current settings and the backbone, stores it and has the routing task apply it live
+// (no reboot, no trial); a failed check changes nothing.
+static esp_err_t routing_put_handler(httpd_req_t *req)
+{
+    const int length_status = device_api_length_check(req->content_len, ROUTING_BODY_MAX);
+
+    if (length_status != 0) {
+        return send_error(req, length_status, length_status == 413 ? "payload_too_large" : "length_required",
+                          "send the routing settings as a JSON body", true);
+    }
+    char *body = read_small_body(req);
+
+    if (!body) {
+        return send_error(req, 400, "invalid_request", "the body could not be read", true);
+    }
+    routing_settings_t current;
+
+    if (routing_get(&current, NULL) != ESP_OK) {
+        free(body);
+        return send_error(req, 503, "not_started", "routing is not running", false);
+    }
+    // A busy OpenThread lock leaves out only the on-link prefixes of received RAs; the rest is still checked.
+    routing_validate_ctx_t ctx;
+    const esp_err_t ctx_err = routing_validate_ctx_fill(&ctx);
+
+    if (ctx_err != ESP_OK) {
+        ESP_LOGW(TAG, "routing validation without the RA prefixes (%s)", esp_err_to_name(ctx_err));
+    }
+    routing_settings_t next;
+    const char *bad_field = NULL;
+    esp_err_t err = routing_settings_from_json(body, &current, &ctx, &next, &bad_field);
+
+    free(body);
+    if (err == ESP_ERR_INVALID_ARG) {
+        return send_error(req, 400, "invalid_request", bad_field ? bad_field : "body", false);
+    }
+    if (err != ESP_OK) {
+        return send_error(req, 500, "internal", esp_err_to_name(err), false);
+    }
+    err = routing_apply(&next);
+    if (err == ESP_ERR_INVALID_STATE) {
+        return send_error(req, 503, "not_started", "routing is not running", false);
+    }
+    if (err != ESP_OK) {
+        char detail[80];
+
+        snprintf(detail, sizeof(detail), "storing the routing settings failed (%s); nothing changed",
+                 esp_err_to_name(err));
+        return send_error(req, 500, "storage_failed", detail, false);
+    }
+    return send_routing_state(req);
+}
+
 /* ---- registration ---- */
 
 typedef struct {
@@ -1296,6 +1404,8 @@ esp_err_t device_api_register(httpd_handle_t server)
         {"/device/names", HTTP_PUT, names_put_handler},
         {"/device/topology", HTTP_POST, topology_post_handler},
         {"/device/topology", HTTP_GET, topology_get_handler},
+        {"/device/routing", HTTP_GET, routing_get_handler},
+        {"/device/routing", HTTP_PUT, routing_put_handler},
         {"/metrics", HTTP_GET, metrics_get_handler},
     };
 

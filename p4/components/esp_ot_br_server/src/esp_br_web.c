@@ -94,7 +94,7 @@ httpd_handle_t esp_br_web_get_server(void)
 #define REST_PATH_COUNT     4 /* esp_otbr_thread_rest_register: paths x methods, asserted there */
 #define REST_METHOD_COUNT   7
 #define REST_ROUTE_SLOTS    (REST_PATH_COUNT * REST_METHOD_COUNT)
-#define EXTRA_HANDLER_SLOTS 20      /* device_api and the catch-all */
+#define EXTRA_HANDLER_SLOTS 24      /* device_api (20 routes) and the catch-all, plus headroom (patch 19) */
 /* Patch 12: per-interface policy (spec 5.13). netcfg_request_allowed sends the 403 itself; failing the handler makes the
  * server close the connection. Single mode (the default) allows everything. */
 #define NETCFG_GATE(req, svc)                       \
@@ -146,9 +146,9 @@ static httpd_uri_t s_resource_handlers[] = {
 };
 
 /*----------------------------------------------------------------------
-                    OpenThread sessions (patch 18)
+                    OpenThread sessions (patch 22)
 ----------------------------------------------------------------------*/
-/* Patch 18: every Web GUI handler runs inside a br_core OpenThread session, so that a radio push or ROM
+/* Patch 22: every Web GUI handler runs inside a br_core OpenThread session, so that a radio push or ROM
  * recovery cannot delete the OpenThread lock and instance while the handler waits for the lock or, with the lock
  * released, for an OpenThread callback (scan, join, ping, pending dataset). Without a session (OpenThread stopped or
  * about to stop) the guard treats OpenThread as not ready. httpd runs one handler at a time, so one flag suffices. */
@@ -479,7 +479,7 @@ static esp_err_t esp_otbr_thread_rest_handler(httpd_req_t *req)
     request.if_none_match = condition;
     /* Patches 2 and 9: sniffer active (409) or OpenThread not (fully) initialised / mode forbids it (503). Pre-check
      * without the OpenThread lock, which does not exist before OpenThread is up; esp_br_thread_rest_request asks
-     * again while holding the lock. Patch 18: the br_core session keeps a radio push from deleting the lock and the
+     * again while holding the lock. Patch 22: the br_core session keeps a radio push from deleting the lock and the
      * instance while the request uses them; without one OpenThread counts as not ready. */
     const bool session = br_core_ot_session_begin();
     const int refused = esp_br_guard_status(ESP_BR_GUARD_REST_CLASS(req->method), br_core_get_mode(),
@@ -511,7 +511,7 @@ exit:
     free(condition);
     cJSON_Delete(query);
     if (reset) {
-        /* httpd_resp_send has submitted the response before rebooting. Patch 20: through the reboot gate, so that a
+        /* httpd_resp_send has submitted the response before rebooting. Patch 23: through the reboot gate, so that a
            running update or radio push is not cut off (the reboot follows once it ends). */
         reboot_gate_restart(200);
     }
@@ -669,7 +669,7 @@ static cJSON *resource_status(char *error, char *msg)
     return root;
 }
 
-/* Patch 18: every handler goes behind the OpenThread session wrapper. */
+/* Patch 22: every handler goes behind the OpenThread session wrapper. */
 static esp_err_t httpd_server_register_http_uri(const http_server_t *server, httpd_uri_t *uris, uint8_t size)
 {
     ESP_RETURN_ON_FALSE((server->handle && uris), ESP_ERR_INVALID_ARG, WEB_TAG, "Invalid argument");
@@ -1609,7 +1609,7 @@ static httpd_handle_t *start_esp_br_http_server(const char *base_path)
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.stack_size = 8 * 1024;
     config.core_id = 1; /* patch 1: management core (core 0 runs the network path) */
-    config.max_open_sockets = 7;
+    config.max_open_sockets = ESP_BR_WEB_MAX_OPEN_SOCKETS; /* patch 21 */
     config.lru_purge_enable = true;
     s_server.port = config.server_port;
 
