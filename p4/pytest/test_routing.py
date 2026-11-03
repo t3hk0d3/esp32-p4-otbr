@@ -70,7 +70,7 @@ CUSTOM_2 = ipaddress.ip_network("2001:db8:42:101::/64")
 BOARD_ASN = 4200000001
 ROUTER_ASN = 4200000002  # eBGP
 ROUTER_ID = "192.0.2.1"
-FEED_START = "2001:db8:f000::"
+FEED_PREFIX = "2001:db8:f000"  # the feed is FEED_PREFIX:<n>::/64, n < 65536
 # The received table the board must drain (a full IPv6 table is about 250k routes).
 FEED_ROUTES = int(os.environ.get("ROUTING_FEED_ROUTES", "10000"))
 UNREACHABLE_PEER = (
@@ -343,12 +343,10 @@ def container_link_local(name):
 FRR_DAEMONS = """\
 bgpd=yes
 ripngd=yes
-sharpd=yes
 vtysh_enable=yes
 zebra_options="  -A 127.0.0.1 -s 90000000"
 bgpd_options="   -A 127.0.0.1"
 ripngd_options=" -A ::1"
-sharpd_options=" -A 127.0.0.1"
 """
 
 
@@ -356,7 +354,7 @@ def frr_bgp_config(
     neighbor, remote_asn, local_asn, prefixes, interface=None, feed=False
 ):
     """frr.conf: one BGP neighbor (the board) with the documented safeguards: an inbound prefix-list limited to the
-    announced /64s, maximum-prefix, and no export to the board. feed: export the routes sharpd installs instead."""
+    announced /64s, maximum-prefix, and no export to the board. feed: export the kernel routes the feed test installs instead."""
     lines = [
         "frr defaults traditional",
         "hostname otbr-test-frr",
@@ -388,7 +386,7 @@ def frr_bgp_config(
         f"  neighbor {neighbor} route-map {'everything' if feed else 'nothing'} out",
     ]
     if feed:
-        lines.append("  redistribute sharp")
+        lines.append("  redistribute kernel")
     lines += [" exit-address-family", "!"]
     return "\n".join(lines) + "\n"
 
@@ -683,12 +681,15 @@ class TestBgp:
         # bgp: a received route feed (ROUTING_FEED_ROUTES, default 10k) leaves free heap and Thread running
         name, _, _, _ = bgp_board(BOARD_ASN, feed=True)
         before = heap(base_url)
+        # The FRR image has no sharpd: install kernel blackhole routes, which zebra learns and bgpd redistributes.
         docker(
             "exec",
             name,
-            "vtysh",
+            "sh",
             "-c",
-            f"sharp install routes {FEED_START} nexthop {DOCKER_GATEWAY} {FEED_ROUTES}",
+            f'i=0; while [ "$i" -lt {FEED_ROUTES} ]; do '
+            f'printf "route add blackhole {FEED_PREFIX}:%x::/64\\n" "$i"; i=$((i + 1)); '
+            "done > /tmp/feed && ip -6 -batch /tmp/feed",
             timeout=600,
         )
         deadline = time.monotonic() + FEED_TIMEOUT_S
