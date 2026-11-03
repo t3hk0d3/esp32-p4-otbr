@@ -1478,19 +1478,28 @@ static bool br_running(void)
     return ot_ready_now() && br_core_get_mode() == BR_MODE_BR_RUNNING;
 }
 
-// Takes the OpenThread lock within `wait_ms` while `usable()` holds, checked before and again after the wait (a push
-// clears ot_ready under the lock before it tears OpenThread down). ESP_ERR_INVALID_STATE when it does not hold,
-// ESP_ERR_TIMEOUT when the lock was not free in time. On ESP_OK the caller releases the lock.
+// Releases the OpenThread lock taken by ot_lock_while and ends its session.
+static void ot_unlock(void)
+{
+    esp_openthread_lock_release();
+    br_core_ot_session_end();
+}
+
+// Opens an OpenThread session and takes the OpenThread lock within `wait_ms` while `usable()` holds, checked before and
+// again after the wait (a push clears ot_ready under the lock before it tears OpenThread down). ESP_ERR_INVALID_STATE
+// when it does not hold or no session opens, ESP_ERR_TIMEOUT when the lock was not free in time; nothing stays open on
+// either. On ESP_OK the caller ends with ot_unlock.
 static esp_err_t ot_lock_while(bool (*usable)(void), uint32_t wait_ms)
 {
-    if (!usable()) {
+    if (!usable() || !br_core_ot_session_begin()) {
         return ESP_ERR_INVALID_STATE;
     }
     if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(wait_ms))) {
+        br_core_ot_session_end();
         return ESP_ERR_TIMEOUT;
     }
     if (!usable()) {
-        esp_openthread_lock_release();
+        ot_unlock();
         return ESP_ERR_INVALID_STATE;
     }
     return ESP_OK;
@@ -1529,7 +1538,7 @@ esp_err_t br_core_set_leader_adjustment(int8_t adj, bool *applied)
         return ESP_OK;
     }
     sync_leader_adjustment(esp_openthread_get_instance());
-    esp_openthread_lock_release();
+    ot_unlock();
     *applied = true;
     return ESP_OK;
 }
@@ -1549,7 +1558,7 @@ esp_err_t br_core_leader_weight(uint8_t *out)
     otInstance *instance = esp_openthread_get_instance();
     sync_leader_adjustment(instance);
     *out = otThreadGetLocalLeaderWeight(instance);
-    esp_openthread_lock_release();
+    ot_unlock();
     return ESP_OK;
 }
 
@@ -1576,11 +1585,11 @@ esp_err_t br_core_become_leader(br_core_leader_refusal_t *refusal)
     *refusal = br_core_leader_check(true, attached, role == OT_DEVICE_ROLE_LEADER, otThreadIsRouterEligible(instance), own,
                                     leader);
     if (*refusal != BR_CORE_LEADER_OK) {
-        esp_openthread_lock_release();
+        ot_unlock();
         return ESP_ERR_INVALID_STATE;
     }
     const otError error = otThreadBecomeLeader(instance);
-    esp_openthread_lock_release();
+    ot_unlock();
 
     switch (error) {
     case OT_ERROR_NONE:
