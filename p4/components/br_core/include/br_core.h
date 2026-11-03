@@ -8,6 +8,7 @@
 #include "openthread/link_raw.h"
 #include "br_core_leader.h"
 #include "br_core_mode.h"
+#include "br_core_trel.h"
 #include "rcp_sync.h"
 
 #ifdef __cplusplus
@@ -72,24 +73,6 @@ void br_core_get_status(br_core_status_t *out);
 /** Like br_core_get_status but never takes the OpenThread lock: ot_state_valid is false, channel and pd_* are not read. */
 void br_core_get_status_brief(br_core_status_t *out);
 
-#define BR_CORE_TREL_PEERS_MAX 8
-
-typedef struct {
-    char ext_address[17]; /**< 16 hex digits */
-    char sock_address[48]; /**< "[ipv6]:port" */
-} br_core_trel_peer_t;
-
-typedef struct {
-    bool built;       /**< the firmware has TREL (CONFIG_OPENTHREAD_RADIO_TREL) */
-    bool enabled;     /**< the setting (br_core_set_trel) */
-    bool state_valid; /**< the fields below were read from OpenThread; false when it is not up or its lock was busy */
-    bool active;      /**< OpenThread runs TREL: enabled and Thread up (otTrelIsEnabled) */
-    uint16_t peers;   /**< otTrelGetNumberOfPeers */
-    uint64_t tx_packets, tx_bytes, tx_failures, rx_packets, rx_bytes;
-    size_t peer_count; /**< entries in peer_list, at most BR_CORE_TREL_PEERS_MAX */
-    br_core_trel_peer_t peer_list[BR_CORE_TREL_PEERS_MAX];
-} br_core_trel_t;
-
 /**
  * Set whether TREL runs. Before br_core_start it only sets the value the start applies; afterwards it is applied to
  * OpenThread at once (otTrelSetEnabled; TREL then runs whenever Thread is up). Storing the setting is the caller's job
@@ -104,6 +87,13 @@ bool br_core_trel_wanted(void);
 
 /** TREL setting and, when OpenThread is up and its lock free within 100 ms, its state, counters and peers. */
 void br_core_get_trel(br_core_trel_t *out);
+
+/**
+ * Fill the OpenThread part of `out` (state_valid, active, counters, both peer counts and the sorted peer list) from one
+ * walk of the TREL peer table. The caller holds the OpenThread lock and has checked that OpenThread is up. Leaves `out`
+ * untouched in a build without TREL. Shared by br_core_get_trel and the metrics collector, so both count alike.
+ */
+void br_core_trel_read_locked(otInstance *instance, br_core_trel_t *out);
 
 /**
  * OpenThread session: while one is open a radio push or ROM recovery does not tear OpenThread down (its lock and
