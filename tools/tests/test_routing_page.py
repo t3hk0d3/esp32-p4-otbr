@@ -241,9 +241,7 @@ class TestRoutingPage:
     def test_sessions_table_shows_the_peer_state(self):
         # BGP active with one established peer: a row with its address, Established and the dropped count
         r = scenario(
-            page("routing", routes())
-            + START
-            + "return t.el('sessionsBody').allText();"
+            page("routing", routes()) + START + "return t.el('sessionsBody').allText();"
         )
         assert "2001:db8:42::1" in r
         assert "Established" in r
@@ -264,6 +262,67 @@ class TestRoutingPage:
     def test_pd_hint_reads_the_pd_state_from_device_status(self):
         # method pd saved: the hint comes from /device/status pd (running, no prefix)
         r = scenario(
-            page("routing", routes(PD_STATE)) + START + "return t.el('methodHint').textContent;"
+            page("routing", routes(PD_STATE))
+            + START
+            + "return t.el('methodHint').textContent;"
         )
         assert r == "DHCPv6 PD: soliciting, nothing delegated yet."
+
+
+@needs_node
+class TestFixRound1:
+    """review fix round 1: no lost input, no silent 400"""
+
+    def test_400_bgp_local_asn_while_ripng_is_picked_shows_a_visible_message(self):
+        # 400 bgp.local_asn while RIPng is picked: shows a visible message
+        r = scenario(
+            page(
+                "routing",
+                routes(
+                    put="{status: 400, body: {error: 'invalid_request', detail: 'bgp.local_asn'}}"
+                ),
+            )
+            + START
+            + """
+            t.el('method-ripng').click();
+            await t.page.save();
+            return [t.el('bgpArea').hidden(), t.el('saveMsg').textContent];
+        """
+        )
+        assert r[0] is True
+        assert r[1].startswith("BGP settings: ")
+        assert "Pick BGP" in r[1]
+
+    def test_inputs_are_disabled_while_a_save_runs_and_enabled_after(self):
+        # Save in flight: inputs, cards and peer fields disabled; after the reply: enabled again
+        r = scenario(
+            page("routing", routes())
+            + START
+            + """
+            t.el('holdTime').type('30');
+            const p = t.page.save();
+            const during = ['holdTime', 'customPrefix', 'ulaBox', 'method-pd', 'omr-auto', 'peer-0-address',
+                            'peer-0-remove', 'addPeerBtn'].map((id) => t.el(id).disabled);
+            await p; await t.flush();
+            const after = ['holdTime', 'customPrefix', 'method-pd', 'peer-0-address'].map((id) => t.el(id).disabled);
+            return [during, after];
+        """
+        )
+        assert r[0] == [True] * 8
+        assert r[1] == [False] * 4
+
+    def test_typed_custom_prefix_survives_a_refresh_behind_the_automatic_card(self):
+        # type a custom prefix, press Automatic, refresh: the prefix is still there when switching back to Custom
+        r = scenario(
+            page("routing", routes(PD_STATE))
+            + START
+            + """
+            t.el('omr-custom').click();
+            t.el('customPrefix').type('2001:db8:9::/64');
+            t.el('omr-auto').click();
+            await t.advance(5000);
+            t.el('omr-custom').click();
+            return [t.el('customPrefix').value, t.el('barText').textContent];
+        """
+        )
+        assert r == ["2001:db8:9::/64", "2 unsaved changes"]

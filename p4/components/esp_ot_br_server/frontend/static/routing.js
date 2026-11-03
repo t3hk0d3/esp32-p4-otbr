@@ -6,10 +6,7 @@
  * ESP Thread Border Router - Routing page (GET/PUT /device/routing, PD state from GET /device/status)
  *
  * RoutingLogic is pure and runs under node too (tools/tests/test_routing_page.py). RoutingPage is the page.
- *
- * The page edits a draft: {method, omr_mode, omr_prefix, announce_ula, local_asn, router_id, hold_time,
- * peers: [{address, asn}]} with the form strings as typed. It is filled from the stored settings of GET, compared with
- * them for the action bar, and turned into the PUT body on Save. The board validates; a 400 names the field.
+ * The draft holds the form strings as typed; the board validates, a 400 names the field.
  */
 'use strict';
 
@@ -20,7 +17,7 @@ var OMR_MODES = [ 'auto', 'custom' ];
 var MAX_PEERS = 2;
 var PD_OFF = ' DHCPv6 PD is off.';
 
-/** Draft of a GET /device/routing answer. */
+/** Draft of a GET answer. */
 function draftFromState(state) {
   var bgp = state.bgp || {};
   return {
@@ -35,13 +32,13 @@ function draftFromState(state) {
   };
 }
 
-/* A typed whole number as a number; anything else as typed, so the board names the field in its 400. */
+/* Whole numbers as numbers, the rest as typed (the board's 400 names it). */
 function number(text) {
   var t = String(text).trim();
   return /^\d+$/.test(t) ? Number(t) : t;
 }
 
-/** PUT /device/routing body of a draft: method, omr, announce_ula and the whole bgp object, never the status. */
+/** PUT body of a draft: always the whole bgp object, never the status. */
 function bodyFromDraft(d) {
   var custom = d.omr_mode === 'custom';
   return {
@@ -90,7 +87,7 @@ var PD_TEXT = {
   uninitialized : 'DHCPv6 PD: the border router is not up yet.'
 };
 
-/** One line on the method in use: the GET answer `state`, and `pd` ({state, prefix} of /device/status) for pd. */
+/** Line on the method in use; `pd` is the pd object of /device/status. */
 function methodHint(state, pd) {
   var st = state.status || {};
   if (state.method === 'pd') {
@@ -118,7 +115,7 @@ function methodHint(state, pd) {
   return 'Nothing is announced.' + PD_OFF;
 }
 
-/* What each field of a 400 means, in words; the key is the error's detail (routing_settings_from_json bad_field). */
+/* A 400's detail (bad_field) in words. */
 var FIELD_TEXT = {
   'method' : 'The board does not accept this method.',
   'omr.prefix' : 'Enter a /64 prefix, for example 2001:db8:1:2::/64: not link-local, not multicast and not a prefix ' +
@@ -151,6 +148,7 @@ return {
   bodyFromDraft : bodyFromDraft,
   visibleSections : visibleSections,
   dirtyCount : dirtyCount,
+  same : same,
   methodHint : methodHint,
   fieldError : fieldError,
   countText : countText,
@@ -237,6 +235,20 @@ function renderPeers() {
   $('addPeerBtn').disabled = draft.peers.length >= L.MAX_PEERS || kit.isBusy();
 }
 
+/* Locked while a Save runs: its reply rewrites the inputs. */
+var INPUT_IDS = [ 'customPrefix', 'ulaBox', 'localAsn', 'routerId', 'holdTime' ];
+
+function lockInputs(on) {
+  var ids = INPUT_IDS.concat(L.METHODS.map(function(m) { return 'method-' + m; }),
+                             L.OMR_MODES.map(function(m) { return 'omr-' + m; }));
+  draft.peers.forEach(function(p, i) {
+    ids.push('peer-' + i + '-address', 'peer-' + i + '-asn', 'peer-' + i + '-remove');
+  });
+  ids.forEach(function(id) { $(id).disabled = on; });
+  if (on)
+    $('addPeerBtn').disabled = true;
+}
+
 /* Everything the draft decides; inputs are only written when they differ, so a refresh keeps what is typed. */
 function renderDraft() {
   if (!draft)
@@ -268,6 +280,7 @@ function renderDraft() {
   show('actionBar', n > 0);
   setText('barText', n + (n === 1 ? ' unsaved change' : ' unsaved changes'));
   $('saveBtn').disabled = kit.isBusy();
+  lockInputs(kit.isBusy());
 }
 
 function sessionRow(p) {
@@ -333,8 +346,15 @@ function stale(text) {
 /* Takes a GET (or PUT) answer as the stored state; a clean draft follows it, unsaved edits stay. */
 function adopt(next) {
   var fresh = L.draftFromState(next);
-  if (!draft || L.dirtyCount(saved, draft) === 0)
+  if (!draft || L.dirtyCount(saved, draft) === 0) {
+    // Keep a prefix typed behind the Automatic card.
+    var typed = draft && String(draft.omr_prefix).trim() && !L.same(draft.omr_prefix, saved.omr_prefix)
+                    ? draft.omr_prefix
+                    : null;
     draft = clone(fresh);
+    if (typed !== null && draft.omr_mode === 'auto')
+      draft.omr_prefix = typed;
+  }
   state = next;
   saved = fresh;
 }
@@ -408,9 +428,12 @@ function save() {
             });
           }
           var field = r.status === 400 && r.body ? r.body.detail : null;
-          if (ERROR_IDS[field] && L.fieldError(field))
+          if (ERROR_IDS[field] && L.fieldError(field)) {
             errors[ERROR_IDS[field]] = L.fieldError(field);
-          else
+            // bgp is checked whatever the method, but shown only for BGP.
+            if (field.indexOf('bgp.') === 0 && draft.method !== 'bgp')
+              note('saveMsg', 'BGP settings: ' + L.fieldError(field) + ' Pick BGP to fix them.', true);
+          } else
             note('saveMsg', kit.failure(r), true);
           return r;
         }, function(e) { note('saveMsg', e.message, true); });
