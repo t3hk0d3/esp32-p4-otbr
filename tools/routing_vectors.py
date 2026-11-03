@@ -4,7 +4,7 @@ Usage: make routing-vectors
   (runs: uv run --no-project --with scapy==2.6.1 python tools/routing_vectors.py <out>)
 
 Writes p4/components/routing/test_host/main/vectors.h: one `static const uint8_t` array
-per message. scapy is an independent BGP implementation, so the codec's output is
+per message. scapy is an independent BGP and RIPng implementation, so the codecs' output is
 compared with bytes it did not produce. Every vector is parsed back with scapy and its
 fields are asserted before the header is written; the script fails on any mismatch.
 
@@ -43,6 +43,7 @@ from scapy.contrib.bgp import (
     BGPPathAttr,
     BGPUpdate,
 )
+from scapy.contrib.ripng import RIPng, RIPngEntry
 from scapy.packet import Raw
 
 # We advertise the 4-octet ASN capability, so AS_PATH carries 4-octet ASNs (RFC 6793).
@@ -373,6 +374,66 @@ def build():
     ]
 
 
+# --- RIPng (RFC 2080) ---
+
+RIPNG_UNKNOWN = "2001:db8:99::"  # a /64 the board does not announce
+# a /56 covering PREFIXES[0]: same first 8 bytes, prefix length not 64
+RIPNG_COVERING = "2001:db8:42:100::"
+
+
+def ripng(cmd, entries, ver=1):
+    """A RIPng message: header (command, version, 2 zero bytes) and its RTEs, each
+    (prefix, prefix length, metric) with route tag 0."""
+    msg = RIPng(cmd=cmd, ver=ver)
+    for prefix, plen, metric in entries:
+        msg = msg / RIPngEntry(
+            prefix_or_nh=prefix, routetag=0, prefixlen=plen, metric=metric
+        )
+    return bytes(msg)
+
+
+def net(prefix):
+    """The address part of "a::/64"."""
+    return prefix.split("/")[0]
+
+
+def build_ripng():
+    """(name, comment, bytes) for every RIPng vector."""
+    p0, p1 = net(PREFIXES[0]), net(PREFIXES[1])
+    two = ripng(2, [(p0, 64, 1), (p1, 64, 1)])
+    return [
+        (
+            "RIPNG_RESPONSE_2",
+            f"response: {PREFIXES[0]} and {PREFIXES[1]}, metric 1",
+            two,
+        ),
+        (
+            "RIPNG_RESPONSE_WITHDRAWN",
+            f"response: {PREFIXES[0]} metric 1, {PREFIXES[1]} metric 16",
+            ripng(2, [(p0, 64, 1), (p1, 64, 16)]),
+        ),
+        (
+            "RIPNG_REQUEST_ALL",
+            "whole-table request: one RTE ::/0, metric 16",
+            ripng(1, [("::", 0, 16)]),
+        ),
+        (
+            "RIPNG_REQUEST_SOME",
+            f"request: {PREFIXES[0]}, {RIPNG_UNKNOWN}/64, {RIPNG_COVERING}/56",
+            ripng(1, [(p0, 64, 16), (RIPNG_UNKNOWN, 64, 16), (RIPNG_COVERING, 56, 16)]),
+        ),
+        # cut inside the 4-byte header
+        ("RIPNG_RX_SHORT", "a response header cut short", two[:3]),
+        (
+            "RIPNG_RX_VERSION_2",
+            f"response version 2: {PREFIXES[0]} metric 1",
+            ripng(2, [(p0, 64, 1)], ver=2),
+        ),
+        # header, one RTE, then the first 10 bytes of the second RTE
+        ("RIPNG_RX_TRUNCATED", "response cut 10 bytes into its second RTE", two[:34]),
+    ]
+
+
 # --- cross-checks: every vector parsed back with scapy ---
 
 
@@ -584,6 +645,51 @@ def cross_check(vectors):
     check(len(mp) == 25 + 17, "BGP_RX_UPDATE_PREFIX_129: 17 prefix bytes")
 
 
+def check_ripng(name, raw, cmd, ver, entries):
+    """Parsed back with scapy: header fields and every RTE (prefix, length, metric),
+    route tag 0, nothing left over."""
+    p = RIPng(raw)
+    check(len(raw) == 4 + 20 * len(entries), f"{name}: length")
+    check(p.cmd == cmd and p.ver == ver and p.null == 0, f"{name}: header")
+    got = []
+    e = p.payload
+    while isinstance(e, RIPngEntry):
+        check(e.routetag == 0, f"{name}: route tag")
+        got.append((e.prefix_or_nh, e.prefixlen, e.metric))
+        e = e.payload
+    check(not bytes(e), f"{name}: trailing bytes")
+    check(got == entries, f"{name}: RTEs {got}")
+
+
+def cross_check_ripng(vectors):
+    v = {name: raw for name, _, raw in vectors}
+    p0, p1 = net(PREFIXES[0]), net(PREFIXES[1])
+    check_ripng(
+        "RIPNG_RESPONSE_2", v["RIPNG_RESPONSE_2"], 2, 1, [(p0, 64, 1), (p1, 64, 1)]
+    )
+    check_ripng(
+        "RIPNG_RESPONSE_WITHDRAWN",
+        v["RIPNG_RESPONSE_WITHDRAWN"],
+        2,
+        1,
+        [(p0, 64, 1), (p1, 64, 16)],
+    )
+    check_ripng("RIPNG_REQUEST_ALL", v["RIPNG_REQUEST_ALL"], 1, 1, [("::", 0, 16)])
+    check_ripng(
+        "RIPNG_REQUEST_SOME",
+        v["RIPNG_REQUEST_SOME"],
+        1,
+        1,
+        [(p0, 64, 16), (RIPNG_UNKNOWN, 64, 16), (RIPNG_COVERING, 56, 16)],
+    )
+    check_ripng("RIPNG_RX_VERSION_2", v["RIPNG_RX_VERSION_2"], 2, 2, [(p0, 64, 1)])
+    # Malformed: prefixes of a valid response, checked on the raw bytes.
+    two = v["RIPNG_RESPONSE_2"]
+    check(v["RIPNG_RX_SHORT"] == two[:3], "RIPNG_RX_SHORT: 3 header bytes")
+    raw = v["RIPNG_RX_TRUNCATED"]
+    check(raw == two[:34] and (len(raw) - 4) % 20 == 10, "RIPNG_RX_TRUNCATED: cut")
+
+
 # --- output ---
 
 
@@ -619,6 +725,9 @@ def main():
     args = ap.parse_args()
     vectors = build()
     cross_check(vectors)
+    ripng_vectors = build_ripng()
+    cross_check_ripng(ripng_vectors)
+    vectors += ripng_vectors
     args.out.write_text(render(vectors))
     print(f"wrote {len(vectors)} vectors to {args.out}")
 

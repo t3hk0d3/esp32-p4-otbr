@@ -7,3 +7,4 @@
 #include "settings.h"
 #include "announce.h"
 #include "bgp_msg.h"
+#include "ripng.h"
