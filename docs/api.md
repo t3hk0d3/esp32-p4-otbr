@@ -190,13 +190,19 @@ To make another board the leader, raise its weight above the current leader's. T
 an adjustment slider (-16 to +16, stored across restarts) that is added to the base weight; `PUT /device/thread` with
 `leader_weight_adjustment` does the same. The adjustment alone changes no role.
 
+<img src="images/leader.png" width="640" alt="Leader card on the Network page: this board 66 (65 base, +1 adjustment) against the current leader 65 (router 0x1000), a 48 to 96 scale with both marks, the verdict Higher than the leader: this board wins the next merge, the weight adjustment slider at +1 with Save, and the Become leader button enabled">
+
 The **Become leader** button (`{"become_leader": true}`) then asks this board to take over. OpenThread only agrees when
 this board's weight is strictly higher than the current leader's, so equal weights refuse with 409 `cannot_take_over`
 and `detail` `weight not higher`. Traffic over the mesh pauses briefly while the role changes; the Thread dataset stays
 the same.
 
-Afterwards, only the weight is stored, not the role. If this board is offline for more than about 2 minutes (a quick restart keeps the role), another router takes over and keeps it, even with a lower weight. Press Become leader again then. If the weight read times out right after a
-started take-over, the reply carries `"partial": true`.
+<img src="images/leader-confirm.png" width="640" alt="Become leader? confirmation: this board starts a new partition with itself as leader (weight 66) and router 0x1000 (weight 65) moves over; the dataset, addresses and pairings don't change, mesh traffic can drop for a few seconds, router 0x1000 keeps working as a border router; Cancel and Become leader buttons">
+
+Afterwards, only the weight is stored, not the role. A quick restart of this board keeps the role. If it is offline for
+more than about 2 minutes, another router takes over and keeps the role, even with a lower weight: the weight only counts
+when partitions merge, and a board that comes back joins the existing partition. Press Become leader again then. If the
+weight read times out right after a started take-over, the reply carries `"partial": true`.
 
 In Home Assistant, add each board as its own OpenThread Border Router integration entry. Running several of these boards
 on one network has not been tested on hardware yet.

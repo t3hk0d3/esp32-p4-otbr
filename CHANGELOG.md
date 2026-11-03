@@ -17,7 +17,7 @@ release's `versions.txt`.
 - Choosing the leader: a **Leader** card on the Network page and `GET`/`PUT /device/thread` set a stored leader weight
   adjustment (-16 to +16 on top of the base weight 65) and a **Become leader** button that makes this board take over
   from a leader with a strictly lower weight (never automatic; the role is not stored). See `docs/api.md`, "Choosing the
-  leader". Not yet tested on the board.
+  leader". Tested on the board on a live network, taking over from another border router.
 - First install without wires: on a factory C6 (ESP-Hosted firmware, no jumper) the board reports `RADIO_FAULT`
   `esp-hosted firmware`, and uploading the new release file `c6_installer.bin` sends it through ESP-Hosted's own update
   over the P4-C6 SDIO lines; it installs the C6 bootloader, partition table and updater, after which `c6_rcp.bin` is
