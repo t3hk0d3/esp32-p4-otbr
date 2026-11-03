@@ -189,7 +189,8 @@ function devices(result) {
 /**
  * [{a, b, lqAB, lqBA}] with a the lower router id; lqAB is b's lq_in for a (LQ out of a), lqBA is a's lq_in for b
  * (LQ into a). A side owned by a router that didn't answer (a stub) is unknown: null, not 0. Links to unknown routers
- * are dropped.
+ * are dropped. A link of this board also carries `transport` ({ieee802154, trel}: OpenThread's preference per radio,
+ * null for a radio it does not use) when the scan reported it; only this board knows its radios.
  */
 function routerLinks(result) {
   var routers = (result && result.routers) || [];
@@ -209,11 +210,74 @@ function routerLinks(result) {
         link.lqBA = l.lq_in;
       else
         link.lqAB = l.lq_in;
+      if (r.this_device && l.transport)
+        link.transport = l.transport;
     });
   });
   return Object.keys(byKey).map(function(k) { return byKey[k]; }).sort(function(x, y) {
     return x.lo - y.lo || x.hi - y.hi;
-  }).map(function(l) { return {a : l.a, b : l.b, lqAB : l.lqAB, lqBA : l.lqBA}; });
+  }).map(function(l) {
+    var out = {a : l.a, b : l.b, lqAB : l.lqAB, lqBA : l.lqBA};
+    if (l.transport)
+      out.transport = l.transport;
+    return out;
+  });
+}
+
+/* ---- transport (15.4 radio, TREL tunnel over Ethernet) of this board's links ---- */
+
+var TREL_HIGH_PREFERENCE = 220; // OpenThread kHighPreference (radio_selector.hpp)
+
+function prefOf(transport, radio) {
+  return transport && typeof transport[radio] === 'number' ? transport[radio] : null;
+}
+
+/**
+ * The radio OpenThread sends on, as RadioSelector::Select picks it: radios are tried TREL first, then 15.4; the first
+ * with a preference of at least 220 wins; when none reaches 220 the higher preference wins, a tie going to TREL. A
+ * radio the neighbour does not use is no candidate. 'trel', 'ieee802154', or null when neither is used.
+ */
+function sendsOver(transport) {
+  var order = ['trel', 'ieee802154'], best = null, bestPref = -1;
+  for (var i = 0; i < order.length; i++) {
+    var p = prefOf(transport, order[i]);
+    if (p === null)
+      continue;
+    if (p >= TREL_HIGH_PREFERENCE)
+      return order[i];
+    if (best === null || bestPref < p) {
+      best = order[i];
+      bestPref = p;
+    }
+  }
+  return best;
+}
+
+/** TREL's preference is below 15.4's: the tunnel is losing to the radio (shown red). */
+function trelLow(transport) {
+  var trel = prefOf(transport, 'trel'), radio = prefOf(transport, 'ieee802154');
+  return trel !== null && radio !== null && trel < radio;
+}
+
+/** [{text, low}] of "15.4 255 · TREL 55, sends over 15.4"; low marks the TREL figure when trelLow. */
+function transportParts(transport) {
+  var radio = prefOf(transport, 'ieee802154'), trel = prefOf(transport, 'trel');
+  var parts = [];
+  if (radio !== null)
+    parts.push({text : '15.4 ' + radio, low : false});
+  if (radio !== null && trel !== null)
+    parts.push({text : ' \u00b7 ', low : false});
+  if (trel !== null) {
+    parts.push({text : 'TREL ', low : false});
+    parts.push({text : String(trel), low : trelLow(transport)});
+  }
+  if (radio !== null && trel !== null)
+    parts.push({text : ', sends over ' + (sendsOver(transport) === 'trel' ? 'TREL' : '15.4'), low : false});
+  return parts;
+}
+
+function transportText(transport) {
+  return transportParts(transport).map(function(p) { return p.text; }).join('');
 }
 
 /** "3" when both sides agree or only one is known, else "in/out" in a's view: lqBA + "/" + lqAB. */
@@ -759,6 +823,10 @@ return {
   addressClass : addressClass,
   devices : devices,
   routerLinks : routerLinks,
+  sendsOver : sendsOver,
+  trelLow : trelLow,
+  transportParts : transportParts,
+  transportText : transportText,
   linkText : linkText,
   linkQuality : linkQuality,
   lqColor : lqColor,
@@ -807,6 +875,7 @@ var INTERRUPTED = 'The scan was interrupted (the board restarted). Load again.';
 var NO_ROUTE = "No routable address yet. Hosts on your home network can't reach this device.";
 var ADDRS_NOT_REPORTED = "This device didn't report its addresses.";
 var ACCENT = '#b35c00';
+var TREL_COLOR = '#7b3fb5'; // TREL links: apart from the three LQI colours and the accent
 var MORE_TEXT = 'Show internal addresses (mesh-local, RLOC, link-local)';
 var LESS_TEXT = 'Hide internal addresses';
 var TYPE_TEXT = {
@@ -1251,6 +1320,31 @@ function drawLink(layer, l, pos) {
   dimmables.push({el : g, lit : function(f) { return f === l.a || f === l.b; }});
 }
 
+/*
+ * A TREL link of this board: a dashed purple curve from the board through the "Home network · Ethernet" box to the
+ * neighbour (the tunnel runs over Ethernet), with "TREL <preference>" on its far half, red when TREL is below 15.4.
+ */
+function drawTrelLink(layer, l, board, pos, home) {
+  var p = pos[board.id], q = pos[l.a === board.id ? l.b : l.a];
+  var c1 = {x : p.x, y : home.y};                           // leaves the board toward the box
+  var c2 = {x : 2 * home.x - c1.x, y : 2 * home.y - c1.y};  // the reflection that keeps the curve smooth at the box
+  var g = svg('g', {'class' : 't-link-edge t-trel-edge'}, layer);
+  svg('path', {d : 'M ' + p.x + ' ' + p.y + ' Q ' + c1.x + ' ' + c1.y + ' ' + home.x + ' ' + home.y + ' T ' + q.x + ' ' +
+                   q.y,
+               fill : 'none', stroke : TREL_COLOR, 'stroke-width' : 2.5, 'stroke-dasharray' : '7 4'},
+      g);
+  var text = 'TREL ' + l.transport.trel;
+  var w = 10 + 7 * text.length;
+  var mx = Math.round(0.25 * home.x + 0.5 * c2.x + 0.25 * q.x), my = Math.round(0.25 * home.y + 0.5 * c2.y + 0.25 * q.y);
+  var low = L.trelLow(l.transport);
+  svg('rect', {x : mx - w / 2, y : my - 8, width : w, height : 16, rx : 8, fill : '#fff', stroke : TREL_COLOR}, g);
+  svg('text', {'class' : 't-badge-text', x : mx, y : my, fill : low ? L.lqColor(1) : TREL_COLOR, 'text-anchor' : 'middle',
+               'dominant-baseline' : 'central'},
+      g)
+      .textContent = text;
+  dimmables.push({el : g, lit : function(f) { return f === l.a || f === l.b; }});
+}
+
 /* The dashed line from this board to the "Home network · Ethernet" box the layout placed next to it. */
 function drawUplink(layer, board, p, home) {
   var g = svg('g', {'class' : 't-uplink'}, layer);
@@ -1291,10 +1385,20 @@ function renderMap() {
                    edges);
     dimmables.push({el : line, lit : function(f) { return f === d.id || f === d.parentId; }});
   });
+  var trelLinks = 0;
   model.links.forEach(function(l) {
-    if (pos[l.a] && pos[l.b])
+    if (!pos[l.a] || !pos[l.b])
+      return;
+    // A TREL-only link of this board gets no straight radio line, whatever link quality the other side reports.
+    var trelOnly = l.transport && l.transport.ieee802154 === null && typeof l.transport.trel === 'number';
+    if (!trelOnly)
       drawLink(edges, l, pos);
+    if (l.transport && typeof l.transport.trel === 'number' && board && lay.home) {
+      drawTrelLink(edges, l, board, pos, lay.home);
+      trelLinks++;
+    }
   });
+  show('t-lg-trel', trelLinks > 0);
   model.devs.forEach(function(d) {
     if (pos[d.id])
       drawNode(nodes, d, pos[d.id]);
@@ -1330,6 +1434,31 @@ function renderChips() {
     chip.appendChild(el('span', String(n), 't-chip-count'));
     box.appendChild(chip);
   });
+}
+
+/* "15.4 255 · TREL 55, sends over 15.4" with the TREL figure red when it is below 15.4's. */
+function transportSpan(transport) {
+  var span = el('span', null, 't-transport');
+  L.transportParts(transport).forEach(function(p) { span.appendChild(el('span', p.text, p.low ? 'pref-low' : '')); });
+  return span;
+}
+
+/* This board's link to router d, when it carries transport. */
+function boardLinkOf(d) {
+  return model.links.filter(function(l) {
+    return l.transport && (l.a === d.id || l.b === d.id) && (model.byId[l.a].thisBoard || model.byId[l.b].thisBoard);
+  })[0] || null;
+}
+
+function viaCell(d) {
+  var td = el('td', viaText(d));
+  var link = d.parentId === null && !d.thisBoard ? boardLinkOf(d) : null;
+  if (link) {
+    var sub = el('div', null, 't-sub');
+    sub.appendChild(transportSpan(link.transport));
+    td.appendChild(sub);
+  }
+  return td;
 }
 
 function viaText(d) {
@@ -1368,7 +1497,7 @@ function rowFor(d) {
   dev.appendChild(el('div', rlocText(d.rloc16) + ' · ' + (d.ext || '–'), 't-mono t-sub'));
   tr.appendChild(dev);
   tr.appendChild(el('td', typeText(d)));
-  tr.appendChild(el('td', viaText(d)));
+  tr.appendChild(viaCell(d));
   var lq = d.child && typeof d.child.lq_in === 'number' ? d.child.lq_in : null;
   var lqCell = el('td', lq === null ? '–' : String(lq), 't-lq');
   if (lq !== null)
@@ -1501,6 +1630,11 @@ function renderRouterColumn(d) {
     var q = el('span', qin === qout ? 'LQI ' + qin : 'LQI ' + lqSide(qin) + ' in / ' + lqSide(qout) + ' out');
     q.style.color = L.lqColor(L.linkQuality(l));
     line.appendChild(q);
+    if (l.transport) {
+      line.appendChild(transportSpan(l.transport));
+      if (typeof l.transport.trel === 'number')
+        line.appendChild(el('span', 'link quality includes TREL frames', 't-muted'));
+    }
     nbBox.appendChild(line);
   });
   model.devs.forEach(function(c) {

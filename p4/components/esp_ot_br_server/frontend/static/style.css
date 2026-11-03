@@ -670,6 +670,8 @@ tr:hover td { background: var(--primary-light); }
 .t-lg-q3 { border-top: 3px solid var(--q3); }
 .t-lg-q2 { border-top-color: var(--q2); }
 .t-lg-q1 { border-top: 2px dashed var(--q1); }
+.t-lg-trel { border-top: 3px dashed #7b3fb5; } /* TREL_COLOR in topology.js */
+.t-transport { margin-left: 6px; }
 .t-lg-parent { border-top: 1.5px solid #9a9a9a; }
 .t-q3 { color: var(--q3); }
 .t-q2 { color: var(--q2); }
