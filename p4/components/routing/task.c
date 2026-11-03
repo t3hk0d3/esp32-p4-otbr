@@ -39,6 +39,7 @@ static const char *TAG = "routing";
 #define OT_LOCK_POLL_MS 10   /* a busy lock skips that state read (as the metrics collector does) */
 #define OT_LOCK_APPLY_MS 100 /* settings changes and validation wait a little longer; a timeout is retried */
 #define WAKE_MAX_MS 100      /* how long a new setting can wait in the mailbox */
+#define STATUS_PERIOD_MS 1000 /* the status is republished at least this often (ages, uptimes) when nothing happened */
 #define LIVE_CONNS (2 * ROUTING_MAX_PEERS)              /* a current and a pending connection per peer */
 #define MAX_CONNS (LIVE_CONNS + ROUTING_MAX_PEERS)      /* plus connections closing after a NOTIFICATION */
 #define LINGER_MS 1000 /* how long a connection closing after a NOTIFICATION waits for the peer's FIN */
@@ -757,8 +758,8 @@ static void add_fd(int fd, fd_set *set, int *max_fd)
     *max_fd = MAX(*max_fd, fd);
 }
 
-/* Waits up to `timeout_ms` for a socket and handles what became ready. */
-static void wait_sockets(uint32_t timeout_ms)
+/* Waits up to `timeout_ms` for a socket and handles what became ready; true when a socket was ready. */
+static bool wait_sockets(uint32_t timeout_ms)
 {
     fd_set rd;
     fd_set wr;
@@ -783,7 +784,7 @@ static void wait_sockets(uint32_t timeout_ms)
     }
     if (max_fd < 0) {
         vTaskDelay(pdMS_TO_TICKS(timeout_ms) + 1);
-        return;
+        return false;
     }
     int ready = select(max_fd + 1, &rd, &wr, NULL, &tv);
     if (ready < 0) {
@@ -797,10 +798,10 @@ static void wait_sockets(uint32_t timeout_ms)
             s_select_logged_ms = now;
         }
         vTaskDelay(pdMS_TO_TICKS(SELECT_ERR_DELAY_MS) + 1);
-        return;
+        return false;
     }
     if (ready == 0) {
-        return;
+        return false;
     }
     uint32_t now = now_ms();
     if (s_listen_fd >= 0 && FD_ISSET(s_listen_fd, &rd)) {
@@ -826,6 +827,7 @@ static void wait_sockets(uint32_t timeout_ms)
             receive_tcp(fd, now_ms());
         }
     }
+    return true;
 }
 
 /* --- status --- */
@@ -867,24 +869,39 @@ static bool reached(uint32_t now, uint32_t at)
     return (int32_t)(now - at) >= 0;
 }
 
+/*
+ * The status is rebuilt only when something can have changed it (a settings change, a state poll, a due BGP or RIPng
+ * deadline, a socket event) and otherwise once per STATUS_PERIOD_MS, for the ages and uptimes in it.
+ */
 static void routing_task(void *arg)
 {
     uint32_t next_state = now_ms();
+    uint32_t next_status = now_ms();
+    bool changed = true; /* a socket event of the previous wait, carried into this round */
 
     routing_engine_start(&s_engine, now_ms());
     for (;;) {
         routing_settings_t s;
         if (xQueueReceive(s_mailbox, &s, 0) == pdTRUE) {
             routing_engine_set_settings(&s_engine, &s, now_ms());
+            changed = true;
         }
         uint32_t now = now_ms();
         if (reached(now, next_state)) {
             /* a busy OpenThread lock skips the read: retried after 100 ms, so withdrawal stays within 1 s */
-            next_state = now + (poll_state(now) ? STATE_PERIOD_MS : STATE_RETRY_MS);
+            bool polled = poll_state(now);
+            next_state = now + (polled ? STATE_PERIOD_MS : STATE_RETRY_MS);
+            changed |= polled;
         }
         now = now_ms();
+        uint32_t due = routing_engine_next_deadline_ms(&s_engine);
+        changed |= due != UINT32_MAX && reached(now, due);
         routing_engine_tick(&s_engine, now);
-        publish_status(now);
+        if (changed || reached(now, next_status)) {
+            publish_status(now);
+            next_status = now + STATUS_PERIOD_MS;
+            changed = false;
+        }
 
         uint32_t wait = WAKE_MAX_MS;
         uint32_t deadline = routing_engine_next_deadline_ms(&s_engine);
@@ -892,7 +909,7 @@ static void routing_task(void *arg)
             wait = reached(now, deadline) ? 0 : MIN(wait, deadline - now);
         }
         wait = reached(now, next_state) ? 0 : MIN(wait, next_state - now);
-        wait_sockets(wait);
+        changed = wait_sockets(wait);
     }
 }
 
