@@ -33,12 +33,14 @@
 #include "openthread/error.h"
 #include "openthread/link.h"
 #include "openthread/mesh_diag.h"
+#include "openthread/multi_radio.h"
 #include "openthread/netdiag.h"
 #include "openthread/netdata.h"
 #include "openthread/srp_server.h"
 #include "openthread/thread.h"
 #include "openthread/thread_ftd.h"
 #include "scan.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "mesh_scan";
 
@@ -447,11 +449,38 @@ static void snapshot_srp_host(const otSrpServerHost *host, mesh_scan_srp_host_t 
     }
 }
 
+// Radios this board uses toward each router it has a link to. Local state only: no mesh traffic.
+static void snapshot_transport(otInstance *ins, mesh_scan_result_t *r)
+{
+    memset(r->this_links, 0, sizeof(r->this_links));
+    r->has_transport = false;
+#if CONFIG_OPENTHREAD_RADIO_TREL
+    r->has_transport = true;
+    for (uint8_t id = 0; id < MESH_SCAN_MAX_ROUTERS; id++) {
+        otRouterInfo router;
+        otMultiRadioNeighborInfo radios;
+
+        if (otThreadGetRouterInfo(ins, id, &router) != OT_ERROR_NONE || !router.mAllocated || !router.mLinkEstablished ||
+                otMultiRadioGetNeighborInfo(ins, &router.mExtAddress, &radios) != OT_ERROR_NONE) {
+            continue;
+        }
+        r->this_links[id] = (mesh_scan_transport_t) {
+            .valid = true,
+            .pref_154 = radios.mSupportsIeee802154 ? radios.mIeee802154Info.mPreference : MESH_SCAN_PREF_NONE,
+            .pref_trel = radios.mSupportsTrelUdp6 ? radios.mTrelUdp6Info.mPreference : MESH_SCAN_PREF_NONE,
+        };
+    }
+#else
+    (void)ins;
+#endif
+}
+
 static void op_snapshot(mesh_scan_result_t *r)
 {
     otInstance *ins = instance();
 
     snapshot_network(ins, &r->network);
+    snapshot_transport(ins, r);
     r->n_srp = 0;
     for (const otSrpServerHost *host = otSrpServerGetNextHost(ins, NULL);
             host && r->n_srp < MESH_SCAN_MAX_SRP_HOSTS; host = otSrpServerGetNextHost(ins, host)) {
