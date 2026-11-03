@@ -78,11 +78,14 @@ def in_prefix(address, prefixes):
 
 
 @pytest.fixture
-def scan(dut, peer, thread_peer_address, base_url):  # noqa: F811  (fixture argument)
+def scan(request, dut, peer, base_url):
     """One finished scan of the rig, with what the checks compare it against.
 
     Returns a dict: result (the `result` object), peer_state, peer_ext (hex, lower case), router_ids (the board's
     router table, read just before the scan)."""
+    request.getfixturevalue(
+        "thread_peer_address"
+    )  # the peer is attached, with an OMR address
     peer_state = peer.wait_state({"child", "router", "leader"}, 30)
     peer_ext = peer.command("extaddr")[-1].lower()
     router_ids = board_router_ids(dut)
@@ -103,7 +106,8 @@ def scan(dut, peer, thread_peer_address, base_url):  # noqa: F811  (fixture argu
 class TestTopologyScan:
     """device_api POST/GET /device/topology"""
 
-    def test_scan_completes_within_60_s(self, base_url, thread_peer_address):
+    @pytest.mark.usefixtures("thread_peer_address")
+    def test_scan_completes_within_60_s(self, base_url):
         # On POST then GET polling with the rig attached: the state ends done within 60 s, with a result and an age.
         state = run_scan(base_url)
         assert state["state"] == "done"
@@ -174,9 +178,8 @@ class TestTopologyScan:
             assert len(routers) == 1
             assert any(in_prefix(a, omr) for a in routers[0]["addresses"])
 
-    def test_post_during_a_running_scan_returns_202(
-        self, base_url, thread_peer_address
-    ):
+    @pytest.mark.usefixtures("thread_peer_address")
+    def test_post_during_a_running_scan_returns_202(self, base_url):
         # On POST while a scan runs: returns 202 and joins the running scan (no second scan, no error).
         first = start_scan(base_url)
         assert first.status_code == requests.codes.accepted, first.text
@@ -188,7 +191,8 @@ class TestTopologyScan:
             time.sleep(POLL_INTERVAL_S)
         assert read_scan(base_url)["state"] == "done"
 
-    def test_get_reports_progress_while_running(self, base_url, thread_peer_address):
+    @pytest.mark.usefixtures("thread_peer_address")
+    def test_get_reports_progress_while_running(self, base_url):
         # On GET while a scan runs: the state is running with a progress object until it ends.
         assert start_scan(base_url).status_code == requests.codes.accepted
         deadline = time.monotonic() + RUNNING_WAIT_S
