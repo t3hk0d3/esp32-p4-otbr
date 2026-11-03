@@ -216,7 +216,7 @@ reason, spec reference.
    the filtered sends and that a discovery answer without TLV 0 adds no device. The mux itself is tested in
    `p4/components/netdiag_mux/test_host/`.
 
-16. Applied (2026-11). `esp_ot_br_server` frontend, upstream pages: new
+17. Applied (2026-11). `esp_ot_br_server` frontend, upstream pages: new
    `frontend/static/mgmt.js` (pure logic exported for node: mode banner, random network parameters, Form Network and
    PSKd validation, the replace-network confirm; page code guarded by `typeof document`), loaded after `api.js` by
    `network.html`, `commission.html`, `addresses.html`, `tools.html`, whose `checkThreadState`
