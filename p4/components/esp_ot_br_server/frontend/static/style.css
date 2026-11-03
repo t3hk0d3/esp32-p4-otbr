@@ -113,7 +113,8 @@ a:hover { color: var(--primary-hover); }
     z-index: 110;
     padding: 4px 0;
 }
-.nav-dropdown:hover .nav-dropdown-menu { display: block; }
+.nav-dropdown:hover .nav-dropdown-menu,
+.nav-dropdown.open .nav-dropdown-menu { display: block; }
 .nav-dropdown-menu a {
     display: block;
     padding: 10px 18px;
@@ -741,3 +742,6 @@ tr:hover td { background: var(--primary-light); }
     .t-d-body { padding: 18px 16px; }
     .t-search { width: 100%; }
 }
+/* Thread management pages: invalid fields and the Home Assistant URL box on the Dashboard */
+.form-input[aria-invalid="true"] { border-color: var(--danger); }
+#t-ha-url { user-select: all; word-break: break-all; }

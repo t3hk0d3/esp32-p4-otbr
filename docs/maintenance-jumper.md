@@ -3,7 +3,7 @@
 Three wires between the P4 header and the C6 header H7 (wiring table in [First install](first-install.md#maintenance-jumper-wiring)).
 With it fitted the P4 can write the C6's bootloader, partition table and updater by itself (ROM recovery): automatically at
 boot when the updater does not answer or its version differs from the one embedded in the P4 app (once per boot), or on
-demand with `make recover BOARD=<board>` (`POST /device/radio/recover`, also the "Recover C6" button on the Firmware page).
+demand with `make recover BOARD=<board>` (`POST /device/radio/recover`, also the "Recover radio" button on the Firmware page).
 
 ![Radio recovery card on the Firmware page with the jumper fitted: Recover C6 and Show C6 console](images/firmware-recovery.png)
 

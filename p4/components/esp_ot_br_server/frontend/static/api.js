@@ -21,13 +21,47 @@ function escapeHtml(str) {
       .replace(/'/g, '&#39;');
 }
 
-function apiGet(url) {
-  return fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+/*
+ * Reply of the Thread web GUI as an object. A refusal (4xx/5xx) resolves to {error: <HTTP status>, message} with the
+ * reason the board gave, so callers that check `error` and show `message` explain it; it is never cached.
+ */
+function apiFailureText(status, body) {
+  var reason = body && typeof body === 'object' ? (body.message || body.ErrorMessage || body.detail || '') : '';
+  if (status === 403)
+    return 'Refused on the management address: open the web UI on the Thread backbone address for Thread changes.';
+  if (status === 409)
+    return 'The board is busy' + (reason ? ' (' + reason + ')' : '') + '.';
+  if (status === 503)
+    return 'The Thread network is not running' + (reason ? ' (' + reason + ')' : '') + '. See the Dashboard.';
+  return reason || ('Request failed (HTTP ' + status + ')');
+}
+
+function apiReply(r) {
+  return r.text().then(function(text) {
+    var body = null;
     try {
-      sessionStorage.setItem('cache:' + url, JSON.stringify(data));
+      body = JSON.parse(text);
     } catch (e) {
+      if (r.ok)
+        throw e;
     }
-    return data;
+    if (!r.ok)
+      return {error : r.status, message : apiFailureText(r.status, body)};
+    return body;
+  });
+}
+
+function apiGet(url) {
+  return fetch(url).then(function(r) {
+    return apiReply(r).then(function(data) {
+      if (r.ok) {
+        try {
+          sessionStorage.setItem('cache:' + url, JSON.stringify(data));
+        } catch (e) {
+        }
+      }
+      return data;
+    });
   });
 }
 
@@ -37,7 +71,7 @@ function apiPost(url, data) {
            headers : {'Content-Type' : 'application/json'},
            body : JSON.stringify(data)
          })
-      .then(function(r) { return r.json(); });
+      .then(apiReply);
 }
 
 /**
@@ -82,52 +116,6 @@ function showLoading(show) {
     o.classList.remove('active');
 }
 
-/**
- * Check Thread network state. Calls callback(role) where role is a string
- * like "disabled", "detached", "child", "router", "leader".
- * Returns true if the device is attached (child/router/leader).
- */
-function checkThreadState(callback) {
-  apiGet('/node/state')
-      .then(function(role) {
-        var r = (typeof role === 'string') ? role : '';
-        var connected = (r === 'child' || r === 'router' || r === 'leader');
-        if (callback)
-          callback(r, connected);
-      })
-      .catch(function() {
-        if (callback)
-          callback('', false);
-      });
-}
-
-/**
- * Disable all interactive elements inside a management page and show
- * a banner when the Thread network is not connected.
- * Call from management sub-pages (except network.html which is always active).
- */
-function disableManagementPage() {
-  /* Insert banner at top of .container */
-  var container = document.querySelector('.container');
-  if (container) {
-    var banner = document.createElement('div');
-    banner.className = 'disabled-banner';
-    banner.innerHTML =
-        'Thread network is not connected. <a href="/network.html">Go to Network</a> to join or form a network.';
-    container.insertBefore(banner, container.firstChild);
-  }
-  /* Disable all buttons and inputs */
-  var els = document.querySelectorAll('button, input, select, textarea');
-  for (var i = 0; i < els.length; i++) {
-    els[i].disabled = true;
-  }
-  /* Add visual overlay to cards */
-  var cards = document.querySelectorAll('.card');
-  for (var j = 0; j < cards.length; j++) {
-    cards[j].classList.add('card-disabled');
-  }
-}
-
 /* Build navigation bar and highlight current page. */
 (function() {
 var pages = [
@@ -158,7 +146,7 @@ if (!nav)
 var p = location.pathname;
 
 var html =
-    '<a href="/" class="nav-brand"><img src="/favicon.ico" width="22" height="22" alt="Espressif"> Espressif Thread Border Router</a><ul class="nav-links">';
+    '<a href="/" class="nav-brand"><img src="/favicon.ico" width="22" height="22" alt=""> Thread Border Router</a><ul class="nav-links">';
 for (var i = 0; i < pages.length; i++) {
   var pg = pages[i];
   if (pg.children) {
@@ -171,7 +159,7 @@ for (var i = 0; i < pages.length; i++) {
       }
     }
     html += '<li class="nav-dropdown">';
-    html += '<a href="#" class="nav-dropdown-toggle' +
+    html += '<a href="#" aria-haspopup="true" aria-expanded="false" class="nav-dropdown-toggle' +
             (childActive ? ' active' : '') + '">' + pg.label + '</a>';
     html += '<ul class="nav-dropdown-menu">';
     for (var j = 0; j < pg.children.length; j++) {
@@ -191,4 +179,45 @@ for (var i = 0; i < pages.length; i++) {
 }
 html += '</ul>';
 nav.innerHTML = html;
+
+/* A tap opens a menu too (touch screens have no hover); a tap elsewhere closes it. */
+if (!nav.querySelectorAll)
+  return; // the nav tests run this file against a bare object
+function closeMenus(except) {
+  var open = nav.querySelectorAll('.nav-dropdown.open');
+  for (var k = 0; k < open.length; k++) {
+    if (open[k] !== except) {
+      open[k].classList.remove('open');
+      open[k].firstChild.setAttribute('aria-expanded', 'false');
+    }
+  }
+}
+var toggles = nav.querySelectorAll('.nav-dropdown-toggle');
+for (var t = 0; t < toggles.length; t++) {
+  toggles[t].addEventListener('click', function(ev) {
+    ev.preventDefault();
+    var li = this.parentNode;
+    closeMenus(li);
+    var on = li.classList.toggle('open');
+    this.setAttribute('aria-expanded', on ? 'true' : 'false');
+  });
+}
+document.addEventListener('click', function(ev) {
+  if (!nav.contains(ev.target))
+    closeMenus(null);
+});
+/* Hover and keyboard focus open a menu by CSS: keep aria-expanded in step. */
+var drops = nav.querySelectorAll('.nav-dropdown');
+function syncExpanded(li, on) {
+  li.firstChild.setAttribute('aria-expanded', on || li.classList.contains('open') ? 'true' : 'false');
+}
+for (var d = 0; d < drops.length; d++) {
+  drops[d].addEventListener('mouseenter', function() { syncExpanded(this, true); });
+  drops[d].addEventListener('mouseleave', function() { syncExpanded(this, false); });
+  drops[d].addEventListener('focusin', function() { syncExpanded(this, true); });
+  drops[d].addEventListener('focusout', function(ev) {
+    if (!this.contains(ev.relatedTarget))
+      syncExpanded(this, false);
+  });
+}
 })();

@@ -34,8 +34,8 @@
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Add a manually-assigned unicast IPv6 address to the Thread interface.</p>
         <form id="ipaddrForm" onsubmit="return false">
             <div class="form-group">
-                <label class="form-label">IPv6 Address</label>
-                <input class="form-input" name="address" type="text" placeholder="e.g. 2001::dead:beef:cafe">
+                <label class="form-label" for="addrInput">IPv6 address</label>
+                <input class="form-input" name="address" id="addrInput" type="text" placeholder="e.g. 2001::dead:beef:cafe">
             </div>
             <div style="display:flex;align-items:center;gap:12px">
                 <button type="button" class="btn btn-primary" onclick="addIpAddr()">Add Address</button>
@@ -50,8 +50,8 @@
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Add or remove on-mesh prefixes from the Thread network.</p>
         <form id="prefixForm" onsubmit="return false">
             <div class="form-group">
-                <label class="form-label">Prefix</label>
-                <input class="form-input" name="prefix" type="text" value="fd11:22::" placeholder="e.g. fd11:22::">
+                <label class="form-label" for="prefInput">Prefix</label>
+                <input class="form-input" name="prefix" id="prefInput" type="text" placeholder="e.g. fd12:3456:789a::">
                 <div class="form-hint">IPv6 prefix for on-mesh routing</div>
             </div>
             <div class="form-check" style="margin-bottom:16px">
@@ -69,13 +69,12 @@
     </div>
 
 </div>
-<div class="footer">Copyright &copy; 2026 Espressif Systems. All rights reserved.</div>
+<div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
 <script src="/static/api.js"></script>
+<script src="/static/mgmt.js"></script>
 <script>
 /* Disable page if Thread network is not connected */
-checkThreadState(function(role, connected) {
-    if (!connected) disableManagementPage();
-});
+MgmtPage.guard(true);
 
 /* ──── IPv6 Address List ──── */
 function renderAddrTable(data) {
@@ -143,6 +142,7 @@ function addIpAddr() {
 
 /* ──── Remove IPv6 Address ──── */
 function removeIpAddr(addr) {
+    if (!window.confirm('Remove the address ' + addr + ' from the Thread interface?')) return;
     apiPost('/delete_ipaddr', { address: addr }).then(function(res) {
         if (res.error) {
             showToast('Failed to remove address', 'error');
@@ -188,6 +188,7 @@ function addPrefix() {
 
 function deletePrefix() {
     var status = document.getElementById('prefStatus');
+    if (!window.confirm('Delete the on-mesh prefix ' + getPrefixData().prefix + ' from the Thread network?')) return;
     status.textContent = 'Deleting prefix...'; status.style.color = 'var(--primary)';
     showLoading(true);
 

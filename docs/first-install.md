@@ -12,6 +12,15 @@ Espressif's ESP-Hosted firmware, which this project overwrites. Three paths:
 Every path needs an antenna, [flashes the P4](#flash-the-p4) (Paths 1 and 2 first, Path 3 after the C6) and ends with
 [the radio firmware upload](#upload-the-radio-firmware).
 
+| Your board | Path |
+| --- | --- |
+| New, never touched, no extra wires | 1 |
+| Maintenance jumper wires fitted (or you can solder three wires) | 2 |
+| A 3.3 V USB-UART adapter at hand, or paths 1 and 2 failed | 3 |
+
+After flashing, the Dashboard (`http://<board>/` or, by default, `http://esp-otbr-<last six MAC hex digits>.local/`) says what is
+missing next.
+
 ## Before you start
 
 - Hardware: the Waveshare ESP32-P4-WIFI6-POE-ETH (ESP32-P4 chip revision v1.3, 32 MB flash, 32 MB PSRAM, IP101 Ethernet
@@ -240,7 +249,7 @@ Within about half a minute `curl http://<board>/node/state` goes from `"detached
   reboot unless it was confirmed. Or use the P4 console (`make monitor`, USB-C, 115200 baud): `net reset` restores `single`, untagged,
   DHCPv4 and reboots; `net show` prints the config.
 - **C6 broken** (bootloader, partition table or updater damaged, RCP firmware missing): with the jumper the P4 repairs it at boot (once per boot), or
-  `curl -X POST http://<board>/device/radio/recover` / "Recover C6" on the Firmware page; then upload `c6_rcp.bin` if
+  `curl -X POST http://<board>/device/radio/recover` / "Recover radio" on the Firmware page; then upload `c6_rcp.bin` if
   `fault_reason` says `no rcp firmware`. Without the jumper use Path 3.
 - **P4 broken** (bad OTA that cannot roll back, corrupt flash): reflash over USB-C, `make erase flash`
   (this deletes the stored dataset and network settings). If the P4 will not enter download mode, hold BOOT while pressing reset.

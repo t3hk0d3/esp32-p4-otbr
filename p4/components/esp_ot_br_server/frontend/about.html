@@ -17,16 +17,15 @@
 
     <div class="about-hero">
         <div class="about-logo">
-            <img src="/favicon.ico" width="64" height="64" alt="Espressif">
+            <img src="/favicon.ico" width="64" height="64" alt="">
         </div>
-        <h1>Espressif Thread Border Router</h1>
-        <p>Built with ESP-IDF &amp; OpenThread by Espressif Systems</p>
+        <h1>Thread Border Router</h1>
+        <p>Built on Espressif's esp-thread-br, ESP-IDF and OpenThread.</p>
     </div>
-
     <h2 class="section-title">Firmware Information</h2>
     <div class="grid grid-2 section">
         <div class="card">
-            <div class="card-header">ESP Thread BR</div>
+            <div class="card-header">Border Router</div>
             <div class="info-row">
                 <span class="info-label">App Version</span>
                 <span class="info-value" id="ab-appver">-</span>
@@ -38,6 +37,10 @@
             <div class="info-row">
                 <span class="info-label">Compiled</span>
                 <span class="info-value" id="ab-compile">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">mDNS name</span>
+                <span class="info-value" id="ab-host">-</span>
             </div>
         </div>
         <div class="card">
@@ -59,10 +62,14 @@
             </div>
         </div>
         <div class="card">
-            <div class="card-header">RCP (Radio Co-Processor)</div>
+            <div class="card-header">Radio Co-Processor</div>
             <div class="info-row">
                 <span class="info-label">Version</span>
                 <span class="info-value" id="ab-rcp">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Base image</span>
+                <span class="info-value" id="ab-base">-</span>
             </div>
             <div class="info-row">
                 <span class="info-label">IEEE EUI-64</span>
@@ -75,24 +82,24 @@
     <div class="card section">
         <ul class="link-list">
             <li>
-                <span class="link-label">Espressif Home</span>
-                <a class="link-url" href="https://www.espressif.com" target="_blank" rel="noopener">espressif.com</a>
+                <span class="link-label">Source code and releases</span>
+                <a class="link-url" href="https://github.com/t3hk0d3/esp32-p4-otbr" target="_blank" rel="noopener">github.com/t3hk0d3/esp32-p4-otbr</a>
             </li>
             <li>
-                <span class="link-label">ESP Thread BR on GitHub</span>
+                <span class="link-label">Documentation</span>
+                <a class="link-url" href="https://github.com/t3hk0d3/esp32-p4-otbr/blob/master/docs/README.md" target="_blank" rel="noopener">docs/README.md</a>
+            </li>
+            <li>
+                <span class="link-label">Home Assistant setup</span>
+                <a class="link-url" href="https://github.com/t3hk0d3/esp32-p4-otbr/blob/master/docs/home-assistant.md" target="_blank" rel="noopener">docs/home-assistant.md</a>
+            </li>
+            <li>
+                <span class="link-label">Troubleshooting</span>
+                <a class="link-url" href="https://github.com/t3hk0d3/esp32-p4-otbr/blob/master/docs/troubleshooting.md" target="_blank" rel="noopener">docs/troubleshooting.md</a>
+            </li>
+            <li>
+                <span class="link-label">esp-thread-br (upstream)</span>
                 <a class="link-url" href="https://github.com/espressif/esp-thread-br" target="_blank" rel="noopener">github.com/espressif/esp-thread-br</a>
-            </li>
-            <li>
-                <span class="link-label">ESP-IDF on GitHub</span>
-                <a class="link-url" href="https://github.com/espressif/esp-idf" target="_blank" rel="noopener">github.com/espressif/esp-idf</a>
-            </li>
-            <li>
-                <span class="link-label">ESP Thread BR Documentation</span>
-                <a class="link-url" href="https://docs.espressif.com/projects/esp-thread-br/en/latest/" target="_blank" rel="noopener">docs.espressif.com/projects/esp-thread-br</a>
-            </li>
-            <li>
-                <span class="link-label">ESP-IDF Documentation</span>
-                <a class="link-url" href="https://docs.espressif.com/projects/esp-idf/" target="_blank" rel="noopener">docs.espressif.com/projects/esp-idf</a>
             </li>
             <li>
                 <span class="link-label">OpenThread</span>
@@ -102,7 +109,7 @@
     </div>
 
 </div>
-<div class="footer">Copyright &copy; 2026 Espressif Systems. All rights reserved.</div>
+<div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
 <script src="/static/api.js"></script>
 <script>
 function renderAbout(data) {
@@ -117,8 +124,24 @@ function renderAbout(data) {
     document.getElementById('ab-rcp').textContent = r['RCP:Version'] || '-';
     document.getElementById('ab-eui').textContent = r['RCP:EUI64'] || '-';
 }
+function setIf(id, v) {
+    if (v !== undefined && v !== null && v !== '') document.getElementById(id).textContent = v;
+}
+/* /device/status answers in every mode; /get_properties only while the border router runs. */
+function renderStatus(s) {
+    if (!s || !s.app) return;
+    setIf('ab-appver', s.app.version);
+    setIf('ab-rcp', s.rcp.installed === null ? 'unknown' : s.rcp.installed === '' ? 'none installed' : s.rcp.installed);
+    setIf('ab-base', s.jumper.base_installed || ('unknown (expected ' + s.jumper.base_expected + ')'));
+}
 renderAbout(getCached('/get_properties'));
-apiGet('/get_properties').then(renderAbout).catch(function() {
+apiGet('/get_properties').then(renderAbout, function() {}).then(function() {
+    return apiGet('/device/status'); /* after the properties: the status wins for the fields both give */
+}).then(renderStatus).then(function() {
+    return apiGet('/device/names');
+}).then(function(n) {
+    if (n && n.hostname_live) setIf('ab-host', n.hostname_live + '.local');
+}).catch(function() {
     showToast('Failed to connect to device', 'error');
 });
 </script>

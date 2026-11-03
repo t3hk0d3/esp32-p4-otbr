@@ -26,20 +26,20 @@
         </p>
         <form id="pingForm" onsubmit="return false">
             <div class="form-group">
-                <label class="form-label">Destination IPv6 Address *</label>
+                <label class="form-label" for="pingAddr">Destination IPv6 Address *</label>
                 <input class="form-input" name="address" id="pingAddr" type="text"
                        placeholder="e.g. fd11:22::1 or fe80::1" required>
                 <div class="form-hint">Enter a Thread mesh-local, link-local, or routable IPv6 address</div>
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">Count</label>
+                    <label class="form-label" for="pingCount">Count</label>
                     <input class="form-input" name="count" id="pingCount" type="number"
                            min="1" max="10" value="4">
                     <div class="form-hint">Number of echo requests (1–10)</div>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Payload Size (bytes)</label>
+                    <label class="form-label" for="pingSize">Payload Size (bytes)</label>
                     <input class="form-input" name="size" id="pingSize" type="number"
                            min="4" max="512" value="32">
                     <div class="form-hint">Payload size excluding headers (4–512)</div>
@@ -60,14 +60,13 @@
     </div>
 
 </div>
-<div class="footer">Copyright &copy; 2026 Espressif Systems. All rights reserved.</div>
+<div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
 
 <script src="/static/api.js"></script>
+<script src="/static/mgmt.js"></script>
 <script>
 /* Disable page if Thread network is not connected */
-checkThreadState(function(role, connected) {
-    if (!connected) disableManagementPage();
-});
+MgmtPage.guard(true);
 
 function startPing() {
     var addr = document.getElementById('pingAddr').value.trim();

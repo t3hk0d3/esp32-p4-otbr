@@ -128,6 +128,15 @@ function loadText(load) {
   return [ pct(load['1s']), pct(load['10s']), pct(load['60s']) ].join(' / ');
 }
 
+/** "Matches this build" of a status rcp object: Yes/No, "unknown" when the probe failed, "-" without firmware. */
+function compatText(rcp) {
+  if (!rcp || rcp.installed === null || rcp.installed === undefined)
+    return 'unknown';
+  if (rcp.installed === '')
+    return '-';
+  return rcp.compatible ? 'Yes' : 'No';
+}
+
 function bytesText(bytes) {
   if (bytes >= 1048576)
     return (bytes / 1048576).toFixed(1) + ' MB';
@@ -136,6 +145,7 @@ function bytesText(bytes) {
 
 return {
   wholeNumber : wholeNumber,
+  compatText : compatText,
   errorMessage : errorMessage,
   formatRemaining : formatRemaining,
   trialLeftPct : trialLeftPct,
@@ -446,6 +456,13 @@ function DeviceEnv() {
     setInterval : function(f, ms) { return setInterval(f, ms); },
     now : function() { return Date.now(); },
     confirm : function(t) { return confirm(t); },
+    storage : (function() {
+      try {
+        return window.sessionStorage;
+      } catch (e) {
+        return null;
+      }
+    })(),
     reload : function() { location.reload(); },
     navigate : function(url) { location.assign(url); },
     AbortController : AbortController,
