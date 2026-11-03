@@ -40,12 +40,13 @@ class TestDefaultLid:
         assert solid(lid, 27.5, 6.0, P.LID_UNDERSIDE + 0.05)
         assert not solid(lid, 27.5, 6.0, P.LID_UNDERSIDE - 0.05)
 
-    def test_has_a_solid_frame_narrowed_over_the_led(self, lid):
+    def test_has_a_solid_frame_all_round(self, lid):
         edge = IX0 - P.REBATE_W + P.LID_CLEAR
         for y in (10.0, 30.0, 50.0):
             assert solid(lid, edge + P.FRAME_W - 0.3, y, BODY_Z)
-        lx, ly = P.LED_XY
-        assert not solid(lid, lx, ly, BODY_Z)  # a cell over the LED
+        assert solid(
+            lid, 1.0, 18.2, BODY_Z
+        )  # no cells cut into the frame (over the LED)
 
     def test_has_only_openings_of_3_5_mm_or_less(self, lid):
         from p4_case.lid import opening_widths
@@ -128,3 +129,24 @@ class TestLidLintel:
         assert not solid(lid, x0 + 0.1, -1.5, P.TOP - 0.5)
         assert solid(lid, x0 + 0.3, -1.5, P.TOP - 0.5)
         assert not solid(lid, x1 - 0.1, -1.5, P.TOP - 0.5)
+
+
+class TestLidGrilleCentred:
+    """lid.cell_centres: On default parameters"""
+
+    def test_is_symmetric_about_the_lid_centre(self):
+        from p4_case.lid import cell_centres
+
+        cells = cell_centres()
+        cx = (P.INNER[0] + P.INNER[1]) / 2
+        cy = (P.INNER[2] + P.INNER[3]) / 2
+        keys = {(round(x, 3), round(y, 3)) for x, y in cells}
+        for x, y in cells:
+            assert (round(2 * cx - x, 3), round(y, 3)) in keys
+            assert (round(x, 3), round(2 * cy - y, 3)) in keys
+
+    def test_keeps_every_cell_out_of_the_frame(self):
+        from p4_case.lid import CELL_R, cell_centres
+
+        edge = P.INNER[0] - P.REBATE_W + P.LID_CLEAR + P.FRAME_W
+        assert min(x for x, _ in cell_centres()) - CELL_R >= edge - 1e-6

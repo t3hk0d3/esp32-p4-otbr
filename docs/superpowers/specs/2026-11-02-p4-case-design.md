@@ -195,7 +195,8 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 - **Frame:** solid, 5.5 mm wide, all round.
 - **Grille:**
   - Honeycomb inside the frame, holes 3.5 mm across flats, 1 mm walls (about 60% open).
-  - One cross rib about 1.8 mm wide across the middle (around board Y 34) stiffens it.
+  - The honeycomb is centred on the lid and mirror-symmetric (an odd number of columns). One cross rib about 1.8 mm
+    wide on the lid's centre line (board Y 35) stiffens it.
   - The grille sits flat on the build plate when printing, so it has no bridges.
 - **Lintel:** a block on the lid's cable-end edge that fills the base's shared opening above the connectors, flush with
   the wall's outer face, with 0.2 mm (LID_CLEAR) to the opening's sides. It stops 1 mm above the USB stack (at the
@@ -230,8 +231,8 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
     ribbon-plug recess, where the wall is full thickness.
   - Bump height and angle, dent fit, tab length and drop, wedge thicknesses and the root fillet go into named constants, so
     they can be tuned after a test print.
-- **LED:** the LED (board X 0.3–1.6, Y 17.4–19.1) sits under the solid frame. The frame narrows locally there, so two or
-  three honeycomb cells (3.5 mm or less) sit directly over it. There's no separate window.
+- **LED:** the power LED (board X 0.3–1.6, Y 17.4–19.1) stays covered by the solid frame. Cells cut into the frame over
+  it made the lid edge fragile, and the power LED isn't needed.
 
 ## 6. Assembly (goes into the docs page)
 
@@ -288,7 +289,6 @@ These are automated checks, run against the vendor STEP:
   ribbon path (X 2.1–52.9, from the top of the block up into the header slot).
 - Each board-screw nut circle (Ø6.5 on top of the board around the mounting hole, 2.5 mm tall) is free of board parts.
 - Both keyhole head volumes (the L sweep plus the head radius, 2.5 mm tall) are free of the board and its underside parts.
-- From straight above the lid, the LED's top face is visible through at least one grille cell.
 - No lid opening, and no gap in the header-end slot, is wider than 3.5 mm.
 - With the lid fitted, the lid and the base do not overlap anywhere.
 - Both parts are watertight solids.
@@ -311,5 +311,4 @@ pencil, insert and eject a card, fit and remove the lid, and hang the case both 
 ## 10. Follow-ups (not now)
 
 - Pry cut-outs or another tool-free way to open the lid.
-- A printed light pipe for the LED.
 - Clip-in table feet.

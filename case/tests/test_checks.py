@@ -126,7 +126,7 @@ class TestOpeningSizeWideCell:
     """checks.opening_size: With a 4 mm cell"""
 
     def test_fails_naming_the_widest_opening(self, base, lid):
-        hole = Pos(27.5, 34.0, board_z(P.LID_UNDERSIDE) - 1) * Box(
+        hole = Pos(2.0, P.RIB_Y, board_z(P.LID_UNDERSIDE) - 1) * Box(
             4.0, 4.0, 5.0, align=(Align.CENTER, Align.CENTER, Align.MIN)
         )
         r = checks.opening_size(base, lid - hole)
@@ -169,7 +169,7 @@ class TestRunAll:
 
         board_facts = [n for n in results if n.startswith("board fact")]
         assert len(board_facts) == len(F) + 2
-        assert len(results) - len(board_facts) == 15
+        assert len(results) - len(board_facts) == 14
 
 
 class TestOpeningSizeTallSlot:
@@ -197,27 +197,6 @@ class TestLidSeats:
         r = checks.lid_seats(base, Pos(0.5, 0, 0) * lid)
         assert not r.ok
         assert "overlap" in r.detail
-
-
-class TestLedVisible:
-    """checks.led_visible"""
-
-    def test_passes_for_the_default_lid(self, results):
-        r = results["LED visible through the lid"]
-        assert r.ok, r.detail
-
-    def test_fails_when_the_cells_over_the_led_are_filled(self, lid):
-        led = FACTS["led"]
-        cover = box(
-            led.x0 - 3,
-            led.x1 + 3,
-            led.y0 - 6,
-            led.y1 + 6,
-            board_z(P.LID_UNDERSIDE),
-            board_z(P.TOP),
-        )
-        r = checks.led_visible(lid + cover)
-        assert not r.ok
 
 
 class TestPrintabilityCantilever:
