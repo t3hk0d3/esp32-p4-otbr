@@ -17,6 +17,11 @@ bool netcfg_ip6_input_drop(bool input_is_mgmt, netcfg_dest_kind_t dest, bool rou
     }
 }
 
+bool netcfg_ip6_udp_drop(bool input_is_mgmt, uint16_t dest_port, uint16_t trel_port)
+{
+    return input_is_mgmt && trel_port != 0 && dest_port == trel_port;
+}
+
 netcfg_route_choice_t netcfg_ip6_route_choice(bool split, bool src_is_mgmt, bool original_is_mgmt, bool original_is_null,
                                               bool dest_on_link_elsewhere)
 {

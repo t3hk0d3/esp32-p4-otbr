@@ -437,3 +437,82 @@ TEST_CASE("On defaults that cannot be applied either: give up and keep the rest 
 {
     TEST_ASSERT_EQUAL(NETCFG_APPLY_GIVE_UP, netcfg_apply_decide(false, false, true));
 }
+
+TEST_CASE("On set_trel with nothing stored: the defaults with the new value become the active config, no restart", "[netcfg]")
+{
+    netcfg_trial_t t;
+    netcfg_config_t use, stored;
+    char text[NETCFG_STORED_MAX];
+
+    reset_fake();
+    netcfg_trial_boot(&t, &s_env, &use);
+    TEST_ASSERT_EQUAL(ESP_OK, netcfg_trial_set_trel(&t, false));
+    TEST_ASSERT_EQUAL(ESP_OK, fake_read(NULL, NETCFG_KEY_ACTIVE, text, sizeof(text)));
+    TEST_ASSERT_EQUAL(ESP_OK, netcfg_from_json(text, &stored, NULL));
+    TEST_ASSERT_FALSE(stored.trel);
+    TEST_ASSERT_EQUAL(NETCFG_MODE_SINGLE, stored.mode);
+    TEST_ASSERT_EQUAL(0, s_fake.restarts);
+}
+
+TEST_CASE("On set_trel with a stored split config: only trel changes", "[netcfg]")
+{
+    netcfg_trial_t t;
+    netcfg_config_t use, stored;
+    char text[NETCFG_STORED_MAX];
+    const netcfg_config_t cfg = split(10, 20);
+
+    reset_fake();
+    store_active(&cfg);
+    netcfg_trial_boot(&t, &s_env, &use);
+    TEST_ASSERT_EQUAL(ESP_OK, netcfg_trial_set_trel(&t, false));
+    TEST_ASSERT_EQUAL(ESP_OK, fake_read(NULL, NETCFG_KEY_ACTIVE, text, sizeof(text)));
+    TEST_ASSERT_EQUAL(ESP_OK, netcfg_from_json(text, &stored, NULL));
+    TEST_ASSERT_TRUE(netcfg_diff_only_trel(&cfg, &stored));
+    TEST_ASSERT_EQUAL(0, s_fake.restarts);
+}
+
+TEST_CASE("On set_trel with the value already stored: nothing is written", "[netcfg]")
+{
+    netcfg_trial_t t;
+    netcfg_config_t use;
+    const netcfg_config_t cfg = vlan_single(5);
+
+    reset_fake();
+    store_active(&cfg);
+    netcfg_trial_boot(&t, &s_env, &use);
+    s_fake.writes = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, netcfg_trial_set_trel(&t, true));
+    TEST_ASSERT_EQUAL(0, s_fake.writes);
+}
+
+TEST_CASE("On set_trel while a trial runs: refused, nothing is written", "[netcfg]")
+{
+    netcfg_trial_t t;
+    netcfg_config_t use;
+    const netcfg_config_t cfg = vlan_single(5);
+
+    reset_fake();
+    TEST_ASSERT_EQUAL(ESP_OK, netcfg_trial_apply(&s_env, &cfg, NULL));
+    netcfg_trial_boot(&t, &s_env, &use);
+    TEST_ASSERT_TRUE(t.on_trial);
+    s_fake.writes = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, netcfg_trial_set_trel(&t, false));
+    TEST_ASSERT_EQUAL(0, s_fake.writes);
+}
+
+TEST_CASE("On set_trel with a storage error: the error is returned, the stored config stays", "[netcfg]")
+{
+    netcfg_trial_t t;
+    netcfg_config_t use, stored;
+    char text[NETCFG_STORED_MAX];
+    const netcfg_config_t cfg = vlan_single(5);
+
+    reset_fake();
+    store_active(&cfg);
+    netcfg_trial_boot(&t, &s_env, &use);
+    s_fake.fail_writes = true;
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, netcfg_trial_set_trel(&t, false));
+    TEST_ASSERT_EQUAL(ESP_OK, fake_read(NULL, NETCFG_KEY_ACTIVE, text, sizeof(text)));
+    TEST_ASSERT_EQUAL(ESP_OK, netcfg_from_json(text, &stored, NULL));
+    TEST_ASSERT_TRUE(stored.trel);
+}

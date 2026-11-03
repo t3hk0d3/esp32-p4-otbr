@@ -259,6 +259,43 @@ esp_err_t netcfg_confirm(httpd_req_t *req)
     return err;
 }
 
+esp_err_t netcfg_get_running(netcfg_config_t *out)
+{
+    ESP_RETURN_ON_FALSE(s.ready, ESP_ERR_INVALID_STATE, TAG, "not started");
+    xSemaphoreTake(s.lock, portMAX_DELAY);
+    *out = s.running;
+    xSemaphoreGive(s.lock);
+    return ESP_OK;
+}
+
+esp_err_t netcfg_set_trel(bool enabled)
+{
+    ESP_RETURN_ON_FALSE(s.ready, ESP_ERR_INVALID_STATE, TAG, "not started");
+    xSemaphoreTake(s.lock, portMAX_DELAY);
+    const esp_err_t err = netcfg_trial_set_trel(&s.trial, enabled);
+
+    if (err == ESP_OK) {
+        s.running.trel = enabled;
+    }
+    xSemaphoreGive(s.lock);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "TREL %s", enabled ? "on" : "off");
+    }
+    return err;
+}
+
+bool netcfg_trel_enabled(void)
+{
+    if (!s.ready) {
+        return true;
+    }
+    xSemaphoreTake(s.lock, portMAX_DELAY);
+    const bool enabled = s.running.trel;
+
+    xSemaphoreGive(s.lock);
+    return enabled;
+}
+
 esp_err_t netcfg_reset(void)
 {
     ESP_RETURN_ON_FALSE(s.ready, ESP_ERR_INVALID_STATE, TAG, "not started");

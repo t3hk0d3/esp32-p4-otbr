@@ -4,6 +4,7 @@
 // with lwIP and only apply the verdict. Host-tested in test_host/.
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,6 +25,12 @@ typedef enum {
  * (remote destination or wide multicast) out of mgmt (`route_is_mgmt`).
  */
 bool netcfg_ip6_input_drop(bool input_is_mgmt, netcfg_dest_kind_t dest, bool route_is_mgmt);
+
+/**
+ * Drop a received UDP datagram by its destination port? Split mode keeps the Thread backbone services off mgmt: TREL
+ * (`trel_port`, 0 = TREL not built) arriving on mgmt is dropped, even when addressed to mgmt's own address.
+ */
+bool netcfg_ip6_udp_drop(bool input_is_mgmt, uint16_t dest_port, uint16_t trel_port);
 
 typedef enum {
     NETCFG_ROUTE_ORIGINAL, /**< use the answer of the original hook (lwIP's own routing follows if it is NULL) */

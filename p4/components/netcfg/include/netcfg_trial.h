@@ -76,6 +76,13 @@ typedef enum {
 /** What to do with the result of bringing up the interfaces (`running_is_defaults`: the config was the defaults, retried or not). */
 netcfg_apply_action_t netcfg_apply_decide(bool apply_ok, bool on_trial, bool running_is_defaults);
 
+/**
+ * Store `enabled` as the TREL setting of the stored active config (the defaults when none is stored or it does not
+ * validate), without a trial or a restart. ESP_ERR_INVALID_STATE while a trial runs (confirm or revert it first); no
+ * write when the stored value is already `enabled`; a storage error leaves the stored config as it was.
+ */
+esp_err_t netcfg_trial_set_trel(const netcfg_trial_t *t, bool enabled);
+
 /** Erase the active config and any trial, then ask for a restart: the next boot uses the defaults. */
 esp_err_t netcfg_trial_reset(const netcfg_env_t *env);
 

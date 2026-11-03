@@ -15,6 +15,7 @@
 #define FIELD_GW "ipv4.gw"
 #define FIELD_DNS "ipv4.dns"
 #define FIELD_JSON "json"
+#define FIELD_TREL "trel"
 #define SECTION_SINGLE "single"
 #define SECTION_MGMT "mgmt"
 #define SECTION_THREAD_BB "thread_bb"
@@ -115,6 +116,7 @@ void netcfg_defaults(netcfg_config_t *out)
     iface_defaults(&out->single);
     iface_defaults(&out->mgmt);
     iface_defaults(&out->thread_bb);
+    out->trel = true;
 }
 
 static esp_err_t fail(const char **bad_field, const char *field)
@@ -203,7 +205,8 @@ static bool iface_equal(const netcfg_iface_cfg_t *a, const netcfg_iface_cfg_t *b
                        a->dns.addr == b->dns.addr);
 }
 
-bool netcfg_equal(const netcfg_config_t *a, const netcfg_config_t *b)
+// The interfaces only: mode and the interfaces that mode uses.
+static bool ifaces_equal(const netcfg_config_t *a, const netcfg_config_t *b)
 {
     if (a->mode != b->mode) {
         return false;
@@ -212,6 +215,16 @@ bool netcfg_equal(const netcfg_config_t *a, const netcfg_config_t *b)
         return iface_equal(&a->single, &b->single);
     }
     return iface_equal(&a->mgmt, &b->mgmt) && iface_equal(&a->thread_bb, &b->thread_bb);
+}
+
+bool netcfg_equal(const netcfg_config_t *a, const netcfg_config_t *b)
+{
+    return a->trel == b->trel && ifaces_equal(a, b);
+}
+
+bool netcfg_diff_only_trel(const netcfg_config_t *a, const netcfg_config_t *b)
+{
+    return a->trel != b->trel && ifaces_equal(a, b);
 }
 
 /* ---- JSON ---- */
@@ -284,9 +297,31 @@ static esp_err_t parse_section(const cJSON *root, const char *name, netcfg_iface
     return parse_iface(section, out, bad_field);
 }
 
+static esp_err_t parse_trel(const cJSON *root, bool *out, const char **bad_field)
+{
+    const cJSON *trel = cJSON_GetObjectItemCaseSensitive(root, FIELD_TREL);
+
+    if (!trel) {
+        return ESP_OK; /* keeps the value the caller put in *out */
+    }
+    if (!cJSON_IsBool(trel)) {
+        return fail(bad_field, FIELD_TREL);
+    }
+    *out = cJSON_IsTrue(trel);
+    return ESP_OK;
+}
+
 esp_err_t netcfg_from_json(const char *json, netcfg_config_t *out, const char **bad_field)
 {
+    return netcfg_from_json_over(json, NULL, out, bad_field);
+}
+
+esp_err_t netcfg_from_json_over(const char *json, const netcfg_config_t *base, netcfg_config_t *out, const char **bad_field)
+{
+    const bool trel_default = base ? base->trel : true;
+
     netcfg_defaults(out);
+    out->trel = trel_default;
     if (!json || strnlen(json, NETCFG_JSON_MAX + 1) > NETCFG_JSON_MAX) {
         return fail(bad_field, FIELD_JSON);
     }
@@ -310,6 +345,9 @@ esp_err_t netcfg_from_json(const char *json, netcfg_config_t *out, const char **
         }
     } else {
         err = fail(bad_field, FIELD_MODE);
+    }
+    if (err == ESP_OK) {
+        err = parse_trel(root, &out->trel, bad_field);
     }
     cJSON_Delete(root);
     return err == ESP_OK ? netcfg_validate(out, bad_field) : err;
@@ -357,6 +395,7 @@ cJSON *netcfg_config_to_cjson(const netcfg_config_t *cfg)
         ok = ok && cJSON_AddItemToObject(root, SECTION_MGMT, iface_to_cjson(&cfg->mgmt)) &&
              cJSON_AddItemToObject(root, SECTION_THREAD_BB, iface_to_cjson(&cfg->thread_bb));
     }
+    ok = ok && cJSON_AddBoolToObject(root, FIELD_TREL, cfg->trel) != NULL;
     if (!ok) {
         cJSON_Delete(root);
         return NULL;

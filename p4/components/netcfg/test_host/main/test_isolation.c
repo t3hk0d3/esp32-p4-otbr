@@ -67,3 +67,25 @@ TEST_CASE("On single mode: the original hook decides whatever the source", "[net
     TEST_ASSERT_EQUAL(NETCFG_ROUTE_ORIGINAL, netcfg_ip6_route_choice(false, true, true, false, false));
     TEST_ASSERT_EQUAL(NETCFG_ROUTE_ORIGINAL, netcfg_ip6_route_choice(false, false, false, true, false));
 }
+
+TEST_CASE("On UDP to the TREL port arriving on mgmt: is dropped", "[netcfg]")
+{
+    TEST_ASSERT_TRUE(netcfg_ip6_udp_drop(true, 12390, 12390));
+}
+
+TEST_CASE("On UDP to another port arriving on mgmt: is kept", "[netcfg]")
+{
+    TEST_ASSERT_FALSE(netcfg_ip6_udp_drop(true, 80, 12390));
+    TEST_ASSERT_FALSE(netcfg_ip6_udp_drop(true, 5353, 12390));
+}
+
+TEST_CASE("On UDP to the TREL port arriving on thread_bb or the single port: is kept", "[netcfg]")
+{
+    TEST_ASSERT_FALSE(netcfg_ip6_udp_drop(false, 12390, 12390));
+}
+
+TEST_CASE("On a build without TREL (port 0): nothing is dropped", "[netcfg]")
+{
+    TEST_ASSERT_FALSE(netcfg_ip6_udp_drop(true, 0, 0));
+    TEST_ASSERT_FALSE(netcfg_ip6_udp_drop(true, 12390, 0));
+}
