@@ -54,10 +54,15 @@ KEY_HEAD_H = 2.5
 
 # --- cable wall openings (5.2) ---
 OPENING_MARGIN = 0.5
-OPENING_TOP_MARGIN = 1.0  # extra room at the top so the board can tilt in
+OPENING_TOP_MARGIN = 1.0  # room between a connector's top and the lid's lintel above it
 OPENING_BOTTOM = -0.5  # board Z of the USB/RJ45 opening bottoms
 USB_BOX, RJ45_BOX, SD_BOX = FACTS["usb"], FACTS["rj45"], FACTS["sd"]
 SD_SLOT = (39.2, 51.4, -0.6, 2.0)  # x0, x1, board z0, z1
+# USB and RJ45 share one opening, cut up through the wall top; the lid's lintel fills it above the connectors
+CABLE_OPENING_X = (FACTS["usb"].x0 - OPENING_MARGIN, FACTS["rj45"].x1 + OPENING_MARGIN)
+LINTEL_SPLIT_X = (
+    FACTS["usb"].x1 + FACTS["rj45"].x0
+) / 2  # where the lintel steps from the USB to the RJ45 height
 SCOOP_X = (41.5, 49.0)
 SCOOP_R = 2.4
 SCOOP_DEPTH = 1.5  # into the cable wall's outer face, at the slot's bottom edge

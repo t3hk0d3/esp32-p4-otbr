@@ -164,9 +164,25 @@ def _tabs() -> Part:
     return tabs + [_bump(s, e) for s, e in corners]
 
 
+def _lintel() -> Part:
+    """Fills the base's cable-wall opening above the connectors, flush with the wall's outer face.
+
+    It stops OPENING_TOP_MARGIN above the USB stack and above the RJ45 (stepping at LINTEL_SPLIT_X), with LID_CLEAR to
+    the opening's sides.
+    """
+    cx0, cx1 = P.CABLE_OPENING_X
+    c = P.LID_CLEAR
+    y0, y1 = P.OUTER[2], IY0 + P.LID_CLEAR + EPS
+    usb_bottom = P.USB_BOX.z1 + P.OPENING_TOP_MARGIN
+    rj_bottom = P.RJ45_BOX.z1 + P.OPENING_TOP_MARGIN
+    return block(
+        cx0 + c, P.LINTEL_SPLIT_X, y0, y1, min(usb_bottom, UNDER), TOP
+    ) + block(P.LINTEL_SPLIT_X - EPS, cx1 - c, y0, y1, rj_bottom, TOP)
+
+
 def build_lid() -> Part:
     """The lid as one solid, in the board frame as fitted (top face flush at case Z 27.6)."""
-    return _plate() + _tabs() - _grille()
+    return _plate() + _lintel() + _tabs() - _grille()
 
 
 def opening_widths(lid: Part) -> list[float]:
