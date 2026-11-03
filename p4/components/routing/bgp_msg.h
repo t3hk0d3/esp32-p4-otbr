@@ -41,7 +41,7 @@ typedef struct {
 
 /** What a valid OPEN negotiates. */
 typedef struct {
-    uint32_t asn;       /**< the 4-octet ASN capability when present, else My AS */
+    uint32_t asn;       /**< from the 4-octet ASN capability (required) */
     uint32_t router_id; /**< host order */
     uint16_t hold_time;
     bool ipv6_unicast; /**< Multiprotocol capability AFI 2 / SAFI 1 offered */
@@ -58,12 +58,16 @@ size_t routing_bgp_encode_keepalive(uint8_t *buf, size_t cap);
 /**
  * UPDATE announcing `announce` (each a /64): ORIGIN IGP; AS_PATH empty on iBGP, one AS_SEQUENCE [local_asn] (4-octet)
  * on eBGP; LOCAL_PREF 100 on iBGP only; MP_REACH_NLRI AFI 2 / SAFI 1 with `nh`. No NEXT_HOP and no IPv4 NLRI.
- * Returns 0 as well when `announce` holds more than ROUTING_MAX_ANNOUNCED prefixes.
+ * Returns 0 and writes nothing as well when `announce` is empty (an MP_REACH_NLRI without NLRI is never sent) or holds
+ * more than ROUTING_MAX_ANNOUNCED prefixes.
  */
 size_t routing_bgp_encode_update(uint8_t *buf, size_t cap, bool ibgp, uint32_t local_asn,
                                  const routing_bgp_nexthop_t *nh, const routing_prefix_set_t *announce);
 
-/** UPDATE whose only path attribute is MP_UNREACH_NLRI AFI 2 / SAFI 1 listing `withdraw` (each a /64). */
+/**
+ * UPDATE whose only path attribute is MP_UNREACH_NLRI AFI 2 / SAFI 1 listing `withdraw` (each a /64). With an empty
+ * set this is the IPv6 unicast End-of-RIB marker (RFC 4724).
+ */
 size_t routing_bgp_encode_withdraw(uint8_t *buf, size_t cap, const routing_prefix_set_t *withdraw);
 
 /** NOTIFICATION without data. */
@@ -78,9 +82,11 @@ routing_bgp_err_t routing_bgp_decode_header(const uint8_t *buf, size_t len, uint
 
 /**
  * Validates an OPEN and fills `out` (meaningful only when OK). Capabilities may be spread across several
- * Capabilities parameters; unknown capabilities are ignored. Errors: version not 4 2/1; peer ASN not
- * `expected_asn` 2/2; BGP identifier 0 2/3; a parameter other than Capabilities 2/4; hold time 1 or 2 2/6; no
- * Multiprotocol AFI 2 / SAFI 1 capability 2/7; parameters or capabilities that do not fit 2/0; shorter than 29 1/2.
+ * Capabilities parameters; unknown capabilities are ignored. The peer ASN is the 4-octet ASN capability's value; My
+ * AS is not used. Errors: version not 4 2/1; no 4-octet ASN capability 2/7 (checked before the ASN, since the
+ * UPDATEs carry a 4-octet AS_PATH an RFC 6793 OLD speaker would misread); peer ASN not `expected_asn` 2/2; BGP
+ * identifier 0 2/3; a parameter other than Capabilities 2/4; hold time 1 or 2 2/6; no Multiprotocol AFI 2 / SAFI 1
+ * capability 2/7; parameters or capabilities that do not fit 2/0; shorter than 29 1/2.
  */
 routing_bgp_err_t routing_bgp_decode_open(const uint8_t *msg, size_t len, uint32_t expected_asn,
                                           routing_bgp_open_t *out);

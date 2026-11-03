@@ -187,6 +187,16 @@ TEST_CASE("Withdrawing prefixes: carries MP_UNREACH_NLRI only, with no path attr
     assert_written(BGP_WITHDRAW, sizeof(BGP_WITHDRAW), n);
 }
 
+TEST_CASE("Empty announce set: returns 0 and writes nothing", "[routing]")
+{
+    routing_prefix_set_t empty = PREFIXES;
+
+    empty.count = 0;
+    fill_buf();
+    TEST_ASSERT_EQUAL_size_t(0, routing_bgp_encode_update(s_buf, sizeof(s_buf), true, ASN2, &NH_BOTH, &empty));
+    assert_untouched_from(0);
+}
+
 TEST_CASE("More prefixes than ROUTING_MAX_ANNOUNCED: returns 0 and writes nothing", "[routing]")
 {
     routing_prefix_set_t too_many = PREFIXES;
@@ -312,8 +322,8 @@ TEST_CASE("Prefix length above 128 inside MP_REACH_NLRI: returns an UPDATE error
 TEST_CASE("Peer ASN differs from the configured one: returns an OPEN error (NOTIFICATION 2/2)", "[routing]")
 {
     assert_err(2, 2, open_err(BGP_OPEN_AS4, sizeof(BGP_OPEN_AS4), ASN4 + 1));
-    /* without the 4-octet capability, My AS is the peer ASN */
-    assert_err(2, 2, open_err(BGP_RX_OPEN_NO_AS4, sizeof(BGP_RX_OPEN_NO_AS4), 65021));
+    /* a 2-octet peer ASN, carried in the 4-octet capability */
+    assert_err(2, 2, open_err(BGP_RX_OPEN_HOLD0, sizeof(BGP_RX_OPEN_HOLD0), 65021));
     /* AS_TRANS in My AS is not taken for the real ASN */
     assert_err(2, 2, open_err(BGP_OPEN_AS4, sizeof(BGP_OPEN_AS4), 23456));
 }
@@ -322,6 +332,13 @@ TEST_CASE("Peer offers hold time 1 or 2: returns an OPEN error (NOTIFICATION 2/6
 {
     assert_err(2, 6, open_err(BGP_RX_OPEN_HOLD1, sizeof(BGP_RX_OPEN_HOLD1), 65020));
     assert_err(2, 6, open_err(BGP_RX_OPEN_HOLD2, sizeof(BGP_RX_OPEN_HOLD2), 65020));
+}
+
+TEST_CASE("Peer lacks the 4-octet ASN capability: returns an OPEN error (NOTIFICATION 2/7)", "[routing]")
+{
+    /* My AS matches the expected ASN, and a different one still gets 2/7, not 2/2 */
+    assert_err(2, 7, open_err(BGP_RX_OPEN_NO_AS4, sizeof(BGP_RX_OPEN_NO_AS4), 65020));
+    assert_err(2, 7, open_err(BGP_RX_OPEN_NO_AS4, sizeof(BGP_RX_OPEN_NO_AS4), 65021));
 }
 
 TEST_CASE("Peer lacks IPv6 unicast: returns an OPEN error (NOTIFICATION 2/7)", "[routing]")
@@ -354,7 +371,7 @@ TEST_CASE("OPEN shorter than 29 bytes: returns a header error (NOTIFICATION 1/2)
     assert_err(1, 2, open_err(BGP_OPEN_AS4, 28, ASN4));
 }
 
-TEST_CASE("Valid OPEN: returns the peer ASN (from the 4-octet capability when present), router ID and hold time",
+TEST_CASE("Valid OPEN: returns the peer ASN (from the 4-octet capability), router ID and hold time",
           "[routing]")
 {
     routing_bgp_open_t out;
@@ -364,13 +381,6 @@ TEST_CASE("Valid OPEN: returns the peer ASN (from the 4-octet capability when pr
     TEST_ASSERT_EQUAL_UINT32(ASN4, out.asn);
     TEST_ASSERT_EQUAL_HEX32(ROUTER_ID, out.router_id);
     TEST_ASSERT_EQUAL_UINT16(HOLD, out.hold_time);
-    TEST_ASSERT_TRUE(out.ipv6_unicast);
-
-    memset(&out, 0, sizeof(out));
-    assert_err(0, 0, routing_bgp_decode_open(BGP_RX_OPEN_NO_AS4, sizeof(BGP_RX_OPEN_NO_AS4), 65020, &out));
-    TEST_ASSERT_EQUAL_UINT32(65020, out.asn);
-    TEST_ASSERT_EQUAL_HEX32(0xc0a80101, out.router_id);
-    TEST_ASSERT_EQUAL_UINT16(90, out.hold_time);
     TEST_ASSERT_TRUE(out.ipv6_unicast);
 }
 

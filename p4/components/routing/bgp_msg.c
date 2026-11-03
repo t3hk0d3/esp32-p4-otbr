@@ -172,7 +172,7 @@ size_t routing_bgp_encode_keepalive(uint8_t *buf, size_t cap)
 size_t routing_bgp_encode_update(uint8_t *buf, size_t cap, bool ibgp, uint32_t local_asn,
                                  const routing_bgp_nexthop_t *nh, const routing_prefix_set_t *announce)
 {
-    if (announce->count > ROUTING_MAX_ANNOUNCED) {
+    if (announce->count == 0 || announce->count > ROUTING_MAX_ANNOUNCED) {
         return 0;
     }
     const size_t as_path_len = ibgp ? 0 : 2 + 4; /* empty, or one AS_SEQUENCE of one 4-octet ASN */
@@ -333,7 +333,7 @@ routing_bgp_err_t routing_bgp_decode_open(const uint8_t *msg, size_t len, uint32
     if (p[0] != 4) {
         return err(ERR_OPEN, ERR_OPEN_VERSION);
     }
-    uint16_t my_as = get16(&p[1]);
+    /* My AS (p[1..2]) is not used: the peer ASN comes from the 4-octet ASN capability, which is required */
     uint16_t hold = get16(&p[3]);
     uint32_t bgp_id = get32(&p[5]);
     size_t params_len = p[9];
@@ -360,7 +360,11 @@ routing_bgp_err_t routing_bgp_decode_open(const uint8_t *msg, size_t len, uint32
         pos += 2 + (size_t)params[pos + 1];
     }
 
-    uint32_t asn = has_as4 ? as4 : my_as;
+    /* An RFC 6793 OLD speaker would misread the 4-octet AS_PATH this codec sends: refused before the ASN check. */
+    if (!has_as4) {
+        return err(ERR_OPEN, ERR_OPEN_CAPABILITY);
+    }
+    uint32_t asn = as4;
     if (asn != expected_asn) {
         return err(ERR_OPEN, ERR_OPEN_PEER_AS);
     }
