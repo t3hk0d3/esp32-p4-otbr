@@ -1,6 +1,6 @@
 # Leader weight and "Become leader": design
 
-Date: 2026-11-03. Status: draft, awaiting approval. Mockup: https://claude.ai/artifact/DHVssN3ZEPZXetCP8KTECj (Leader card on the Network
+Date: 2026-11-03. Status: approved 2026-11-03; plan `docs/superpowers/plans/2026-11-03-leader-weight.md`. Mockup: https://claude.ai/artifact/DHVssN3ZEPZXetCP8KTECj (Leader card on the Network
 page, and its four states).
 
 ## 1. Purpose and scope
