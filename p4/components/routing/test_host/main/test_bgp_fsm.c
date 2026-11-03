@@ -294,7 +294,7 @@ TEST_CASE("Peer offers hold time 0, own 90: negotiates 0; no keepalive deadline 
     fsm_init(HOLD);
     to_openconfirm(0, 0);
     TEST_ASSERT_EQUAL_UINT16(0, routing_bgp_fsm_hold_time(&f));
-    expect_deadline(NONE);
+    expect_deadline(240000); /* only the handshake guard */
     simple(ROUTING_BGP_EV_KEEPALIVE_RX, 1000);
     expect_state(ROUTING_BGP_ESTABLISHED);
     expect_deadline(NONE);
@@ -609,9 +609,9 @@ TEST_CASE("Incoming connection while an outgoing one is in OpenSent or OpenConfi
         expect_actions(1, ROUTING_BGP_ACT_REJECT_INCOMING);
         expect_notification(0, 6, 7);
         expect_state(in_confirm ? ROUTING_BGP_OPENCONFIRM : ROUTING_BGP_OPENSENT);
-        /* no longer pending: the next OPEN is on the current connection */
+        /* the current connection carries on */
         if (!in_confirm) {
-            open_rx(LOWER_ID, HOLD, true, 300);
+            open_rx(LOWER_ID, HOLD, false, 300);
             expect_actions(1, ROUTING_BGP_ACT_SEND_KEEPALIVE);
             expect_state(ROUTING_BGP_OPENCONFIRM);
         }
@@ -688,8 +688,8 @@ TEST_CASE("Current connection drops while an incoming one is pending: adopts the
     expect_deadline(200 + 240000);
     TEST_ASSERT_EQUAL_STRING("notification 6/7 received", routing_bgp_fsm_last_error(&f));
 
-    /* the adopted connection's OPEN, still tagged incoming, is now on the current connection */
-    open_rx(HIGHER_ID, HOLD, true, 300);
+    /* the adopted connection is now the current one: its OPEN comes tagged false */
+    open_rx(HIGHER_ID, HOLD, false, 300);
     expect_actions(1, ROUTING_BGP_ACT_SEND_KEEPALIVE);
     expect_state(ROUTING_BGP_OPENCONFIRM);
 
@@ -874,4 +874,114 @@ TEST_CASE("Clock wraps past UINT32_MAX: timers still fire on time", "[routing]")
     tick(start + 30000);
     expect_actions(1, ROUTING_BGP_ACT_SEND_KEEPALIVE);
     TEST_ASSERT_EQUAL_UINT32(40, routing_bgp_fsm_uptime_s(&f, start + 40000));
+}
+
+/* --- fix round 1 --- */
+
+TEST_CASE("Event tagged incoming with nothing pending: leaves the current session untouched", "[routing]")
+{
+    for (int established = 0; established <= 1; established++) {
+        fsm_init(HOLD);
+        simple(ROUTING_BGP_EV_START, 0);
+        connected(false, 0);
+        if (established) {
+            open_rx(LOWER_ID, HOLD, false, 0);
+            simple(ROUTING_BGP_EV_KEEPALIVE_RX, 0);
+            simple(ROUTING_BGP_EV_INCOMING_WHILE_BUSY, 100);
+        } else {
+            simple(ROUTING_BGP_EV_INCOMING_WHILE_BUSY, 100);
+            open_rx(LOWER_ID, HOLD, true, 100); /* local ID higher */
+        }
+        expect_actions(1, ROUTING_BGP_ACT_REJECT_INCOMING);
+        routing_bgp_state_t state = routing_bgp_fsm_state(&f);
+        uint32_t deadline = routing_bgp_fsm_next_deadline_ms(&f);
+
+        /* the rejected connection's NOTIFICATION, FIN and a late OPEN */
+        notification_rx(6, 7, true, 200);
+        expect_actions(0);
+        conn_lost(true, 300);
+        expect_actions(0);
+        open_rx(HIGHER_ID, HOLD, true, 400);
+        expect_actions(0);
+        open_bad(2, 2, true, 500);
+        expect_actions(0);
+        expect_state(state);
+        expect_deadline(deadline);
+        TEST_ASSERT_EQUAL_STRING("", routing_bgp_fsm_last_error(&f));
+        TEST_ASSERT_EQUAL_UINT32(0, routing_bgp_fsm_resets(&f));
+    }
+}
+
+TEST_CASE("Negotiated hold time 0 and no KEEPALIVE in OpenConfirm for 240 s: sends NOTIFICATION 4/0, closes, moves "
+          "to Idle", "[routing]")
+{
+    fsm_init(HOLD);
+    to_openconfirm(0, 1000);
+    tick(1000 + 239999);
+    expect_actions(0);
+    expect_state(ROUTING_BGP_OPENCONFIRM);
+    tick(1000 + 240000);
+    expect_actions(2, ROUTING_BGP_ACT_SEND_NOTIFICATION, ROUTING_BGP_ACT_CLOSE);
+    expect_notification(0, 4, 0);
+    expect_state(ROUTING_BGP_IDLE);
+    TEST_ASSERT_EQUAL_STRING("hold timer expired", routing_bgp_fsm_last_error(&f));
+}
+
+TEST_CASE("Timer that would end at UINT32_MAX: ends 1 ms later at 0, never reported as none", "[routing]")
+{
+    fsm_init(HOLD);
+    simple(ROUTING_BGP_EV_START, UINT32_MAX - ROUTING_BGP_CONNECT_TIMEOUT_MS);
+    expect_deadline(0);
+    tick(UINT32_MAX);
+    expect_actions(0);
+    expect_state(ROUTING_BGP_CONNECT);
+    tick(0);
+    expect_actions(1, ROUTING_BGP_ACT_CLOSE);
+    expect_state(ROUTING_BGP_ACTIVE);
+}
+
+TEST_CASE("New incoming connection while the current one is incoming: replaces it and sends OPEN", "[routing]")
+{
+    /* adopted in Connect, replaced in OpenSent */
+    fsm_init(HOLD);
+    simple(ROUTING_BGP_EV_START, 0);
+    simple(ROUTING_BGP_EV_INCOMING_WHILE_BUSY, 100);
+    simple(ROUTING_BGP_EV_INCOMING_WHILE_BUSY, 200);
+    expect_actions(2, ROUTING_BGP_ACT_ADOPT_INCOMING, ROUTING_BGP_ACT_SEND_OPEN);
+    expect_state(ROUTING_BGP_OPENSENT);
+    expect_deadline(200 + 240000);
+    open_rx(LOWER_ID, HOLD, false, 300); /* not a collision: nothing was pending */
+    expect_actions(1, ROUTING_BGP_ACT_SEND_KEEPALIVE);
+    expect_state(ROUTING_BGP_OPENCONFIRM);
+
+    /* accepted in Idle (CONNECTED incoming), replaced in OpenConfirm */
+    fsm_init(HOLD);
+    to_established(HOLD, 0);
+    conn_lost(false, 1000);
+    connected(true, 2000);
+    open_rx(LOWER_ID, HOLD, false, 2000);
+    simple(ROUTING_BGP_EV_INCOMING_WHILE_BUSY, 3000);
+    expect_actions(2, ROUTING_BGP_ACT_ADOPT_INCOMING, ROUTING_BGP_ACT_SEND_OPEN);
+    expect_state(ROUTING_BGP_OPENSENT);
+
+    /* replaced in Established: counted as a reset */
+    simple(ROUTING_BGP_EV_INCOMING_WHILE_BUSY, 4000);
+    open_rx(LOWER_ID, HOLD, false, 4000);
+    simple(ROUTING_BGP_EV_KEEPALIVE_RX, 4000);
+    expect_state(ROUTING_BGP_ESTABLISHED);
+    TEST_ASSERT_EQUAL_UINT32(1, routing_bgp_fsm_resets(&f));
+    simple(ROUTING_BGP_EV_INCOMING_WHILE_BUSY, 5000);
+    expect_actions(2, ROUTING_BGP_ACT_ADOPT_INCOMING, ROUTING_BGP_ACT_SEND_OPEN);
+    expect_state(ROUTING_BGP_OPENSENT);
+    TEST_ASSERT_EQUAL_UINT32(2, routing_bgp_fsm_resets(&f));
+    TEST_ASSERT_EQUAL_STRING("connection lost", routing_bgp_fsm_last_error(&f));
+    TEST_ASSERT_EQUAL_UINT32(0, routing_bgp_fsm_uptime_s(&f, 9000));
+
+    /* an outgoing current connection still goes through collision resolution */
+    fsm_init(HOLD);
+    simple(ROUTING_BGP_EV_START, 0);
+    connected(false, 0);
+    simple(ROUTING_BGP_EV_INCOMING_WHILE_BUSY, 100);
+    expect_actions(0);
+    expect_state(ROUTING_BGP_OPENSENT);
 }

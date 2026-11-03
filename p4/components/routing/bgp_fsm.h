@@ -10,12 +10,19 @@
 // OpenSent or OpenConfirm, held until its OPEN decides the collision. The task reads that OPEN and reports it with
 // OPEN_RX (or OPEN_BAD) with `incoming` set; it sends nothing on that connection before ADOPT_INCOMING. While a
 // connection is pending the task refuses further incoming connections for this peer itself and does not report them.
-// The `incoming` flags of OPEN_RX, OPEN_BAD, CONN_LOST and NOTIFICATION_RX are true for events on the pending
-// connection and false for the current one; without a pending connection they are ignored.
+// The `incoming` flag of OPEN_RX, OPEN_BAD, CONN_LOST and NOTIFICATION_RX names the connection, not its direction:
+// true always means the pending incoming connection, false the current one. Once the FSM adopts an incoming
+// connection (ADOPT_INCOMING) it is the current one and the task tags its events false. An event tagged true while
+// nothing is pending (e.g. the FIN or a late OPEN of a connection just rejected) is ignored.
+// A new incoming connection while the current one is itself incoming (adopted, or CONNECTED with `incoming`) means
+// the peer abandoned the current one: the new one replaces it (ADOPT_INCOMING, SEND_OPEN, OpenSent) in OpenSent,
+// OpenConfirm and Established; from Established that counts as a reset with last_error "connection lost". A new
+// incoming connection while the current one is outgoing is a collision, resolved as RFC 4271 section 6.8 says.
 //
 // Timers. Times are milliseconds on a free-running uint32_t clock; comparisons are wrap-safe. Connect timeout 10 s;
 // OpenSent hold timer 240 s; after the OPEN exchange the hold time is the smaller of the two offered and keepalives go
-// every hold / 3; with a hold time of 0 neither runs. The connect-retry backoff starts at 5 s and doubles after every
+// every hold / 3; with a hold time of 0 neither runs once Established, but OpenConfirm keeps the 240 s guard so that a
+// peer that never confirms cannot hold the session there (expiry is a hold-timer expiry, NOTIFICATION 4/0). The connect-retry backoff starts at 5 s and doubles after every
 // scheduled retry up to 120 s; it is reset to 5 s on reaching Established, so a drop from Established retries after
 // 5 s. Retries are scheduled after a failed connect (moving to Active) and after a drop (moving to Idle); STOP schedules
 // nothing until the next START.
@@ -151,6 +158,7 @@ typedef struct {
     routing_bgp_state_t state;
     bool started;
     bool pending_incoming;
+    bool current_incoming; /**< the current connection was opened by the peer */
     uint16_t hold_time; /**< negotiated, valid from OpenConfirm on */
     uint32_t backoff_ms;
     bool retry_armed;
@@ -173,7 +181,10 @@ void routing_bgp_fsm_init(routing_bgp_fsm_t *f, const routing_bgp_fsm_config_t *
 void routing_bgp_fsm_handle(routing_bgp_fsm_t *f, const routing_bgp_event_t *ev, uint32_t now_ms,
                             routing_bgp_actions_t *out);
 
-/** The earliest armed timer (send a TICK when the clock reaches it), or UINT32_MAX when none runs. */
+/**
+ * The earliest armed timer (send a TICK when the clock reaches it), or UINT32_MAX when none runs. UINT32_MAX is never
+ * a real deadline: a timer that would end at UINT32_MAX ends 1 ms later, at 0.
+ */
 uint32_t routing_bgp_fsm_next_deadline_ms(const routing_bgp_fsm_t *f);
 
 routing_bgp_state_t routing_bgp_fsm_state(const routing_bgp_fsm_t *f);

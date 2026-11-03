@@ -9,6 +9,14 @@ static bool due(uint32_t now, uint32_t at)
     return (int32_t)(now - at) >= 0;
 }
 
+/* now + delay, moved 1 ms later when it would equal UINT32_MAX, which next_deadline_ms reserves for "none". */
+static uint32_t deadline(uint32_t now, uint32_t delay_ms)
+{
+    uint32_t at = now + delay_ms;
+
+    return at == UINT32_MAX ? 0 : at;
+}
+
 static void push(routing_bgp_actions_t *out, routing_bgp_action_type_t type, uint8_t code, uint8_t subcode)
 {
     /* No transition emits more than ROUTING_BGP_FSM_MAX_ACTIONS; the host tests check every list. */
@@ -36,7 +44,7 @@ static void disarm_timers(routing_bgp_fsm_t *f)
 static void schedule_retry(routing_bgp_fsm_t *f, uint32_t now)
 {
     f->retry_armed = true;
-    f->retry_at = now + f->backoff_ms;
+    f->retry_at = deadline(now, f->backoff_ms);
     f->backoff_ms *= 2;
     if (f->backoff_ms > ROUTING_BGP_BACKOFF_MAX_MS) {
         f->backoff_ms = ROUTING_BGP_BACKOFF_MAX_MS;
@@ -50,9 +58,9 @@ static uint32_t hold_ms(const routing_bgp_fsm_t *f)
 
 static void restart_hold(routing_bgp_fsm_t *f, uint32_t now)
 {
-    if (f->hold_armed) {
-        f->hold_at = now + hold_ms(f);
-    }
+    /* with hold time 0 this ends the handshake guard of OpenConfirm (see accept_open) */
+    f->hold_armed = f->hold_time != 0;
+    f->hold_at = deadline(now, hold_ms(f));
 }
 
 static void enter_connect(routing_bgp_fsm_t *f, uint32_t now, routing_bgp_actions_t *out)
@@ -60,19 +68,22 @@ static void enter_connect(routing_bgp_fsm_t *f, uint32_t now, routing_bgp_action
     push(out, ROUTING_BGP_ACT_CONNECT, 0, 0);
     f->state = ROUTING_BGP_CONNECT;
     disarm_timers(f);
-    f->connect_at = now + ROUTING_BGP_CONNECT_TIMEOUT_MS;
+    f->connect_at = deadline(now, ROUTING_BGP_CONNECT_TIMEOUT_MS);
+    f->current_incoming = false;
 }
 
-static void enter_opensent(routing_bgp_fsm_t *f, uint32_t now, bool adopt, routing_bgp_actions_t *out)
+/* `incoming`: the new current connection is an incoming one; `adopt`: the task must first make it current. */
+static void enter_opensent(routing_bgp_fsm_t *f, uint32_t now, bool incoming, bool adopt, routing_bgp_actions_t *out)
 {
     if (adopt) {
         push(out, ROUTING_BGP_ACT_ADOPT_INCOMING, 0, 0);
     }
+    f->current_incoming = incoming;
     push(out, ROUTING_BGP_ACT_SEND_OPEN, 0, 0);
     f->state = ROUTING_BGP_OPENSENT;
     disarm_timers(f);
     f->hold_armed = true;
-    f->hold_at = now + ROUTING_BGP_OPENSENT_HOLD_S * 1000u;
+    f->hold_at = deadline(now, ROUTING_BGP_OPENSENT_HOLD_S * 1000u);
 }
 
 /* A valid OPEN on the current connection in OpenSent. */
@@ -83,11 +94,14 @@ static void accept_open(routing_bgp_fsm_t *f, const routing_bgp_open_t *open, ui
     push(out, ROUTING_BGP_ACT_SEND_KEEPALIVE, 0, 0);
     f->state = ROUTING_BGP_OPENCONFIRM;
     disarm_timers(f);
+    f->hold_armed = true;
     if (f->hold_time != 0) {
-        f->hold_armed = true;
-        f->hold_at = now + hold_ms(f);
+        f->hold_at = deadline(now, hold_ms(f));
         f->keepalive_armed = true;
-        f->keepalive_at = now + hold_ms(f) / 3u;
+        f->keepalive_at = deadline(now, hold_ms(f) / 3u);
+    } else {
+        /* no hold timer once Established, but a peer that never confirms must not keep OpenConfirm forever */
+        f->hold_at = deadline(now, ROUTING_BGP_OPENSENT_HOLD_S * 1000u);
     }
 }
 
@@ -112,7 +126,7 @@ static void drop(routing_bgp_fsm_t *f, uint32_t now, bool notify, uint8_t code, 
     }
     if (f->pending_incoming) {
         f->pending_incoming = false;
-        enter_opensent(f, now, true, out);
+        enter_opensent(f, now, true, true, out);
         return;
     }
     push(out, ROUTING_BGP_ACT_CLOSE, 0, 0);
@@ -157,7 +171,7 @@ static void resolve_collision(routing_bgp_fsm_t *f, const routing_bgp_open_t *op
     }
     push(out, ROUTING_BGP_ACT_SEND_NOTIFICATION, ROUTING_BGP_ERR_CEASE, ROUTING_BGP_CEASE_COLLISION);
     f->pending_incoming = false;
-    enter_opensent(f, now, true, out);
+    enter_opensent(f, now, true, true, out);
     accept_open(f, open, now, out);
 }
 
@@ -182,21 +196,30 @@ static void on_incoming_while_busy(routing_bgp_fsm_t *f, uint32_t now, routing_b
     switch (f->state) {
     case ROUTING_BGP_IDLE:
         if (f->started) {
-            enter_opensent(f, now, true, out);
+            enter_opensent(f, now, true, true, out);
         } else {
             push(out, ROUTING_BGP_ACT_REJECT_INCOMING, ROUTING_BGP_ERR_CEASE, ROUTING_BGP_CEASE_CONNECTION_REJECTED);
         }
         break;
     case ROUTING_BGP_CONNECT:
     case ROUTING_BGP_ACTIVE:
-        enter_opensent(f, now, true, out);
+        enter_opensent(f, now, true, true, out);
         break;
     case ROUTING_BGP_OPENSENT:
     case ROUTING_BGP_OPENCONFIRM:
-        f->pending_incoming = true; /* decided when its OPEN arrives */
-        break;
     case ROUTING_BGP_ESTABLISHED:
-        push(out, ROUTING_BGP_ACT_REJECT_INCOMING, ROUTING_BGP_ERR_CEASE, ROUTING_BGP_CEASE_COLLISION);
+        if (f->current_incoming) {
+            /* the peer opened the current connection too: a new one means it abandoned that one */
+            if (f->state == ROUTING_BGP_ESTABLISHED) {
+                f->resets++;
+                snprintf(f->last_error, sizeof(f->last_error), "connection lost");
+            }
+            enter_opensent(f, now, true, true, out);
+        } else if (f->state == ROUTING_BGP_ESTABLISHED) {
+            push(out, ROUTING_BGP_ACT_REJECT_INCOMING, ROUTING_BGP_ERR_CEASE, ROUTING_BGP_CEASE_COLLISION);
+        } else {
+            f->pending_incoming = true; /* decided when its OPEN arrives */
+        }
         break;
     }
 }
@@ -247,7 +270,7 @@ static void on_tick(routing_bgp_fsm_t *f, uint32_t now, routing_bgp_actions_t *o
             drop(f, now, true, ROUTING_BGP_ERR_HOLD_TIMER, 0, out);
         } else if (f->keepalive_armed && due(now, f->keepalive_at)) {
             push(out, ROUTING_BGP_ACT_SEND_KEEPALIVE, 0, 0);
-            f->keepalive_at = now + hold_ms(f) / 3u;
+            f->keepalive_at = deadline(now, hold_ms(f) / 3u);
         }
         break;
     }
@@ -279,7 +302,7 @@ void routing_bgp_fsm_handle(routing_bgp_fsm_t *f, const routing_bgp_event_t *ev,
     case ROUTING_BGP_EV_CONNECTED:
         if (f->state == ROUTING_BGP_CONNECT || f->state == ROUTING_BGP_ACTIVE ||
                 (f->state == ROUTING_BGP_IDLE && f->started)) {
-            enter_opensent(f, now_ms, false, out);
+            enter_opensent(f, now_ms, ev->connected.incoming, false, out);
         } else if (f->state == ROUTING_BGP_IDLE) {
             push(out, ROUTING_BGP_ACT_CLOSE, 0, 0);
         }
@@ -290,16 +313,20 @@ void routing_bgp_fsm_handle(routing_bgp_fsm_t *f, const routing_bgp_event_t *ev,
         }
         break;
     case ROUTING_BGP_EV_CONN_LOST:
-        if (f->pending_incoming && ev->conn_lost.incoming) {
-            reject_pending(f, 0, 0, out);
+        if (ev->conn_lost.incoming) {
+            if (f->pending_incoming) {
+                reject_pending(f, 0, 0, out);
+            }
         } else if (is_connected(f->state)) {
             snprintf(f->last_error, sizeof(f->last_error), "connection lost");
             drop(f, now_ms, false, 0, 0, out);
         }
         break;
     case ROUTING_BGP_EV_OPEN_RX:
-        if (f->pending_incoming && ev->open_rx.incoming) {
-            resolve_collision(f, &ev->open_rx.open, now_ms, out);
+        if (ev->open_rx.incoming) {
+            if (f->pending_incoming) {
+                resolve_collision(f, &ev->open_rx.open, now_ms, out);
+            }
         } else if (f->state == ROUTING_BGP_OPENSENT) {
             accept_open(f, &ev->open_rx.open, now_ms, out);
         } else if (is_connected(f->state)) {
@@ -307,8 +334,10 @@ void routing_bgp_fsm_handle(routing_bgp_fsm_t *f, const routing_bgp_event_t *ev,
         }
         break;
     case ROUTING_BGP_EV_OPEN_BAD:
-        if (f->pending_incoming && ev->open_bad.incoming) {
-            reject_pending(f, ev->open_bad.err.code, ev->open_bad.err.subcode, out);
+        if (ev->open_bad.incoming) {
+            if (f->pending_incoming) {
+                reject_pending(f, ev->open_bad.err.code, ev->open_bad.err.subcode, out);
+            }
         } else if (is_connected(f->state)) {
             drop_sending(f, now_ms, ev->open_bad.err.code, ev->open_bad.err.subcode, out);
         }
@@ -325,8 +354,10 @@ void routing_bgp_fsm_handle(routing_bgp_fsm_t *f, const routing_bgp_event_t *ev,
         }
         break;
     case ROUTING_BGP_EV_NOTIFICATION_RX:
-        if (f->pending_incoming && ev->notification_rx.incoming) {
-            reject_pending(f, 0, 0, out);
+        if (ev->notification_rx.incoming) {
+            if (f->pending_incoming) {
+                reject_pending(f, 0, 0, out);
+            }
         } else if (is_connected(f->state)) {
             snprintf(f->last_error, sizeof(f->last_error), "notification %u/%u received", ev->notification_rx.code,
                      ev->notification_rx.subcode);
