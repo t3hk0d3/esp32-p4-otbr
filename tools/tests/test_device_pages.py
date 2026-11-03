@@ -14,8 +14,9 @@ WEB_API = (
     FRONTEND.parent / "private_include" / "esp_br_web_api.h"
 )  # Thread web GUI routes (/get_properties, ...)
 WEB_BUDGET_BYTES = (
-    320 * 1024
-)  # of the 2 MB web partition; raised from 256 KB for the topology page (about 265 KB in all)
+    384 * 1024
+)  # of the 2 MB web partition; raised from 256 KB for the topology page, then from 320 KB for the Routing page
+# (about 330 KB in all with both)
 
 DEVICE_MENU = [
     ["/ethernet.html", "Ethernet"],
