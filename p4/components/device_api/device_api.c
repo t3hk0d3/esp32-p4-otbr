@@ -65,7 +65,7 @@ static const char *TAG = "device_api";
 #define URL_BODY_MAX 512
 #define HTTP_CLIENT_TIMEOUT_MS 15000
 #define OTA_URL_TIMEOUT_MS 30000
-#define STATUS_BODY_MAX 1280
+#define STATUS_BODY_MAX 2048
 #define BASE_VERSION_MAX 32
 #define ETH_IFKEY "ETH_DEF" // used until netcfg has created the interfaces
 // url_source_open result (private): the response is larger than the C6 slot
@@ -269,6 +269,33 @@ static void base_expected_version(char *out, size_t cap)
 }
 
 // Works in every mode and never waits long: br_core_get_status uses a short lock timeout and skips the lock in a fault.
+static void fill_trel(device_api_trel_t *out)
+{
+    br_core_trel_t *t = calloc(1, sizeof(*t));
+
+    memset(out, 0, sizeof(*out));
+    if (!t) {
+        out->built = true; // state_valid false: the state is written as unknown
+        out->enabled = netcfg_trel_enabled();
+        return;
+    }
+    br_core_get_trel(t);
+    out->built = t->built;
+    out->enabled = t->enabled;
+    out->state_valid = t->state_valid;
+    out->active = t->active;
+    out->peers = t->peers;
+    out->tx_packets = t->tx_packets;
+    out->tx_failures = t->tx_failures;
+    out->rx_packets = t->rx_packets;
+    out->peer_count = t->peer_count < DEVICE_API_TREL_PEERS_MAX ? t->peer_count : DEVICE_API_TREL_PEERS_MAX;
+    for (size_t i = 0; i < out->peer_count; i++) {
+        strlcpy(out->peer_list[i].ext_address, t->peer_list[i].ext_address, sizeof(out->peer_list[i].ext_address));
+        strlcpy(out->peer_list[i].address, t->peer_list[i].sock_address, sizeof(out->peer_list[i].address));
+    }
+    free(t);
+}
+
 static esp_err_t status_get_handler(httpd_req_t *req)
 {
     device_api_status_t *s = calloc(1, sizeof(*s));
@@ -311,6 +338,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     s->sniffer_duration_s = ss.duration_s;
     s->fault_reason = bs.fault_reason;
     s->storage_ok = !bs.storage_degraded;
+    fill_trel(&s->trel);
 
     esp_err_t err;
 
@@ -1132,6 +1160,26 @@ static esp_err_t network_get_handler(httpd_req_t *req)
     return err;
 }
 
+// A change of `trel` alone is applied live: stored in the active config (no trial, no reboot) and handed to OpenThread.
+static esp_err_t network_put_trel(httpd_req_t *req, bool enabled)
+{
+    if (netcfg_trial_pending()) {
+        return send_error(req, 409, "busy", "confirm or revert the network change first", true);
+    }
+    esp_err_t err = netcfg_set_trel(enabled);
+
+    if (err != ESP_OK) {
+        const device_api_error_t error = device_api_map_network_set_error(err);
+
+        return send_mapped_error(req, error, error.detail, false);
+    }
+    err = br_core_set_trel(enabled);
+    if (err == ESP_ERR_TIMEOUT) {
+        return send_json(req, "{\"status\":\"saved\",\"detail\":\"OpenThread is busy: the setting applies at its next start\"}");
+    }
+    return send_json(req, "{\"status\":\"applied\"}");
+}
+
 static esp_err_t network_put_handler(httpd_req_t *req)
 {
     const int length_status = device_api_length_check(req->content_len, NETWORK_BODY_MAX);
@@ -1140,20 +1188,26 @@ static esp_err_t network_put_handler(httpd_req_t *req)
         return send_error(req, length_status, length_status == 413 ? "payload_too_large" : "length_required",
                           "send the network configuration as a JSON body", true);
     }
-    // A reboot into the new config would cut an update or a firmware push short.
-    if (device_api_op_long_running()) {
-        return send_error(req, 409, "busy", "an update or firmware push is running or waits for its reboot", true);
-    }
     char *body = read_small_body(req);
 
     if (!body) {
         return send_error(req, 400, "invalid_request", "the body could not be read", true);
     }
-    netcfg_config_t cfg;
+    netcfg_config_t running, cfg;
     const char *bad_field = NULL;
-    esp_err_t err = netcfg_from_json(body, &cfg, &bad_field);
+    esp_err_t err = netcfg_get_running(&running);
 
+    if (err == ESP_OK) {
+        err = netcfg_from_json_over(body, &running, &cfg, &bad_field);
+    }
     free(body);
+    if (err == ESP_OK && netcfg_diff_only_trel(&running, &cfg)) {
+        return network_put_trel(req, cfg.trel);
+    }
+    // A reboot into the new config would cut an update or a firmware push short.
+    if (err == ESP_OK && device_api_op_long_running()) {
+        return send_error(req, 409, "busy", "an update or firmware push is running or waits for its reboot", true);
+    }
     if (err == ESP_OK) {
         err = netcfg_set_trial(&cfg);
     }

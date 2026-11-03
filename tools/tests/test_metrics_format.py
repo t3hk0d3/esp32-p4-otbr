@@ -61,6 +61,12 @@ CATALOGUE = {
     "br_srp_server_state": "gauge",
     "br_srp_hosts": "gauge",
     "br_srp_services": "gauge",
+    "br_trel_enabled": "gauge",
+    "br_trel_active": "gauge",
+    "br_trel_peers": "gauge",
+    "br_trel_packets": "counter",
+    "br_trel_bytes": "counter",
+    "br_trel_tx_failures": "counter",
     "br_thread_collect_age_seconds": "gauge",
     "br_thread_collect_failures": "counter",
 }

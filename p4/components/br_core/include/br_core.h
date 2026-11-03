@@ -97,6 +97,9 @@ typedef struct {
  */
 esp_err_t br_core_set_trel(bool enabled);
 
+/** The TREL setting (br_core_set_trel); never takes a lock. */
+bool br_core_trel_wanted(void);
+
 /** TREL setting and, when OpenThread is up and its lock free within 100 ms, its state, counters and peers. */
 void br_core_get_trel(br_core_trel_t *out);
 

@@ -26,6 +26,7 @@ void json_out_raw(json_out_t *w, const char *text);
 /** Append a quoted, escaped string; NULL writes null. */
 void json_out_str(json_out_t *w, const char *text);
 void json_out_uint(json_out_t *w, uint32_t value);
+void json_out_u64(json_out_t *w, uint64_t value);
 void json_out_int(json_out_t *w, int32_t value);
 void json_out_bool(json_out_t *w, bool value);
 
@@ -128,6 +129,25 @@ const char *device_api_op_busy_detail(device_api_op_t op);
 #define DEVICE_API_MAX_IPV6 6
 #define DEVICE_API_ADDR_LEN 48
 
+#define DEVICE_API_TREL_PEERS_MAX 8
+
+typedef struct {
+    char ext_address[17];
+    char address[48]; /**< "[ipv6]:port" */
+} device_api_trel_peer_t;
+
+/** TREL part of the status (a copy of br_core_trel_t). */
+typedef struct {
+    bool built;       /**< false: "trel" is null */
+    bool enabled;
+    bool state_valid; /**< false: active, peers and the counters are null, peer_list is empty */
+    bool active;
+    uint32_t peers;
+    uint64_t tx_packets, tx_failures, rx_packets;
+    size_t peer_count;
+    device_api_trel_peer_t peer_list[DEVICE_API_TREL_PEERS_MAX];
+} device_api_trel_t;
+
 typedef struct {
     int mode;                   /**< br_core_mode_t */
     const char *app_version;
@@ -153,6 +173,7 @@ typedef struct {
     uint32_t sniffer_duration_s;
     const char *fault_reason;   /**< "" = none (JSON null) */
     bool storage_ok;            /**< false: NVS did not initialise (degraded boot) */
+    device_api_trel_t trel;
 } device_api_status_t;
 
 /** Name of a br_core_mode_t: "STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT" ("UNKNOWN" otherwise). */

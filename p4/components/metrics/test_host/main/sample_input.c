@@ -104,6 +104,15 @@ void sample_input(sample_input_t *s)
     t->srp_state = 1;
     t->srp_hosts = 3;
     t->srp_services = 4;
+    t->trel.built = true;
+    t->trel.enabled = true;
+    t->trel.active = true;
+    t->trel.peers = 2;
+    t->trel.tx_packets = 18204;
+    t->trel.tx_bytes = 5000000000ull;
+    t->trel.tx_failures = 3;
+    t->trel.rx_packets = 17951;
+    t->trel.rx_bytes = 4000000000ull;
     s->collector.started = true;
     s->collector.ever_collected = true;
     s->collector.valid = true;

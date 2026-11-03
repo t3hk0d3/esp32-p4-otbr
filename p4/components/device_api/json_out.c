@@ -115,6 +115,12 @@ void json_out_uint(json_out_t *w, uint32_t value)
     put(w, tmp, (size_t)snprintf(tmp, sizeof(tmp), "%lu", (unsigned long)value));
 }
 
+void json_out_u64(json_out_t *w, uint64_t value)
+{
+    char tmp[24];
+    put(w, tmp, (size_t)snprintf(tmp, sizeof(tmp), "%llu", (unsigned long long)value));
+}
+
 void json_out_int(json_out_t *w, int32_t value)
 {
     char tmp[16];

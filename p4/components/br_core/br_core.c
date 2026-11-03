@@ -652,12 +652,17 @@ esp_err_t br_core_set_trel(bool enabled)
 #endif
 }
 
+bool br_core_trel_wanted(void)
+{
+    return atomic_load(&s_trel_wanted);
+}
+
 void br_core_get_trel(br_core_trel_t *out)
 {
     memset(out, 0, sizeof(*out));
 #if CONFIG_OPENTHREAD_RADIO_TREL
     out->built = true;
-    out->enabled = atomic_load(&s_trel_wanted);
+    out->enabled = br_core_trel_wanted();
     if (!ot_callable() || !esp_openthread_lock_acquire(pdMS_TO_TICKS(STATUS_LOCK_MS))) {
         return;
     }

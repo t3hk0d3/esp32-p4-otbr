@@ -34,7 +34,7 @@ static device_api_status_t sample(void)
     return s;
 }
 
-static char body[1024];
+static char body[2048];
 
 static void render(const device_api_status_t *s)
 {
@@ -206,4 +206,72 @@ TEST_CASE("On a failed ROM recovery: jumper.recovery_failed is true", "[device_a
     s.jumper_recovery_failed = true;
     render(&s);
     TEST_ASSERT_NOT_NULL(strstr(body, "\"recovery_failed\":true"));
+}
+
+TEST_CASE("On a build without TREL: trel is null", "[device_api]")
+{
+    device_api_status_t s = sample();
+
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":null}"));
+}
+
+TEST_CASE("On TREL whose state could not be read: enabled is written, the rest is null", "[device_api]")
+{
+    device_api_status_t s = sample();
+
+    s.trel.built = true;
+    s.trel.enabled = true;
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":{\"enabled\":true,\"active\":null,\"peers\":null,\"tx_packets\":null,"
+                                "\"tx_failures\":null,\"rx_packets\":null,\"peer_list\":[]}"));
+}
+
+TEST_CASE("On TREL with peers: state, counters and the peer list are written", "[device_api]")
+{
+    device_api_status_t s = sample();
+
+    s.trel = (device_api_trel_t) {
+        .built = true, .enabled = true, .state_valid = true, .active = true, .peers = 2,
+        .tx_packets = 5000000000ULL, .tx_failures = 1, .rx_packets = 17, .peer_count = 2,
+    };
+    strcpy(s.trel.peer_list[0].ext_address, "1a2b3c4d5e6f7081");
+    strcpy(s.trel.peer_list[0].address, "[fe80::1]:12390");
+    strcpy(s.trel.peer_list[1].ext_address, "9f8e7d6c5b4a3921");
+    strcpy(s.trel.peer_list[1].address, "[fe80::2]:12390");
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":{\"enabled\":true,\"active\":true,\"peers\":2,\"tx_packets\":5000000000,"
+                                "\"tx_failures\":1,\"rx_packets\":17,\"peer_list\":[{\"ext_address\":\"1a2b3c4d5e6f7081\","
+                                "\"address\":\"[fe80::1]:12390\"},{\"ext_address\":\"9f8e7d6c5b4a3921\",\"address\":\"[fe80::2]:12390\"}]}"));
+}
+
+TEST_CASE("On TREL switched off: enabled false, active false", "[device_api]")
+{
+    device_api_status_t s = sample();
+
+    s.trel = (device_api_trel_t) {
+        .built = true, .enabled = false, .state_valid = true, .active = false,
+    };
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":{\"enabled\":false,\"active\":false,\"peers\":0,"));
+}
+
+TEST_CASE("On a full status (8 TREL peers, 6 IPv6 addresses): fits the 2048-byte handler buffer", "[device_api]")
+{
+    device_api_status_t s = sample();
+    char full[2048];
+
+    for (size_t i = 0; i < DEVICE_API_MAX_IPV6; i++) {
+        strcpy(s.ipv6[i], "2001:db8:1234:5678:9abc:def0:1234:5678");
+    }
+    s.ipv6_count = DEVICE_API_MAX_IPV6;
+    s.trel = (device_api_trel_t) {
+        .built = true, .enabled = true, .state_valid = true, .active = true, .peers = 8, .peer_count = 8,
+        .tx_packets = UINT64_MAX, .tx_failures = UINT64_MAX, .rx_packets = UINT64_MAX,
+    };
+    for (size_t i = 0; i < DEVICE_API_TREL_PEERS_MAX; i++) {
+        strcpy(s.trel.peer_list[i].ext_address, "1a2b3c4d5e6f7081");
+        strcpy(s.trel.peer_list[i].address, "[2001:db8:1234:5678:9abc:def0:1234:5678]:12390");
+    }
+    TEST_ASSERT_GREATER_THAN(0, device_api_status_json(full, sizeof(full), &s));
 }
