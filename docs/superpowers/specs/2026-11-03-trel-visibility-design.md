@@ -1,6 +1,6 @@
 # TREL visibility: peer networks and link transport: design
 
-Date: 2026-11-03. Status: draft, waiting for approval.
+Date: 2026-11-03. Status: approved 2026-11-03.
 
 Builds on the TREL design (`2026-11-03-trel-design.md`) and the Topology page (`2026-11-02-topology-page-design.md`).
 
