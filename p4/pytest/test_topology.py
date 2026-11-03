@@ -149,10 +149,9 @@ class TestTopologyScan:
             for link in router.get("links", [])
             if link["lq_in"] > 0
         }
-        if scan["peer_state"] == "router":
-            own = next(r["router_id"] for r in routers.values() if r["this_device"])
-            others = [rid for rid in routers if rid != own]
-            assert any(frozenset((own, rid)) in listed for rid in others)
+        own = next(r["router_id"] for r in routers.values() if r.get("this_device"))
+        others = [rid for rid in routers if rid != own]
+        assert any(frozenset((own, rid)) in listed for rid in others)
 
     def test_peer_appears_with_an_omr_address(self, scan):
         # On the rig after a finished scan: a peer that is a child appears under a router's children with at least
