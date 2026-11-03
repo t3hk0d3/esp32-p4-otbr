@@ -330,6 +330,17 @@ static cJSON *trial_json(const netcfg_config_t *cfg, uint32_t remaining_s)
     return item;
 }
 
+esp_err_t netcfg_set_dhcp_hostname(const char *name)
+{
+    ESP_RETURN_ON_FALSE(name && strlen(name) <= NETCFG_DHCP_NAME_MAX, ESP_ERR_INVALID_ARG, TAG, "bad DHCP name");
+    return netcfg_ifaces_set_dhcp_name(name);
+}
+
+netcfg_mode_t netcfg_running_mode(void)
+{
+    return netcfg_ifaces_mode();
+}
+
 bool netcfg_trial_pending(void)
 {
     if (!s.ready) {

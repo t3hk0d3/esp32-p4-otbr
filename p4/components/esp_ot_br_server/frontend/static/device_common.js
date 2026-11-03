@@ -447,6 +447,7 @@ function DeviceEnv() {
     now : function() { return Date.now(); },
     confirm : function(t) { return confirm(t); },
     reload : function() { location.reload(); },
+    navigate : function(url) { location.assign(url); },
     AbortController : AbortController,
     IntersectionObserver : typeof IntersectionObserver !== 'undefined' ? IntersectionObserver : null
   };

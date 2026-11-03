@@ -2,14 +2,14 @@
 
 Building and flashing: [building.md](building.md). Conventions (naming, formatting, errors, tests): `STYLEGUIDE.md`. Design:
 `docs/superpowers/specs/2026-10-30-esp32-p4-otbr-design.md` (the whole firmware), plus the later feature specs in
-`docs/superpowers/specs/` (device pages, Prometheus metrics) and the plans in `docs/superpowers/plans/` (among them the
+`docs/superpowers/specs/` (device pages, Prometheus metrics, network names) and the plans in `docs/superpowers/plans/` (among them the
 no-wires first install through ESP-Hosted).
 
 ## Repository layout
 
-- `p4/`: the ESP32-P4 firmware (components `br_core`, `device_api`, `netcfg`, `sniffer`, `diag`, `metrics`, `rcp_sync`,
-  `c6_hosted` (just enough of the ESP-Hosted protocol to send `c6_installer.bin` to a factory C6), vendored
-  `esp_ot_br_server` and `esp_br_http_ota`); `p4/pytest/` holds the on-board tests.
+- `p4/`: the ESP32-P4 firmware (components `br_core`, `device_api`, `netcfg`, `netnames` (mDNS and DHCP names),
+  `sniffer`, `diag`, `metrics`, `rcp_sync`, `c6_hosted` (just enough of the ESP-Hosted protocol to send
+  `c6_installer.bin` to a factory C6), vendored `esp_ot_br_server` and `esp_br_http_ota`); `p4/pytest/` holds the on-board tests.
 - `c6_updater/`: the small, frozen C6 program that receives the RCP firmware from the P4 and writes it to flash.
 - `c6_installer/`: the one-time C6 app sent through ESP-Hosted on a factory C6; it writes the `c6_updater` bootloader,
   partition table and updater, then restarts into the updater (`c6_installer.bin`).

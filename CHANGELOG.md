@@ -16,9 +16,14 @@ release's `versions.txt`.
   stand-in, not yet on an untouched factory C6. See `docs/first-install.md`, Path 1.
 - `docs/home-assistant.md`: adding the board to Home Assistant, moving it onto the preferred Thread network, phones and
   Matter, several boards, troubleshooting.
+- Network names: **mDNS** and **Hostname** sections on the Ethernet page and `GET`/`PUT /device/names` set the mDNS
+  hostname, the name Home Assistant shows (the `_meshcop._udp` instance, by default the hostname), an optional
+  `_http._tcp` advertisement of the web UI (off by default, not in split mode) and the DHCP client name. Applied live, stored
+  across reboots and updates. The page shows when an mDNS conflict renamed the board. See `docs/networking.md`.
 
 ### Changed
 
+- The board's DHCP client name is `esp-otbr` instead of lwIP's `espressif`.
 - `POST /device/radio/firmware` refuses `c6_installer.bin` on a C6 that already runs the updater (400 `invalid_image`),
   before anything is erased.
 - `docs/first-install.md`: the jumper path is now Path 2 and the USB-UART path Path 3.

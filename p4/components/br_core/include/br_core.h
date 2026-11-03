@@ -36,14 +36,15 @@ typedef struct {
 void br_core_note_storage_init(esp_err_t storage_init_err);
 
 /**
- * Start mDNS with the hostname esp-otbr-<last 3 MAC bytes, lowercase hex>. Idempotent. Needs esp_netif_init() and
- * the default event loop. app_main calls it before anything slow so that the HTTP server can start right after.
+ * Start mDNS with `hostname` and the default service instance name `instance` (the names come from netnames). Idempotent;
+ * the names are kept for the retry br_core_start makes when this failed. Needs esp_netif_init() and the default event
+ * loop. app_main calls it before anything slow so that the HTTP server can start right after.
  */
-esp_err_t br_core_mdns_start(void);
+esp_err_t br_core_mdns_start(const char *hostname, const char *instance);
 
 /**
- * Boot the radio side (spec 5.3 steps 3 to 5): start mDNS with the hostname esp-otbr-<last 3 MAC bytes,
- * lowercase hex>, probe the installed RCP version (best effort, nothing is ever pushed at boot), reset the C6 into
+ * Boot the radio side (spec 5.3 steps 3 to 5): start mDNS (a retry, with the names
+ * br_core_mdns_start was given), probe the installed RCP version (best effort, nothing is ever pushed at boot), reset the C6 into
  * its RCP, start OpenThread with RADIO_MODE_SPI_RCP on core 0 and
  * arrange for the border router to start once `backbone` has an IPv6 address. The border router start
  * enables DHCPv6-PD and starts Thread when an active dataset is stored; otherwise Thread stays idle.

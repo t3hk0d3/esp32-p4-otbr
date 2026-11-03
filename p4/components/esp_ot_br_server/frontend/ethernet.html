@@ -18,7 +18,7 @@
         <div>
             <h1 class="page-title">Ethernet</h1>
             <p class="page-desc">How the board connects to your network: one port for everything, or management and Thread
-                traffic on separate VLANs of the same cable.</p>
+                traffic on separate VLANs of the same cable. And the names it uses on the network (mDNS and hostname).</p>
         </div>
     </div>
 
@@ -272,10 +272,76 @@
         </div>
         <div class="form-hint" id="netMsg" role="status" aria-live="polite"></div>
     </section>
+    <section id="namesSection" aria-labelledby="mdnsTitle">
+        <div class="section-head">
+            <h2 class="section-title" id="mdnsTitle">mDNS</h2>
+            <span class="chip chip-ok hidden" id="nm-announced">Announced</span>
+            <span class="chip chip-warn hidden" id="nm-renamed">Renamed</span>
+        </div>
+        <div class="card">
+            <p class="iface-role">How the board shows up in browsers, discovery apps and Home Assistant.</p>
+            <div class="disabled-banner hidden" id="nm-conflict" role="status"></div>
+            <div class="names-form">
+                <fieldset>
+                    <legend>Hostname</legend>
+                    <span class="input-suffix"><input type="text" id="nm-hostname" size="22" autocomplete="off"
+                        spellcheck="false" aria-label="mDNS hostname"><span class="suffix">.local</span></span>
+                    <p class="form-hint" id="nm-hostname-hint"></p>
+                    <p class="form-hint hidden" id="nm-hostname-split">In split mode this name resolves on the Thread
+                        backbone only. Open this page by its management IP address.</p>
+                    <div id="nm-hostname-err" role="alert"></div>
+                </fieldset>
+                <fieldset>
+                    <legend>Name in Home Assistant</legend>
+                    <label class="check-row" for="nm-follows"><input type="checkbox" id="nm-follows" checked> Same as
+                        hostname</label>
+                    <input type="text" id="nm-ha" size="30" autocomplete="off" aria-label="Name in Home Assistant">
+                    <p class="form-hint">Up to 63 bytes. Thread adds a short code to the end, for example
+                        <span class="mono">#1A2B</span>.</p>
+                    <div id="nm-ha-err" role="alert"></div>
+                </fieldset>
+                <fieldset>
+                    <legend>Web UI</legend>
+                    <label class="check-row check-top" for="nm-http"><input type="checkbox" id="nm-http">
+                        <span>Advertise the web UI (<span class="mono">_http._tcp</span>)<br><span class="form-hint">Lets
+                            network browsers and discovery apps find this page.</span></span></label>
+                    <p class="form-hint hidden" id="nm-http-split">Not available in split mode: the web UI is on the
+                        management VLAN, and mDNS runs only on the Thread backbone.</p>
+                </fieldset>
+                <div class="actions-end">
+                    <button class="btn btn-outline" id="nm-discard" type="button" disabled>Discard</button>
+                    <button class="btn btn-primary" id="nm-save" type="button" disabled>Save</button>
+                </div>
+                <div class="form-hint" id="nm-msg" role="status" aria-live="polite"></div>
+            </div>
+        </div>
+    </section>
+
+    <section id="hostnameSection" aria-labelledby="hostnameTitle">
+        <h2 class="section-title" id="hostnameTitle">Hostname</h2>
+        <div class="card">
+            <p class="iface-role">The name the board gives your router when it asks for an address (DHCP).</p>
+            <div class="names-form">
+                <fieldset>
+                    <legend>DHCP client name</legend>
+                    <input type="text" id="hn-dhcp" size="22" autocomplete="off" spellcheck="false"
+                        aria-label="DHCP client name">
+                    <p class="form-hint" id="hn-dhcp-hint"></p>
+                    <div id="hn-dhcp-err" role="alert"></div>
+                </fieldset>
+                <div class="actions-end">
+                    <button class="btn btn-outline" id="hn-discard" type="button" disabled>Discard</button>
+                    <button class="btn btn-primary" id="hn-save" type="button" disabled>Save</button>
+                </div>
+                <div class="form-hint" id="hn-msg" role="status" aria-live="polite"></div>
+            </div>
+        </div>
+    </section>
 </div>
 <div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
 <script src="/static/api.js"></script>
 <script src="/static/device_common.js"></script>
 <script src="/static/ethernet.js"></script>
+<script src="/static/names.js"></script>
 </body>
 </html>

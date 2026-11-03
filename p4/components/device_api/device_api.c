@@ -35,6 +35,8 @@
 #include "metrics.h"
 #include "esp_br_http_ota.h"
 #include "netcfg.h"
+#include "names_json.h"
+#include "netnames.h"
 #include "rcp_sync.h"
 #include "sniffer.h"
 
@@ -1123,6 +1125,68 @@ static esp_err_t network_confirm_post_handler(httpd_req_t *req)
     return send_json(req, "{\"status\":\"confirmed\"}");
 }
 
+/* ---- /device/names ---- */
+
+#define NAMES_BODY_MAX 512
+#define NAMES_JSON_MAX 1024
+
+static esp_err_t send_names(httpd_req_t *req, const netnames_result_t *res)
+{
+    netnames_t names;
+    char body[NAMES_JSON_MAX];
+
+    netnames_get(&names);
+    if (device_api_names_json(body, sizeof(body), &names, netcfg_running_mode() == NETCFG_MODE_SPLIT, res) < 0) {
+        return send_error(req, 500, "internal", "the names do not fit the reply", false);
+    }
+    return send_json(req, body);
+}
+
+static esp_err_t names_get_handler(httpd_req_t *req)
+{
+    return send_names(req, NULL);
+}
+
+static esp_err_t names_put_handler(httpd_req_t *req)
+{
+    const int length_status = device_api_length_check(req->content_len, NAMES_BODY_MAX);
+
+    if (length_status != 0) {
+        return send_error(req, length_status, length_status == 413 ? "payload_too_large" : "length_required",
+                          "send the names as a JSON body", true);
+    }
+    char *body = read_small_body(req);
+
+    if (!body) {
+        return send_error(req, 400, "invalid_request", "the body could not be read", true);
+    }
+    netnames_settings_t settings;
+    netnames_result_t res = {0};
+    const char *field = NULL;
+    esp_err_t err = device_api_names_parse(body, &settings, &field);
+
+    free(body);
+    if (err != ESP_OK) {
+        res.field = field;
+        res.reason = "missing, of the wrong type or longer than 63 bytes";
+    } else {
+        err = netnames_set(&settings, &res);
+    }
+    if (err == ESP_ERR_INVALID_ARG) {
+        char error[256];
+
+        if (device_api_names_error_json(error, sizeof(error), res.field, res.reason) < 0) {
+            return send_error(req, 400, "invalid_config", res.field, false);
+        }
+        httpd_resp_set_status(req, device_api_status_line(400));
+        return send_json(req, error);
+    }
+    if (err != ESP_OK) {
+        return send_error(req, 500, "storage_failed", "the names could not be stored", false);
+    }
+    return send_names(req, &res);
+}
+
 /* ---- registration ---- */
 
 typedef struct {
@@ -1163,6 +1227,8 @@ esp_err_t device_api_register(httpd_handle_t server)
         {"/device/network", HTTP_GET, network_get_handler},
         {"/device/network", HTTP_PUT, network_put_handler},
         {"/device/network/confirm", HTTP_POST, network_confirm_post_handler},
+        {"/device/names", HTTP_GET, names_get_handler},
+        {"/device/names", HTTP_PUT, names_put_handler},
         {"/metrics", HTTP_GET, metrics_get_handler},
     };
 
