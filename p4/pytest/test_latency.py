@@ -390,7 +390,7 @@ class TestLatencyIsolation:
             pytest.param(
                 load,
                 marks=pytest.mark.xfail(
-                    load in ("topology_requests", "device_topology_requests"),
+                    load == "topology_requests",
                     strict=False,
                     reason="V3 measurement: a topology request sends a Thread Diagnostic Get to the mesh; the added p99 "
                     "(100-125 ms) comes from OpenThread's own processing and radio time, not from the REST handler "

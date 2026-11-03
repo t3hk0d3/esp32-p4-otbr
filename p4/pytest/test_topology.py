@@ -60,7 +60,12 @@ def wait_for_mode(base_url, mode, timeout):
     deadline = time.monotonic() + timeout
     current = None
     while time.monotonic() < deadline:
-        current = requests.get(f"{base_url}/device/status", timeout=10).json()["mode"]
+        try:
+            current = requests.get(f"{base_url}/device/status", timeout=10).json()[
+                "mode"
+            ]
+        except (requests.RequestException, ValueError):
+            current = None
         if current == mode:
             return
         time.sleep(0.5)
@@ -83,6 +88,10 @@ def scan(dut, peer, thread_peer_address, base_url):  # noqa: F811  (fixture argu
     router_ids = board_router_ids(dut)
     state = run_scan(base_url)
     assert state["state"] == "done", state
+    after = peer.command("state")[-1]
+    if after != peer_state:
+        # A child can promote to router during the scan: the result may or may not show the new role.
+        pytest.skip(f"the peer changed role during the scan ({peer_state} -> {after})")
     return {
         "result": state["result"],
         "peer_state": peer_state,
@@ -127,6 +136,8 @@ class TestTopologyScan:
     def test_router_peer_is_linked_to_the_board(self, scan):
         # On the rig after a finished scan with a router peer: one of the two lists the other with lq_in > 0 (the
         # page draws a link only then). With a child peer there is no second router and nothing to check.
+        if scan["peer_state"] != "router":
+            pytest.skip("the peer is a child: there is no second router to link")
         routers = {r["router_id"]: r for r in scan["result"]["routers"]}
         listed = {
             frozenset((rid, link["router_id"]))
@@ -163,7 +174,9 @@ class TestTopologyScan:
             assert len(routers) == 1
             assert any(in_prefix(a, omr) for a in routers[0]["addresses"])
 
-    def test_post_during_a_running_scan_returns_202(self, base_url, thread_peer_address):
+    def test_post_during_a_running_scan_returns_202(
+        self, base_url, thread_peer_address
+    ):
         # On POST while a scan runs: returns 202 and joins the running scan (no second scan, no error).
         first = start_scan(base_url)
         assert first.status_code == requests.codes.accepted, first.text
@@ -182,6 +195,7 @@ class TestTopologyScan:
         state = read_scan(base_url)
         while state["state"] == "running" and "progress" not in state:
             assert time.monotonic() < deadline
+            time.sleep(POLL_INTERVAL_S / 5)
             state = read_scan(base_url)
         if state["state"] == "running":
             assert state["progress"]["queried"] <= max(state["progress"]["routers"], 0)
@@ -191,8 +205,9 @@ class TestTopologyScan:
 
     def test_post_in_sniffer_mode_returns_409(self, base_url):
         # On SNIFFER: returns 409 busy with detail `mode SNIFFER`.
-        stream = start_capture(base_url)
+        stream = None
         try:
+            stream = start_capture(base_url)
             response = start_scan(base_url)
             assert response.status_code == requests.codes.conflict, response.text
             body = response.json()
@@ -200,4 +215,4 @@ class TestTopologyScan:
             assert body["detail"] == "mode SNIFFER"
         finally:
             stop_capture(base_url, stream)
-        wait_for_mode(base_url, "BR_RUNNING", BR_RUNNING_WAIT_S)
+            wait_for_mode(base_url, "BR_RUNNING", BR_RUNNING_WAIT_S)
