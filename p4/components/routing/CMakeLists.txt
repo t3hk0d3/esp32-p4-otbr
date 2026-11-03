@@ -1,4 +1,4 @@
-set(pure_srcs "settings.c" "announce.c" "bgp_msg.c" "bgp_fsm.c" "ripng.c" "publisher.c")
+set(pure_srcs "settings.c" "announce.c" "bgp_msg.c" "bgp_fsm.c" "ripng.c" "publisher.c" "engine.c")
 
 if(IDF_TARGET STREQUAL "linux")
     # Host tests cover the pure files only.
