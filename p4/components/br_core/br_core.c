@@ -1177,6 +1177,11 @@ static esp_err_t run_radio_job(const rcp_fw_source_t *source, char *err_detail, 
     return err;
 }
 
+bool br_core_radio_job_running(void)
+{
+    return atomic_load(&s_core.push_busy);
+}
+
 esp_err_t br_core_push_radio_firmware(const rcp_fw_source_t *source, char *err_detail, size_t err_cap)
 {
     if (err_detail && err_cap > 0) {

@@ -86,6 +86,12 @@ bool br_core_ot_session_begin(void);
 void br_core_ot_session_end(void);
 
 /**
+ * True while a radio push or ROM recovery runs. OpenThread may still be running in its drain window, so a caller that
+ * cannot open a session must not touch OpenThread state at all, not even without the lock.
+ */
+bool br_core_radio_job_running(void);
+
+/**
  * BR_RUNNING to SNIFFER (spec 5.4): Thread stops, the OpenThread netif goes down (Ethernet stays up), the raw link
  * receives promiscuously on `channel`. `receive_cb` runs in the OpenThread task for every frame.
  * ESP_ERR_INVALID_STATE unless BR_RUNNING (also while a firmware push has taken OpenThread over), ESP_ERR_INVALID_ARG unless 11..26 and `receive_cb` is not NULL (nothing changes then). If the raw link cannot be enabled,
