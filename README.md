@@ -23,6 +23,13 @@ Get the board from [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.
   advertising. One cable carries power and data.
 - **Updates over the network.** The firmware and the web UI update together with automatic rollback, and the radio
   firmware updates separately, all from the browser.
+- **Routes the mesh without prefix delegation.** No DHCPv6-PD from your ISP or router? Pick your own OMR prefix (a GUA
+  /64 from your space, or the self-generated ULA) and announce it to your core router over **BGP** (iBGP or eBGP, up to
+  2 peers) or **RIPng**, so hosts on other subnets reach Thread devices. Set live on the Routing page, no reboot.
+- **Joins border routers over Ethernet.** TREL (Thread over Ethernet) links border routers of the same Thread network
+  over Ethernet, so radio islands in different rooms or floors become one mesh and traffic can route around weak radio
+  hops. Works with any TREL-capable border router on the same Ethernet link (the Thread backbone VLAN in split mode). On
+  by default, switched live on the Ethernet page.
 - **Built for your network.** An optional VLAN split mode puts management and the Thread backbone on separate VLANs,
   and confirm-or-revert means a bad network setting can't lock you out.
 - **Sees what is on the air.** Sniffer mode streams 802.15.4 traffic as pcap straight into Wireshark.
@@ -44,6 +51,7 @@ down, the others keep the network reachable.
 | Border router keeps running when the Home Assistant host reboots or the add-on updates | ✅ yes | ❌ no | ❌ no |
 | Network setup | ✅ its own, on any VLAN; split mode keeps management and the Thread backbone on separate VLANs | ❌ the Home Assistant host's; another VLAN means reconfiguring the host | ❌ the Home Assistant host's; another VLAN means reconfiguring the host |
 | Radio placement | ✅ anywhere with Ethernet | ❌ at the Home Assistant host, on a USB extension cable | ✅ anywhere with Ethernet |
+| Routing to the mesh without DHCPv6-PD | ✅ custom OMR prefix announced over BGP or RIPng | ❌ PD, or a static route on your router | ❌ PD, or a static route on your router |
 | Link between border router and radio | ✅ on-board SPI | ✅ USB serial (passthrough needed in a VM) | ❌ spinel over TCP, sensitive to network delay |
 | Packet capture, radio recovery, diagnostics | ✅ built in | ❌ separate tools | ❌ separate tools |
 | Runs without a Home Assistant host | ✅ yes | ❌ no | ❌ no |
@@ -87,7 +95,7 @@ jumper, or a USB-UART adapter on the C6 header.
 ## Documentation
 
 Everything is in [`docs/`](docs/README.md): [Home Assistant](docs/home-assistant.md), [building](docs/building.md), [updates](docs/updates.md),
-[API and web UI](docs/api.md), [networking and VLANs](docs/networking.md), [sniffer](docs/sniffer.md),
+[API and web UI](docs/api.md), [networking, VLANs, TREL and mesh routing](docs/networking.md), [sniffer](docs/sniffer.md),
 [maintenance jumper](docs/maintenance-jumper.md), [diagnostics](docs/diagnostics.md), [Prometheus metrics](docs/metrics.md),
 [troubleshooting and limitations](docs/troubleshooting.md) and [development](docs/development.md). Run `make help`
 to list the targets for building, flashing, updating and testing.
