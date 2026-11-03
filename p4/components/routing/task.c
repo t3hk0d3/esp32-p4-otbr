@@ -38,7 +38,12 @@ static const char *TAG = "routing";
 #define OT_LOCK_POLL_MS 10   /* a busy lock skips that state read (as the metrics collector does) */
 #define OT_LOCK_APPLY_MS 100 /* settings changes and validation wait a little longer; a timeout is retried */
 #define WAKE_MAX_MS 100      /* how long a new setting can wait in the mailbox */
-#define MAX_CONNS (2 * ROUTING_MAX_PEERS)
+#define LIVE_CONNS (2 * ROUTING_MAX_PEERS)              /* a current and a pending connection per peer */
+#define MAX_CONNS (LIVE_CONNS + ROUTING_MAX_PEERS)      /* plus connections closing after a NOTIFICATION */
+#define LINGER_MS 1000 /* how long a connection closing after a NOTIFICATION waits for the peer's FIN */
+#define DRAIN_CHUNK 256
+#define DRAIN_READS 8
+#define STATE_RETRY_MS 100 /* a skipped state read is retried this soon, so withdrawal stays within 1 s */
 #define LISTEN_BACKLOG 2
 #define RIPNG_RX_MAX 1500
 #define RIPNG_RX_PER_WAKE 16
@@ -54,19 +59,27 @@ typedef struct {
 typedef struct {
     int fd; /**< -1 unused */
     bool connecting;
+    bool notified;  /**< the last message sent was a NOTIFICATION: close gracefully */
+    bool lingering; /**< closed by the engine, write side shut, waiting for the peer's FIN until linger_until */
+    uint32_t linger_until;
 } conn_slot_t;
 
 static routing_engine_t s_engine;
 static bool s_started;
 static QueueHandle_t s_mailbox;   /* one routing_settings_t, the latest wins */
-static SemaphoreHandle_t s_mutex; /* s_settings, s_status, s_view */
+static SemaphoreHandle_t s_mutex; /* s_settings, s_settings_gen, s_publisher_ready, s_status, s_view */
 static routing_settings_t s_settings; /* latest stored */
+static uint32_t s_settings_gen;       /* bumped by every routing_apply */
 static routing_status_t s_status;
 static routing_metrics_view_t s_view;
 
 /* only under the OpenThread lock */
 static routing_publisher_t s_publisher;
-static volatile bool s_publisher_ready;
+/*
+ * Set by the border-router-up hook once it applied the latest settings, with both the OpenThread lock and s_mutex
+ * held: readers take either one.
+ */
+static bool s_publisher_ready;
 
 /* routing task only */
 static int s_listen_fd = -1;
@@ -235,19 +248,42 @@ static conn_slot_t *conn_find(int fd)
     return NULL;
 }
 
+static void conn_release(conn_slot_t *slot)
+{
+    close(slot->fd);
+    memset(slot, 0, sizeof(*slot));
+    slot->fd = -1;
+}
+
+/* A free slot; when only closing connections hold the rest, the one closest to its deadline is closed for it. */
 static conn_slot_t *conn_free_slot(void)
 {
+    conn_slot_t *oldest = NULL;
+
     for (int i = 0; i < MAX_CONNS; i++) {
         if (s_conns[i].fd < 0) {
             return &s_conns[i];
         }
+        if (s_conns[i].lingering &&
+                (!oldest || (int32_t)(s_conns[i].linger_until - oldest->linger_until) < 0)) {
+            oldest = &s_conns[i];
+        }
     }
-    return NULL;
+    if (oldest) {
+        conn_release(oldest);
+    }
+    return oldest;
 }
 
+/* Room for one more connection the engine owns. */
 static bool conn_room(void)
 {
-    return conn_free_slot() != NULL;
+    int live = 0;
+
+    for (int i = 0; i < MAX_CONNS; i++) {
+        live += s_conns[i].fd >= 0 && !s_conns[i].lingering;
+    }
+    return live < LIVE_CONNS;
 }
 
 /* Callers checked conn_room(). */
@@ -256,8 +292,36 @@ static void conn_add(int fd, bool connecting)
     conn_slot_t *slot = conn_free_slot();
 
     if (slot) {
+        memset(slot, 0, sizeof(*slot));
         slot->fd = fd;
         slot->connecting = connecting;
+    }
+}
+
+/* Reads and discards what the peer sent; true when it closed (EOF) or the connection failed. */
+static bool conn_drain(int fd)
+{
+    static uint8_t sink[DRAIN_CHUNK];
+
+    for (int i = 0; i < DRAIN_READS; i++) {
+        ssize_t n = recv(fd, sink, sizeof(sink), MSG_DONTWAIT);
+        if (n == 0) {
+            return true;
+        }
+        if (n < 0) {
+            return errno != EAGAIN && errno != EWOULDBLOCK;
+        }
+    }
+    return false;
+}
+
+/* Closes the closing connections whose peer closed or whose deadline passed. */
+static void conn_linger_expire(uint32_t now)
+{
+    for (int i = 0; i < MAX_CONNS; i++) {
+        if (s_conns[i].lingering && (int32_t)(now - s_conns[i].linger_until) >= 0) {
+            conn_release(&s_conns[i]);
+        }
     }
 }
 
@@ -297,18 +361,37 @@ static int io_tcp_send(void *ctx, int h, const uint8_t *buf, size_t len)
 {
     /* BGP messages are small next to the send buffer: a short write means the peer stopped reading */
     ssize_t n = send(h, buf, len, 0);
+    conn_slot_t *slot = conn_find(h);
 
-    return n == (ssize_t)len ? 0 : -1;
+    if (n != (ssize_t)len) {
+        return -1;
+    }
+    if (slot) {
+        slot->notified = len >= ROUTING_BGP_HDR_LEN && buf[18] == ROUTING_BGP_MSG_NOTIFICATION;
+    }
+    return 0;
 }
 
+/*
+ * After a NOTIFICATION, close() with unread received data would make lwIP send RST and drop the queued NOTIFICATION
+ * (tcp_close_shutdown). So: drain what arrived, shut the write side (the NOTIFICATION goes out, then FIN), and close
+ * once the peer closes or LINGER_MS has passed. The slot stays reserved until then.
+ */
 static void io_tcp_close(void *ctx, int h)
 {
     conn_slot_t *slot = conn_find(h);
 
-    if (slot) {
-        slot->fd = -1;
+    if (!slot) {
+        close(h);
+        return;
     }
-    close(h);
+    if (!slot->notified || slot->connecting || conn_drain(h)) {
+        conn_release(slot);
+        return;
+    }
+    shutdown(h, SHUT_WR);
+    slot->lingering = true;
+    slot->linger_until = now_ms() + LINGER_MS;
 }
 
 static bool io_bgp_listen(void *ctx, bool on)
@@ -420,8 +503,12 @@ static int io_ripng_send(void *ctx, const uint8_t *dst, uint16_t port, const uin
 
 static bool io_publisher_apply(void *ctx, const routing_settings_t *s)
 {
-    if (!s_publisher_ready) {
-        return true; /* routing_on_border_router_up applies the latest settings */
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    bool ready = s_publisher_ready;
+    xSemaphoreGive(s_mutex);
+    if (!ready) {
+        /* the hook has not finished: it applies s_settings and re-reads them if a PUT changed them meanwhile */
+        return true;
     }
     if (br_core_get_mode() != BR_MODE_BR_RUNNING ||
             !esp_openthread_lock_acquire(pdMS_TO_TICKS(OT_LOCK_APPLY_MS))) {
@@ -543,11 +630,25 @@ static void finish_connect(conn_slot_t *slot, uint32_t now)
     socklen_t len = sizeof(err);
     int fd = slot->fd;
 
+    struct sockaddr_in6 local;
+    socklen_t local_len = sizeof(local);
+    backbone_t bb;
+
     if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) != 0) {
         err = errno;
     }
     slot->connecting = false;
-    routing_engine_tcp_connected(&s_engine, fd, err == 0, err == 0 ? NULL : errno_text(err), now);
+    if (err != 0) {
+        routing_engine_tcp_connected(&s_engine, fd, false, errno_text(err), now);
+        return;
+    }
+    /* second guard next to SO_BINDTODEVICE: the connection must have left from a backbone address */
+    if (!get_backbone(&bb) || getsockname(fd, (struct sockaddr *)&local, &local_len) != 0 ||
+            !is_backbone_address(&bb, (const uint8_t *)&local.sin6_addr)) {
+        routing_engine_tcp_connected(&s_engine, fd, false, "not on the backbone", now);
+        return;
+    }
+    routing_engine_tcp_connected(&s_engine, fd, true, NULL, now);
 }
 
 static void receive_tcp(int fd, uint32_t now)
@@ -618,6 +719,7 @@ static void wait_sockets(uint32_t timeout_ms)
     conn_slot_t snapshot[MAX_CONNS];
     struct timeval tv = {.tv_sec = 0, .tv_usec = (suseconds_t)timeout_ms * 1000};
 
+    conn_linger_expire(now_ms());
     FD_ZERO(&rd);
     FD_ZERO(&wr);
     if (s_listen_fd >= 0) {
@@ -650,10 +752,14 @@ static void wait_sockets(uint32_t timeout_ms)
         int fd = snapshot[i].fd;
         conn_slot_t *slot = fd >= 0 ? conn_find(fd) : NULL;
         /* the engine may have closed it (or a new one took the number) meanwhile */
-        if (!slot || slot->connecting != snapshot[i].connecting) {
+        if (!slot || slot->connecting != snapshot[i].connecting || slot->lingering != snapshot[i].lingering) {
             continue;
         }
-        if (slot->connecting && FD_ISSET(fd, &wr)) {
+        if (slot->lingering) {
+            if (FD_ISSET(fd, &rd) && conn_drain(fd)) {
+                conn_release(slot);
+            }
+        } else if (slot->connecting && FD_ISSET(fd, &wr)) {
             finish_connect(slot, now_ms());
         } else if (!slot->connecting && FD_ISSET(fd, &rd)) {
             receive_tcp(fd, now_ms());
@@ -712,8 +818,8 @@ static void routing_task(void *arg)
         }
         uint32_t now = now_ms();
         if (reached(now, next_state)) {
-            poll_state(now); /* a busy OpenThread lock skips this read; the next is 500 ms later */
-            next_state = now + STATE_PERIOD_MS;
+            /* a busy OpenThread lock skips the read: retried after 100 ms, so withdrawal stays within 1 s */
+            next_state = now + (poll_state(now) ? STATE_PERIOD_MS : STATE_RETRY_MS);
         }
         now = now_ms();
         routing_engine_tick(&s_engine, now);
@@ -777,17 +883,36 @@ void routing_on_border_router_up(otInstance *instance)
     routing_settings_t s;
 
     (void)instance; /* the ops use esp_openthread_get_instance() */
-    if (s_mutex) {
-        xSemaphoreTake(s_mutex, portMAX_DELAY);
-        s = s_settings;
-        xSemaphoreGive(s_mutex);
-    } else if (routing_settings_load(&s) != ESP_OK) {
-        ESP_LOGW(TAG, "border router up before routing_start, stored settings unavailable: using the defaults");
-    }
     /* the publisher learns the ULA before the first apply sets PD or a custom OMR config (publisher.h) */
     routing_publisher_init(&s_publisher, &routing_ot_ops_openthread);
-    routing_publisher_apply(&s_publisher, &s);
-    s_publisher_ready = true;
+    if (!s_mutex) {
+        if (routing_settings_load(&s) != ESP_OK) {
+            ESP_LOGW(TAG, "border router up before routing_start, stored settings unavailable: using the defaults");
+        }
+        routing_publisher_apply(&s_publisher, &s);
+        s_publisher_ready = true;
+        return;
+    }
+    /*
+     * Until s_publisher_ready is set the task leaves applying to this hook, so a PUT stored meanwhile (s_settings_gen
+     * moved) is applied here as well before the hook hands over.
+     */
+    for (;;) {
+        xSemaphoreTake(s_mutex, portMAX_DELAY);
+        s = s_settings;
+        uint32_t gen = s_settings_gen;
+        xSemaphoreGive(s_mutex);
+        routing_publisher_apply(&s_publisher, &s);
+        xSemaphoreTake(s_mutex, portMAX_DELAY);
+        bool current = gen == s_settings_gen;
+        if (current) {
+            s_publisher_ready = true;
+        }
+        xSemaphoreGive(s_mutex);
+        if (current) {
+            return;
+        }
+    }
 }
 
 esp_err_t routing_apply(const routing_settings_t *s)
@@ -796,6 +921,7 @@ esp_err_t routing_apply(const routing_settings_t *s)
     ESP_RETURN_ON_ERROR(routing_settings_store(s), TAG, "storing the settings failed");
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     s_settings = *s;
+    s_settings_gen++;
     xSemaphoreGive(s_mutex);
     xQueueOverwrite(s_mailbox, s);
     return ESP_OK;

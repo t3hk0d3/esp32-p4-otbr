@@ -106,6 +106,7 @@ static void send_diff(routing_engine_t *e, routing_engine_peer_t *p, followup_t 
     send_current(e, p, routing_bgp_encode_update(e->tx, sizeof(e->tx), ibgp, e->settings.local_asn,
                                                  &e->state.nexthop, &added), f);
     p->sent = e->announced;
+    p->sent_nh = e->state.nexthop;
 }
 
 static void execute(routing_engine_t *e, routing_engine_peer_t *p, const routing_bgp_action_t *a, followup_t *f)
@@ -141,6 +142,7 @@ static void execute(routing_engine_t *e, routing_engine_peer_t *p, const routing
         send_current(e, p, routing_bgp_encode_update(e->tx, sizeof(e->tx), ibgp, e->settings.local_asn,
                                                      &e->state.nexthop, &e->announced), f);
         p->sent = e->announced;
+        p->sent_nh = e->state.nexthop;
         break;
     case ROUTING_BGP_ACT_SEND_DIFF:
         send_diff(e, p, f);
@@ -248,6 +250,7 @@ static void peer_reinit(routing_engine_t *e, routing_engine_peer_t *p)
     close_conn(e, &p->conn[1]);
     p->cur = 0;
     memset(&p->sent, 0, sizeof(p->sent));
+    memset(&p->sent_nh, 0, sizeof(p->sent_nh));
     routing_bgp_fsm_init(&p->fsm, &cfg);
 }
 
@@ -552,6 +555,42 @@ static void announce_update(routing_engine_t *e, uint32_t now)
     }
 }
 
+static bool nexthop_equal(const routing_bgp_nexthop_t *a, const routing_bgp_nexthop_t *b)
+{
+    return a->has_global == b->has_global && (!a->has_global || memcmp(a->global, b->global, 16) == 0) &&
+           memcmp(a->link_local, b->link_local, 16) == 0;
+}
+
+/*
+ * The backbone next-hop changed (typically a global address appearing after the session came up on link-local
+ * alone): every Established session announces what it announced again with the new next-hop. No reset.
+ */
+static void nexthop_update(routing_engine_t *e, uint32_t now)
+{
+    if (!e->bgp_running) {
+        return;
+    }
+    for (int i = 0; i < ROUTING_MAX_PEERS; i++) {
+        routing_engine_peer_t *p = &e->peers[i];
+        if (!p->in_use || routing_bgp_fsm_state(&p->fsm) != ROUTING_BGP_ESTABLISHED ||
+                nexthop_equal(&p->sent_nh, &e->state.nexthop)) {
+            continue;
+        }
+        followup_t f = {.connect_failed = false, .why = NULL, .lost_h = -1};
+        bool ibgp = p->cfg.asn == e->settings.local_asn;
+        /* the codec returns 0 for an empty set: nothing was announced, nothing to correct */
+        send_current(e, p, routing_bgp_encode_update(e->tx, sizeof(e->tx), ibgp, e->settings.local_asn,
+                                                     &e->state.nexthop, &p->sent), &f);
+        p->sent_nh = e->state.nexthop;
+        if (f.lost_h >= 0 && cur(p)->h == f.lost_h) {
+            routing_bgp_event_t ev;
+            memset(&ev, 0, sizeof(ev));
+            ev.type = ROUTING_BGP_EV_CONN_LOST;
+            feed(e, p, &ev, now);
+        }
+    }
+}
+
 /* --- RIPng --- */
 
 static void ripng_multicast(routing_engine_t *e, const routing_ripng_rte_t *rtes, size_t n, uint32_t now)
@@ -706,6 +745,7 @@ void routing_engine_poll(routing_engine_t *e, const routing_engine_state_t *st, 
     e->state = *st;
     e->state_custom = e->settings.omr_prefix;
     e->have_state = true;
+    nexthop_update(e, now_ms); /* before the diff, so that added prefixes are not sent twice */
     announce_update(e, now_ms);
     ripng_sync(e, now_ms);
     if (e->publisher_dirty) {

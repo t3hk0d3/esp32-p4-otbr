@@ -603,6 +603,67 @@ TEST_CASE("Set shrinks: sends a withdrawal and no announcement", "[routing]")
     assert_sent(fake_io_send_on(h, 0), expected, routing_bgp_encode_withdraw(expected, sizeof(expected), &removed));
 }
 
+/* Established with the ULA announced while the backbone had only its link-local address; calls cleared. */
+static int established_link_local_only(void)
+{
+    routing_settings_t s = base_settings(ROUTING_METHOD_BGP);
+    routing_engine_state_t st = up_state();
+
+    st.nexthop.has_global = false;
+    memset(st.nexthop.global, 0, 16);
+    begin(&s);
+    routing_engine_poll(&s_e, &st, T0);
+    int h = establish(0, P1_ASN, T0);
+    fake_io_clear_calls();
+    return h;
+}
+
+TEST_CASE("Global address appears after Established: sends one UPDATE with the 32-byte next-hop", "[routing]")
+{
+    int h = established_link_local_only();
+    uint8_t expected[256];
+    routing_prefix_set_t set = set_of(&ULA, NULL);
+
+    poll_up(T0 + 500);
+    TEST_ASSERT_EQUAL(1, fake_io_sends_on(h));
+    assert_sent(fake_io_send_on(h, 0), expected, expected_update(expected, sizeof(expected), &set));
+    TEST_ASSERT_EQUAL(0, fake_io_closes(h));
+    poll_up(T0 + 1000);
+    TEST_ASSERT_EQUAL(1, fake_io_sends_on(h));
+}
+
+TEST_CASE("Global address disappears after Established: sends one UPDATE with the 16-byte next-hop", "[routing]")
+{
+    routing_settings_t s = base_settings(ROUTING_METHOD_BGP);
+    int h = bgp_established(&s);
+    uint8_t expected[256];
+    routing_prefix_set_t set = set_of(&ULA, NULL);
+    routing_engine_state_t st = up_state();
+
+    st.nexthop.has_global = false;
+    memset(st.nexthop.global, 0, 16);
+    routing_engine_poll(&s_e, &st, T0 + 500);
+    TEST_ASSERT_EQUAL(1, fake_io_sends_on(h));
+    size_t len = routing_bgp_encode_update(expected, sizeof(expected), false, LOCAL_ASN, &st.nexthop, &set);
+    assert_sent(fake_io_send_on(h, 0), expected, len);
+    TEST_ASSERT_EQUAL(0, fake_io_closes(h));
+}
+
+TEST_CASE("Next-hop changes with nothing announced: sends nothing", "[routing]")
+{
+    routing_settings_t s = base_settings(ROUTING_METHOD_BGP);
+    routing_engine_state_t st = up_state();
+
+    s.announce_ula = false;
+    st.nexthop.has_global = false;
+    begin(&s);
+    routing_engine_poll(&s_e, &st, T0);
+    int h = establish(0, P1_ASN, T0);
+    fake_io_clear_calls();
+    poll_up(T0 + 500);
+    TEST_ASSERT_EQUAL(0, fake_io_sends_on(h));
+}
+
 TEST_CASE("Keepalive timer: sends KEEPALIVE a third of the hold time later", "[routing]")
 {
     routing_settings_t s = base_settings(ROUTING_METHOD_BGP);

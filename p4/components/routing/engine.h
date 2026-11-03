@@ -109,7 +109,8 @@ typedef struct {
     routing_bgp_fsm_t fsm;
     routing_engine_conn_t conn[2]; /**< conn[cur] is the current connection, conn[cur ^ 1] the pending incoming one */
     uint8_t cur;
-    routing_prefix_set_t sent; /**< what this session announced last */
+    routing_prefix_set_t sent;    /**< what this session announced last */
+    routing_bgp_nexthop_t sent_nh; /**< the next-hop it announced them with */
 } routing_engine_peer_t;
 
 /** Engine state; the caller owns the storage (about 22 KB). Fields are private to engine.c. */
