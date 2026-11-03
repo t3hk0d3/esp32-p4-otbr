@@ -195,8 +195,7 @@ this board's weight is strictly higher than the current leader's, so equal weigh
 and `detail` `weight not higher`. Traffic over the mesh pauses briefly while the role changes; the Thread dataset stays
 the same.
 
-Afterwards, only the weight is stored, not the role. If this board restarts or is offline for more than about 2 minutes,
-another router may take over; press the button again to take the role back. If the weight read times out right after a
+Afterwards, only the weight is stored, not the role. If this board is offline for more than about 2 minutes (a quick restart keeps the role), another router takes over and keeps it, even with a lower weight. Press Become leader again then. If the weight read times out right after a
 started take-over, the reply carries `"partial": true`.
 
 In Home Assistant, add each board as its own OpenThread Border Router integration entry. Running several of these boards

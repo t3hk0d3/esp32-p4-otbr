@@ -68,7 +68,7 @@
                 <li><strong>Traffic pauses briefly.</strong> While routers rejoin, mesh traffic can drop for a few seconds. Devices keep their addresses, and nothing needs to be paired again.</li>
                 <li><strong>Nothing else changes.</strong> The network settings (dataset) stay the same, and <span id="ld-name-2">the current leader</span> keeps working as a border router.</li>
             </ol>
-            <p><strong style="color:var(--text)">Afterwards:</strong> the role is not saved, only the weight is. If this board restarts or is offline for more than about 2 minutes, another router takes over and keeps the role, even with a lower weight. Press Become leader again then. The higher weight only decides who wins when partitions merge, for example after the leader is lost.</p>
+            <p><strong style="color:var(--text)">Afterwards:</strong> the role is not saved, only the weight is. If this board is offline for more than about 2 minutes (a quick restart keeps the role), another router takes over and keeps it, even with a lower weight. Press Become leader again then. The higher weight only decides who wins when partitions merge, for example after the leader is lost.</p>
             <p><strong style="color:var(--text)">Why it can be greyed out:</strong> OpenThread only lets a router take over from a leader with a strictly lower weight, so a misconfigured board can't steal the role back and forth.</p>
         </details>
     </div>

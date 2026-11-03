@@ -99,8 +99,7 @@ weight), `leaderData.leaderRouterId` and `leaderData.partitionId`. `leaderData` 
   2. The other routers, the old leader included, join it; their end devices follow.
   3. Mesh traffic can drop for a few seconds; addresses and pairings don't change.
   4. The dataset doesn't change; the old leader keeps working as a border router.
-  Afterwards: only the weight is stored. If this board restarts or is offline for more than about 2 minutes, another
-  router takes over and keeps the role, so press the button again. Why greyed out: OpenThread only takes over from a
+  Afterwards: only the weight is stored. If this board is offline for more than about 2 minutes (a quick restart keeps the role), another router takes over and keeps it, even with a lower weight. Press Become leader again then. Why greyed out: OpenThread only takes over from a
   leader with a strictly lower weight.
   When OpenThread is not running the card shows the stored adjustment, keeps Save working, and hides the comparison.
 - Docs: the two rows (`GET`, `PUT` with both keys) in the Device API table of `docs/api.md`; a subsection "Choosing the leader" under "Adding more
@@ -112,7 +111,7 @@ weight), `leaderData.leaderRouterId` and `leaderData.partitionId`. `leaderData` 
 - Frontend tests in `tools/tests/` with the existing fake-DOM harness: button state and hint for lower / equal /
   higher / leader / unsaved / not attached / OpenThread not running, Save enablement, the leader name.
 - The on-board test is written in the plan but run in the batched hardware pass after review and fixes, not inside a
-  task. Until then the "Afterwards" text is provisional (section 6).
+  task. The hardware pass (2026-11-03) confirmed the "Afterwards" text (section 6).
 - On the board, with the Thread peer (ot_cli on the C6 devkit) as the other router: the peer forms the network and is
   leader with weight 65 (`leaderweight`); the board joins; take-over is refused (`weight not higher`); adjustment +1;
   take-over succeeds and the board becomes leader while the peer stays attached as a router; the adjustment survives a
@@ -120,9 +119,7 @@ weight), `leaderData.leaderRouterId` and `leaderData.partitionId`. `leaderData` 
 
 ## 6. Risks
 
-- What happens when this board, as leader, restarts quickly: OpenThread may resume the leader role on reattach instead
-  of joining the other partition. The "Afterwards" text says "about 2 minutes"; check it on the board and correct the
-  text if the behaviour differs.
+- Measured on the board (2026-11-03): a quick restart (~10 s down, `POST /device/reboot`) kept the leader role in the same partition; with Thread off for ~3 minutes the rest of the mesh kept the old partition for about 125 s, then a router with weight 65 took over in a new partition, and when this board (weight 66) rejoined it did not take the role back, because weights only count when partitions merge. The "Afterwards" copy was corrected accordingly.
 - ot-br-posix may set a higher weight on some builds (CCM border router: 72, stable power: +4). Up to 81 is reachable
   with +16; above that the button stays greyed out and the hint says so.
 - A take-over interrupts mesh traffic for a few seconds; the confirm dialog says so.
