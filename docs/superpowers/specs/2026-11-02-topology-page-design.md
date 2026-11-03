@@ -207,6 +207,44 @@ back with an empty address list. Only minimal (MTD) children register their addr
 - **The "Home network · Ethernet" box** must not overlap any node or node label. It takes the nearest free spot
   around the board, trying wider rings when the close ones are taken. The map grows if it must.
 
+### 3.5 Amendment 2026-11-03: findings from the code review
+
+**One network-diagnostics callback for everyone.** OpenThread's netdiag client keeps a single callback, and every
+`otThreadSendDiagnosticGet` replaces it. As a result, the scan's child step, the vendored `/topology` and the REST
+diagnostics take each other's answers. A new component, `netdiag_mux`, owns that slot:
+- **Sending:** every sender calls `netdiag_mux_send_get(dest, tlvs, count, cb, ctx, filter_peer)` instead of the
+  OpenThread call. It runs on the OpenThread task, or with the OpenThread lock held.
+- **Listeners:** the mux keeps one listener per callback function, with the latest context it was sent with. When
+  `filter_peer` is set and `dest` is unicast, the listener also keeps `dest`. The table holds at most 4 listeners.
+- **Answers** (no error, with a message) go to every listener that either has no peer filter or whose `dest` equals
+  the answer's peer address. A CoAP response comes from the address the request was sent to.
+- **Errors** (timeouts, no message) are dropped. Every current callback ignores them already.
+- **Who filters:**
+  - the vendored sends use `filter_peer = true`; multicast sends are unfiltered either way;
+  - the scan's child step uses `false`, because it matches peers itself.
+- **Bookkeeping:** this patches vendored code, so it gets a `PATCHES.md` entry.
+
+**Ending a scan never calls into OpenThread from a callback or without the lock.**
+- **A callback that finds the mode lost:** it fails the scan with `stopped` and does not call `otMeshDiagCancel`.
+  OpenThread's single mesh-diag slot keeps a new discover out (`OT_ERROR_BUSY`) until the abandoned one ends, as the
+  watchdog path already relies on.
+- **`mesh_scan_cancel`:**
+  - It cancels in OpenThread when it gets the lock within 100 ms.
+  - Otherwise it fails the scan with `stopped` anyway (scan mutex only), so a push, recovery or capture never runs
+    alongside a live scan.
+  - It returns `esp_err_t`: `ESP_OK`, or `ESP_ERR_TIMEOUT` when OpenThread could not be told.
+
+**Start results.**
+- `mesh_scan_start` returns `ESP_ERR_INVALID_STATE` only when a scan is already running. The endpoint maps that to
+  202, joining the scan.
+- When the mode is not `BR_RUNNING`, it returns `ESP_ERR_NOT_ALLOWED`, and the endpoint answers 409 `busy`,
+  `mode <MODE>`, with the mode read after the refusal.
+- `POST /device/topology` also answers 409 `busy` while a capture stream holds the pcap slot, with the slot's own
+  detail.
+
+**The page.** A `done` answer to the POST counts as a fresh load only when `age_s` is at most 5 s. An older one is
+shown as a saved result (amber pill), at its real time.
+
 ## 4. Page
 
 ### 4.1 Start and loading
