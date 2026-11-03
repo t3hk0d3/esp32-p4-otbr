@@ -38,6 +38,25 @@ int device_api_thread_json(char *buf, size_t cap, const device_api_thread_t *t)
     return w.overflow ? -1 : (int)w.len;
 }
 
+int device_api_thread_error_json(char *buf, size_t cap, const char *code, const char *detail, const device_api_thread_t *t)
+{
+    json_out_t w;
+
+    json_out_init(&w, buf, cap);
+    json_out_raw(&w, "{\"error\":");
+    json_out_str(&w, code);
+    json_out_raw(&w, ",\"detail\":");
+    json_out_str(&w, detail ? detail : "");
+    if (t && t->has_applied) {
+        json_out_raw(&w, ",\"" KEY_ADJUSTMENT "\":");
+        json_out_int(&w, t->adjustment);
+        json_out_raw(&w, ",\"applied\":");
+        json_out_bool(&w, t->applied);
+    }
+    json_out_raw(&w, "}");
+    return w.overflow ? -1 : (int)w.len;
+}
+
 void device_api_thread_refusal(br_core_leader_refusal_t refusal, int mode, int *status, const char **code, char *detail,
                                size_t cap)
 {
@@ -79,8 +98,9 @@ esp_err_t device_api_thread_parse(const char *body, device_api_thread_put_t *out
 
         if (adj) {
             // cJSON keeps one number type: accept any whole value, so 8.0 is 8 and 8.5 is not.
-            if (!cJSON_IsNumber(adj) || !(adj->valuedouble >= -1000 && adj->valuedouble <= 1000) ||
-                    (double)(int)adj->valuedouble != adj->valuedouble || !br_core_leader_adjustment_valid((int)adj->valuedouble)) {
+            // The range comes first on the double, so the cast to int is safe.
+            if (!cJSON_IsNumber(adj) || !(adj->valuedouble >= BR_CORE_LEADER_ADJ_MIN && adj->valuedouble <= BR_CORE_LEADER_ADJ_MAX) ||
+                    (double)(int)adj->valuedouble != adj->valuedouble) {
                 *field = KEY_ADJUSTMENT;
             } else {
                 put.has_adjustment = true;

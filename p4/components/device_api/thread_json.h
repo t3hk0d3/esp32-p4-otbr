@@ -40,6 +40,13 @@ typedef struct {
 int device_api_thread_json(char *buf, size_t cap, const device_api_thread_t *t);
 
 /**
+ * The error body `{"error":code,"detail":detail}` of a failed PUT. With `t` (non-NULL and has_applied: the body stored an
+ * adjustment first) it also carries "leader_weight_adjustment" (t->adjustment) and "applied" (t->applied). Returns its
+ * length, or -1 when `cap` is too small.
+ */
+int device_api_thread_error_json(char *buf, size_t cap, const char *code, const char *detail, const device_api_thread_t *t);
+
+/**
  * HTTP answer to a refused take-over. `mode` is a br_core_mode_t (BR_CORE_LEADER_NOT_RUNNING reports it as "mode <NAME>").
  * Writes the detail into `detail` (`cap` bytes).
  */

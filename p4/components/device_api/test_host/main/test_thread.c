@@ -152,6 +152,11 @@ TEST_CASE("Thread PUT adjustment 17: invalid, field leader_weight_adjustment", "
     expect_bad("{\"leader_weight_adjustment\":17}", "leader_weight_adjustment");
 }
 
+TEST_CASE("Thread PUT adjustment 1e30: invalid, field leader_weight_adjustment", "[device_api]")
+{
+    expect_bad("{\"leader_weight_adjustment\":1e30}", "leader_weight_adjustment");
+}
+
 TEST_CASE("Thread PUT adjustment -17: invalid, field leader_weight_adjustment", "[device_api]")
 {
     expect_bad("{\"leader_weight_adjustment\":-17}", "leader_weight_adjustment");
@@ -271,6 +276,63 @@ TEST_CASE("Thread JSON buffer too small: negative", "[device_api]")
     const device_api_thread_t t = {.adjustment = 8, .weight_known = true, .weight = 73};
 
     TEST_ASSERT_LESS_THAN(0, render(buf, sizeof(buf), &t));
+}
+
+/* ---- device_api_thread_error_json ---- */
+
+TEST_CASE("Thread error JSON without a stored adjustment: only error and detail", "[device_api]")
+{
+    char buf[256];
+
+    TEST_ASSERT_GREATER_THAN(0, device_api_thread_error_json(buf, sizeof(buf), "busy", "mode SNIFFER", NULL));
+    TEST_ASSERT_EQUAL_STRING("{\"error\":\"busy\",\"detail\":\"mode SNIFFER\"}", buf);
+}
+
+TEST_CASE("Thread error JSON with t but no has_applied: only error and detail", "[device_api]")
+{
+    char buf[256];
+    const device_api_thread_t t = {.adjustment = 3};
+
+    TEST_ASSERT_GREATER_THAN(0, device_api_thread_error_json(buf, sizeof(buf), "cannot_take_over", "weight not higher", &t));
+    TEST_ASSERT_NULL(strstr(buf, "applied"));
+    TEST_ASSERT_NULL(strstr(buf, "leader_weight_adjustment"));
+}
+
+TEST_CASE("Thread error JSON after a stored adjustment: adds adjustment and applied, no applied detail", "[device_api]")
+{
+    char buf[256];
+    const device_api_thread_t t = {.adjustment = -4, .has_applied = true, .applied = true, .detail = "ignored"};
+
+    TEST_ASSERT_GREATER_THAN(0, device_api_thread_error_json(buf, sizeof(buf), "cannot_take_over", "weight not higher", &t));
+    cJSON *json = cJSON_Parse(buf);
+
+    TEST_ASSERT_NOT_NULL(json);
+    TEST_ASSERT_EQUAL_STRING("cannot_take_over", cJSON_GetObjectItemCaseSensitive(json, "error")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("weight not higher", cJSON_GetObjectItemCaseSensitive(json, "detail")->valuestring);
+    TEST_ASSERT_EQUAL_INT(-4, cJSON_GetObjectItemCaseSensitive(json, "leader_weight_adjustment")->valueint);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json, "applied")));
+    TEST_ASSERT_NULL(strstr(buf, "ignored"));
+    cJSON_Delete(json);
+}
+
+TEST_CASE("Thread error JSON with applied false: applied is false", "[device_api]")
+{
+    char buf[256];
+    const device_api_thread_t t = {.adjustment = 8, .has_applied = true, .applied = false};
+
+    TEST_ASSERT_GREATER_THAN(0, device_api_thread_error_json(buf, sizeof(buf), "busy", "OpenThread is busy, retry", &t));
+    cJSON *json = cJSON_Parse(buf);
+
+    TEST_ASSERT_NOT_NULL(json);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(json, "applied")));
+    cJSON_Delete(json);
+}
+
+TEST_CASE("Thread error JSON buffer too small: negative", "[device_api]")
+{
+    char buf[16];
+
+    TEST_ASSERT_LESS_THAN(0, device_api_thread_error_json(buf, sizeof(buf), "busy", "OpenThread is busy, retry", NULL));
 }
 
 /* ---- device_api_thread_refusal ---- */

@@ -1455,6 +1455,19 @@ static esp_err_t thread_get_handler(httpd_req_t *req)
     return send_json(req, body);
 }
 
+// An error of the PUT; after a stored adjustment (t->has_applied) it carries the adjustment and `applied` too.
+static esp_err_t send_thread_error(httpd_req_t *req, int http_status, const char *code, const char *detail,
+                                   const device_api_thread_t *t)
+{
+    char body[384];
+
+    if (device_api_thread_error_json(body, sizeof(body), code, detail, t) < 0) {
+        return send_error(req, http_status, code, detail, false);
+    }
+    httpd_resp_set_status(req, device_api_status_line(http_status));
+    return send_json(req, body);
+}
+
 static esp_err_t thread_put_handler(httpd_req_t *req)
 {
     const int length_status = device_api_length_check(req->content_len, THREAD_BODY_MAX);
@@ -1479,7 +1492,7 @@ static esp_err_t thread_put_handler(httpd_req_t *req)
     device_api_thread_t t = {0};
 
     if (put.has_adjustment) {
-        bool applied = false;
+        br_core_leader_apply_t applied = BR_CORE_LEADER_NOT_READY;
         const esp_err_t err = br_core_set_leader_adjustment(put.adjustment, &applied);
 
         if (err == ESP_ERR_INVALID_ARG) { // the parser checks the range; cannot happen
@@ -1489,15 +1502,19 @@ static esp_err_t thread_put_handler(httpd_req_t *req)
             return send_error(req, 500, "storage_failed", "the leader weight adjustment could not be stored", false);
         }
         t.has_applied = true;
-        t.applied = applied;
-        if (!applied) { // applied is false when OpenThread is not ready (not BR_RUNNING) or its lock stayed busy for 1 s
-            t.detail = br_core_get_mode() == BR_MODE_BR_RUNNING ? "OpenThread is busy, applied within seconds or at the next start"
-                       : "Thread is not running";
+        t.adjustment = put.adjustment; // for an error reply of the take-over; the final reply re-reads it
+        t.applied = applied == BR_CORE_LEADER_APPLIED;
+        if (applied == BR_CORE_LEADER_NOT_READY) {
+            t.detail = "Thread is not running";
+        } else if (applied == BR_CORE_LEADER_BUSY) {
+            t.detail = "OpenThread is busy, applied within seconds or at the next start";
         }
     }
+    uint8_t started_weight = 0;
+
     if (put.become_leader) {
         br_core_leader_refusal_t refusal = BR_CORE_LEADER_OK;
-        const esp_err_t err = br_core_become_leader(&refusal);
+        const esp_err_t err = br_core_become_leader(&refusal, &started_weight);
 
         if (err == ESP_ERR_INVALID_STATE) {
             int status;
@@ -1505,13 +1522,16 @@ static esp_err_t thread_put_handler(httpd_req_t *req)
             char detail[64];
 
             device_api_thread_refusal(refusal, br_core_get_mode(), &status, &code, detail, sizeof(detail));
-            return send_error(req, status, code, detail, false);
+            return send_thread_error(req, status, code, detail, &t);
+        }
+        if (err == ESP_ERR_NOT_FINISHED) {
+            return send_thread_error(req, 503, "busy", "OpenThread is restarting, retry", &t);
         }
         if (err == ESP_ERR_TIMEOUT) {
-            return send_error(req, 503, "busy", "OpenThread is busy, retry", false);
+            return send_thread_error(req, 503, "busy", "OpenThread is busy, retry", &t);
         }
         if (err != ESP_OK) {
-            return send_error(req, 500, "internal", "taking over failed", false);
+            return send_thread_error(req, 500, "internal", "taking over failed", &t);
         }
         t.become_started = true;
     }
@@ -1521,6 +1541,11 @@ static esp_err_t thread_put_handler(httpd_req_t *req)
 
     t.weight_known = weight_err == ESP_OK;
     t.partial = weight_err == ESP_ERR_TIMEOUT;
+    if (!t.weight_known && t.become_started) { // the weight the take-over read under its own lock
+        t.weight = started_weight;
+        t.weight_known = true;
+        t.partial = false;
+    }
     if (device_api_thread_json(body, sizeof(body), &t) < 0) {
         return send_error(req, 500, "internal", "the reply does not fit its buffer", false);
     }

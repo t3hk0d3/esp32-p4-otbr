@@ -198,19 +198,26 @@ esp_err_t br_core_push_radio_firmware(const rcp_fw_source_t *source, char *err_d
  */
 esp_err_t br_core_rom_recover(char *err_detail, size_t err_cap);
 
+/** Whether br_core_set_leader_adjustment applied the value to OpenThread. */
+typedef enum {
+    BR_CORE_LEADER_APPLIED,   /**< OpenThread uses the value now */
+    BR_CORE_LEADER_NOT_READY, /**< OpenThread is not usable (RADIO_FAULT, not started, a push) or no session opened */
+    BR_CORE_LEADER_BUSY,      /**< the 1 s wait for the OpenThread lock ran out */
+} br_core_leader_apply_t;
+
 /**
  * Store the leader weight adjustment (NVS namespace `thread`, key `leader_adj`; written only when it changes, `net reset`
  * keeps it) and apply it at once whenever OpenThread is ready (any mode but RADIO_FAULT: STARTING, BR_RUNNING, SNIFFER):
  * OpenThread's device properties recompute the local leader weight. When OpenThread is not ready or its lock is not free
  * within 1 s, the value is stored and applied at the next border router start or the next br_core_leader_weight read,
- * whichever comes first. Call it from one task at a time (the HTTP server task).
+ * whichever comes first. Safe to call from several tasks: a mutex serialises the compare, the NVS write and the store.
  * @param adj BR_CORE_LEADER_ADJ_MIN..BR_CORE_LEADER_ADJ_MAX
- * @param applied set to whether OpenThread uses the value now: false only when OpenThread is not ready or the lock wait
- *        ran out (and on every error)
- * @return ESP_ERR_INVALID_ARG out of range or NULL `applied` (nothing stored), ESP_ERR_INVALID_STATE when storage is
- *         degraded (nothing changes), the NVS error when the write fails
+ * @param result set on ESP_OK to BR_CORE_LEADER_APPLIED, BR_CORE_LEADER_NOT_READY (OpenThread not usable) or
+ *        BR_CORE_LEADER_BUSY (the lock wait ran out); NOT_READY on every error
+ * @return ESP_ERR_INVALID_ARG out of range or NULL `result` (nothing stored), ESP_ERR_INVALID_STATE when storage is
+ *         degraded or br_core_note_storage_init was not called (nothing changes), the NVS error when the write fails
  */
-esp_err_t br_core_set_leader_adjustment(int8_t adj, bool *applied);
+esp_err_t br_core_set_leader_adjustment(int8_t adj, br_core_leader_apply_t *result);
 
 /** The stored leader weight adjustment: 0 when nothing is stored or storage is degraded. Never takes a lock. */
 int8_t br_core_leader_adjustment(void);
@@ -230,10 +237,13 @@ esp_err_t br_core_leader_weight(uint8_t *out);
  * partition with this board as leader; the old leader reattaches.
  * @param refusal set to BR_CORE_LEADER_OK, or the reason with ESP_ERR_INVALID_STATE (not BR_RUNNING: NOT_RUNNING;
  *        OpenThread's own refusal: OT_ERROR_NOT_CAPABLE as WEIGHT_NOT_HIGHER, OT_ERROR_INVALID_STATE as NOT_ATTACHED)
- * @return ESP_OK started, ESP_ERR_INVALID_STATE refused, ESP_ERR_TIMEOUT when the lock was not free within 1 s,
- *         ESP_ERR_INVALID_ARG for NULL, ESP_FAIL for any other OpenThread error
+ * @param weight may be NULL; on ESP_OK set to this board's local leader weight, read under the same lock before the
+ *        take-over
+ * @return ESP_OK started, ESP_ERR_INVALID_STATE refused, ESP_ERR_NOT_FINISHED when OpenThread is being stopped or
+ *         restarted (radio push: the mode is still BR_RUNNING but OpenThread no longer takes calls), ESP_ERR_TIMEOUT when
+ *         the lock was not free within 1 s, ESP_ERR_INVALID_ARG for NULL `refusal`, ESP_FAIL for any other OpenThread error
  */
-esp_err_t br_core_become_leader(br_core_leader_refusal_t *refusal);
+esp_err_t br_core_become_leader(br_core_leader_refusal_t *refusal, uint8_t *weight);
 
 /**
  * Start the app validity timer: once the image is pending-verify, the app has run 60 s and the HTTP server

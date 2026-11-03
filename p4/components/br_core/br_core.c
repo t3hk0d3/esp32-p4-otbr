@@ -110,8 +110,11 @@ typedef struct {
 static core_state_t s_core;
 static bool s_storage_degraded; // set by br_core_note_storage_init before br_core_start
 // Stored leader weight adjustment (NVS thread/leader_adj), loaded by br_core_note_storage_init; 0 when nothing is stored
-// or storage is degraded. Read without any lock (bring-up, the HTTP handlers); written only by the setter.
+// or storage is degraded. Read without any lock (bring-up, the HTTP handlers); written only by the setter, under
+// s_leader_mutex.
 static atomic_int s_leader_adj;
+static StaticSemaphore_t s_leader_mutex_buf;
+static SemaphoreHandle_t s_leader_mutex; // serialises compare, NVS write and store in br_core_set_leader_adjustment
 static const mode_fsm_ops_t s_ops;
 // The only owner of the mode (spec 5.4). Its operations run under the OpenThread lock, except the push.
 static mode_fsm_t s_fsm = {.ops = &s_ops, .mode = BR_MODE_STARTING};
@@ -628,12 +631,19 @@ static void load_leader_adjustment(void)
     nvs_handle_t handle;
     int8_t value = 0;
 
-    if (nvs_open(LEADER_NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
-        return; // the namespace does not exist before the first write
+    const esp_err_t open_err = nvs_open(LEADER_NVS_NAMESPACE, NVS_READONLY, &handle);
+    if (open_err != ESP_OK) {
+        if (open_err != ESP_ERR_NVS_NOT_FOUND) { // the namespace does not exist before the first write
+            ESP_LOGW(TAG, "reading the leader weight adjustment: nvs_open: %s, using 0", esp_err_to_name(open_err));
+        }
+        return;
     }
     const esp_err_t err = nvs_get_i8(handle, LEADER_NVS_KEY, &value);
     nvs_close(handle);
     if (err != ESP_OK) {
+        if (err != ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGW(TAG, "reading the leader weight adjustment: %s, using 0", esp_err_to_name(err));
+        }
         return;
     }
     if (!br_core_leader_adjustment_valid(value)) {
@@ -645,6 +655,9 @@ static void load_leader_adjustment(void)
 
 void br_core_note_storage_init(esp_err_t storage_init_err)
 {
+    if (!s_leader_mutex) { // once, before any HTTP handler can run
+        s_leader_mutex = xSemaphoreCreateMutexStatic(&s_leader_mutex_buf);
+    }
     s_storage_degraded = mode_fsm_storage_degraded(storage_init_err);
     if (s_storage_degraded) {
         ESP_LOGE(TAG, "storage init failed (%s): booting DEGRADED, OpenThread will not start; NVS is NOT erased "
@@ -1517,29 +1530,40 @@ static void sync_leader_adjustment(otInstance *instance)
     }
 }
 
-esp_err_t br_core_set_leader_adjustment(int8_t adj, bool *applied)
+esp_err_t br_core_set_leader_adjustment(int8_t adj, br_core_leader_apply_t *result)
 {
-    ESP_RETURN_ON_FALSE(applied, ESP_ERR_INVALID_ARG, TAG, "no applied flag");
-    *applied = false;
+    ESP_RETURN_ON_FALSE(result, ESP_ERR_INVALID_ARG, TAG, "no result output");
+    *result = BR_CORE_LEADER_NOT_READY;
     ESP_RETURN_ON_FALSE(br_core_leader_adjustment_valid(adj), ESP_ERR_INVALID_ARG, TAG, "leader weight adjustment %d out of range", adj);
     ESP_RETURN_ON_FALSE(!s_storage_degraded, ESP_ERR_INVALID_STATE, TAG, "storage is unavailable");
 
-    // One HTTP server task calls this, so the compare and the store need no lock of their own.
-    const bool changed = atomic_load(&s_leader_adj) != adj;
-    if (changed) {
-        ESP_RETURN_ON_ERROR(store_leader_adjustment(adj), TAG, "storing the leader weight adjustment");
-        atomic_store(&s_leader_adj, adj);
-    }
+    ESP_RETURN_ON_FALSE(s_leader_mutex, ESP_ERR_INVALID_STATE, TAG, "br_core_note_storage_init was not called");
 
-    if (ot_lock_while(ot_usable, LEADER_LOCK_MS) != ESP_OK) {
+    // The mutex covers the compare, the NVS write and the store, so concurrent callers cannot interleave them. It is not
+    // held while waiting for the OpenThread lock.
+    xSemaphoreTake(s_leader_mutex, portMAX_DELAY);
+    const bool changed = atomic_load(&s_leader_adj) != adj;
+    esp_err_t store_err = ESP_OK;
+    if (changed) {
+        store_err = store_leader_adjustment(adj);
+        if (store_err == ESP_OK) {
+            atomic_store(&s_leader_adj, adj);
+        }
+    }
+    xSemaphoreGive(s_leader_mutex);
+    ESP_RETURN_ON_ERROR(store_err, TAG, "storing the leader weight adjustment");
+
+    const esp_err_t lock_err = ot_lock_while(ot_usable, LEADER_LOCK_MS);
+    if (lock_err != ESP_OK) {
         if (changed) {
             ESP_LOGI(TAG, "leader weight adjustment %+d stored, applied at the next start or weight read", adj);
         }
+        *result = lock_err == ESP_ERR_TIMEOUT ? BR_CORE_LEADER_BUSY : BR_CORE_LEADER_NOT_READY;
         return ESP_OK;
     }
     sync_leader_adjustment(esp_openthread_get_instance());
     ot_unlock();
-    *applied = true;
+    *result = BR_CORE_LEADER_APPLIED;
     return ESP_OK;
 }
 
@@ -1562,7 +1586,7 @@ esp_err_t br_core_leader_weight(uint8_t *out)
     return ESP_OK;
 }
 
-esp_err_t br_core_become_leader(br_core_leader_refusal_t *refusal)
+esp_err_t br_core_become_leader(br_core_leader_refusal_t *refusal, uint8_t *weight)
 {
     ESP_RETURN_ON_FALSE(refusal, ESP_ERR_INVALID_ARG, TAG, "no refusal output");
     *refusal = BR_CORE_LEADER_OK;
@@ -1572,6 +1596,9 @@ esp_err_t br_core_become_leader(br_core_leader_refusal_t *refusal)
         return ESP_ERR_TIMEOUT;
     }
     if (lock_err != ESP_OK) {
+        if (br_core_get_mode() == BR_MODE_BR_RUNNING) {
+            return ESP_ERR_NOT_FINISHED; // a radio push is about to stop OpenThread: ot_ready is cleared, the mode is not yet
+        }
         *refusal = br_core_leader_check(false, false, false, false, 0, 0);
         return ESP_ERR_INVALID_STATE;
     }
@@ -1594,6 +1621,9 @@ esp_err_t br_core_become_leader(br_core_leader_refusal_t *refusal)
     switch (error) {
     case OT_ERROR_NONE:
         ESP_LOGI(TAG, "taking over as leader (weight %u > %u)", own, leader);
+        if (weight) {
+            *weight = own;
+        }
         return ESP_OK;
     case OT_ERROR_NOT_CAPABLE:
         *refusal = BR_CORE_LEADER_WEIGHT_NOT_HIGHER;
