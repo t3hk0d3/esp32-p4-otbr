@@ -1,5 +1,5 @@
 if(IDF_TARGET STREQUAL "linux")
-    # Host tests cover the mode state machine only; it needs nothing from OpenThread but one type (stubbed).
+    # Host tests cover the mode state machine and the leader weight logic (leader.c); they need nothing from OpenThread but a few types (stubbed).
     idf_component_register(SRCS "mode_fsm.c" "leader.c"
                            INCLUDE_DIRS "include" "." "test_host/stubs"
                            REQUIRES rcp_sync
