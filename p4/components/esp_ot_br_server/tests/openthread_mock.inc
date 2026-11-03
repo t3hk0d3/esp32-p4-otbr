@@ -34,6 +34,8 @@ void mock_reset(void) {
     mock_calls[0]=0;
     pending_callback=NULL;
     diagnostic_callback=NULL;
+    mock_netdiag_sends=0;
+    mock_netdiag_filtered_sends=0;
     mock_time=0;
     mock_mode=BR_MODE_BR_RUNNING;
     mock_ot_ready=true;

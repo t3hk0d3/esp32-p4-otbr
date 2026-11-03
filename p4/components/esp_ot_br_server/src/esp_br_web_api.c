@@ -23,6 +23,7 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "malloc.h"
+#include "netdiag_mux.h"
 #include "stdio.h"
 #include "stdlib.h"
 #include "string.h"
@@ -1056,13 +1057,14 @@ static esp_err_t build_thread_network_topology(void)
     esp_openthread_lock_acquire(portMAX_DELAY);
     otIp6Address rloc16address = *otThreadGetRloc(ins);
     otIp6Address multicastAddress;
-    ESP_GOTO_ON_FALSE(otThreadSendDiagnosticGet(ins, &rloc16address, kAllTlvTypes, sizeof(kAllTlvTypes),
-                                                &diagnosticTlv_result_handler, NULL) == OT_ERROR_NONE,
+    /* Patch 17: netdiag_mux owns OpenThread's single netdiag callback; filter_peer keeps other senders' answers out. */
+    ESP_GOTO_ON_FALSE(netdiag_mux_send_get(&rloc16address, kAllTlvTypes, sizeof(kAllTlvTypes),
+                                           &diagnosticTlv_result_handler, NULL, true) == OT_ERROR_NONE,
                       ESP_FAIL, exit, API_TAG, "Fail to send diagnostic rloc16address.");
     ESP_GOTO_ON_FALSE(otIp6AddressFromString(kMulticastAddrAllRouters, &multicastAddress) == OT_ERROR_NONE, ESP_FAIL,
                       exit, API_TAG, "Fail to convert ipv6 to string.");
-    ESP_GOTO_ON_FALSE(otThreadSendDiagnosticGet(ins, &multicastAddress, kAllTlvTypes, sizeof(kAllTlvTypes),
-                                                &diagnosticTlv_result_handler, NULL) == OT_ERROR_NONE,
+    ESP_GOTO_ON_FALSE(netdiag_mux_send_get(&multicastAddress, kAllTlvTypes, sizeof(kAllTlvTypes),
+                                           &diagnosticTlv_result_handler, NULL, true) == OT_ERROR_NONE,
                       ESP_FAIL, exit, API_TAG, "Fail to send diagnostic multicastAddress.");
 exit:
     esp_openthread_lock_release();
@@ -3225,9 +3227,11 @@ static void rest_poll(otInstance *instance)
                 action->attempts++;
                 rest_status(action, "active");
                 const uint8_t types[] = {0, 1, 2, 8, 23};
-                otThreadSendDiagnosticGet(instance, otThreadGetRealmLocalAllThreadNodesMulticastAddress(instance),
-                                          types, sizeof(types), rest_discover_devices_callback,
-                                          (void *)(uintptr_t)action->token);
+                /* Patch 17: through netdiag_mux (multicast: every answer reaches the callback, which drops answers
+                 * without the Ext Address TLV). */
+                netdiag_mux_send_get(otThreadGetRealmLocalAllThreadNodesMulticastAddress(instance),
+                                     types, sizeof(types), rest_discover_devices_callback,
+                                     (void *)(uintptr_t)action->token, true);
             } else {
                 s_rest_mesh_action = NULL;
             }
@@ -3313,8 +3317,9 @@ static void rest_poll(otInstance *instance)
                 rest_status(action, "active");
                 continue;
             }
-            otError error = otThreadSendDiagnosticGet(instance, &destination, types, count, rest_diagnostic_callback,
-                                                      (void *)(uintptr_t)action->token);
+            /* Patch 17: through netdiag_mux; for a unicast destination only its answers reach the callback. */
+            otError error = netdiag_mux_send_get(&destination, types, count, rest_diagnostic_callback,
+                                                 (void *)(uintptr_t)action->token, true);
             if (error == OT_ERROR_NONE) {
                 action->active = true;
                 rest_status(action, "active");

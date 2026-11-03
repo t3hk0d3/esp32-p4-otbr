@@ -51,7 +51,9 @@ def main():
             run(['clang++', '-I', OT, '-Xclang', '-ast-dump=json', '-fsyntax-only', declarations], stdout=output)
         table = {}
         functions(json.loads(ast_path.read_text()), table)
-        used = set(re.findall(r'\bot[A-Z]\w*\b', api + web + base))
+        # host_platform.c too: its netdiag_mux_send_get stub (patch 17) forwards to the mocked otThreadSendDiagnosticGet.
+        platform = (ROOT / 'tests/host_platform.c').read_text()
+        used = set(re.findall(r'\bot[A-Z]\w*\b', api + web + base + platform))
         mocks = '#include "host_platform.h"\n#include <string.h>\n'
         mocks += (ROOT / 'tests/openthread_mock.inc').read_text()
         custom = json.loads((ROOT / 'tests/mock_functions.json').read_text())

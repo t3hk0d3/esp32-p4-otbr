@@ -35,6 +35,15 @@ otInstance *esp_openthread_get_instance(void)
 {
     return (otInstance *)(uintptr_t)1;
 }
+unsigned mock_netdiag_sends;
+unsigned mock_netdiag_filtered_sends;
+otError netdiag_mux_send_get(const otIp6Address *dest, const uint8_t *tlvs, uint8_t count,
+                             otReceiveDiagnosticGetCallback cb, void *ctx, bool filter_peer)
+{
+    mock_netdiag_sends++;
+    mock_netdiag_filtered_sends += filter_peer;
+    return otThreadSendDiagnosticGet(esp_openthread_get_instance(), dest, tlvs, count, cb, ctx);
+}
 bool esp_openthread_lock_acquire(uint32_t timeout)
 {
     (void)timeout;

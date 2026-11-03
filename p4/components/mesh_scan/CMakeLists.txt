@@ -9,4 +9,4 @@ endif()
 idf_component_register(SRCS "render.c" "scan.c" "ot_ops.c"
                        INCLUDE_DIRS "include"
                        PRIV_INCLUDE_DIRS "."
-                       PRIV_REQUIRES openthread br_core esp_timer freertos log heap)
+                       PRIV_REQUIRES openthread netdiag_mux br_core esp_timer freertos log heap)

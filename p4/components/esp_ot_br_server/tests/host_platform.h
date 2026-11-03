@@ -94,6 +94,11 @@ void mock_reset(void);
 #define ESP_LOGI(tag, ...) ((void)0) /* logging is not checked on the host */
 #endif
 void mock_deliver_diagnostic(uintptr_t token);
+/* netdiag_mux (patch 17): the host build forwards to the mocked otThreadSendDiagnosticGet, which captures the callback. */
+otError netdiag_mux_send_get(const otIp6Address *dest, const uint8_t *tlvs, uint8_t count,
+                             otReceiveDiagnosticGetCallback cb, void *ctx, bool filter_peer);
+extern unsigned mock_netdiag_sends;           /* netdiag_mux_send_get() calls so far */
+extern unsigned mock_netdiag_filtered_sends;  /* of those, with filter_peer set */
 otInstance *esp_openthread_get_instance(void);
 bool esp_openthread_lock_acquire(uint32_t timeout);
 void esp_openthread_lock_release(void);

@@ -192,6 +192,21 @@ reason, spec reference.
    (device_api) and pings through the existing `POST /ping`; `/topology` is no longer used by the page. The last result
    and nicknames live in `localStorage` (`topology:last`, `topology:names`). Host tests:
    `tools/tests/test_topology_page.py`.
+17. Applied. `esp_ot_br_server`: every Network Diagnostic Get goes through the new `netdiag_mux` component (spec
+   2026-11-02 section 3.5). OpenThread's netdiag client keeps one callback slot and every `otThreadSendDiagnosticGet`
+   replaces it, so `/topology`, the REST diagnostics and discovery, and the `mesh_scan` child step took each other's
+   answers. `src/esp_br_web_api.c` includes `netdiag_mux.h`; its four `otThreadSendDiagnosticGet` calls
+   (`build_thread_network_topology`: own RLOC and all-routers multicast; `rest_poll`: device discovery to the
+   realm-local all-nodes multicast and `getNetworkDiagnosticTask`) call `netdiag_mux_send_get(..., filter_peer = true)`,
+   so a unicast Get only gets answers from its destination (multicast and anycast-locator Gets are unfiltered in the mux).
+   The discovery callback `rest_discover_devices_callback` already drops answers without the Ext Address TLV (TLV 0), so
+   the scan's TLV-8-only answers that reach it create no device; no further guard. `CMakeLists.txt`: `netdiag_mux` in
+   `PRIV_REQUIRES`. Host tests: `tests/host_platform.c`/`.h` stub `netdiag_mux_send_get` (forwards to the mocked
+   `otThreadSendDiagnosticGet`, so `mock_deliver_diagnostic` works as before, and counts the sends and the filtered ones
+   in `mock_netdiag_sends`/`mock_netdiag_filtered_sends`, reset in `tests/openthread_mock.inc`); `tests/run_host_tests.py`
+   also scans `tests/host_platform.c` for the OpenThread functions to mock; `tests/test_rest.c` `test_actions` asserts
+   the filtered sends and that a discovery answer without TLV 0 adds no device. The mux itself is tested in
+   `p4/components/netdiag_mux/test_host/`.
 
 ### REST guard classification (patches 2 and 9)
 

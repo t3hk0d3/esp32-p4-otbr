@@ -365,6 +365,12 @@ static void test_actions(void)
     release(&req, json);
     rest_poll(esp_openthread_get_instance());
     assert(s_rest_mesh_action && s_rest_mesh_action->active);
+    /* Patch 17: discovery sends through netdiag_mux with the peer filter (multicast: unfiltered in the mux anyway). */
+    assert(mock_netdiag_sends == 1 && mock_netdiag_filtered_sends == 1);
+    /* An answer without the Ext Address TLV (the scan asks for TLV 8 only) creates no device. */
+    unsigned devices = rest_count(s_rest_devices);
+    mock_deliver_diagnostic(s_rest_mesh_action->token);
+    assert(rest_count(s_rest_devices) == devices);
     char uri[160];
     snprintf(uri, sizeof(uri), "/api/actions/%s?fields%%5BupdateDeviceCollectionTask%%5D=status", id);
     req = request(HTTP_GET, uri, NULL, THREAD_REST_JSON_API, NULL);
@@ -399,6 +405,7 @@ static void test_actions(void)
     json = run_request(&req, 200);
     release(&req, json);
     rest_poll(esp_openthread_get_instance());
+    assert(mock_netdiag_sends == 2 && mock_netdiag_filtered_sends == 2); /* patch 17 */
     uint32_t old_token = s_rest_actions->token;
     rest_collection_delete(&s_rest_actions, NULL, esp_openthread_get_instance());
     req = request(HTTP_POST, "/api/actions", body, NULL, THREAD_REST_JSON_API);
