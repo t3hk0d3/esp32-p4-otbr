@@ -1,9 +1,10 @@
 """Shared code of the device pages (BDD: DeviceCommon, DeviceKit). Runs static/device_common.js under node."""
 
+import json
 import re
 
 import pytest
-from device_js import REPO, kit, logic, needs_node, scenario
+from device_js import KIT_HTML, REPO, kit, logic, needs_node, scenario
 
 C6_BOARD = REPO / "common" / "c6_board" / "c6_board.h"
 PARTITIONS = REPO / "p4" / "partitions.csv"
@@ -440,6 +441,21 @@ class TestKitReview:
 @needs_node
 class TestKitPrReview:
     """PR review findings"""
+
+    def test_page_without_the_trial_bar_still_counts_down_and_hides_the_banner(self):
+        # On a cached page from before the bar (no #trialFill), remaining_s 5 and 6 s: the countdown ends and the
+        # banner is hidden, no error.
+        old_page = KIT_HTML.replace('<div id="trialFill"></div>', "")
+        r = scenario(
+            f"const t = H.makeEnv({{html: {json.dumps(old_page)}, absent: ['trialFill'], kit: {{actionIds: []}}}}, "
+            + "() => { throw new Error('rebooting'); });"
+            + f"""
+            t.kit.start(); t.kit.renderTrial(({NET})(5).body);
+            await t.advance(6000);
+            return [t.el('trialRemaining').textContent, t.el('trialBanner').hidden()];
+        """
+        )
+        assert r == ["0:00", True]
 
     def test_a_wake_while_a_request_runs_does_not_start_a_second_one(self):
         # On visibilitychange while the first request is pending: no second request until it answers.

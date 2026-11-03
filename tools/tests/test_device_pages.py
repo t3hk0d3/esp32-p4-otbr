@@ -3,6 +3,7 @@
 import json
 import re
 import subprocess
+from html.parser import HTMLParser
 
 import pytest
 from device_js import FRONTEND, REPO, STATIC, needs_node
@@ -57,6 +58,50 @@ PAGES = {
 KIT_IDS = ["trialBanner", "trialRemaining", "trialFill", "confirmBtn", "confirmMsg"]
 KIT_ENDPOINTS = ["/device/network", "/device/network/confirm", "/device/diag"]
 LIVE_ID = re.compile(r"Msg$|-note$|-offline$|-stale$")
+
+
+class _Ancestors(HTMLParser):
+    VOID = frozenset(
+        {
+            "area",
+            "base",
+            "br",
+            "col",
+            "embed",
+            "hr",
+            "img",
+            "input",
+            "link",
+            "meta",
+            "source",
+            "track",
+            "wbr",
+        }
+    )
+
+    def __init__(self, target):
+        super().__init__()
+        self.target, self.stack, self.found = target, [], None
+
+    def handle_starttag(self, tag, attrs):
+        ident = dict(attrs).get("id")
+        if ident == self.target and self.found is None:
+            self.found = [i for _, i in self.stack if i]
+        if tag not in self.VOID:
+            self.stack.append((tag, ident))
+
+    def handle_endtag(self, tag):
+        while self.stack:
+            if self.stack.pop()[0] == tag:
+                break
+
+
+def ancestor_ids(html, ident):
+    """The ids of the elements that enclose #ident, outermost first."""
+    parser = _Ancestors(ident)
+    parser.feed(html)
+    assert parser.found is not None, f"#{ident} not found"
+    return parser.found
 
 
 def html_of(name):
@@ -142,6 +187,10 @@ class TestPages:
         for ident in KIT_IDS:
             assert f'id="{ident}"' in html, ident
         assert 'href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a>' in html
+
+    def test_trial_bar_sits_inside_the_banner(self, name):
+        # On the page: #trialFill is inside #trialBanner, so hiding the banner hides the bar too.
+        assert ancestor_ids(html_of(name), "trialFill").count("trialBanner") == 1
 
     def test_script_never_inserts_markup(self, name):
         # On the script: no innerHTML/outerHTML/insertAdjacentHTML/document.write.

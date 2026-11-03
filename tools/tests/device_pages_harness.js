@@ -72,6 +72,7 @@ class El {
 class Doc {
   constructor(html) {
     this.byId = {};
+    this.absent = new Set();
     this.hidden = false;
     this.listeners = {};
     const tagRe = /<(\w+)([^>]*)>/g;
@@ -94,6 +95,8 @@ class Doc {
     }
   }
   getElementById(id) {
+    if (this.absent.has(id))
+      return null; // as a browser does for an element the page does not have
     if (!this.byId[id])
       throw new Error('no element with id ' + id);
     return this.byId[id];
@@ -116,6 +119,7 @@ class Doc {
 function makeEnv(page, routes) {
   const html = typeof page === 'string' ? fs.readFileSync(path.join(FRONTEND, page + '.html'), 'utf8') : page.html;
   const doc = new Doc(html);
+  doc.absent = new Set(page.absent || []); // ids the page lacks on purpose: null instead of a test error
   const calls = [];
   const timers = [];
   let now = 1000000;

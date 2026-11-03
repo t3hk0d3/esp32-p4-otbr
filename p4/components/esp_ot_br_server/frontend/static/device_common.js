@@ -383,7 +383,10 @@ function tickTrial() {
     return;
   var left = Math.max(0, Math.round((trialEnd - env.now()) / 1000));
   setText('trialRemaining', L.formatRemaining(left));
-  $('trialFill').style.width = L.trialLeftPct(left) + '%';
+  // A page cached from before the bar has no #trialFill; the countdown must still run out.
+  var fill = $('trialFill');
+  if (fill)
+    fill.style.width = L.trialLeftPct(left) + '%';
   if (left === 0) {
     // The board reverts and reboots now: the banner and its button are stale until the next answer.
     trialEnd = 0;
