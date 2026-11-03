@@ -57,5 +57,10 @@ Out of scope: TREL-only mode (no 15.4), OpenThread-managed DNS-SD (`OPENTHREAD_C
 - mDNS reflector between VLANs can surface peers whose addresses are not on `thread_bb`; sends to them fail and are
   counted in `tx_failures`.
 - The IDF port latches the TREL netif from the first browse result: correct while only one netif runs mDNS.
+- The IDF port's browse for peers queries once, when TREL is enabled at OpenThread init: before the backbone has an
+  address, and before the switch port forwards (on the bench nothing left the board until DHCP, 14 s after reset).
+  esp mdns repeats browses on a new address only for its predefined netifs, and netcfg registers its own, so peers
+  already on the link were never found (the peer listed the board, the board listed no peer). br_core sends a PTR
+  query for `_trel._udp` when the backbone gets an IPv4 or a non-link-local IPv6 address; the browse takes the answers.
 - Kconfig: the TREL menu depends on `EXAMPLE_CONNECT_ETHERNET`, satisfied through `protocol_examples_common`. A build
   check guards it (step 1).

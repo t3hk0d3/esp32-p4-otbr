@@ -63,6 +63,7 @@ static const char *TAG = "br_core";
 #define EVENTFD_COUNT 4
 #endif
 #define TREL_SET_LOCK_MS 1000
+#define TREL_QUERY_MS 3000 // how long a peer query collects answers
 
 typedef struct {
     StaticSemaphore_t mutex_storage;
@@ -110,6 +111,9 @@ static esp_openthread_platform_config_t s_platform_config;
 
 // TREL setting (br_core_set_trel); applied after every esp_openthread_init.
 static atomic_bool s_trel_wanted = true;
+#if CONFIG_OPENTHREAD_RADIO_TREL
+static mdns_search_once_t *s_trel_query; // the last peer query (query_trel_peers); used by the event loop task only
+#endif
 
 static void set_reason(const char *reason)
 {
@@ -315,12 +319,48 @@ static void note_address(void)
     xSemaphoreGive(s_core.mutex);
 }
 
+// The IDF port browses for TREL peers with a single query, sent when TREL is enabled. That is before the backbone has an
+// address, or before the switch port forwards, so the query is lost; esp mdns repeats browses on a new address only
+// for its predefined netifs, which netcfg does not use. Peers already on the link would never be found. A PTR query
+// once an address shows the link works makes them answer, and the browse takes the answers.
+static void query_trel_peers(void)
+{
+#if CONFIG_OPENTHREAD_RADIO_TREL
+    if (!atomic_load(&s_trel_wanted)) {
+        return;
+    }
+    if (s_trel_query) {
+        mdns_result_t *results = NULL;
+
+        if (!mdns_query_async_get_results(s_trel_query, 0, &results, NULL)) {
+            return; // still running: it covers this address too
+        }
+        mdns_query_results_free(results);
+        mdns_query_async_delete(s_trel_query);
+    }
+    s_trel_query = mdns_query_async_new(NULL, "_trel", "_udp", MDNS_TYPE_PTR, TREL_QUERY_MS, 1, NULL);
+#endif
+}
+
 static void on_got_ip6(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     const ip_event_got_ip6_t *event = data;
 
     if (event->esp_netif == s_core.backbone) {
         note_address();
+        // A link-local address exists before the switch port forwards; a SLAAC address needed a router advertisement.
+        if (esp_netif_ip6_get_addr_type(&event->ip6_info.ip) != ESP_IP6_ADDR_IS_LINK_LOCAL) {
+            query_trel_peers();
+        }
+    }
+}
+
+static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    const ip_event_got_ip_t *event = data;
+
+    if (event->esp_netif == s_core.backbone) {
+        query_trel_peers();
     }
 }
 
@@ -545,6 +585,7 @@ esp_err_t br_core_start(esp_netif_t *backbone)
         ESP_LOGE(TAG, "mDNS did not start (%s), continuing without it", esp_err_to_name(mdns_err));
     }
     ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_GOT_IP6, on_got_ip6, NULL), TAG, "event handler");
+    ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, on_got_ip, NULL), TAG, "event handler");
 
     ESP_RETURN_ON_ERROR(start_ot_task(), TAG, "cannot create the OpenThread task");
     if (xSemaphoreTake(s_core.boot_done, pdMS_TO_TICKS(BOOT_WAIT_MS)) != pdTRUE) {
