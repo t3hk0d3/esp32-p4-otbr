@@ -158,3 +158,17 @@ git push origin v0.2.0
 | `versions.txt`, `SHA256SUMS` | build versions and checksums |
 
 The firmware versions stay `<build timestamp>-<git hash>`; the tag only names the release.
+
+## Documentation site
+
+`mkdocs.yml` builds `docs/` with Material for MkDocs into a GitHub Pages site; `README.md` is its home page and
+`docs/superpowers/` and `docs/phase0/` stay out. `tools/docs_hooks.py` keeps the links written for GitHub working: links
+to pages and images stay relative, links to anything else in the repository become GitHub URLs. A new page goes into the
+`nav` of `mkdocs.yml` as well as `docs/README.md`. `make docs` builds it with `--strict` (a broken link fails), `make
+docs-serve` previews it.
+
+`.github/workflows/docs.yml` builds the site on pull requests that touch the docs and publishes it from `master` and
+after every successful `v*` build. Before publishing, `make docs-firmware` puts the P4 images of the latest release and
+an [ESP Web Tools](https://esphome.github.io/esp-web-tools/) manifest (`tools/flash_manifest.py`, from `flash_args`)
+into `site/firmware/`, which [Flash in the browser](flash.md) uses. Repository settings: Pages, source "GitHub
+Actions".

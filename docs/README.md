@@ -4,6 +4,7 @@ Setting up:
 
 - [First install](first-install.md): bring a new board up (no wires, maintenance jumper or USB-UART) and create a Thread
   network.
+- [Flash in the browser](flash.md): the P4 firmware of the latest release from the documentation site, no tools needed.
 - [Building and flashing](building.md): prerequisites, `make` targets, build outputs, versions, USB flashing.
 
 Running it:
@@ -20,6 +21,6 @@ Running it:
 
 Working on it:
 
-- [Development](development.md): repository layout, vendored code, tests, CI and releases.
+- [Development](development.md): repository layout, vendored code, tests, CI, releases and the documentation site.
 - `STYLEGUIDE.md`: conventions. `docs/superpowers/`: design spec and implementation plan. `docs/phase0/RESULTS.md`:
   hardware facts from the bring-up.

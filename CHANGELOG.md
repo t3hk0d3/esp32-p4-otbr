@@ -7,6 +7,12 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+### Added
+
+- Documentation site on GitHub Pages (<https://t3hk0d3.github.io/esp32-p4-otbr/>), built from `docs/` and `README.md`
+  with Material for MkDocs, and a browser flasher page (ESP Web Tools) that writes the P4 firmware of the latest
+  release over USB from Chrome or Edge. `make docs`, `make docs-serve`, `make docs-firmware`; see `docs/development.md`.
+
 ## [0.3.0] - 2026-11-03
 
 ### Added
