@@ -168,8 +168,8 @@ counted (`received_dropped`) and dropped, read through one 4096-byte buffer per 
 - Attributes: ORIGIN IGP; AS_PATH empty on iBGP, the board's ASN on eBGP; LOCAL_PREF 100 on iBGP.
 - Next-hop: the board's global address on the backbone (a GUA before a ULA) and its link-local, the 32-byte form of
   RFC 2545. With no global address, the link-local alone in a 16-byte next-hop, which RFC 2545 does not cover. FRR,
-  which the UDM Pro runs, accepts it on a directly connected session; for BIRD this is still to be confirmed on the
-  test rig (`p4/pytest/test_routing.py`, `TestBgpLinkLocal`).
+  which the UDM Pro runs, and BIRD are expected to accept it on a directly connected session; both are still to be
+  confirmed on the test rig (`p4/pytest/test_routing.py`, `TestBgpLinkLocal`).
 - Changes: changing the OMR prefix or the ULA box only sends UPDATEs. Removing a peer or changing its ASN closes that
   session with Cease 6/3. Changing the local ASN, the hold time or the router ID in use restarts every session with
   Cease 6/6.
@@ -180,8 +180,8 @@ The board, iBGP with a UDM Pro at `2001:db8:42::1`:
 curl -X PUT http://<board>/device/routing -d '{"method":"bgp","omr":{"mode":"custom","prefix":"2001:db8:42:100::/64"},"announce_ula":true,"bgp":{"local_asn":4200000001,"router_id":null,"hold_time":90,"peers":[{"address":"2001:db8:42::1","asn":4200000001}]}}'
 ```
 
-The router (FRR), with the board at `2001:db8:42::15`: accept only the board's /64s, at most 2 of them, and send it
-nothing.
+The router (FRR), with the board at `2001:db8:42::15`: accept only the board's /64s, at most 2 of them (more drops the
+session, which FRR brings back up after 5 minutes instead of waiting for an operator), and send it nothing.
 
 ```
 ipv6 prefix-list thread-br-in seq 5 permit 2001:db8:42:100::/64
@@ -195,7 +195,7 @@ router bgp 4200000001
  address-family ipv6 unicast
   neighbor 2001:db8:42::15 activate
   neighbor 2001:db8:42::15 prefix-list thread-br-in in
-  neighbor 2001:db8:42::15 maximum-prefix 2
+  neighbor 2001:db8:42::15 maximum-prefix 2 restart 5
   neighbor 2001:db8:42::15 route-map thread-br-out out
  exit-address-family
 ```
