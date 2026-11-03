@@ -1,6 +1,7 @@
 """Leader card of the Network page (BDD: LeaderLogic, LeaderPage). Runs static/leader.js under node."""
 
 import json
+import re
 
 from device_js import logic, needs_node, page, scenario
 
@@ -439,3 +440,51 @@ class TestLeaderPage:
         """.replace("@READS@", READS)
         )
         assert r == [0, True]
+
+
+GUARD_SCENARIO = """
+    const mk = (parent, attrs) => {
+      const e = {parent, disabled: false, classes: new Set(), attrs: attrs || {},
+                 classList: {add: (c) => e.classes.add(c), remove: (c) => e.classes.delete(c)},
+                 closest: (sel) => { for (let x = e; x; x = x.parent) if (x.attrs['data-guard-exempt'] !== undefined) return x; return null; }};
+      return e;
+    };
+    const ldCard = mk(null, {'data-guard-exempt': ''});
+    const other = mk(null);
+    const ldAdj = mk(ldCard), ldSave = mk(ldCard), otherBtn = mk(other);
+    const controls = [ldAdj, ldSave, otherBtn];
+    globalThis.document = {
+      querySelector: () => ({insertBefore() {}, firstChild: null}),
+      getElementById: () => null,
+      createElement: () => ({appendChild() {}, setAttribute() {}, firstChild: null}),
+      createTextNode: () => ({}),
+      querySelectorAll: (sel) => sel.includes('button') ? controls : sel === '.card' ? [ldCard, other]
+                                 : sel === '.card-disabled' ? [ldCard, other].filter((c) => c.classes.has('card-disabled')) : []
+    };
+    globalThis.fetch = async (u) => ({status: 200, json: async () => (u === '/device/status' ? {mode: 'RADIO_FAULT'} : {})});
+    globalThis.setTimeout = () => 0;
+    const Page = require(@MGMT@).Page;
+    await Page.guard(false);
+    return [ldAdj.disabled, ldSave.disabled, ldCard.classes.has('card-disabled'),
+            otherBtn.disabled, other.classes.has('card-disabled')];
+"""
+
+
+@needs_node
+class TestGuardWithTheLeaderCard:
+    """mgmt.js guard + the Leader card"""
+
+    def test_the_guard_leaves_the_leader_card_usable(self):
+        # On RADIO_FAULT: the card's controls stay enabled and the card is not greyed; every other card is disabled.
+        from device_js import STATIC
+
+        r = scenario(GUARD_SCENARIO.replace("@MGMT@", json.dumps(str(STATIC / "mgmt.js"))))
+        assert r == [False, False, False, True, True]
+
+    def test_the_network_page_marks_the_card_exempt(self):
+        # On network.html: #ld-card carries data-guard-exempt; no other card does.
+        from device_js import FRONTEND
+
+        html = (FRONTEND / "network.html").read_text()
+        assert re.search(r'id="ld-card"[^>]*\bdata-guard-exempt\b', html)
+        assert html.count("data-guard-exempt") == 1

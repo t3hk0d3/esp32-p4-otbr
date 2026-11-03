@@ -167,20 +167,25 @@ var MgmtPage = typeof document === 'undefined' ? null : (function() {
   var disabledByGuard = []; // only what the guard disabled, so a restore leaves the page's own disabled controls alone
   var RETRY_MS = 5000;
 
+  /* A part of the page that works in every mode (the Leader card): data-guard-exempt on the element. */
+  function exempt(el) { return !!el.closest && !!el.closest('[data-guard-exempt]'); }
+
   /* Disables the page's controls, the dialogs too (they sit outside .container), and closes an open dialog. */
   function disable() {
     var els = document.querySelectorAll(
         '.container button, .container input, .container select, .container textarea, ' +
         '.modal button, .modal input, .modal select, .modal textarea');
     for (var i = 0; i < els.length; i++) {
-      if (!els[i].disabled) {
+      if (!els[i].disabled && !exempt(els[i])) {
         els[i].disabled = true;
         disabledByGuard.push(els[i]);
       }
     }
     var cards = document.querySelectorAll('.card');
-    for (var j = 0; j < cards.length; j++)
-      cards[j].classList.add('card-disabled');
+    for (var j = 0; j < cards.length; j++) {
+      if (!exempt(cards[j]))
+        cards[j].classList.add('card-disabled');
+    }
     var open = document.querySelectorAll('.modal-overlay.active');
     for (var k = 0; k < open.length; k++)
       open[k].classList.remove('active');
@@ -250,3 +255,6 @@ var MgmtPage = typeof document === 'undefined' ? null : (function() {
 
   return {guard : guard, rnd : rnd};
 })();
+
+if (typeof module !== 'undefined' && module.exports && MgmtPage)
+  module.exports.Page = MgmtPage;
