@@ -21,6 +21,8 @@ work="${TMPDIR:-/tmp}/c6-${example}"
 rm -rf "${work}"
 cp -r "${IDF_PATH}/examples/openthread/${example}" "${work}"
 cd "${work}"
+# Leftovers of a build inside the IDF tree: the lock's relative component paths do not resolve from the copy.
+rm -rf build sdkconfig dependencies.lock managed_components
 idf.py set-target esp32c6
 idf.py -p "${port}" build flash
 echo "${example} flashed to ${port}"
