@@ -75,6 +75,18 @@ const M = {partial: false, srp_hosts: [],
     {rloc16: 0xe400, router_id: 57, ext_address: 'a10000000000e400', version: 5, leader: true, this_device: false,
      border_router: false, links: [{router_id: 13, lq_in: 3}, {router_id: 4, lq_in: 2}],
      addresses: ['fdde:ad00:beef::ff:fe00:e400'], responded: true, children_detail: true, children: []}]};
+// SH: the mesh of the 2026-11-03 screenshots (the old layout put the Home box on the board's links and LQI badges):
+// this board 0x8800 linked to all three other routers, each with children.
+const kid = (rloc16) => ({rloc16, ext_address: 'f' + rloc16.toString(16).padStart(15, '0'), mode: mode(false), lq_in: 3,
+                          ...detail, addresses: []});
+const srouter = (rloc16, router_id, links, kids, extra) => ({rloc16, router_id, ext_address: rloc16.toString(16).padStart(16, '0'),
+  version: 5, leader: false, this_device: false, border_router: false, addresses: [], responded: true,
+  children_detail: true, links: links.map(([id, lq]) => ({router_id: id, lq_in: lq})), children: kids.map(kid), ...extra});
+const SH = {partial: false, srp_hosts: [], network: {...NET, leader_router_id: 9, this_rloc16: 0x8800}, routers: [
+  srouter(0x2400, 9, [[34, 3], [23, 2], [40, 3]], [0x2401], {leader: true}),
+  srouter(0x5c00, 23, [[9, 2], [34, 3]], [0x5c01, 0x5c02]),
+  srouter(0x8800, 34, [[9, 3], [23, 3], [40, 2]], [0x8801, 0x8802, 0x8803], {this_device: true, border_router: true}),
+  srouter(0xa000, 40, [[9, 3], [34, 2]], [0xa001, 0xa002])]};
 const D = L.devices(R), DB = L.devices(B), LK = L.routerLinks(R);
 const byId = (ds, id) => ds.find((d) => d.id === id);
 const names = (ds, list) => list.map((d) => d.id);
@@ -105,13 +117,33 @@ HOME_HITS = f"""((ds, lk) => {{
           width: m.width, height: m.height}};
 }})"""
 
+# Every line the page draws, as [a, b] node centres: router links, then parent lines. (ds, lk, m) -> [[a, b]].
+LINES = """((ds, lk, m) => lk.filter((l) => m.pos[l.a] && m.pos[l.b]).map((l) => [m.pos[l.a], m.pos[l.b]])
+  .concat(ds.filter((d) => d.parentId !== null && m.pos[d.id] && m.pos[d.parentId]).map((d) => [m.pos[d.parentId], m.pos[d.id]])))"""
+
+# The LQI badges as the page draws them: 10 + 7 px per character wide, 16 px high, at the link middle. -> [[x0, x1, y0, y1]].
+BADGES = """((lk, m) => lk.filter((l) => m.pos[l.a] && m.pos[l.b]).map((l) => {
+  const w = 10 + 7 * L.linkText(l).length, x = (m.pos[l.a].x + m.pos[l.b].x) / 2, y = (m.pos[l.a].y + m.pos[l.b].y) / 2;
+  return [x - w / 2, x + w / 2, y - 8, y + 8];
+}))"""
+
+# (ds, lk) -> {lines: drawn lines through the Home box, badges: LQI badges it overlaps}.
+HOME_ON_LINKS = f"""((ds, lk) => {{
+  const m = L.layout(ds, lk, {LABELS}(ds)), h = m.home;
+  const box = {{x0: h.x - h.w / 2, x1: h.x + h.w / 2, y0: h.y - h.h / 2, y1: h.y + h.h / 2}};
+  return {{lines: {LINES}(ds, lk, m).filter(([a, b]) => L.crosses(a, b, box)).length,
+          badges: {BADGES}(lk, m).filter((b) => box.x0 < b[1] && b[0] < box.x1 && box.y0 < b[3] && b[2] < box.y1).length}};
+}})"""
+
 # (ds, lk) -> {closer: a free box centre more than 12 px nearer the board than the box, or null}. Grid step 4 px.
 HOME_NEAREST = f"""((ds, lk) => {{
   const labels = {LABELS}(ds), m = L.layout(ds, lk, labels), h = m.home;
-  const board = ds.find((d) => d.thisBoard), b = m.pos[board.id], fps = {FOOTPRINTS}(ds, m, labels);
+  const board = ds.find((d) => d.thisBoard), b = m.pos[board.id];
+  const fps = {FOOTPRINTS}(ds, m, labels).map((f) => f.slice(1)).concat({BADGES}(lk, m)), lines = {LINES}(ds, lk, m);
   const taken = Math.hypot(h.x - b.x, h.y - b.y);
-  const free = (x, y) => fps.every((f) => !(x - h.w / 2 < f[2] + 6 && f[1] < x + h.w / 2 + 6 &&
-                                            y - h.h / 2 < f[4] + 6 && f[3] < y + h.h / 2 + 6));
+  const free = (x, y) => fps.every((f) => !(x - h.w / 2 < f[1] + 6 && f[0] < x + h.w / 2 + 6 &&
+                                            y - h.h / 2 < f[3] + 6 && f[2] < y + h.h / 2 + 6)) &&
+      lines.every(([p, q]) => !L.crosses(p, q, {{x0: x - h.w / 2, x1: x + h.w / 2, y0: y - h.h / 2, y1: y + h.h / 2}}));
   for (let dx = -taken; dx <= taken; dx += 4)
     for (let dy = -taken; dy <= taken; dy += 4)
       if (Math.hypot(dx, dy) < taken - 12 && free(b.x + dx, b.y + dy))
@@ -544,11 +576,29 @@ class TestTopologyLogic:
         assert got["hits"] == [], got
         assert got["inside"] is True, got
 
-    def test_home_box_is_the_nearest_free_spot_around_the_board(self):
-        # On the fixtures: no free spot for the box (clear of every footprint by the layout's 6 px gap) is more than
-        # one ring step (12 px) closer to the board than the one taken.
+    def test_home_box_stays_off_every_link_parent_line_and_lqi_badge(self):
+        # On the screenshot mesh (the old layout put the box across the board's links and two LQI badges) and the
+        # other fixtures: no drawn line passes through the box and no LQI badge overlaps it.
         got = js(
-            f"[[L.devices(M), L.routerLinks(M)], [D, LK], [DB, L.routerLinks(B)]].map(([ds, lk]) => {HOME_NEAREST}(ds, lk))"
+            "[[L.devices(SH), L.routerLinks(SH)], [L.devices(M), L.routerLinks(M)], [D, LK], [DB, L.routerLinks(B)]]"
+            f".map(([ds, lk]) => {HOME_ON_LINKS}(ds, lk))"
+        )
+        assert all(g == {"lines": 0, "badges": 0} for g in got), got
+
+    def test_crosses_detects_a_segment_through_a_box_and_not_one_beside_it(self):
+        # On a 100x20 box: a line across it, one ending inside, one passing 20 px above, one parallel 10 px beside.
+        got = plain(
+            "[[{x: -10, y: 10}, {x: 110, y: 10}], [{x: 50, y: -40}, {x: 50, y: 5}], [{x: -10, y: -20}, {x: 110, y: -20}],"
+            " [{x: 120, y: -40}, {x: 120, y: 60}]].map(([a, b]) => L.crosses(a, b, {x0: 0, x1: 100, y0: 0, y1: 20}))"
+        )
+        assert got == [True, True, False, False]
+
+    def test_home_box_is_the_nearest_free_spot_around_the_board(self):
+        # On the fixtures: no free spot for the box (clear of every footprint and LQI badge by the layout's 6 px gap,
+        # and off every line) is more than one ring step (12 px) closer to the board than the one taken.
+        got = js(
+            "[[L.devices(SH), L.routerLinks(SH)], [L.devices(M), L.routerLinks(M)], [D, LK], [DB, L.routerLinks(B)]]"
+            f".map(([ds, lk]) => {HOME_NEAREST}(ds, lk))"
         )
         assert all(g["closer"] is None for g in got), got
 
