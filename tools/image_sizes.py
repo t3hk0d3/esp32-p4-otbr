@@ -30,8 +30,10 @@ IMAGES = [
     ("C6 bootloader", "c6_updater", "bootloader/bootloader.bin", "bootloader"),
     ("C6 installer", "c6_installer", "c6_installer.bin", None),
 ]
-# Images padded to their partition (the SPIFFS web image): the size that counts is the part before the 0xFF fill.
-TRIMMED = {"web_0.bin"}
+# SPIFFS images fill the whole partition and spread their pages over it: the size that counts is the pages in use
+# (not erased, all 0xFF). The page size is ESP-IDF's default CONFIG_SPIFFS_PAGE_SIZE.
+SPIFFS = {"web_0.bin"}
+SPIFFS_PAGE = 256
 
 MARKER = "<!-- image-sizes -->"
 
@@ -59,7 +61,12 @@ def bootloader_limit(build):
 
 def image_size(path):
     data = path.read_bytes()
-    return len(data.rstrip(b"\xff")) if path.name in TRIMMED else len(data)
+    if path.name not in SPIFFS:
+        return len(data)
+    erased = b"\xff" * SPIFFS_PAGE
+    return SPIFFS_PAGE * sum(
+        data[i : i + SPIFFS_PAGE] != erased for i in range(0, len(data), SPIFFS_PAGE)
+    )
 
 
 def collect(root):
@@ -138,7 +145,7 @@ def report(head, base=None, base_label=None):
         lines.append("No base build to compare against.")
     lines.append("")
     lines.append(
-        "Web UI: the SPIFFS image without its 0xFF fill. C6 installer: booted from the ESP-Hosted"
+        "Web UI: the SPIFFS pages in use. C6 installer: booted from the ESP-Hosted"
         " firmware's own slot, no limit here."
     )
     return "\n".join(lines) + "\n"
