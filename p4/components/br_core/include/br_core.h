@@ -43,6 +43,13 @@ void br_core_note_storage_init(esp_err_t storage_init_err);
 esp_err_t br_core_mdns_start(const char *hostname, const char *instance);
 
 /**
+ * Set the `_meshcop._udp` instance name (the name Home Assistant shows). While OpenThread runs the name is set under its
+ * lock and the service, when published (BR_RUNNING, attached), is published again under the new name; otherwise it is
+ * kept for the next start. Errors of the republish are returned (the name is set anyway).
+ */
+esp_err_t br_core_set_meshcop_name(const char *name);
+
+/**
  * Boot the radio side (spec 5.3 steps 3 to 5): start mDNS (a retry, with the names
  * br_core_mdns_start was given), probe the installed RCP version (best effort, nothing is ever pushed at boot), reset the C6 into
  * its RCP, start OpenThread with RADIO_MODE_SPI_RCP on core 0 and

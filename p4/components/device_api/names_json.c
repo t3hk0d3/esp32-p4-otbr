@@ -84,7 +84,7 @@ static bool get_bool(const cJSON *json, const char *key, bool *out)
 
 esp_err_t device_api_names_parse(const char *body, netnames_settings_t *out, const char **field)
 {
-    cJSON *json = cJSON_Parse(body);
+    cJSON *json = cJSON_ParseWithOpts(body, NULL, true); // like netcfg_from_json: nothing may follow the object
     netnames_settings_t s = {0};
 
     *field = NULL;

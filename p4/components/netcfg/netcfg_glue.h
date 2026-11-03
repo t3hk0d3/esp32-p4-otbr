@@ -11,7 +11,6 @@
 #include "netcfg_vlan.h"
 
 #define NETCFG_IFACE_NAME_MAX 12
-#define NETCFG_DHCP_NAME_MAX 32 /* esp_netif_set_hostname refuses longer names (ESP_NETIF_HOSTNAME_MAX_SIZE) */
 #define NETCFG_IP6_MAX CONFIG_LWIP_IPV6_NUM_ADDRESSES
 
 /* ---- vlan_glue.c: driver-level 802.1Q ---- */

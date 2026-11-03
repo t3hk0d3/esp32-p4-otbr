@@ -47,6 +47,11 @@ static void net_init_task(void *arg)
         ESP_LOGE(TAG, "netcfg_start failed: %s: no network, the border router is NOT started (HTTP server and console stay; `net reset` + reboot)", esp_err_to_name(err));
         vTaskDelete(NULL);
     }
+    // A second try if mDNS did not start in app_main (it is idempotent), before the web UI advert is decided.
+    err = br_core_mdns_start(netnames_hostname(), netnames_ha_name());
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "br_core_mdns_start: %s", esp_err_to_name(err));
+    }
     netnames_set_mode(netcfg_running_mode());
     err = br_core_start(netcfg_backbone_netif());
     if (err != ESP_OK) {
@@ -92,9 +97,6 @@ void app_main(void)
         ESP_LOGE(TAG, "netnames_init: %s", esp_err_to_name(err));
     }
     err = br_core_mdns_start(netnames_hostname(), netnames_ha_name());
-    if (err == ESP_OK) {
-        err = netnames_mdns_started();
-    }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "mDNS start: %s", esp_err_to_name(err));
     }

@@ -175,6 +175,16 @@ TEST_CASE("Names parse, not an object: field body", "[device_api]")
     assert_parse_fails("[1,2]", "body");
 }
 
+TEST_CASE("Names parse, text after the object: field body", "[device_api]")
+{
+    char body[512];
+
+    snprintf(body, sizeof(body), "%s garbage", VALID);
+    assert_parse_fails(body, "body");
+    snprintf(body, sizeof(body), "%s%s", VALID, VALID);
+    assert_parse_fails(body, "body");
+}
+
 TEST_CASE("Names parse, a missing field: that field", "[device_api]")
 {
     assert_parse_fails("{\"ha_name_follows_hostname\":true,\"ha_name\":\"\",\"http_advert\":false,\"dhcp_name\":\"\"}",

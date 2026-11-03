@@ -182,6 +182,37 @@ TEST_CASE("HA name with invalid UTF-8: rejected as ha_name", "[netnames]")
     TEST_ASSERT_EQUAL_STRING("ha_name", field);
 }
 
+TEST_CASE("HA name with an encoded surrogate, an overlong form or a code point above U+10FFFF: rejected as ha_name", "[netnames]")
+{
+    static const char *const bad[] = {
+        "Kitchen \xed\xa0\x80",     // U+D800, a surrogate
+        "a\xe0\x80\x8a" "b",        // overlong U+000A hiding a newline
+        "a\xc0\xaf",                 // overlong '/'
+        "a\xf0\x80\x80\x80",       // overlong 4-byte form
+        "a\xf4\x90\x80\x80",       // above U+10FFFF
+    };
+
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        netnames_settings_t s = blank();
+        const char *field = NULL;
+
+        s.ha_name_follows_hostname = false;
+        strlcpy(s.ha_name, bad[i], sizeof(s.ha_name));
+        TEST_ASSERT_FALSE_MESSAGE(check(&s, &field), bad[i]);
+        TEST_ASSERT_EQUAL_STRING("ha_name", field);
+    }
+}
+
+TEST_CASE("HA name with 3- and 4-byte characters at the edges of their ranges: valid", "[netnames]")
+{
+    netnames_settings_t s = blank();
+    const char *field = NULL;
+
+    s.ha_name_follows_hostname = false;
+    strlcpy(s.ha_name, "\xe0\xa0\x80 \xed\x9f\xbf \xf0\x90\x80\x80 \xf4\x8f\xbf\xbf", sizeof(s.ha_name));
+    TEST_ASSERT_TRUE(check(&s, &field));
+}
+
 TEST_CASE("HA name following the hostname but holding junk: valid (ignored)", "[netnames]")
 {
     netnames_settings_t s = blank();
@@ -322,6 +353,34 @@ TEST_CASE("Steps, same hostname but live differs (conflict rename): hostname", "
 
     strlcpy(a.hostname, "kitchen", sizeof(a.hostname));
     assert_steps(netnames_rules_steps(&a, &a, DEFAULT_HOST, "kitchen-2"), true, false, false, false);
+}
+
+TEST_CASE("Steps, only the DHCP name changed while renamed: dhcp_name only, no hostname retry", "[netnames]")
+{
+    netnames_settings_t a = blank(), b;
+
+    strlcpy(a.hostname, "kitchen", sizeof(a.hostname));
+    b = a;
+    strlcpy(b.dhcp_name, "router", sizeof(b.dhcp_name));
+    assert_steps(netnames_rules_steps(&a, &b, DEFAULT_HOST, "kitchen-2"), false, false, false, true);
+}
+
+TEST_CASE("Steps, only the advert toggled while renamed: http_advert only, no hostname retry", "[netnames]")
+{
+    netnames_settings_t a = blank(), b;
+
+    strlcpy(a.hostname, "kitchen", sizeof(a.hostname));
+    b = a;
+    b.http_advert = true;
+    assert_steps(netnames_rules_steps(&a, &b, DEFAULT_HOST, "kitchen-2"), false, false, true, false);
+}
+
+TEST_CASE("Steps, nothing changed and mDNS not running (no live name): hostname", "[netnames]")
+{
+    netnames_settings_t a = blank();
+
+    strlcpy(a.hostname, "kitchen", sizeof(a.hostname));
+    assert_steps(netnames_rules_steps(&a, &a, DEFAULT_HOST, ""), true, false, false, false);
 }
 
 TEST_CASE("Steps, http_advert toggled: http_advert only", "[netnames]")

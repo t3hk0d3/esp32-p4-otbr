@@ -6,9 +6,11 @@
 #include <string.h>
 
 #define NAME_MAX_LEN (NETNAMES_NAME_LEN - 1)
+#define STR(x) STR_(x)
+#define STR_(x) #x
 
 /* An empty name, or a DNS label: 1-max_len of letters, digits and '-', not starting or ending with '-'. */
-static bool label_valid(const char *name, size_t max_len, const char **reason)
+static bool label_valid(const char *name, size_t max_len, const char *too_long, const char **reason)
 {
     const size_t len = strnlen(name, NETNAMES_NAME_LEN);
 
@@ -16,7 +18,7 @@ static bool label_valid(const char *name, size_t max_len, const char **reason)
         return true;
     }
     if (len > max_len) {
-        *reason = max_len == NETNAMES_DHCP_NAME_MAX ? "longer than 32 characters" : "longer than 63 characters";
+        *reason = too_long;
         return false;
     }
     for (size_t i = 0; i < len; i++) {
@@ -86,6 +88,14 @@ static bool free_text_valid(const char *name, const char **reason)
                 return false;
             }
         }
+        // Overlong 3- and 4-byte forms, encoded surrogates and code points above U+10FFFF (the ranges json_out's
+        // writer refuses too): the second byte of these lead bytes has a narrower range.
+        const unsigned char b1 = n > 1 ? (unsigned char)name[i + 1] : 0;
+
+        if ((c == 0xe0 && b1 < 0xa0) || (c == 0xed && b1 > 0x9f) || (c == 0xf0 && b1 < 0x90) || (c == 0xf4 && b1 > 0x8f)) {
+            *reason = "is not valid UTF-8";
+            return false;
+        }
         i += n;
     }
     return true;
@@ -93,7 +103,7 @@ static bool free_text_valid(const char *name, const char **reason)
 
 bool netnames_rules_check(const netnames_settings_t *in, const char **field, const char **reason)
 {
-    if (!label_valid(in->hostname, NAME_MAX_LEN, reason)) {
+    if (!label_valid(in->hostname, NAME_MAX_LEN, "longer than 63 characters", reason)) {
         *field = "hostname";
         return false;
     }
@@ -101,7 +111,7 @@ bool netnames_rules_check(const netnames_settings_t *in, const char **field, con
         *field = "ha_name";
         return false;
     }
-    if (!label_valid(in->dhcp_name, NETNAMES_DHCP_NAME_MAX, reason)) {
+    if (!label_valid(in->dhcp_name, NETCFG_DHCP_NAME_MAX, "longer than " STR(NETCFG_DHCP_NAME_MAX) " characters", reason)) {
         *field = "dhcp_name";
         return false;
     }
@@ -143,10 +153,14 @@ netnames_steps_t netnames_rules_steps(const netnames_settings_t *old, const netn
 
     netnames_rules_effective(old, default_hostname, old_host, old_ha, old_dhcp);
     netnames_rules_effective(new, default_hostname, new_host, new_ha, new_dhcp);
-    steps.hostname = strcmp(old_host, new_host) != 0 || strcmp(live_hostname, new_host) != 0;
     steps.ha_name = strcmp(old_ha, new_ha) != 0;
     // The _http._tcp instance is the HA name, so a rename of it is a step of the service too.
     steps.http_advert = old->http_advert != new->http_advert || steps.ha_name;
     steps.dhcp_name = strcmp(old_dhcp, new_dhcp) != 0;
+    // A save that changes nothing else while the library uses another name (a conflict rename, or mDNS not running)
+    // is a retry of the name; a save of something else leaves the renamed host alone.
+    const bool other_change = steps.http_advert || steps.dhcp_name;
+
+    steps.hostname = strcmp(old_host, new_host) != 0 || (!other_change && strcmp(live_hostname, new_host) != 0);
     return steps;
 }

@@ -1,8 +1,9 @@
 """Names section of the Ethernet page (BDD: NamesLogic, NamesPage). Runs static/names.js under node."""
 
 import json
+import re
 
-from device_js import logic, needs_node, page, scenario
+from device_js import REPO, STATIC, logic, needs_node, page, scenario
 
 
 def names(expression):
@@ -90,6 +91,14 @@ class TestNamesLogic:
         err = errors_of(form(dhcp_name="d" * 33))
         assert set(err) == {"dhcp_name"}
         assert "32 characters" in err["dhcp_name"]
+
+    def test_dhcp_name_limit_matches_the_firmware(self):
+        # On names.js and netcfg_config.h: the page's DHCP_NAME_MAX equals NETCFG_DHCP_NAME_MAX.
+        header = (REPO / "p4/components/netcfg/include/netcfg_config.h").read_text()
+        script = (STATIC / "names.js").read_text()
+        firmware = re.search(r"#define NETCFG_DHCP_NAME_MAX (\d+)", header).group(1)
+        page_limit = re.search(r"var DHCP_NAME_MAX = (\d+);", script).group(1)
+        assert page_limit == firmware
 
     def test_ha_name_is_checked_only_when_it_does_not_follow(self):
         # On an empty or space-padded HA name: an error only with follows off.
@@ -522,6 +531,62 @@ class TestNamesPage:
         )
         assert "letters, digits and hyphens" in r[0]
         assert r[1] is True
+
+    def test_sections_turn_disabled_and_stop_polling_when_the_ethernet_page_becomes_busy(
+        self,
+    ):
+        # On the Ethernet page turning busy after load: every input and button disabled at once, no names poll while busy.
+        r = scenario(
+            page("names", routes())
+            + START
+            + """
+            t.setBlocked(true);
+            const before = t.calls.filter((c) => c.url === '/device/names').length;
+            await t.advance(30000);
+            const polls = t.calls.filter((c) => c.url === '/device/names').length - before;
+            return [t.el('nm-hostname').disabled, t.el('hn-dhcp').disabled, t.el('nm-follows').disabled,
+                    t.el('nm-save').disabled, polls];
+        """
+        )
+        assert r == [True, True, True, True, 0]
+
+    def test_sections_come_back_when_the_ethernet_page_is_free_again(self):
+        # On busy then free: the inputs enabled again without waiting for a poll.
+        r = scenario(
+            page("names", routes())
+            + START
+            + "t.setBlocked(true); t.setBlocked(false); return [t.el('nm-hostname').disabled, t.el('hn-dhcp').disabled];"
+        )
+        assert r == [False, False]
+
+    def test_save_without_a_hostname_change_applies_the_reply_at_once(self):
+        # On a DHCP-only save: no 2 s wait and no second read; the section is saved and usable right after the reply.
+        r = scenario(
+            page(
+                "names",
+                routes(
+                    put="{status: 200, body: H.fixture(H.NAMES, {dhcp_name: 'router', applied: true})}"
+                ),
+            )
+            + START
+            + """
+            t.el('hn-dhcp').type('router');
+            const before = t.calls.length;
+            t.el('hn-save').click(); await t.advance(100);
+            const after = t.calls.slice(before).map((c) => c.method + ' ' + c.url);
+            return [after, t.el('hn-save').disabled, t.el('hn-dhcp').disabled, t.el('hn-dhcp').value];
+        """
+        )
+        assert r == [["PUT /device/names"], True, False, "router"]
+
+    def test_no_live_name_shows_neither_chip_nor_banner(self):
+        # On hostname_live "" (mDNS does not run): no Announced chip, no Renamed chip, no conflict banner.
+        r = scenario(
+            page("names", routes("H.fixture(H.NAMES, {hostname_live: ''})"))
+            + START
+            + "return [t.el('nm-announced').hidden(), t.el('nm-renamed').hidden(), t.el('nm-conflict').hidden()];"
+        )
+        assert r == [True, True, True]
 
     def test_polls_do_not_overwrite_an_edit(self):
         # On an edit followed by a poll: the edit stays.

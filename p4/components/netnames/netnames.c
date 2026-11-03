@@ -9,17 +9,12 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_mac.h"
-#include "esp_openthread.h"
-#include "esp_openthread_border_router.h"
-#include "esp_openthread_lock.h"
-#include "esp_openthread_meshcop_mdns.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "mdns.h"
 #include "netcfg.h"
 #include "netnames_rules.h"
 #include "nvs.h"
-#include "openthread/thread.h"
 
 static const char *TAG = "netnames";
 
@@ -33,8 +28,10 @@ static const char *TAG = "netnames";
 #define HTTP_PROTO "_tcp"
 #define HTTP_PORT 80
 
+_Static_assert(NETNAMES_LIVE_LEN >= MDNS_NAME_BUF_LEN, "mdns_hostname_get writes up to MDNS_NAME_BUF_LEN bytes");
+
 static struct {
-    SemaphoreHandle_t lock; /* guards everything below except `live` */
+    SemaphoreHandle_t lock; /* guards everything below */
     StaticSemaphore_t lock_storage;
     netnames_settings_t set;
     char hostname_default[NETNAMES_NAME_LEN];
@@ -46,29 +43,12 @@ static struct {
     bool http_published;
 } s = {.set = {.ha_name_follows_hostname = true}};
 
-/* The hostname the mDNS library uses (a conflict renames it); written by the library's callback on the mDNS task. */
-static char s_live[NETNAMES_NAME_LEN];
-static portMUX_TYPE s_live_lock = portMUX_INITIALIZER_UNLOCKED;
-
-/* ---- live hostname ---- */
-
-static void live_set(const char *hostname)
+/* The hostname the mDNS library uses now (a conflict renames it), read from the library itself: "" when mDNS does not run. */
+static void live_get(char out[NETNAMES_LIVE_LEN])
 {
-    taskENTER_CRITICAL(&s_live_lock);
-    strlcpy(s_live, hostname ? hostname : "", sizeof(s_live));
-    taskEXIT_CRITICAL(&s_live_lock);
-}
-
-static void live_get(char out[NETNAMES_NAME_LEN])
-{
-    taskENTER_CRITICAL(&s_live_lock);
-    strlcpy(out, s_live, NETNAMES_NAME_LEN);
-    taskEXIT_CRITICAL(&s_live_lock);
-}
-
-static void on_hostname_changed(const char *hostname, void *arg)
-{
-    live_set(hostname);
+    if (mdns_hostname_get(out) != ESP_OK) {
+        out[0] = '\0';
+    }
 }
 
 /* ---- storage ---- */
@@ -168,33 +148,13 @@ static esp_err_t apply_http(void)
     return err;
 }
 
-/* The HA name is the meshcop instance: stored for the next role change, and republished now when the service is up. */
+/* The HA name is the meshcop instance (br_core sets it safely against the OpenThread task) and the default instance. */
 static esp_err_t apply_ha_name(void)
 {
-    esp_err_t err = mdns_instance_name_set(s.ha_name);
-    const br_core_mode_t mode = br_core_get_mode();
+    const esp_err_t instance = mdns_instance_name_set(s.ha_name);
+    const esp_err_t meshcop = br_core_set_meshcop_name(s.ha_name);
 
-    // The setter frees the previous name, which the role-change handler reads on the OpenThread task: under the lock while
-    // OpenThread runs. STARTING and RADIO_FAULT have no running OpenThread task (and maybe no lock yet); the next start
-    // publishes with the name stored here.
-    if (mode != BR_MODE_BR_RUNNING && mode != BR_MODE_SNIFFER) {
-        esp_openthread_set_meshcop_instance_name(s.ha_name);
-        return err;
-    }
-    esp_openthread_lock_acquire(portMAX_DELAY);
-    esp_openthread_set_meshcop_instance_name(s.ha_name);
-    const otDeviceRole role = otThreadGetDeviceRole(esp_openthread_get_instance());
-
-    if (mode == BR_MODE_BR_RUNNING &&
-            (role == OT_DEVICE_ROLE_CHILD || role == OT_DEVICE_ROLE_ROUTER || role == OT_DEVICE_ROLE_LEADER)) {
-        // publish returns early while the service is published, so a rename is a remove first.
-        esp_openthread_remove_meshcop_mdns();
-        const esp_err_t published = esp_openthread_publish_meshcop_mdns(s.ha_name);
-
-        err = err == ESP_OK ? published : err;
-    }
-    esp_openthread_lock_release();
-    return err;
+    return meshcop != ESP_OK ? meshcop : instance;
 }
 
 static void note_step(netnames_result_t *res, const char *step, esp_err_t err)
@@ -224,23 +184,11 @@ esp_err_t netnames_init(void)
     netnames_rules_default_hostname(mac, s.hostname_default);
     load(&s.set);
     resolve();
-    live_set(s.hostname);
-    // No init-state guard in the prebuilt library: it keeps a copy, the role-change handler publishes with it.
-    esp_openthread_set_meshcop_instance_name(s.ha_name);
+    br_core_set_meshcop_name(s.ha_name); // before OpenThread starts: kept for its first publish
     xSemaphoreGive(s.lock);
     ESP_LOGI(TAG, "hostname %s, HA name \"%s\", DHCP name %s, web UI advert %s", s.hostname, s.ha_name, s.dhcp_name,
              s.set.http_advert ? "on" : "off");
     return ESP_OK;
-}
-
-esp_err_t netnames_mdns_started(void)
-{
-    char live[NETNAMES_NAME_LEN];
-
-    if (mdns_hostname_get(live) == ESP_OK) {
-        live_set(live);
-    }
-    return mdns_register_hostname_changed_callback(on_hostname_changed, NULL);
 }
 
 void netnames_set_mode(netcfg_mode_t mode)
@@ -261,14 +209,14 @@ void netnames_get(netnames_t *out)
     strlcpy(out->ha_name, s.ha_name, sizeof(out->ha_name));
     strlcpy(out->dhcp_name, s.dhcp_name, sizeof(out->dhcp_name));
     out->http_advert_available = !s.mode_known || s.mode == NETCFG_MODE_SINGLE;
-    xSemaphoreGive(s.lock);
     live_get(out->hostname_live);
+    xSemaphoreGive(s.lock);
 }
 
 esp_err_t netnames_set(const netnames_settings_t *in, netnames_result_t *res)
 {
     netnames_settings_t next = *in;
-    char live[NETNAMES_NAME_LEN];
+    char live[NETNAMES_LIVE_LEN];
 
     *res = (netnames_result_t) {
         .applied = true

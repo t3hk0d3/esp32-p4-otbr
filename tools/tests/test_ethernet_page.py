@@ -534,6 +534,23 @@ class TestEthernetPage:
         assert "http://10.0.0.2" in r[2]
         assert r[3:] == [True, True, 0]
 
+    def test_apply_tells_the_blocked_listeners_and_reports_blocked(self):
+        # On Apply: a listener added with onBlockedChange is called, and isBlocked() is true while the board reboots.
+        r = scenario(
+            page("ethernet", routes())
+            + START
+            + """
+            let calls = 0;
+            t.page.onBlockedChange(() => { calls++; });
+            const before = t.page.isBlocked();
+            t.el('if-single-edit').click(); t.el('if-single-staticbtn').click(); t.el('if-single-cidr').type('10.0.0.2/24');
+            t.el('reviewBtn').click();
+            await t.page.apply();
+            return [before, t.page.isBlocked(), calls > 0];
+        """
+        )
+        assert r == [False, True, True]
+
     def test_apply_refused_by_the_board_shows_why_and_releases_the_buttons(self):
         # On a 400 invalid_config: the detail in netMsg, not busy, Apply enabled again.
         r = scenario(

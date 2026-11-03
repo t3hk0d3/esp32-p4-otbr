@@ -14,8 +14,8 @@ extern "C" {
 
 /** Buffer size of every name: up to 63 characters (bytes of UTF-8 for the HA name) plus the terminator. */
 #define NETNAMES_NAME_LEN 64
-/** Longest DHCP client name: esp_netif_set_hostname refuses more (ESP_NETIF_HOSTNAME_MAX_SIZE). */
-#define NETNAMES_DHCP_NAME_MAX 32
+/** Buffer of the hostname the mDNS library uses: its MDNS_NAME_BUF_LEN (a conflict rename can add "-2" to 63 chars). */
+#define NETNAMES_LIVE_LEN 65
 /** Default DHCP client name (replaces lwIP's CONFIG_LWIP_LOCAL_HOSTNAME). */
 #define NETNAMES_DEFAULT_DHCP_NAME "esp-otbr"
 
@@ -33,7 +33,7 @@ typedef struct {
     netnames_settings_t set;
     char hostname[NETNAMES_NAME_LEN];         /**< effective hostname */
     char hostname_default[NETNAMES_NAME_LEN]; /**< esp-otbr-<last 3 MAC bytes> */
-    char hostname_live[NETNAMES_NAME_LEN];    /**< what the mDNS library uses; differs after a conflict rename */
+    char hostname_live[NETNAMES_LIVE_LEN];    /**< what the mDNS library uses; differs after a conflict rename, "" without mDNS */
     char ha_name[NETNAMES_NAME_LEN];          /**< effective Home Assistant (meshcop instance) name */
     char dhcp_name[NETNAMES_NAME_LEN];        /**< effective DHCP client name */
     bool http_advert_available;               /**< false in split mode: the web UI is not on the mDNS interface */
@@ -52,9 +52,6 @@ typedef struct {
  * to ESP-IDF's meshcop publisher. Call after storage_init and before br_core_mdns_start.
  */
 esp_err_t netnames_init(void);
-
-/** Call once mDNS runs: reads the hostname in use and follows the library's renames from then on. */
-esp_err_t netnames_mdns_started(void);
 
 /** The running network mode, once netcfg has started: decides whether the _http._tcp advert can be published. */
 void netnames_set_mode(netcfg_mode_t mode);

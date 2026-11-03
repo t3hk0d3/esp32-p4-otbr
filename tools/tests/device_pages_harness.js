@@ -166,10 +166,11 @@ function makeEnv(page, routes) {
   };
   let page_ = null, kit = null, Logic = null;
   const handle = {};
+  const blockedListeners = [];
   if (typeof page === 'string') {
     Logic = require(path.join(FRONTEND, 'static', SCRIPTS[page] + '.js'));
-    // The names section asks the Ethernet page whether it is busy; a test sets `t.blocked`.
-    page_ = Logic.Page(env, {isBlocked: () => !!handle.blocked});
+    // The names sections ask the Ethernet page whether it is busy and listen for changes; a test calls t.setBlocked().
+    page_ = Logic.Page(env, {isBlocked: () => !!handle.blocked, onBlockedChange: (fn) => blockedListeners.push(fn)});
   } else {
     kit = Common.DeviceKit(env, page.kit || {});
   }
@@ -194,7 +195,8 @@ function makeEnv(page, routes) {
   };
   return Object.assign(handle, {env, page: page_, kit, Logic, Common, doc, calls, flush, advance,
                                 el: (id) => doc.getElementById(id), reloads: () => reloads, maxInFlight: () => maxInFlight,
-                                confirms: () => confirms, navigations: () => navigations});
+                                confirms: () => confirms, navigations: () => navigations,
+                                setBlocked(on) { handle.blocked = on; blockedListeners.forEach((f) => f()); }});
 }
 
 const STATUS = {

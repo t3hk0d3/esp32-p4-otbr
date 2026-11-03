@@ -112,8 +112,8 @@ function toBody(form) {
 /* The hostname the board means to use: the set one, or the default. */
 function effectiveHostname(body) { return body.hostname || body.hostname_default; }
 
-/* The mDNS library renamed the board after a conflict. */
-function conflict(body) { return body.hostname_live !== effectiveHostname(body); }
+/* The mDNS library renamed the board after a conflict. No live name ("") means mDNS does not run: no conflict. */
+function conflict(body) { return !!body.hostname_live && body.hostname_live !== effectiveHostname(body); }
 
 /*
  * Where to go after a save: the same page on the new live name when this page was opened by the old live name; null
@@ -143,8 +143,9 @@ return {
 })();
 
 /*
- * opts.isBlocked(): true while the Ethernet page runs a trial or waits for its reboot. Two sections, mDNS (ids nm-*) and
- * Hostname (ids hn-*), each with its own Save and Discard: saving one sends the other's saved values and keeps its edits.
+ * opts.isBlocked(): true while the Ethernet page runs a trial or waits for its reboot; opts.onBlockedChange(fn): fn runs
+ * when that may have changed. Two sections, mDNS (ids nm-*) and Hostname (ids hn-*), each with its own Save and Discard:
+ * saving one sends the other's saved values and keeps its edits.
  */
 function NamesPage(env, opts) {
 var C = typeof DeviceCommon !== 'undefined' ? DeviceCommon : require('./device_common.js');
@@ -212,7 +213,7 @@ function render() {
                               'Save; it only matters with an automatic (DHCP) address.');
   Object.keys(FIELDS).forEach(function(f) { messages(FIELDS[f] + '-err', v.errors[f] || serverErrors[f]); });
   var renamed = L.conflict(api);
-  show('nm-announced', !renamed);
+  show('nm-announced', !!api.hostname_live && !renamed);
   show('nm-renamed', renamed);
   setText('nm-conflict', renamed ? 'Another device on the network already uses ' + L.effectiveHostname(api) +
                                        '.local, so the board answers as ' + api.hostname_live +
@@ -273,7 +274,15 @@ function discard(part) {
   render();
 }
 
-/* After a save: wait for the new name to settle, read the names again, move to the new .local name if needed. */
+/* The names after a save of `part`: the other section keeps what is being typed there. */
+function adopt(part, after) {
+  var keep = form;
+  api = after;
+  saved = L.fromApi(after);
+  form = L.merge(saved, keep, OTHER[part]);
+}
+
+/* After a save that moves the hostname: wait for the new name to settle, read again, move to the new .local name. */
 function settleThenReload(part, before, reply) {
   return new Promise(function(resolve) { env.setTimeout(resolve, SETTLE_MS); }).then(function() {
     return kit.request('GET', '/device/names', {timeoutMs : 5000});
@@ -287,11 +296,7 @@ function settleThenReload(part, before, reply) {
       env.navigate(target);
       return;
     }
-    // The other section keeps what is being typed there.
-    var keep = form;
-    api = after;
-    saved = L.fromApi(after);
-    form = L.merge(saved, keep, OTHER[part]);
+    adopt(part, after);
   });
 }
 
@@ -300,11 +305,13 @@ function save(part) {
   if (!form || !canSave(part, L.validate(form)))
     return Promise.resolve(null);
   var before = api;
+  var body = L.toBody(L.merge(saved, form, part));
+  // Only a new hostname (or a retry of a renamed one) moves the live name; any other save's reply is already current.
+  var moves = (body.hostname.toLowerCase() || before.hostname_default) !== before.hostname_live;
   saving = true;
   render();
   return kit.request('PUT', '/device/names', {headers : {'Content-Type' : 'application/json'},
-                                               body : JSON.stringify(L.toBody(L.merge(saved, form, part))),
-                                               timeoutMs : 10000})
+                                               body : JSON.stringify(body), timeoutMs : 10000})
       .then(function(r) {
         if (r.status === 400 && r.body && FIELDS[r.body.field]) {
           serverErrors = {};
@@ -320,7 +327,10 @@ function save(part) {
           note(msg, 'Saved, but not everything took effect yet: ' + r.body.detail, true);
         else
           note(msg, 'Saved.', false);
-        return settleThenReload(part, before, r.body);
+        if (moves)
+          return settleThenReload(part, before, r.body);
+        adopt(part, r.body);
+        return null;
       }, function(e) { note(msg, e.message, true); })
       .then(function() {
         saving = false;
@@ -342,7 +352,10 @@ function init() {
     $(IDS[part] + '-discard').addEventListener('click', function() { discard(part); });
     $(IDS[part] + '-save').addEventListener('click', function() { save(part); });
   });
-  kit.poller(function() { return saving ? Promise.resolve(true) : refresh(); }, 10000, 'namesSection');
+  if (opts.onBlockedChange)
+    opts.onBlockedChange(render);
+  // Once loaded, no poll while a save runs or the Ethernet page reboots the board: it would only fail or race the save.
+  kit.poller(function() { return form && blocked() ? Promise.resolve(true) : refresh(); }, 10000, 'namesSection');
 }
 
 return {init : init, refresh : refresh, save : save, render : render, kit : kit};
@@ -353,7 +366,12 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports.Page = NamesPage;
 }
 
+// ethernetPage is the global ethernet.js (loaded first) leaves on this page.
 if (typeof document !== 'undefined')
   NamesPage(DeviceCommon.DeviceEnv(), {
-    isBlocked : function() { return typeof ethernetPage !== 'undefined' && ethernetPage.isBlocked(); }
+    isBlocked : function() { return !!ethernetPage && ethernetPage.isBlocked(); },
+    onBlockedChange : function(fn) {
+      if (ethernetPage)
+        ethernetPage.onBlockedChange(fn);
+    }
   }).init();

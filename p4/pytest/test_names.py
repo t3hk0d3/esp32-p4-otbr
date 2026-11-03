@@ -237,16 +237,19 @@ class TestNamesSplit:
 
     def test_no_web_ui_advert_and_nothing_on_mgmt(self, split_board):  # noqa: F811
         # On split mode with the advert on: no _http._tcp on either side, the hostname never answered on mgmt.
+        mgmt = link_local(split_board, "mgmt")
         body = json.dumps(DEFAULTS | {"hostname": "names-split", "http_advert": True})
-        status, _, reply = http_from(
-            "mgmt", link_local(split_board, "mgmt"), "PUT", "/device/names", body
-        )
-        assert status == requests.codes.ok, reply
-        assert json.loads(reply)["http_advert_available"] is False
-        time.sleep(SETTLE_S)
-        for side in ("mgmt", "thread"):
-            assert not mdns_records(
-                side, "_http._tcp.local", TYPE_PTR, full_window=True
-            ), side
-        assert not mdns_records("mgmt", "names-split.local", 28, full_window=True)
-        assert mdns_records("thread", "names-split.local", 28)
+        try:
+            status, _, reply = http_from("mgmt", mgmt, "PUT", "/device/names", body)
+            assert status == requests.codes.ok, reply
+            assert json.loads(reply)["http_advert_available"] is False
+            time.sleep(SETTLE_S)
+            for side in ("mgmt", "thread"):
+                assert not mdns_records(
+                    side, "_http._tcp.local", TYPE_PTR, full_window=True
+                ), side
+            assert not mdns_records("mgmt", "names-split.local", 28, full_window=True)
+            assert mdns_records("thread", "names-split.local", 28)
+        finally:
+            # `net reset` (the split fixture's teardown) keeps the names: later modules expect esp-otbr-<mac>.
+            http_from("mgmt", mgmt, "PUT", "/device/names", json.dumps(DEFAULTS))

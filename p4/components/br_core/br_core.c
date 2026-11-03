@@ -14,6 +14,7 @@
 #include "esp_openthread.h"
 #include "esp_openthread_border_router.h"
 #include "esp_openthread_lock.h"
+#include "esp_openthread_meshcop_mdns.h"
 #include "esp_openthread_netif_glue.h"
 #include "esp_openthread_spinel.h"
 #include "esp_openthread_types.h"
@@ -965,6 +966,39 @@ static bool ot_ready_now(void)
     const bool ready = s_core.ot_ready;
     xSemaphoreGive(s_core.mutex);
     return ready;
+}
+
+esp_err_t br_core_set_meshcop_name(const char *name)
+{
+    ESP_RETURN_ON_FALSE(name, ESP_ERR_INVALID_ARG, TAG, "no meshcop name");
+    // The setter frees the previous name, which the role-change handler reads on the OpenThread task. Without OpenThread
+    // (checked under the status mutex, so it cannot start meanwhile) nothing reads it; its next start publishes this one.
+    if (s_core.started) {
+        xSemaphoreTake(s_core.mutex, portMAX_DELAY);
+    }
+    if (!s_core.started || !s_core.ot_ready) {
+        esp_openthread_set_meshcop_instance_name(name);
+        if (s_core.started) {
+            xSemaphoreGive(s_core.mutex);
+        }
+        return ESP_OK;
+    }
+    xSemaphoreGive(s_core.mutex);
+    esp_openthread_lock_acquire(portMAX_DELAY);
+    esp_openthread_set_meshcop_instance_name(name);
+    esp_err_t err = ESP_OK;
+
+    if (ot_ready_now() && br_core_get_mode() == BR_MODE_BR_RUNNING) { // a push may have taken OpenThread over meanwhile
+        const otDeviceRole role = otThreadGetDeviceRole(esp_openthread_get_instance());
+
+        if (role == OT_DEVICE_ROLE_CHILD || role == OT_DEVICE_ROLE_ROUTER || role == OT_DEVICE_ROLE_LEADER) {
+            // publish returns early while the service is published, so a rename is a remove first.
+            esp_openthread_remove_meshcop_mdns();
+            err = esp_openthread_publish_meshcop_mdns(name);
+        }
+    }
+    esp_openthread_lock_release();
+    return err;
 }
 
 esp_err_t br_core_enter_sniffer(uint8_t channel, otLinkRawReceiveDone receive_cb)

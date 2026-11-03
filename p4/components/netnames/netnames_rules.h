@@ -36,8 +36,8 @@ void netnames_rules_effective(const netnames_settings_t *s, const char *default_
                               char ha_name[NETNAMES_NAME_LEN], char dhcp_name[NETNAMES_NAME_LEN]);
 
 /**
- * Steps needed to go from `old` to `new`. The hostname step also runs when the effective hostname is unchanged but the
- * mDNS library uses another one (`live_hostname`, after a conflict rename), so saving again retries the name.
+ * Steps needed to go from `old` to `new`. The hostname step also runs when nothing else changes and the mDNS library
+ * uses another name (`live_hostname`: a conflict rename, or "" when mDNS does not run), so saving again retries the name.
  */
 netnames_steps_t netnames_rules_steps(const netnames_settings_t *old, const netnames_settings_t *new,
                                       const char *default_hostname, const char *live_hostname);

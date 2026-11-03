@@ -184,6 +184,14 @@ reason, spec reference.
    it runs), `GET /node/state`, and `PUT /node/state "enable"` only when Thread is `disabled` (enabling a running Thread
    starts a fresh attach), then polls the role for up to 60 s like the Form flow. 403 (management address), 409
    (sniffer) and 503 (radio) are shown as readable messages. Host tests: `tools/tests/test_network_page.py`.
+16. Applied. `esp_ot_br_server` frontend: mDNS and Hostname sections on the Ethernet page (spec
+   2026-11-03-network-names-design.md). New `frontend/static/names.js` (pure `NamesLogic` exported for node, page code
+   guarded by `typeof document`, text only through `textContent`) for `GET`/`PUT /device/names`; `frontend/ethernet.html`
+   gets the two sections and loads `names.js` after `ethernet.js`; `frontend/static/ethernet.js` leaves its page object in
+   the global `ethernetPage` and adds `isBlocked()` / `onBlockedChange(fn)` so the sections stay still during a trial and
+   the reboot after Apply; `frontend/static/device_common.js` `DeviceEnv` gains `navigate(url)` (moves the page to the
+   new `.local` name); `frontend/static/style.css` gains `.section-head`, `.names-form`, `.check-row`, `.check-top` and
+   `.input-suffix`. Host tests: `tools/tests/test_names_page.py`.
 
 ### REST guard classification (patches 2 and 9)
 

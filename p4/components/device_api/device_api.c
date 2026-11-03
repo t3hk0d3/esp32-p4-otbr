@@ -1182,7 +1182,7 @@ static esp_err_t names_put_handler(httpd_req_t *req)
         return send_json(req, error);
     }
     if (err != ESP_OK) {
-        return send_error(req, 500, "storage_failed", "the names could not be stored", false);
+        return send_error(req, 500, "store_failed", "the names could not be stored", false);
     }
     return send_names(req, &res);
 }

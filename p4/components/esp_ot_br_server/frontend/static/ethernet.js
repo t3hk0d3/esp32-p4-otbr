@@ -316,11 +316,15 @@ var draft = null;   // what the person edits
 var editing = {};
 var review = false;
 var ack = false;
+var blockedListeners = []; // the names sections on this page: told when isBlocked() may have changed
 var kit = C.DeviceKit(env, {
   actionIds : [ 'discardBtn', 'backBtn' ],
   trial : false,
   refreshNetwork : function() { return refreshNetwork(); },
-  onBusy : function() { render(); }
+  onBusy : function() {
+    render();
+    notifyBlocked();
+  }
 });
 var $ = kit.$, el = kit.el, setText = kit.setText, show = kit.show, note = kit.note;
 
@@ -457,6 +461,7 @@ function refreshNetwork() {
     if (!draft)
       draft = clone(cur);
     kit.renderTrial(net);
+    notifyBlocked(); // a trial started or ended
     show('n-stale', false);
     setText('n-dropped', String(net.vlan_rx_dropped));
     setText('n-fallback', net.fallback ? 'The stored settings could not be applied (' + (net.error || 'unknown reason') +
@@ -575,10 +580,23 @@ function init() {
   kit.poller(refreshNetwork, 10000, 'ethSection');
 }
 
-/* The names section stays still during a trial and while the board reboots into what was applied. */
+/* The names sections stay still during a trial and while the board reboots into what was applied. */
 function isBlocked() { return kit.isBusy() || !!(net && net.trial); }
 
-return {init : init, refreshNetwork : refreshNetwork, apply : apply, kit : kit, isBlocked : isBlocked};
+function onBlockedChange(fn) { blockedListeners.push(fn); }
+
+function notifyBlocked() {
+  blockedListeners.forEach(function(fn) { fn(); });
+}
+
+return {
+  init : init,
+  refreshNetwork : refreshNetwork,
+  apply : apply,
+  kit : kit,
+  isBlocked : isBlocked,
+  onBlockedChange : onBlockedChange
+};
 }
 
 if (typeof module !== 'undefined' && module.exports) {

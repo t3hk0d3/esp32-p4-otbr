@@ -18,6 +18,8 @@ extern "C" {
 #define NETCFG_VLAN_MAX 4094
 /** Longest JSON text netcfg_from_json looks at; a longer text is rejected before it is parsed. */
 #define NETCFG_JSON_MAX 1024
+/** Longest DHCP client name (option 12): esp_netif_set_hostname refuses more (ESP_NETIF_HOSTNAME_MAX_SIZE). */
+#define NETCFG_DHCP_NAME_MAX 32
 
 typedef enum {
     NETCFG_MODE_SINGLE,
