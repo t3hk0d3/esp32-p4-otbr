@@ -39,11 +39,12 @@ supply, CCM), metrics, a Dashboard change, changing the weight of other border r
 | Topic | Decision |
 | --- | --- |
 | Setting | one integer, the weight adjustment, −16..+16, default 0. Nothing else of the device properties is exposed |
-| Storage | NVS, its own namespace `leader`, key `adj` (i8), written only when the value changes; survives reboot and firmware updates; not touched by `net reset` |
+| Storage | NVS, its own namespace `thread`, key `leader_adj` (i8), written only when the value changes; survives reboot and firmware updates; not touched by `net reset` |
 | Apply | at every Thread bring-up before Thread is enabled; live under the OpenThread lock in `BR_RUNNING` |
-| API, read | `GET /device/leader` |
-| API, setting | `PUT /device/leader` `{"adjustment": n}`: `200` with the GET body plus `"applied": true`, or `false` when not `BR_RUNNING` or the OpenThread lock was not free within 1 s (stored, applied at the next start). Errors in the style of `/device/names`: 400 `invalid_config` with `field` `adjustment` (missing, not an integer, outside −16..16) or `body`, `length_required`, `invalid_request`; 413 `payload_too_large`; 500 `storage_failed` |
-| API, take over | `POST /device/leader/take-over` (no body): `202 {"started": true}`. 409 `cannot_take_over` with `detail` `weight not higher` (the leader's weight is equal or higher), `already leader`, `not attached` (detached or disabled), `not router eligible`; 409 `busy` with `detail` `mode <MODE>` when not `BR_RUNNING`; 503 `busy` `OpenThread is busy, retry` when the lock was not free within 1 s |
+| API | one small endpoint, `/device/thread`, for what no existing API has: the stored adjustment, this board's weight, and the take-over. Everything about the leader and the role comes from the existing `GET /node` |
+| API, read | `GET /device/thread` (below) |
+| API, setting | `PUT /device/thread` `{"leader_weight_adjustment": n}`: `200` with the GET body plus `"applied": true`, or `false` when not `BR_RUNNING` or the OpenThread lock was not free within 1 s (stored, applied at the next start). Errors in the style of `/device/names`: 400 `invalid_config` with `field` `leader_weight_adjustment` (missing, not an integer, outside −16..16) or `body`, `length_required`, `invalid_request`; 413 `payload_too_large`; 500 `storage_failed` |
+| API, take over | `POST /device/thread/become-leader` (no body): `202 {"started": true}`. 409 `cannot_take_over` with `detail` `weight not higher` (the leader's weight is equal or higher), `already leader`, `not attached` (detached or disabled), `not router eligible`; 409 `busy` with `detail` `mode <MODE>` when not `BR_RUNNING`; 503 `busy` `OpenThread is busy, retry` when the lock was not free within 1 s |
 | Take-over trigger | only the button (the POST). Never automatic, never at boot |
 | Take-over persistence | none: only the weight is stored |
 | Modes | the setting can be saved in every mode; take-over only in `BR_RUNNING` |
@@ -52,35 +53,26 @@ supply, CCM), metrics, a Dashboard change, changing the weight of other border r
 | Live apply fails | the value stays stored; PUT answers 200 with `"applied": false` and a `detail` naming the failure (as `/device/names` does) |
 | UI placement | a "Leader" card at the top of the Network page (`network.html`) |
 | Slider | applies on Save, not while dragging; the label shows the resulting weight and "not saved" while it differs |
-| Button | greyed out unless the saved weight is strictly greater than the leader's, this board is not the leader, and there is no unsaved slider change; the hint says why |
+| Button | greyed out unless the saved weight is strictly greater than the leader's (`leaderData.weighting` of `GET /node`), this board is not the leader, and there is no unsaved slider change; the hint says why. The page decides this from its two reads; the POST checks again under the OpenThread lock, so a stale page can only get a 409 |
 | Confirm | a dialog before the POST, listing the effects |
-| Leader name | "this board" when this board is leader; else the nickname from the Topology page's localStorage key `topology:names` (`{ext: nickname}`, written by `static/topology.js`) when `ext_address` is known and has one; else `router 0x<rloc16>`. `leader.js` reads the key itself (unreadable or missing: no nickname) |
+| Leader name | "this board" when this board is leader, else `router 0x<rloc16>` (`leaderRouterId` × 1024, in hex). No Topology nickname: `GET /node` does not give the leader's extended address |
 
-### `GET /device/leader`
+### `GET /device/thread`
 
 ```json
-{
-  "adjustment": 8,
-  "weight": 73,
-  "base_weight": 65,
-  "role": "router",
-  "partition_id": 305419896,
-  "leader": {"rloc16": "0x2c00", "router_id": 11, "ext_address": "1a2b3c4d5e6f7a8b", "weight": 65},
-  "can_take_over": true
-}
+{"leader_weight_adjustment": 8, "leader_weight": 73, "leader_weight_base": 65}
 ```
 
-- `adjustment`: the stored value; always present.
-- `weight`: `otThreadGetLocalLeaderWeight`; `base_weight` = `weight − adjustment` (what the UI shows as "base"). Both are
-  omitted when OpenThread is not running.
-- `role`: `disabled`, `detached`, `child`, `router`, `leader` (the strings the REST API and the metrics already use);
-  omitted when OpenThread is not running.
-- `partition_id` and `leader`: omitted unless attached. `leader.weight` is `otThreadGetLeaderWeight`; `ext_address` comes
-  from the router table entry of the leader's router ID and is omitted when the entry is not known. When this board is
-  leader, `leader` describes this board.
-- `can_take_over`: the same test the POST makes (attached, not leader, router eligible, `weight > leader.weight`).
-- Read with a bounded OpenThread lock wait like the other Thread reads; on a timeout the Thread fields are omitted and
-  `"partial": true` is added.
+- `leader_weight_adjustment`: the stored value; always present.
+- `leader_weight`: `otThreadGetLocalLeaderWeight`; `leader_weight_base` = `leader_weight − leader_weight_adjustment`
+  (what the UI shows as "base"). Both are omitted when OpenThread is not running, or when the OpenThread lock was not
+  free within the bounded wait the other Thread reads use (then `"partial": true` is added).
+
+### What the page reads from `GET /node` (existing, unchanged)
+
+`state` (this board's role: `disabled`, `detached`, `child`, `router`, `leader`), `leaderData.weighting` (the leader's
+weight), `leaderData.leaderRouterId` and `leaderData.partitionId`. `leaderData` is meaningless unless `state` is
+`child`, `router` or `leader`.
 
 ## 4. Architecture
 
@@ -89,16 +81,17 @@ supply, CCM), metrics, a Dashboard change, changing the weight of other border r
     `BR_RUNNING` (`otThreadGetDeviceProperties`, change `mLeaderWeightAdjustment`, `otThreadSetDeviceProperties`).
     Returns whether it was applied or only saved.
   - `int8_t br_core_leader_adjustment(void)`: the stored value; never takes a lock.
-  - `void br_core_get_leader(br_core_leader_t *out)`: the read for `GET`.
+  - `esp_err_t br_core_leader_weight(uint8_t *out)`: `otThreadGetLocalLeaderWeight` with a bounded lock wait.
   - `esp_err_t br_core_become_leader(void)`: checks and `otThreadBecomeLeader` under the lock; maps the OpenThread errors
     to the reasons in section 3.
   - Bring-up applies the stored adjustment next to the TREL setting, before Thread is enabled.
-  - A pure helper decides `can_take_over` and the take-over refusal reason from (mode, role, router eligible, local
-    weight, leader weight), so both are host-tested.
+  - A pure helper decides the take-over refusal reason (or none) from (mode, role, router eligible, local weight,
+    leader weight), so it is host-tested.
 - `device_api`: the three handlers, JSON in and out, error replies through the existing `json_err` helpers.
 - Web UI: the Leader card on `network.html` and a new `static/leader.js` (ES5 like the other pages). It polls
-  `GET /device/leader` every 5 s while the page is visible, and every 1 s for 30 s after a take-over until `role` is
-  `leader`. The card shows the role, both weights with this board's breakdown (base and adjustment), a 48..96 scale
+  `GET /device/thread` and `GET /node` together every 5 s while the page is visible, and every 1 s for 30 s after a
+  take-over until `state` is `leader`. A pure part (verdict, button state and hint, leader name) takes both replies
+  and is what the frontend tests drive. The card shows the role, both weights with this board's breakdown (base and adjustment), a 48..96 scale
   with both markers, a one-line verdict (lower / equal / higher / this board is the leader), the slider with Save, the
   Become leader button with its hint, and an open "What Become leader does" box:
   1. This board starts a new partition with itself as leader: same network, same devices.
@@ -109,14 +102,14 @@ supply, CCM), metrics, a Dashboard change, changing the weight of other border r
   router takes over and keeps the role, so press the button again. Why greyed out: OpenThread only takes over from a
   leader with a strictly lower weight.
   When OpenThread is not running the card shows the stored adjustment, keeps Save working, and hides the comparison.
-- Docs: the three rows in the Device API table of `docs/api.md`; a subsection "Choosing the leader" under "Adding more
+- Docs: the three rows (`GET`, `PUT`, `POST …/become-leader`) in the Device API table of `docs/api.md`; a subsection "Choosing the leader" under "Adding more
   border routers" in `docs/api.md` (why another border router stays leader, the adjustment, the button).
 
 ## 5. Testing
 
 - Host tests: the take-over decision helper (every reason), adjustment range and JSON parsing, the GET JSON writer.
 - Frontend tests in `tools/tests/` with the existing fake-DOM harness: button state and hint for lower / equal /
-  higher / leader / unsaved, Save enablement, the leader name fallback.
+  higher / leader / unsaved / not attached / OpenThread not running, Save enablement, the leader name.
 - The on-board test is written in the plan but run in the batched hardware pass after review and fixes, not inside a
   task. Until then the "Afterwards" text is provisional (section 6).
 - On the board, with the Thread peer (ot_cli on the C6 devkit) as the other router: the peer forms the network and is
