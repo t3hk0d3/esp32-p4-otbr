@@ -562,7 +562,7 @@ function renderTrel() {
   setText('trel-hint', v.hint);
 }
 
-/* "15.4 200 · TREL 255", the TREL figure red when it is below 15.4's; "-" for a peer that is not a neighbour. */
+/* "15.4 78% · TREL 100%", the TREL figure red when it is below 15.4's; "-" for a peer that is not a neighbour. */
 function preferenceCell(p) {
   var td = el('td', p.prefParts.length ? '' : '-');
   p.prefParts.forEach(function(part) { td.appendChild(el('span', part.text, part.low ? 'pref-low' : '')); });

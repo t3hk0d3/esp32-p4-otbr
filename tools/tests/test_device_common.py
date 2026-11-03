@@ -125,6 +125,16 @@ class TestCommonLogic:
 class TestRadioPreference:
     """radioPref, trelLow, preferenceParts: OpenThread's per-radio preference of a Thread neighbour"""
 
+    def test_preference_is_shown_as_a_whole_percent_of_255(self):
+        assert common("[0, 55, 200, 220, 230, 255].map(L.preferencePercent)") == [
+            "0%",
+            "22%",
+            "78%",
+            "86%",
+            "90%",
+            "100%",
+        ]
+
     def test_trel_below_the_radio_is_low(self):
         assert common("L.trelLow({ieee802154: 230, trel: 55})") is True
 
@@ -138,21 +148,21 @@ class TestRadioPreference:
 
     def test_parts_read_15_4_then_trel_with_the_low_figure_marked(self):
         r = common("L.preferenceParts({ieee802154: 230, trel: 55})")
-        assert "".join(p["text"] for p in r) == "15.4 230 \u00b7 TREL 55"
-        assert [p["text"] for p in r if p["low"]] == ["55"]
+        assert "".join(p["text"] for p in r) == "15.4 90% \u00b7 TREL 22%"
+        assert [p["text"] for p in r if p["low"]] == ["22%"]
 
     def test_parts_of_one_radio_or_none(self):
         assert (
             common(
                 "L.preferenceParts({ieee802154: null, trel: 255}).map((p) => p.text).join('')"
             )
-            == "TREL 255"
+            == "TREL 100%"
         )
         assert (
             common(
                 "L.preferenceParts({ieee802154: 255, trel: null}).map((p) => p.text).join('')"
             )
-            == "15.4 255"
+            == "15.4 100%"
         )
         assert common("L.preferenceParts(null)") == []
 

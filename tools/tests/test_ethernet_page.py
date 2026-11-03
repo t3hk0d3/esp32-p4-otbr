@@ -1018,10 +1018,10 @@ class TestTrelLogic:
             "L.trelPeerView({same_network: true, preference: {ieee802154: 230, trel: 55}}).prefParts"
         )
         assert r == [
-            {"text": "15.4 230", "low": False},
+            {"text": "15.4 90%", "low": False},
             {"text": " \u00b7 ", "low": False},
             {"text": "TREL ", "low": False},
-            {"text": "55", "low": True},
+            {"text": "22%", "low": True},
         ]
 
     def test_non_neighbour_has_no_preference(self):
@@ -1089,7 +1089,7 @@ class TestTrelCard:
             return cells.map((td) => [td.allText().replace(/\s+/g, ' '), td.findAll((e) => e.className === 'pref-low').length]);
         """
         )
-        assert r == [["15.4 255 \u00b7 TREL 255", 0], ["15.4 230 \u00b7 TREL 55", 1]]
+        assert r == [["15.4 100% \u00b7 TREL 100%", 0], ["15.4 90% \u00b7 TREL 22%", 1]]
 
     def test_preference_of_a_non_neighbour_is_a_dash(self):
         r = scenario(
@@ -1097,7 +1097,7 @@ class TestTrelCard:
             + START
             + "return t.el('trel-peerlist').children.map((tr) => tr.children[2].allText().replace(/\\s+/g, ' '));"
         )
-        assert r == ["TREL 255", "-"]
+        assert r == ["TREL 100%", "-"]
 
     def test_build_without_trel_hides_the_card(self):
         r = scenario(

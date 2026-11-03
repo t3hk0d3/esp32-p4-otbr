@@ -250,7 +250,7 @@ function sendsOver(transport) {
   return best;
 }
 
-/** [{text, low}] of "15.4 255 · TREL 55, sends over 15.4"; low marks the TREL figure when it is below 15.4's. */
+/** [{text, low}] of "15.4 100% · TREL 22%, sends over 15.4"; low marks the TREL figure when it is below 15.4's. */
 function transportParts(transport) {
   var parts = C.preferenceParts(transport);
   if (C.radioPref(transport, 'ieee802154') !== null && C.radioPref(transport, 'trel') !== null)
@@ -1315,7 +1315,7 @@ function drawTrelLink(layer, l, board, pos, home) {
                    q.y,
                fill : 'none', stroke : TREL_COLOR, 'stroke-width' : 2.5, 'stroke-dasharray' : '7 4'},
       g);
-  var text = 'TREL ' + l.transport.trel;
+  var text = 'TREL ' + C.preferencePercent(l.transport.trel);
   var w = 10 + 7 * text.length;
   var mx = Math.round(0.25 * home.x + 0.5 * c2.x + 0.25 * q.x), my = Math.round(0.25 * home.y + 0.5 * c2.y + 0.25 * q.y);
   var low = L.trelLow(l.transport);

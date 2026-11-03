@@ -1574,12 +1574,15 @@ class TestTrelTransport:
     @pytest.mark.parametrize(
         ("transport", "text"),
         [
-            ("{ieee802154: 255, trel: null}", "15.4 255"),
-            ("{ieee802154: null, trel: 255}", "TREL 255"),
-            ("{ieee802154: 255, trel: 55}", "15.4 255 \u00b7 TREL 55, sends over 15.4"),
+            ("{ieee802154: 255, trel: null}", "15.4 100%"),
+            ("{ieee802154: null, trel: 255}", "TREL 100%"),
+            (
+                "{ieee802154: 255, trel: 55}",
+                "15.4 100% \u00b7 TREL 22%, sends over 15.4",
+            ),
             (
                 "{ieee802154: 255, trel: 255}",
-                "15.4 255 \u00b7 TREL 255, sends over TREL",
+                "15.4 100% \u00b7 TREL 100%, sends over TREL",
             ),
         ],
     )
@@ -1613,7 +1616,7 @@ class TestTrelMap:
             " return [g.map(badge), path.map((p) => [p.attrs['stroke-dasharray'], p.attrs.stroke,"
             " p.attrs.d.includes(' ' + cx + ' ' + cy + ' T ')]), straight];"
         )
-        assert r[0] == ["TREL 55", "TREL 255"]
+        assert r[0] == ["TREL 22%", "TREL 100%"]
         assert r[1] == [["7 4", "#7b3fb5", True], ["7 4", "#7b3fb5", True]]
         assert "3" in r[2]  # the 15.4 line to the leader stays
 
@@ -1647,7 +1650,7 @@ class TestTrelMap:
             + " node('r9').click(); return t.el('t-d-neighbors').children.map((c) => c.allText().replace(/\\s+/g, ' ').replace(/ ,/g, ','));"
         )
         assert r[1] == (
-            "This border router LQI 3 15.4 230 \u00b7 TREL 55, sends over 15.4 link quality includes TREL frames"
+            "This border router LQI 3 15.4 90% \u00b7 TREL 22%, sends over 15.4 link quality includes TREL frames"
         )
 
     def test_dialog_marks_a_low_trel_figure_red(self):
@@ -1656,7 +1659,7 @@ class TestTrelMap:
             + " node('r9').click(); return t.el('t-d-neighbors').findAll((e) => e.classes.has('pref-low'))"
             ".map((e) => e.textContent);"
         )
-        assert r == ["55"]
+        assert r == ["22%"]
 
     def test_connected_via_names_the_boards_transport_to_that_router(self):
         r = run(
@@ -1664,5 +1667,5 @@ class TestTrelMap:
             + " return [row('r9').children[2].allText().replace(/\\s+/g, ' ').replace(/ ,/g, ','),"
             " row('r23').children[2].allText()];"
         )
-        assert r[0] == "3 router neighbors 15.4 230 \u00b7 TREL 55, sends over 15.4"
+        assert r[0] == "3 router neighbors 15.4 90% \u00b7 TREL 22%, sends over 15.4"
         assert "TREL" not in r[1]
