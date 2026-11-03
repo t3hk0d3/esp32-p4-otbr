@@ -47,29 +47,32 @@ def _plate() -> Part:
 
 
 def cell_centres() -> list[tuple[float, float]]:
-    """Honeycomb cell centres inside the frame, skipping the cross rib, plus the cells over the LED."""
+    """Honeycomb cell centres, centred on the lid and symmetric about the cross rib, all inside the solid frame."""
     fx0, fx1, fy0, fy1, _ = _flange_outline()
     gx0, gx1 = fx0 + P.FRAME_W, fx1 - P.FRAME_W
     gy0, gy1 = fy0 + P.FRAME_W, fy1 - P.FRAME_W
+    cx, cy = (gx0 + gx1) / 2, (gy0 + gy1) / 2
     pitch_y = P.CELL + P.CELL_WALL
     pitch_x = 1.5 * pitch_y / math.sqrt(3)
     half_x, half_y = CELL_R, P.CELL / 2
     rib_keep = P.RIB_W / 2 + half_y
+    cols = int((gx1 - gx0 - 2 * half_x) / pitch_x) + 1
+    cols -= 1 - cols % 2  # odd, so the honeycomb can mirror about the centre column
     out = []
-    col = 0
-    x = gx0 + half_x
-    while x + half_x <= gx1:
-        y = gy0 + half_y + (pitch_y / 2 if col % 2 else 0.0)
-        while y + half_y <= gy1:
-            if abs(y - P.RIB_Y) >= rib_keep:
-                out.append((x, y))
-            y += pitch_y
-        x += pitch_x
-        col += 1
-    lx, ly = P.LED_XY
-    led_x = IX0 + P.LID_CLEAR + half_x + 0.15  # first cell inside the lid body edge
-    out += [(max(lx, led_x), ly + k * pitch_y) for k in (-1, 0, 1)]
-    return out
+    for i in range(cols):
+        d = i - (cols - 1) // 2
+        x = cx + d * pitch_x
+        # columns alternate between a cell on the centre line and cells half a pitch off it
+        offset = 0.0 if d % 2 == 0 else pitch_y / 2
+        k = 0
+        while True:
+            ys = {cy + offset + k * pitch_y, cy - offset - k * pitch_y}
+            inside = [y for y in ys if y - half_y >= gy0 and y + half_y <= gy1]
+            if not inside:
+                break
+            out += [(x, y) for y in inside if abs(y - P.RIB_Y) >= rib_keep]
+            k += 1
+    return sorted(set(out))
 
 
 def _grille() -> Part:

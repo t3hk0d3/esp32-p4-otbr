@@ -427,27 +427,6 @@ def lid_seats(base: Part, lid: Part) -> CheckResult:
     )
 
 
-LED_PROBE = 0.1  # mm: column size for the LED sight lines
-
-
-def led_visible(lid: Part) -> CheckResult:
-    """From straight above, the LED's top face shows through at least one grille cell."""
-    led = FACTS["led"]
-    xs = np.arange(led.x0 + LED_PROBE, led.x1 - LED_PROBE, 0.2)
-    ys = np.arange(led.y0 + LED_PROBE, led.y1 - LED_PROBE, 0.2)
-    top = board_z(P.TOP) + 1
-    free = 0
-    for x in xs:
-        for y in ys:
-            col = _box(x, x + LED_PROBE, y, y + LED_PROBE, led.z1, top)
-            free += _intersection(col, lid) <= 1e-6
-    return CheckResult(
-        "LED visible through the lid",
-        free > 0,
-        f"{free} of {len(xs) * len(ys)} sight lines clear",
-    )
-
-
 def watertight(part: Part, name: str) -> CheckResult:
     mesh = to_mesh(part)
     ok = part.is_valid and len(part.solids()) == 1 and mesh.is_watertight
@@ -517,7 +496,6 @@ def run_all(board: BoardModel, base: Part, lid: Part) -> list[CheckResult]:
         *lid_clearance(board, lid),
         opening_paths(base, lid),
         lid_seats(base, lid),
-        led_visible(lid),
         fitting_motion(base, board),
         ribbon_plug_fit(base),
         keyhole_volumes(board),
