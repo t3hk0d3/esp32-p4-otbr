@@ -296,6 +296,59 @@ TEST_CASE("Peer address multicast, unspecified, or one of the board's own addres
                                                               "\"peers\":[{\"address\":\"2001:db8:42::17\",\"asn\":65010}]")), NULL);
 }
 
+TEST_CASE("Body without bgp, a current peer now one of the board's own addresses: bad_field bgp.peers", "[routing]")
+{
+    routing_settings_t current, out;
+    routing_validate_ctx_t ctx;
+    const char *bad = NULL;
+    const char *json = "{\"method\":\"bgp\",\"omr\":{\"mode\":\"auto\"},\"announce_ula\":false}";
+
+    populated(&current);
+    memset(&ctx, 0, sizeof(ctx));
+    memcpy(ctx.own_addrs[0], PEER_LINK_LOCAL, 16);
+    ctx.own_count = 1;
+    out = current;
+    out.method = ROUTING_METHOD_RIPNG;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, routing_settings_from_json(json, &current, &ctx, &out, &bad));
+    TEST_ASSERT_EQUAL_STRING("bgp.peers", bad);
+    TEST_ASSERT_EQUAL(ROUTING_METHOD_RIPNG, out.method); /* out left unchanged */
+}
+
+TEST_CASE("Body without bgp, a current peer multicast or unspecified: bad_field bgp.peers", "[routing]")
+{
+    static const uint8_t multicast[16] = {0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02};
+    static const uint8_t unspecified[16] = {0};
+    const uint8_t *const bad_addrs[] = {multicast, unspecified};
+    const char *json = "{\"method\":\"pd\",\"omr\":{\"mode\":\"auto\"},\"announce_ula\":false}";
+
+    for (size_t i = 0; i < sizeof(bad_addrs) / sizeof(bad_addrs[0]); i++) {
+        routing_settings_t current, out;
+        const char *bad = NULL;
+
+        populated(&current);
+        memcpy(current.peers[1].addr, bad_addrs[i], 16);
+        TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, routing_settings_from_json(json, &current, NULL, &out, &bad));
+        TEST_ASSERT_EQUAL_STRING("bgp.peers", bad);
+    }
+}
+
+TEST_CASE("Body without bgp, current peers valid in the context: keeps them", "[routing]")
+{
+    routing_settings_t current, out;
+    routing_validate_ctx_t ctx;
+    static const uint8_t own[16] = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x17};
+
+    populated(&current);
+    memset(&ctx, 0, sizeof(ctx));
+    memcpy(ctx.own_addrs[0], own, 16);
+    ctx.own_count = 1;
+    TEST_ASSERT_EQUAL(ESP_OK, routing_settings_from_json(
+                          "{\"method\":\"bgp\",\"omr\":{\"mode\":\"auto\"},\"announce_ula\":false}", &current, &ctx,
+                          &out, NULL));
+    TEST_ASSERT_EQUAL(2, out.peer_count);
+    TEST_ASSERT_EQUAL_MEMORY(current.peers, out.peers, sizeof(out.peers));
+}
+
 TEST_CASE("Method bgp with no peers: bad_field bgp.peers", "[routing]")
 {
     const char *no_peers = bgp_with("\"local_asn\":65010,\"hold_time\":90,\"peers\":[]");

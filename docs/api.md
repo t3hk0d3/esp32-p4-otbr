@@ -74,7 +74,8 @@ Settings (defaults: `pd`, `auto`, `false`, local ASN 4200000001, router ID `null
   `null`). The prefix is a /64 with the host bits zero, not link-local (`fe80::/10`), not multicast, and not on-link on
   the backbone.
 - `announce_ula`: `true` or `false`. Required.
-- `bgp`: optional; left out, the stored BGP settings stay. When present it is checked whatever the method, so the
+- `bgp`: optional; left out, the stored BGP settings stay (their peers still get the address checks below, so a peer
+  that has become one of the board's own addresses is refused with `bgp.peers`). When present it is checked whatever the method, so the
   stored BGP settings are always valid, and it must be complete (`null` is refused):
   - `local_asn` and each peer's `asn`: 1..4294967295, not 23456 (AS_TRANS);
   - `router_id`: `null` (use the backbone IPv4 address) or a dotted IPv4 address other than `0.0.0.0`; the backbone

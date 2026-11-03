@@ -376,14 +376,19 @@ static bool is_own_address(const routing_validate_ctx_t *ctx, const uint8_t addr
     return false;
 }
 
+/* An address a peer may have: not multicast, not unspecified, not one of the board's own. */
+static bool peer_address_ok(const routing_validate_ctx_t *ctx, const uint8_t addr[16])
+{
+    return !is_multicast(addr) && !is_unspecified(addr) && !is_own_address(ctx, addr);
+}
+
 static bool parse_peer(const cJSON *item, const routing_validate_ctx_t *ctx, const routing_settings_t *s,
                        routing_bgp_peer_t *out)
 {
     const cJSON *address = cJSON_GetObjectItemCaseSensitive(item, "address");
 
     if (!cJSON_IsObject(item) || !cJSON_IsString(address) || !parse_ipv6(address->valuestring, out->addr) ||
-            is_multicast(out->addr) || is_unspecified(out->addr) || is_own_address(ctx, out->addr) ||
-            !get_asn(cJSON_GetObjectItemCaseSensitive(item, "asn"), &out->asn)) {
+            !peer_address_ok(ctx, out->addr) || !get_asn(cJSON_GetObjectItemCaseSensitive(item, "asn"), &out->asn)) {
         return false;
     }
     for (int i = 0; i < s->peer_count; i++) {
@@ -474,6 +479,13 @@ static esp_err_t parse_settings(const cJSON *root, const routing_settings_t *cur
         err = parse_bgp(bgp, ctx, s, bad_field);
         if (err != ESP_OK) {
             return err;
+        }
+    } else {
+        /* the peers kept from `current` get the same address checks: the board's own addresses may have changed */
+        for (int i = 0; i < s->peer_count && i < ROUTING_MAX_PEERS; i++) {
+            if (!peer_address_ok(ctx, s->peers[i].addr)) {
+                return fail(bad_field, FIELD_PEERS);
+            }
         }
     }
     if (s->method == ROUTING_METHOD_BGP && s->peer_count == 0) {
