@@ -21,7 +21,7 @@ IDF := $(if $(shell command -v idf.py),,. "$(IDF_EXPORT)" >/dev/null &&)
 board_url = $(if $(BOARD),http://$(BOARD),$(error set BOARD=<board address>, e.g. make $@ BOARD=192.168.1.50))
 
 .PHONY: help build build-test reconfigure clean flash monitor erase c6-flash-base bundle package ota radio recover \
-	status test test-host test-vendored test-tools test-target lan-ping-up lan-ping-down lint
+	status test test-host test-vendored test-tools test-target lan-ping-up lan-ping-down lint routing-vectors
 
 help: ## List the targets
 	@awk -F':.*## ' '/^[a-z0-9-]+:.*## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -110,3 +110,7 @@ lan-ping-down: ## Remove the latency tests' LAN container
 
 lint: ## Format and lint checks (pre-commit)
 	uvx pre-commit run --all-files
+
+routing-vectors: ## Regenerate the routing host-test vectors (vectors.h) with scapy
+	uv run --no-project --with scapy==2.6.1 python tools/routing_vectors.py \
+		p4/components/routing/test_host/main/vectors.h
