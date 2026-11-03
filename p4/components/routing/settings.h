@@ -29,8 +29,8 @@ void routing_settings_defaults(routing_settings_t *out);
 /**
  * Parse and check a PUT /device/routing body. `status` in the body is ignored. Without "bgp" the BGP settings are
  * taken from `current` (the defaults when NULL); "method", "omr" and "announce_ula" are required. `ctx` (may be NULL:
- * those checks are skipped) gives the backbone on-link prefixes, which a custom prefix must not equal, and the board's
- * own addresses, which a peer must not have.
+ * those checks are skipped) gives the on-link prefixes (backbone, and mgmt in split mode), which a custom prefix must
+ * not equal, and the board's own addresses, which a peer must not have.
  *
  * ESP_OK fills `out` (which may be `current`). Otherwise ESP_ERR_INVALID_ARG with `*bad_field` (may be NULL) naming
  * the first offending field, a static string: "body", "method", "omr", "omr.mode", "omr.prefix", "announce_ula",

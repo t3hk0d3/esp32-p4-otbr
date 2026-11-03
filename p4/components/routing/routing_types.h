@@ -13,7 +13,7 @@ extern "C" {
 
 #define ROUTING_MAX_PEERS 2
 #define ROUTING_MAX_ANNOUNCED 2
-#define ROUTING_MAX_ONLINK 4     /**< backbone on-link prefixes a validation context holds */
+#define ROUTING_MAX_ONLINK 8     /**< on-link prefixes (backbone, mgmt) a validation context holds */
 #define ROUTING_MAX_OWN_ADDRS 12 /**< board addresses a validation context holds */
 #define ROUTING_LAST_ERROR_LEN 48
 
@@ -61,7 +61,7 @@ typedef struct {
 
 /** What a settings check needs to know about the backbone. */
 typedef struct {
-    routing_prefix64_t onlink[ROUTING_MAX_ONLINK]; /**< prefixes on-link on the backbone */
+    routing_prefix64_t onlink[ROUTING_MAX_ONLINK]; /**< prefixes on-link on the backbone or the mgmt netif */
     uint8_t onlink_count;
     uint8_t own_addrs[ROUTING_MAX_OWN_ADDRS][16]; /**< the board's own IPv6 addresses */
     uint8_t own_count;

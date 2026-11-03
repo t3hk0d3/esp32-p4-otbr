@@ -988,22 +988,31 @@ static void add_onlink(routing_validate_ctx_t *ctx, const uint8_t prefix[8])
     }
 }
 
-esp_err_t routing_validate_ctx_fill(routing_validate_ctx_t *ctx)
+/* The /64 of every non-link-local address on `netif`. */
+static void add_onlink_of(routing_validate_ctx_t *ctx, esp_netif_t *netif)
 {
-    esp_netif_t *backbone = netcfg_backbone_netif();
-    esp_netif_t *mgmt = netcfg_mgmt_netif();
     uint8_t addrs[CONFIG_LWIP_IPV6_NUM_ADDRESSES][16];
+    int n = netif_ip6(netif, addrs, CONFIG_LWIP_IPV6_NUM_ADDRESSES);
 
-    memset(ctx, 0, sizeof(*ctx));
-    add_own(ctx, backbone);
-    if (mgmt != backbone) {
-        add_own(ctx, mgmt);
-    }
-    int n = netif_ip6(backbone, addrs, CONFIG_LWIP_IPV6_NUM_ADDRESSES);
     for (int i = 0; i < n; i++) {
         if (!is_link_local(addrs[i])) {
             add_onlink(ctx, addrs[i]);
         }
+    }
+}
+
+esp_err_t routing_validate_ctx_fill(routing_validate_ctx_t *ctx)
+{
+    esp_netif_t *backbone = netcfg_backbone_netif();
+    esp_netif_t *mgmt = netcfg_mgmt_netif();
+
+    memset(ctx, 0, sizeof(*ctx));
+    add_own(ctx, backbone);
+    add_onlink_of(ctx, backbone);
+    if (mgmt != backbone) {
+        /* split mode: a custom OMR prefix equal to the mgmt VLAN's /64 would break IPv6 management */
+        add_own(ctx, mgmt);
+        add_onlink_of(ctx, mgmt);
     }
     if (br_core_get_mode() != BR_MODE_BR_RUNNING) {
         return ESP_OK; /* no border routing manager, no received RAs */
