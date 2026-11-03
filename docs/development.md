@@ -91,7 +91,10 @@ make lan-ping-down
   was on.
 - `pd_router`: delegating server in Docker, env `PD_HOST_IF`.
 - `routing_rig`: FRR and BIRD routers in Docker for the mesh routing tests, env `ROUTING_HOST_IF` (and `TIMEOUT=1800`;
-  `ROUTING_FEED_ROUTES` sets the size of the received-route feed, default 10k). Flash once (`make build-test && make flash`) and pass
+  `ROUTING_FEED_ROUTES` sets the size of the received-route feed, default 10k). `ROUTING_NETWORK` uses an existing docker
+  network instead of creating a macvlan one (for a VLAN whose host interface already carries ipvlan), and
+  `ROUTING_BOARD_URL` (for example `http://192.168.10.104`) points the tests at the board's management address in split
+  mode. Flash once (`make build-test && make flash`) and pass
   `TARGET_PYTEST=".venv/bin/pytest --skip-autoflash y"`: without it every test would flash the board again, so
   `test_routing.py` refuses to run. The PUT validation tests (`test_routing_api.py`) need no rig and run unmarked.
 

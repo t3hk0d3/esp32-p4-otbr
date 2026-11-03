@@ -21,8 +21,10 @@ left over, put them back and delete it (the next run refuses to start while it e
 
 The PUT validation tests of spec section 9 are in test_routing_api.py (no rig, normal on-board suite).
 
-The link-local next-hop tests need a backbone without IPv6 prefixes in its router advertisements: the board sends the
-16-byte next-hop only while it has no global address there. On a LAN with SLAAC prefixes they skip.
+The link-local next-hop tests need a backbone without SLAAC: the board sends the 16-byte next-hop only while it has no
+global address there, otherwise they skip. Run them in split mode with Thread on such a VLAN, with ROUTING_BOARD_URL
+set to the board's mgmt address and, where the VLAN's host interface already carries an ipvlan network,
+ROUTING_NETWORK set to that docker network (the containers join it and are removed afterwards).
 
 Images: FRR from quay.io/frrouting/frr (the FRR project's registry; Docker Hub's frrouting/frr stops at 8.4), BIRD 2
 built once from debian:12.8-slim with the bookworm bird2 package (2.0.12).
@@ -54,6 +56,7 @@ BIRD_DOCKERFILE = (
 )
 BIRD_SOCKET = "/run/bird.ctl"
 NETWORK = "otbr-routing-lan"
+SUBNETS = []  # docker's own IPv6 subnets on the network in use, set by lan_network
 CONTAINER_SUBNET = "fd5a:7e57:d::/64"  # docker needs one to keep IPv6 on; unrelated to the board's prefixes
 DOCKER_GATEWAY = (
     "fd5a:7e57:d::1"  # on-link in every container: the next-hop of the generated routes
@@ -70,6 +73,7 @@ CUSTOM_2 = ipaddress.ip_network("2001:db8:42:101::/64")
 BOARD_ASN = 4200000001
 ROUTER_ASN = 4200000002  # eBGP
 ROUTER_ID = "192.0.2.1"
+BOARD_ROUTER_ID = "192.0.2.17"
 FEED_PREFIX = "2001:db8:f000"  # the feed is FEED_PREFIX:<n>::/64, n < 65536
 # The received table the board must drain (a full IPv6 table is about 250k routes).
 FEED_ROUTES = int(os.environ.get("ROUTING_FEED_ROUTES", "10000"))
@@ -111,7 +115,9 @@ def docker(*args, check=True, timeout=120, stdin=None):
 
 @pytest.fixture
 def base_url(board_ip):
-    return f"http://{board_ip}"
+    # Split mode: the device API answers only on mgmt, which may not be the first `got ip` of the boot log.
+    url = os.environ.get("ROUTING_BOARD_URL")
+    return url.rstrip("/") if url else f"http://{board_ip}"
 
 
 def device_status(base_url):
@@ -181,17 +187,19 @@ def custom(prefix):
 def bgp_settings(peer_address, peer_asn, local_asn=BOARD_ASN):
     return {
         "local_asn": local_asn,
-        "router_id": None,
+        # Used only when the backbone has no IPv4 address (the board prefers that one).
+        "router_id": BOARD_ROUTER_ID,
         "hold_time": 90,
         "peers": [{"address": str(peer_address), "asn": peer_asn}],
     }
 
 
 def board_addresses(base_url):
-    """The board's backbone addresses (single mode: eth), as (link-local, [globals])."""
-    addresses = [
-        ipaddress.ip_address(a) for a in device_status(base_url)["eth"]["ipv6"]
-    ]
+    """The board's backbone addresses (single mode: eth, split mode: thread_bb), as (link-local, [globals])."""
+    network = requests.get(f"{base_url}/device/network", timeout=10).json()
+    backbone = "thread_bb" if network["mode"] == "split" else "eth"
+    texts = next(i["ipv6"] for i in network["interfaces"] if i["name"] == backbone)
+    addresses = [ipaddress.ip_address(a) for a in texts]
     link_local = [a for a in addresses if a.is_link_local]
     if not link_local:
         pytest.fail(f"the board has no link-local address: {addresses}")
@@ -235,9 +243,34 @@ def heap(base_url):
 # ---- containers ----
 
 
+def docker_subnets(network):
+    """The IPv6 subnets docker assigns from on `network` (its static addresses, not the LAN router's)."""
+    out = docker(
+        "network",
+        "inspect",
+        network,
+        "--format",
+        "{{range .IPAM.Config}}{{.Subnet}} {{end}}",
+    ).stdout
+    return [
+        net
+        for net in (ipaddress.ip_network(text) for text in out.split())
+        if net.version == 6
+    ]
+
+
 @pytest.fixture(scope="module")
 def lan_network():
-    """Docker macvlan network on the board's LAN, created for the module and removed afterwards."""
+    """Docker macvlan network on the board's LAN, created for the module and removed afterwards; or, with
+    ROUTING_NETWORK, an existing docker network on that LAN (left as it is)."""
+    existing = os.environ.get("ROUTING_NETWORK")
+    if existing:
+        found = docker("network", "inspect", existing, check=False)
+        if found.returncode:
+            pytest.skip(f"docker network {existing} (ROUTING_NETWORK) does not exist")
+        SUBNETS[:] = docker_subnets(existing)
+        yield existing
+        return
     parent = os.environ.get("ROUTING_HOST_IF", "mgmt0")
     if not Path("/sys/class/net", parent).exists():
         pytest.skip(f"host interface {parent} (ROUTING_HOST_IF) does not exist")
@@ -260,6 +293,7 @@ def lan_network():
     )
     if created.returncode:
         pytest.skip(f"cannot create the macvlan network: {created.stderr.strip()}")
+    SUBNETS[:] = [ipaddress.ip_network(CONTAINER_SUBNET)]
     yield NETWORK
     docker("network", "rm", NETWORK, check=False)
 
@@ -308,10 +342,9 @@ def container_addresses(name):
     """The container's addresses on the LAN, as (link-local, [addresses from the LAN router's prefixes])."""
     out = docker("exec", name, "ip", "-6", "-o", "addr", "show", "dev", "eth0").stdout
     found = [ipaddress.ip_address(a) for a in re.findall(r"inet6 ([0-9a-f:]+)/", out)]
-    docker_subnet = ipaddress.ip_network(CONTAINER_SUBNET)
     link_local = next((a for a in found if a.is_link_local), None)
     return link_local, [
-        a for a in found if not a.is_link_local and a not in docker_subnet
+        a for a in found if not a.is_link_local and not any(a in net for net in SUBNETS)
     ]
 
 
@@ -454,7 +487,10 @@ def wait_established(name, timeout=SESSION_TIMEOUT_S):
     deadline = time.monotonic() + timeout
     state = None
     while time.monotonic() < deadline:
-        state = frr_neighbor(name).get("bgpState")
+        try:
+            state = frr_neighbor(name).get("bgpState")
+        except subprocess.CalledProcessError:  # bgpd is still starting
+            state = "bgpd not up"
         if state == "Established":
             return
         time.sleep(1)

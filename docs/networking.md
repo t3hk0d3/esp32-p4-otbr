@@ -167,9 +167,10 @@ counted (`received_dropped`) and dropped, read through one 4096-byte buffer per 
 - Hold time: 0 or 3..65535 s, default 90. Keepalives every third of the negotiated hold time.
 - Attributes: ORIGIN IGP; AS_PATH empty on iBGP, the board's ASN on eBGP; LOCAL_PREF 100 on iBGP.
 - Next-hop: the board's global address on the backbone (a GUA before a ULA) and its link-local, the 32-byte form of
-  RFC 2545. With no global address, the link-local alone in a 16-byte next-hop, which RFC 2545 does not cover. FRR,
-  which the UDM Pro runs, and BIRD are expected to accept it on a directly connected session; both are still to be
-  confirmed on the test rig (`p4/pytest/test_routing.py`, `TestBgpLinkLocal`).
+  RFC 2545. With no global address, the link-local alone in a 16-byte next-hop, which RFC 2545 does not cover. FRR 10.4
+  (which the UDM Pro runs) and BIRD 2.0.12 accept it on a directly connected session: checked on the test rig with
+  the backbone on a VLAN whose advertised prefix has autoconfiguration off (`p4/pytest/test_routing.py`,
+  `TestBgpLinkLocal`).
 - Changes: changing the OMR prefix or the ULA box only sends UPDATEs. Removing a peer or changing its ASN closes that
   session with Cease 6/3. Changing the local ASN, the hold time or the router ID in use restarts every session with
   Cease 6/6.
