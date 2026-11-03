@@ -20,29 +20,10 @@ release's `versions.txt`.
   hostname, the name Home Assistant shows (the `_meshcop._udp` instance, by default the hostname), an optional
   `_http._tcp` advertisement of the web UI (off by default, not in split mode) and the DHCP client name. Applied live, stored
   across reboots and updates. The page shows when an mDNS conflict renamed the board. See `docs/networking.md`.
-- Dashboard: a Home Assistant tile with the URL to enter in the integration (the Thread backbone address in split mode),
-  the mDNS name (from `/device/names`) and where it is announced.
-- Network page: "This board's dataset" shows the active dataset TLVs to paste into another board.
 
 ### Changed
 
 - The board's DHCP client name is `esp-otbr` instead of lwIP's `espressif`.
-- Web UI usability review:
-  - Form Network starts with a random network key, PAN ID, Ext PAN ID, passphrase and ULA prefix instead of the
-    well-known example values; the fields are checked before sending. Join and Commissioner no longer prefill a key or
-    PSKd, and a PSKd is checked against the Thread rules.
-  - Forming or joining a network asks first and names the network it replaces; so do Install and reboot, radio
-    firmware install, Recover C6, removing an address and deleting a prefix.
-  - The management pages (Network, Commissioner, Addresses, Tools) say why Thread is unavailable (radio
-    fault, packet capture, starting) with a link to the page that fixes it, instead of "not connected, go to Network".
-    A refusal now shows its reason (e.g. 403 on the management address) instead of "Connection error".
-  - Dashboard: clear texts for the `esp-hosted firmware`, `rom recovery failed` and `storage unavailable` faults;
-    "Matches this build" says unknown or "-" when there is no radio firmware.
-  - After an update the Firmware page says which version the board runs now and which it ran before.
-  - One look across all pages: project name in the navigation, the project footer, About links to this project's
-    documentation and shows the mDNS name and C6 base image. Menus open with a tap on touch screens.
-  - The scan table shows name, channel, PAN IDs and signal only.
-- `docs/first-install.md` starts with a table to pick the install path.
 - `POST /device/radio/firmware` refuses `c6_installer.bin` on a C6 that already runs the updater (400 `invalid_image`),
   before anything is erased.
 - `docs/first-install.md`: the jumper path is now Path 2 and the USB-UART path Path 3.
