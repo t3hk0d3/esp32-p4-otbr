@@ -106,6 +106,19 @@ Thread network, and the mesh can route around weak radio hops. Thread devices th
   with 409 while a network trial runs. Changed together with interface settings, it goes through the trial with them.
 - State, peers and counters: `trel` in `GET /device/status`, the card on the Ethernet page, `br_trel_*` in
   [metrics](metrics.md), and `ot trel` on the test build console.
+- TREL border routers of other Thread networks on the same link are found too, but never used. They are listed with
+  their extended PAN ID and a red "other" chip and counted apart ("+ N other network", `peers_other`,
+  `br_trel_peers_other`); "Peers" counts this network only.
+- Preference: for a peer that is a Thread neighbour, the card shows OpenThread's preference per radio (0 to 255; up on
+  frames received and sends acknowledged, down on failures, -100 per lost TREL acknowledgement). OpenThread sends over
+  TREL while its preference is 220 or more. The TREL figure is red when it is lower than the 15.4 figure: the tunnel is
+  losing to the radio. OpenThread never forgets a radio a neighbour has used, so a broken tunnel shows as a falling TREL
+  preference, not as a missing peer.
+- Topology page: each TREL link of this board is a dashed purple curve through the "Home network · Ethernet" box with
+  its TREL preference, red under the same rule; a link that runs over TREL only has no straight radio line. The device
+  dialog and the "Connected via" column give both preferences and the radio OpenThread sends over. The link quality
+  of a link that also runs over TREL includes TREL frames, which OpenThread counts as a strong signal. Links between
+  other routers show no transport: Thread diagnostics do not report it.
 - In split mode UDP port 12390 (TREL) is dropped on `mgmt`.
 
 <img src="images/ethernet-trel.png" width="640" alt="Thread over Ethernet card on the Ethernet page: TREL active on the Thread backbone, the Off/On switch on On, 2 peers, sent and received packet counters and the peer table">
