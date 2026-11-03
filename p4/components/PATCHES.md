@@ -244,7 +244,8 @@ reason, spec reference.
    pending-dataset write (30 s) and ping (14 s) released the lock and took it again without a re-check, so a push started
    meanwhile deleted the lock under them (use-after-free). Now `br_core` puts the mode to STARTING and clears its ready
    state under the OpenThread lock, waits up to 45 s for open sessions to close (the main loop keeps running, an RCP
-   failure meanwhile only resets the C6) and refuses the push as busy (409) if they do not, putting the mode back. Known
+   failure meanwhile only resets the C6) and refuses the push as busy (409) if they do not, putting the mode back. A pending-dataset
+   PUT whose wait ends that way answers 503 and clears its busy flag (its callback dies with the instance). Known
    limit: a Web GUI session also covers the request's socket I/O, so a very slow client can hold it. Host tests:
    `tests/test_rest.c` `test_no_openthread_without_a_session`, `test_callback_wait_ends_when_not_ready` (mocks
    `br_core_ot_session_begin/end` in `tests/host_platform.c`).
