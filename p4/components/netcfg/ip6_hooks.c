@@ -8,6 +8,7 @@
 #include "lwip/netif.h"
 #include "lwip/pbuf.h"
 #include "lwip/prot/ip6.h"
+#include "sdkconfig.h"
 #include "esp_netif.h"
 #include "esp_netif_net_stack.h"
 #include "netcfg_glue.h"
@@ -57,6 +58,31 @@ static netcfg_dest_kind_t classify(struct netif *inp, const ip6_addr_t *dest)
     return NETCFG_DEST_REMOTE;
 }
 
+#if CONFIG_OPENTHREAD_RADIO_TREL
+#define TREL_PORT CONFIG_OPENTHREAD_TREL_PORT
+#else
+#define TREL_PORT 0
+#endif
+
+// UDP port rules (netcfg_ip6_udp_drop). The UDP header is looked for behind any extension headers, as lwIP finds it;
+// a chain too long to follow may hide a TREL datagram, so on mgmt it is dropped too when TREL is built.
+static bool udp_drop(const struct pbuf *p, bool input_is_mgmt)
+{
+    uint16_t dest_port;
+
+    if (!input_is_mgmt) {
+        return false;
+    }
+    switch (netcfg_ip6_udp_dest_port(p->payload, p->len, &dest_port)) {
+    case NETCFG_UDP_PORT_FOUND:
+        return netcfg_ip6_udp_drop(true, dest_port, TREL_PORT);
+    case NETCFG_UDP_PORT_UNKNOWN:
+        return TREL_PORT != 0;
+    default:
+        return false;
+    }
+}
+
 int __wrap_lwip_hook_ip6_input(struct pbuf *p, struct netif *inp)
 {
     struct netif *mgmt = s_mgmt;
@@ -71,7 +97,7 @@ int __wrap_lwip_hook_ip6_input(struct pbuf *p, struct netif *inp)
         const bool forwardable = kind == NETCFG_DEST_REMOTE || kind == NETCFG_DEST_MULTICAST_WIDE;
         const bool route_is_mgmt = inp != mgmt && forwardable && ip6_route(IP6_ADDR_ANY6, &dest) == mgmt;
 
-        if (netcfg_ip6_input_drop(inp == mgmt, kind, route_is_mgmt)) {
+        if (netcfg_ip6_input_drop(inp == mgmt, kind, route_is_mgmt) || udp_drop(p, inp == mgmt)) {
             pbuf_free(p);
             return 1; // eaten
         }

@@ -33,9 +33,10 @@ typedef struct {
 typedef struct {
     netcfg_mode_t mode;
     netcfg_iface_cfg_t single, mgmt, thread_bb; /**< single is used in SINGLE mode, the other two in SPLIT mode */
+    bool trel; /**< Thread Radio Encapsulation Link on the backbone interface; changes apply live, without a trial */
 } netcfg_config_t;
 
-/** Build-time defaults: single mode, untagged, DHCPv4. */
+/** Build-time defaults: single mode, untagged, DHCPv4, TREL on. */
 void netcfg_defaults(netcfg_config_t *out);
 
 /**
@@ -45,16 +46,23 @@ void netcfg_defaults(netcfg_config_t *out);
  */
 esp_err_t netcfg_validate(const netcfg_config_t *cfg, const char **bad_field);
 
-/** True when both configurations describe the same network: the same mode and the same interfaces for that mode. */
+/** True when both configurations describe the same network: the same mode, the same interfaces for that mode, the same TREL. */
 bool netcfg_equal(const netcfg_config_t *a, const netcfg_config_t *b);
+
+/** True when the configurations differ in `trel` and nothing else: such a change is applied live, without a trial. */
+bool netcfg_diff_only_trel(const netcfg_config_t *a, const netcfg_config_t *b);
 
 /**
  * Parse and validate the JSON of spec 5.13. `out` is filled with the defaults first; interfaces the mode does not use stay
- * default. ESP_OK, or ESP_ERR_INVALID_ARG with `*bad_field` (may be NULL): the field names of netcfg_validate, plus "json"
- * (not a JSON object, or longer than NETCFG_JSON_MAX), "mode", "single" / "mgmt" / "thread_bb" (section missing or not an
- * object), "ipv4" (missing or malformed).
+ * default, and a missing "trel" means true (configs stored before TREL existed). ESP_OK, or ESP_ERR_INVALID_ARG with
+ * `*bad_field` (may be NULL): the field names of netcfg_validate, plus "json" (not a JSON object, or longer than
+ * NETCFG_JSON_MAX), "mode", "single" / "mgmt" / "thread_bb" (section missing or not an object), "ipv4" (missing or
+ * malformed), "trel" (not a boolean).
  */
 esp_err_t netcfg_from_json(const char *json, netcfg_config_t *out, const char **bad_field);
+
+/** netcfg_from_json for a change request: a missing "trel" keeps `base->trel` instead of meaning true. */
+esp_err_t netcfg_from_json_over(const char *json, const netcfg_config_t *base, netcfg_config_t *out, const char **bad_field);
 
 /** JSON text of the configuration (only the interfaces the mode uses); the caller frees it with free(). NULL when out of memory. */
 char *netcfg_to_json(const netcfg_config_t *cfg);

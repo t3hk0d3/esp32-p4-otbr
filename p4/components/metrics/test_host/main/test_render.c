@@ -87,7 +87,8 @@ TEST_CASE("On any input: families in the catalogue's order", "[metrics]")
     const char *order[] = {"# TYPE br_info ", "# TYPE br_uptime_seconds ", "# TYPE br_mode ", "# TYPE br_cpu_seconds_total ",
                            "# TYPE br_heap_free_bytes ", "# TYPE br_ot_lock_acquisitions_total ", "# TYPE br_storage_ok ",
                            "# TYPE br_scrape_partial ", "# TYPE br_thread_role ", "# TYPE br_mac_tx_frames_total ",
-                           "# TYPE br_border_routing_state ", "# TYPE br_srp_hosts ", "# TYPE br_thread_collect_age_seconds ",
+                           "# TYPE br_border_routing_state ", "# TYPE br_srp_hosts ", "# TYPE br_trel_enabled ",
+                           "# TYPE br_trel_tx_failures_total ", "# TYPE br_thread_collect_age_seconds ",
                            "# TYPE br_thread_collect_failures_total ", "# TYPE br_routing_method ",
                            "# TYPE br_routing_announced_prefixes ", "# TYPE br_routing_omr_custom ",
                            "# TYPE br_bgp_peer_state ", "# TYPE br_bgp_peer_uptime_seconds ",
@@ -235,7 +236,8 @@ TEST_CASE("On a valid cache younger than 30 s: every Thread family, state sets w
                               "br_mac_tx_errors_total", "br_mac_rx_frames_total", "br_mac_rx_duplicated_total",
                               "br_mac_rx_errors_total", "br_thread_ip6_packets_total", "br_border_routing_packets_total",
                               "br_border_routing_bytes_total", "br_border_routing_ra_total", "br_border_routing_rs_total",
-                              "br_srp_hosts", "br_srp_services"
+                              "br_srp_hosts", "br_srp_services", "br_trel_enabled", "br_trel_active", "br_trel_peers",
+                              "br_trel_packets_total", "br_trel_bytes_total", "br_trel_tx_failures_total"
                              };
 
     for (size_t i = 0; i < sizeof(families) / sizeof(families[0]); i++) {
@@ -253,6 +255,10 @@ TEST_CASE("On a valid cache younger than 30 s: every Thread family, state sets w
     TEST_ASSERT_TRUE(has_line(out, "br_mac_rx_errors_total{reason=\"invalid_src\"} 9"));
     TEST_ASSERT_TRUE(has_line(out, "br_thread_ip6_packets_total{direction=\"rx\",result=\"failure\"} 2"));
     TEST_ASSERT_TRUE(has_line(out, "br_border_routing_ra_total{event=\"tx_failure\"} 22"));
+    TEST_ASSERT_TRUE(has_line(out, "br_trel_peers 2"));
+    TEST_ASSERT_TRUE(has_line(out, "br_trel_packets_total{direction=\"rx\"} 17951"));
+    TEST_ASSERT_TRUE(has_line(out, "br_trel_bytes_total{direction=\"tx\"} 5000000000"));
+    TEST_ASSERT_TRUE(has_line(out, "br_trel_tx_failures_total 3"));
     TEST_ASSERT_TRUE(has_line(out, "br_scrape_partial 0"));
     free(out);
 }
@@ -539,4 +545,28 @@ void app_main(void)
     unity_run_all_tests();
     int failures = (int)UNITY_END();
     exit(failures == 0 ? 0 : 1);
+}
+
+TEST_CASE("On a build without TREL: no TREL families", "[metrics]")
+{
+    with_sample();
+    s_in.collector.thread.trel.built = false;
+    char *out = render();
+
+    TEST_ASSERT_NULL(strstr(out, "br_trel_"));
+    free(out);
+}
+
+TEST_CASE("On TREL switched off: enabled 0, active 0, families still written", "[metrics]")
+{
+    with_sample();
+    s_in.collector.thread.trel.enabled = false;
+    s_in.collector.thread.trel.active = false;
+    s_in.collector.thread.trel.peers = 0;
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "br_trel_enabled 0"));
+    TEST_ASSERT_TRUE(has_line(out, "br_trel_active 0"));
+    TEST_ASSERT_TRUE(has_line(out, "br_trel_peers 0"));
+    free(out);
 }

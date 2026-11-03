@@ -21,6 +21,8 @@
 #include "openthread/srp_server.h"
 #include "openthread/thread.h"
 #include "openthread/thread_ftd.h"
+#include "openthread/trel.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "metrics";
 
@@ -122,6 +124,28 @@ static void read_srp(otInstance *ins, metrics_thread_t *t)
     }
 }
 
+static void read_trel(otInstance *ins, metrics_thread_t *t)
+{
+#if CONFIG_OPENTHREAD_RADIO_TREL
+    const otTrelCounters *c = otTrelGetCounters(ins);
+
+    t->trel.built = true;
+    t->trel.enabled = br_core_trel_wanted();
+    t->trel.active = otTrelIsEnabled(ins);
+    t->trel.peers = otTrelGetNumberOfPeers(ins);
+    if (c) {
+        t->trel.tx_packets = c->mTxPackets;
+        t->trel.tx_bytes = c->mTxBytes;
+        t->trel.tx_failures = c->mTxFailure;
+        t->trel.rx_packets = c->mRxPackets;
+        t->trel.rx_bytes = c->mRxBytes;
+    }
+#else
+    (void)ins;
+    (void)t;
+#endif
+}
+
 // Under the OpenThread lock: reads only, no allocation, no logging, no waiting.
 static void read_thread(otInstance *ins, metrics_thread_t *t)
 {
@@ -145,6 +169,7 @@ static void read_thread(otInstance *ins, metrics_thread_t *t)
     t->ip6.rx_failure = ip->mRxFailure;
     read_border_routing(ins, t);
     read_srp(ins, t);
+    read_trel(ins, t);
 }
 
 static void collect_once(void)

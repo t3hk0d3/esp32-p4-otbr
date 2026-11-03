@@ -193,6 +193,8 @@ TEST_CASE("On JSON round trip: netcfg_from_json(netcfg_to_json(cfg)) equals cfg"
     cfg = split_config(0, 20);
     cfg.thread_bb = static_iface(20, ip(172, 16, 0, 9), ip(255, 255, 255, 128));
     assert_round_trip(&cfg); // split, untagged mgmt with DHCP, tagged static backbone
+    cfg.trel = false;
+    assert_round_trip(&cfg); // TREL off
 }
 
 TEST_CASE("On JSON of the spec shape: parses into the config", "[netcfg]")
@@ -253,4 +255,85 @@ TEST_CASE("On JSON longer than the limit: rejects with field json", "[netcfg]")
     strcpy(big + NETCFG_JSON_MAX + 32, "{}");
     assert_rejected(big, "json");
     free(big);
+}
+
+TEST_CASE("On the defaults: TREL is on", "[netcfg]")
+{
+    netcfg_config_t cfg;
+
+    netcfg_defaults(&cfg);
+    TEST_ASSERT_TRUE(cfg.trel);
+}
+
+TEST_CASE("On JSON without trel (a config stored before TREL): parses with trel on", "[netcfg]")
+{
+    netcfg_config_t cfg;
+
+    TEST_ASSERT_EQUAL(ESP_OK, netcfg_from_json("{\"mode\":\"single\",\"single\":{\"vlan\":0,\"ipv4\":{\"dhcp\":true}}}", &cfg, NULL));
+    TEST_ASSERT_TRUE(cfg.trel);
+}
+
+TEST_CASE("On JSON with trel false: parses with trel off", "[netcfg]")
+{
+    netcfg_config_t cfg;
+
+    TEST_ASSERT_EQUAL(ESP_OK, netcfg_from_json("{\"mode\":\"single\",\"single\":{\"vlan\":0,\"ipv4\":{\"dhcp\":true}},\"trel\":false}",
+                                               &cfg, NULL));
+    TEST_ASSERT_FALSE(cfg.trel);
+}
+
+TEST_CASE("On JSON with a trel that is not a boolean: rejects naming trel", "[netcfg]")
+{
+    assert_rejected("{\"mode\":\"single\",\"single\":{\"vlan\":0,\"ipv4\":{\"dhcp\":true}},\"trel\":1}", "trel");
+    assert_rejected("{\"mode\":\"single\",\"single\":{\"vlan\":0,\"ipv4\":{\"dhcp\":true}},\"trel\":\"on\"}", "trel");
+}
+
+TEST_CASE("On a change request without trel: keeps the base value", "[netcfg]")
+{
+    netcfg_config_t base, cfg;
+
+    netcfg_defaults(&base);
+    base.trel = false;
+    TEST_ASSERT_EQUAL(ESP_OK, netcfg_from_json_over("{\"mode\":\"single\",\"single\":{\"vlan\":3,\"ipv4\":{\"dhcp\":true}}}", &base,
+                                                    &cfg, NULL));
+    TEST_ASSERT_FALSE(cfg.trel);
+    TEST_ASSERT_EQUAL(3, cfg.single.vlan);
+}
+
+TEST_CASE("On a change request with trel: the request wins over the base", "[netcfg]")
+{
+    netcfg_config_t base, cfg;
+
+    netcfg_defaults(&base);
+    base.trel = false;
+    TEST_ASSERT_EQUAL(ESP_OK, netcfg_from_json_over("{\"mode\":\"single\",\"single\":{\"vlan\":0,\"ipv4\":{\"dhcp\":true}},\"trel\":true}",
+                                                    &base, &cfg, NULL));
+    TEST_ASSERT_TRUE(cfg.trel);
+}
+
+TEST_CASE("On configs differing only in trel: not equal, diff_only_trel true", "[netcfg]")
+{
+    netcfg_config_t a = split_config(10, 20), b = split_config(10, 20);
+
+    b.trel = false;
+    TEST_ASSERT_FALSE(netcfg_equal(&a, &b));
+    TEST_ASSERT_TRUE(netcfg_diff_only_trel(&a, &b));
+}
+
+TEST_CASE("On equal configs: diff_only_trel false", "[netcfg]")
+{
+    netcfg_config_t a = split_config(10, 20), b = split_config(10, 20);
+
+    TEST_ASSERT_FALSE(netcfg_diff_only_trel(&a, &b));
+}
+
+TEST_CASE("On configs differing in an interface or the mode: diff_only_trel false", "[netcfg]")
+{
+    netcfg_config_t a = split_config(10, 20), b = split_config(10, 21), c;
+
+    b.trel = false;
+    TEST_ASSERT_FALSE(netcfg_diff_only_trel(&a, &b));
+    netcfg_defaults(&c);
+    c.trel = false;
+    TEST_ASSERT_FALSE(netcfg_diff_only_trel(&a, &c));
 }

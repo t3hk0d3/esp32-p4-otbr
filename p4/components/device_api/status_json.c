@@ -64,6 +64,39 @@ static void str_or_null(json_out_t *w, const char *text)
     json_out_str(w, text && text[0] ? text : NULL);
 }
 
+static void trel_json(json_out_t *w, const device_api_trel_t *t)
+{
+    if (!t->built) {
+        json_out_raw(w, "null");
+        return;
+    }
+    json_out_raw(w, "{\"enabled\":");
+    json_out_bool(w, t->enabled);
+    if (!t->state_valid) {
+        json_out_raw(w, ",\"active\":null,\"peers\":null,\"tx_packets\":null,\"tx_failures\":null,\"rx_packets\":null,\"peer_list\":[]}");
+        return;
+    }
+    json_out_raw(w, ",\"active\":");
+    json_out_bool(w, t->active);
+    json_out_raw(w, ",\"peers\":");
+    json_out_uint(w, t->peers);
+    json_out_raw(w, ",\"tx_packets\":");
+    json_out_u64(w, t->tx_packets);
+    json_out_raw(w, ",\"tx_failures\":");
+    json_out_u64(w, t->tx_failures);
+    json_out_raw(w, ",\"rx_packets\":");
+    json_out_u64(w, t->rx_packets);
+    json_out_raw(w, ",\"peer_list\":[");
+    for (size_t i = 0; i < t->peer_count && i < DEVICE_API_TREL_PEERS_MAX; i++) {
+        json_out_raw(w, i > 0 ? ",{\"ext_address\":" : "{\"ext_address\":");
+        json_out_str(w, t->peer_list[i].ext_address);
+        json_out_raw(w, ",\"address\":");
+        json_out_str(w, t->peer_list[i].address);
+        json_out_raw(w, "}");
+    }
+    json_out_raw(w, "]}");
+}
+
 int device_api_status_json(char *buf, size_t cap, const device_api_status_t *s)
 {
     json_out_t w;
@@ -120,6 +153,8 @@ int device_api_status_json(char *buf, size_t cap, const device_api_status_t *s)
     str_or_null(&w, s->fault_reason);
     json_out_raw(&w, ",\"storage_ok\":");
     json_out_bool(&w, s->storage_ok);
+    json_out_raw(&w, ",\"trel\":");
+    trel_json(&w, &s->trel);
     json_out_raw(&w, "}");
     return w.overflow ? -1 : (int)w.len;
 }

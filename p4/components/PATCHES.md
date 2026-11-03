@@ -58,6 +58,9 @@ reason, spec reference.
    device routes are exact `/device/...` paths. Their footer links the source code
    (https://github.com/t3hk0d3/esp32-p4-otbr), which the AGPL asks a network-facing modified version to offer. (spec 5.7,
    5.8; docs/superpowers/specs/2026-11-02-device-pages-design.md)
+   2026-11-03: `frontend/ethernet.html` gets the "Thread over Ethernet" (TREL) card, `static/ethernet.js` its logic
+   (`trelOnly`, `trelView`, `setTrel`); it also polls `/device/status` for the TREL state. No CSS change.
+   (docs/superpowers/specs/2026-11-03-trel-design.md)
 4. Not applied. Not needed: Phase 0 showed `esp_ot_br_server` links without Wi-Fi. (spec 5.8)
 5. Applied (part a Task 11B, part b Task 13). `esp_br_http_ota`: (a) minimal RCP strip: removed the
    `esp_rcp_ota_*` / `esp_rcp_firmware.h` use and the `esp_rcp_update` entry in `REQUIRES`. Reason: the RCP firmware

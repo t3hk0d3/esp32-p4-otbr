@@ -2,7 +2,7 @@
 
 Building and flashing: [building.md](building.md). Conventions (naming, formatting, errors, tests): `STYLEGUIDE.md`. Design:
 `docs/superpowers/specs/2026-10-30-esp32-p4-otbr-design.md` (the whole firmware), plus the later feature specs in
-`docs/superpowers/specs/` (device pages, Prometheus metrics, network names) and the plans in `docs/superpowers/plans/` (among them the
+`docs/superpowers/specs/` (device pages, Prometheus metrics, network names, TREL) and the plans in `docs/superpowers/plans/` (among them the
 no-wires first install through ESP-Hosted).
 
 ## Repository layout
@@ -104,6 +104,22 @@ make lan-ping-down
 esp-hosted-mcu 0.0.27 `slave/`, `idf.py set-target esp32c6 build` with IDF v5.4); the test writes it to the C6 over the
 jumper (console `c6_stock_restore`, with the C6 held in reset) and hides the jumper from the probe (`c6_jumper_ignore`).
 The board ends up in `BR_RUNNING` with the given RCP.
+
+`test_trel.py` links the board with a second TREL border router when the TREL test peer runs (`tools/trel_peer`):
+ot-br-posix from the official `openthread/border-router` image (TREL built in) on the board's backbone link through Docker
+macvlan, with the Thread peer devkit as its radio. Its tests skip otherwise.
+
+```
+tools/trel_peer/flash_c6.sh rcp                  # the C6 devkit on $PEER_PORT (/dev/ttyACM1) becomes a UART RCP
+LAN_IF=enp3s0 LAN_SUBNET=192.168.1.0/24 LAN_GATEWAY=192.168.1.1 PEER_IP=192.168.1.240 tools/trel_peer/up.sh
+make test-target TEST=p4/pytest/test_trel.py     # the tests join the peer to the board's network themselves
+tools/trel_peer/join.sh <board>; tools/trel_peer/status.sh   # by hand: join, then TREL peers, counters, radios
+tools/trel_peer/down.sh; tools/trel_peer/flash_c6.sh cli     # back to the ot_cli Thread peer
+```
+
+`LAN_IF` is a wired interface on the backbone link (in split mode the host's VLAN interface of `thread_bb`); see
+`up.sh` for the variables. While the devkit is the RCP, run no other on-board tests: the `peer` fixture would write CLI
+commands into the RCP's UART.
 
 A test that kills the radio (`rcp_kill`, `c6_hold`) leaves a flag: after an aborted run use the console `c6_hold 0` and
 reboot (and `c6_jumper_ignore 0` after an aborted `test_hosted_install.py`). A killed `test_routing.py` or

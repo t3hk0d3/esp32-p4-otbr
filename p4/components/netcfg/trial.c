@@ -153,6 +153,29 @@ netcfg_apply_action_t netcfg_apply_decide(bool apply_ok, bool on_trial, bool run
     return running_is_defaults ? NETCFG_APPLY_GIVE_UP : NETCFG_APPLY_TRY_DEFAULTS;
 }
 
+esp_err_t netcfg_trial_set_trel(const netcfg_trial_t *t, bool enabled)
+{
+    if (t->on_trial) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    netcfg_config_t active;
+
+    load_active(t->env, &active);
+    if (active.trel == enabled) {
+        return ESP_OK;
+    }
+    active.trel = enabled;
+    char *text = netcfg_to_json(&active);
+
+    if (!text) {
+        return ESP_ERR_NO_MEM;
+    }
+    const esp_err_t err = t->env->write(t->env->ctx, NETCFG_KEY_ACTIVE, text);
+
+    free(text);
+    return err;
+}
+
 esp_err_t netcfg_trial_reset(const netcfg_env_t *env)
 {
     esp_err_t err = env->erase(env->ctx, NETCFG_KEY_ACTIVE);

@@ -49,6 +49,7 @@ static void net_init_task(void *arg)
         vTaskDelete(NULL);
     }
     netnames_set_mode(netcfg_running_mode());
+    br_core_set_trel(netcfg_trel_enabled()); // before the start: applied right after OpenThread is initialised
     err = br_core_start(netcfg_backbone_netif());
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "br_core_start failed: %s", esp_err_to_name(err));

@@ -60,6 +60,19 @@ esp_err_t netcfg_set_trial(const netcfg_config_t *cfg);
  */
 esp_err_t netcfg_confirm(httpd_req_t *req);
 
+/** Copy of the configuration this boot runs (the trial during a trial, the defaults after a fallback). ESP_ERR_INVALID_STATE before netcfg_start. */
+esp_err_t netcfg_get_running(netcfg_config_t *out);
+
+/**
+ * Store the TREL setting in the active config without a trial or a reboot (netcfg_trial_set_trel) and make it the running
+ * value; the caller applies it to OpenThread (br_core_set_trel). ESP_ERR_INVALID_STATE before netcfg_start or while a trial
+ * runs. No flash write when the value does not change.
+ */
+esp_err_t netcfg_set_trel(bool enabled);
+
+/** TREL setting of the running configuration; true (the default) before netcfg_start. */
+bool netcfg_trel_enabled(void);
+
 /** Erase the stored configs and reboot: the next boot uses the defaults. */
 esp_err_t netcfg_reset(void);
 

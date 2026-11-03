@@ -90,6 +90,11 @@ CONFIG_OPENTHREAD_RADIO_SPINEL_SPI=y
 CONFIG_OPENTHREAD_HEADER_CUSTOM=y
 CONFIG_OPENTHREAD_CUSTOM_HEADER_PATH="main"
 CONFIG_OPENTHREAD_CUSTOM_HEADER_FILE_NAME="esp_ot_custom_config.h"
+# TREL (Thread Radio Encapsulation Link) on the backbone interface, next to the 15.4 radio: OpenThread mesh links over
+# Ethernet to other border routers of the same Thread network. On by default, switched live by PUT /device/network.
+# The receive ring holds pbufs until the OpenThread task reads them; 20 is plenty for a home network.
+CONFIG_OPENTHREAD_RADIO_TREL=y
+CONFIG_OPENTHREAD_TREL_BUFFER_SIZE=20
 # The RCP firmware is pushed on request (R14); esp_ot_cli_extension's rcp command would need esp_rcp_update.
 CONFIG_OPENTHREAD_RCP_COMMAND=n
 

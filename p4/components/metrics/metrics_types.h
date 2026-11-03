@@ -42,6 +42,13 @@ typedef struct {
     int srp_state; /**< otSrpServerState: disabled, running, stopped */
     uint32_t srp_hosts;
     uint32_t srp_services;
+    struct {
+        bool built;   /**< false: no TREL families */
+        bool enabled; /**< the setting */
+        bool active;  /**< OpenThread runs TREL */
+        uint32_t peers;
+        uint64_t tx_packets, tx_bytes, tx_failures, rx_packets, rx_bytes;
+    } trel;
 } metrics_thread_t;
 
 typedef struct {

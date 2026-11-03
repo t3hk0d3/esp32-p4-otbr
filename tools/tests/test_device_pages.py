@@ -15,8 +15,8 @@ WEB_API = (
 )  # Thread web GUI routes (/get_properties, ...)
 WEB_BUDGET_BYTES = (
     384 * 1024
-)  # of the 2 MB web partition; raised from 256 KB for the topology page, then from 320 KB for the Routing page
-# (about 330 KB in all with both)
+)  # of the 2 MB web partition; raised from 256 KB for the topology page, then from 320 KB for the TREL card and the
+# Routing page
 
 DEVICE_MENU = [
     ["/ethernet.html", "Ethernet"],

@@ -349,8 +349,15 @@ NET_SPLIT_TRIAL = (
 )
 
 
-def routes(net_js="H.NETWORK", put='{status: 200, body: {status: "trial"}}'):
-    return f"(u, o) => o.method === 'PUT' ? ({put}) : u === '/device/diag' ? ({{status: 200, body: H.DIAG}}) : ({{status: 200, body: {net_js}}})"
+def routes(
+    net_js="H.NETWORK",
+    put='{status: 200, body: {status: "trial"}}',
+    status_js="H.STATUS",
+):
+    return (
+        f"(u, o) => o.method === 'PUT' ? ({put}) : u === '/device/diag' ? ({{status: 200, body: H.DIAG}})"
+        f" : u === '/device/status' ? ({{status: 200, body: {status_js}}}) : ({{status: 200, body: {net_js}}})"
+    )
 
 
 START = "t.page.init(); await t.advance(100);"
@@ -530,6 +537,7 @@ class TestEthernetPage:
                 "vlan": 0,
                 "ipv4": {"dhcp": False, "addr": "10.0.0.2", "mask": "255.255.255.0"},
             },
+            "trel": True,
         }
         assert "http://10.0.0.2" in r[2]
         assert r[3:] == [True, True, 0]
@@ -617,13 +625,13 @@ class TestEthernetPage:
         )
         assert r == "<b>x</b>"
 
-    def test_init_polls_only_the_network(self):
-        # On init: GET /device/network once (the banner uses the same answer), nothing else.
+    def test_init_polls_the_network_and_the_status_once_each(self):
+        # On init: GET /device/network once (the banner uses the same answer) and /device/status once (TREL card).
         r = scenario(
             page("ethernet", routes())
-            + "t.page.init(); await t.advance(100); return t.calls.map((c) => c.url);"
+            + "t.page.init(); await t.advance(100); return t.calls.map((c) => c.url).sort();"
         )
-        assert r == ["/device/network"]
+        assert r == ["/device/network", "/device/status"]
 
 
 @needs_node
@@ -858,3 +866,338 @@ class TestEthernetPrReview:
         """
         )
         assert "No answer" in r and "http://10.0.0.2" in r
+
+
+TREL_STATUS = (
+    "H.fixture(H.STATUS, {trel: {enabled: true, active: true, peers: 2, tx_packets: 18204, tx_failures: 0,"
+    " rx_packets: 17951, peer_list: [{ext_address: '1a2b3c4d5e6f7081', address: '[fe80::1]:12390'},"
+    " {ext_address: '9f8e7d6c5b4a3921', address: '[fe80::2]:12390'}]}})"
+)
+NET_TREL_OFF = "H.fixture(H.NETWORK, {active: {mode: 'single', single: {vlan: 0, ipv4: {dhcp: true}}, trel: false}})"
+
+
+@needs_node
+class TestTrelLogic:
+    """draftFromConfig, changes, requestBody, trelOnly, trelView"""
+
+    def test_config_without_trel_runs_trel(self):
+        # On a configuration of older firmware (no "trel"): the draft has TREL on, the board's default.
+        assert (
+            eth(
+                "L.draftFromConfig({mode: 'single', single: {vlan: 0, ipv4: {dhcp: true}}}).trel"
+            )
+            is True
+        )
+
+    def test_config_with_trel_false_gives_a_draft_with_trel_off(self):
+        assert (
+            eth(
+                "L.draftFromConfig({mode: 'single', single: {vlan: 0, ipv4: {dhcp: true}}, trel: false}).trel"
+            )
+            is False
+        )
+
+    def test_trel_change_is_a_review_row(self):
+        d = draft() | {"trel": True}
+        r = eth(
+            f"L.changes({json.dumps(d)}, Object.assign({json.dumps(d)}, {{trel: false}}))"
+        )
+        assert r == [{"what": "TREL (Thread over Ethernet)", "from": "On", "to": "Off"}]
+
+    def test_off_while_still_running_says_so(self):
+        # On a saved Off that OpenThread has not applied yet (lock busy): Off, with a hint that TREL still runs.
+        r = eth(
+            "L.trelView({enabled: false, active: true, peers: 1, tx_packets: 0, tx_failures: 0, rx_packets: 0,"
+            " peer_list: []}, 'single')"
+        )
+        assert r["chip"] == "Off"
+        assert "still runs" in r["hint"]
+
+    def test_request_body_carries_trel(self):
+        d = draft() | {"trel": False}
+        assert eth(f"L.requestBody({json.dumps(d)}).trel") is False
+
+    def test_trel_only_when_nothing_else_differs(self):
+        d = draft() | {"trel": True}
+        off = d | {"trel": False}
+        both = off | {"single": d["single"] | {"tagged": True, "vlan": "5"}}
+        assert eth(f"L.trelOnly({json.dumps(d)}, {json.dumps(off)})") is True
+        assert eth(f"L.trelOnly({json.dumps(d)}, {json.dumps(both)})") is False
+        assert eth(f"L.trelOnly({json.dumps(d)}, {json.dumps(d)})") is False
+
+    def test_no_trel_object_means_no_card(self):
+        assert eth("L.trelView(null, 'single').available") is False
+        assert eth("L.trelView(undefined, 'single').available") is False
+
+    @pytest.mark.parametrize(
+        ("trel", "chip"),
+        [
+            ("{enabled: false, active: false, peers: 0}", "Off"),
+            ("{enabled: true, active: null, peers: null}", "Unknown"),
+            ("{enabled: true, active: false, peers: 0}", "Waiting for Thread"),
+            ("{enabled: true, active: true, peers: 1}", "Active"),
+        ],
+    )
+    def test_chip_names_the_state(self, trel, chip):
+        assert eth(f"L.trelView({trel}, 'single').chip") == chip
+
+    def test_active_without_peers_explains_how_to_check(self):
+        hint = eth("L.trelView({enabled: true, active: true, peers: 0}, 'single').hint")
+        assert "avahi-browse -rt _trel._udp" in hint
+
+    def test_where_names_the_backbone_interface(self):
+        assert eth("L.trelView({enabled: true}, 'split').where") == "On Thread backbone"
+        assert eth("L.trelView({enabled: true}, 'single').where") == "On Ethernet port"
+
+    def test_unread_counters_are_dashes_and_large_ones_grouped(self):
+        assert (
+            eth(
+                "L.trelView({enabled: true, active: null, peers: null}, 'single').peers"
+            )
+            == "-"
+        )
+        assert (
+            eth(
+                "L.trelView({enabled: true, active: true, tx_packets: 1234567}, 'single').tx"
+            )
+            == "1\u2009234\u2009567"
+        )
+
+
+@needs_node
+class TestTrelCard:
+    """The TREL card of ethernet.js against a fake DOM and fetch"""
+
+    def test_card_shows_state_counters_and_peers(self):
+        r = scenario(
+            page("ethernet", routes(status_js=TREL_STATUS))
+            + START
+            + """
+            return [t.el('trelSection').hidden(), t.el('trel-chip').textContent, t.el('trel-where').textContent,
+                    t.el('trel-on').getAttribute('aria-pressed'), t.el('trel-peers').textContent,
+                    t.el('trel-peerwrap').hidden(), t.el('trel-peerlist').children.length];
+        """
+        )
+        assert r == [False, "Active", "On Ethernet port", "true", "2", False, 2]
+
+    def test_build_without_trel_hides_the_card(self):
+        r = scenario(
+            page("ethernet", routes(status_js="H.fixture(H.STATUS, {trel: null})"))
+            + START
+            + "return t.el('trelSection').hidden();"
+        )
+        assert r is True
+
+    def test_switch_alone_is_sent_at_once_without_review(self):
+        # On Off with nothing else changed: PUT of the running config with trel false; no action bar, no review.
+        r = scenario(
+            page(
+                "ethernet",
+                routes(
+                    status_js=TREL_STATUS,
+                    put="{status: 200, body: {status: 'applied'}}",
+                ),
+            )
+            + START
+            + """
+            await t.page.setTrel(false);
+            const put = t.calls.find((c) => c.method === 'PUT');
+            return [put.url, JSON.parse(put.body), t.el('actionBar').hidden(), t.el('reviewSection').hidden(),
+                    t.el('trelMsg').textContent, t.page.kit.isWaiting()];
+        """
+        )
+        assert r[0] == "/device/network"
+        assert r[1] == {
+            "mode": "single",
+            "single": {"vlan": 0, "ipv4": {"dhcp": True}},
+            "trel": False,
+        }
+        assert r[2:] == [True, True, "TREL off.", False]
+
+    def test_switch_with_other_changes_joins_the_review(self):
+        # On Off while an interface edit is pending: no PUT; the review lists TREL with the other change.
+        r = scenario(
+            page("ethernet", routes(status_js=TREL_STATUS))
+            + START
+            + """
+            t.el('if-single-edit').click(); t.el('if-single-tagged').click(); t.el('if-single-vlan').type('7');
+            await t.page.setTrel(false);
+            t.el('reviewBtn').click();
+            const rows = t.el('diffBody').children.map((tr) => tr.children[0].textContent);
+            return [t.calls.filter((c) => c.method === 'PUT').length, rows];
+        """
+        )
+        assert r[0] == 0
+        assert "TREL (Thread over Ethernet)" in r[1]
+        assert "Ethernet port VLAN" in r[1]
+
+    def test_switch_during_a_trial_asks_to_settle_it_first(self):
+        r = scenario(
+            page("ethernet", routes(NET_SPLIT_TRIAL, status_js=TREL_STATUS))
+            + START
+            + """
+            await t.page.setTrel(false);
+            return [t.calls.filter((c) => c.method === 'PUT').length, t.el('trelMsg').textContent];
+        """
+        )
+        assert r[0] == 0
+        assert "trial" in r[1]
+
+    def test_switch_refused_by_the_board_shows_why_and_keeps_the_state(self):
+        r = scenario(
+            page(
+                "ethernet",
+                routes(
+                    status_js=TREL_STATUS,
+                    put="{status: 409, body: {error: 'busy', detail: 'confirm or revert the network change first'}}",
+                ),
+            )
+            + START
+            + """
+            await t.page.setTrel(false);
+            return [t.el('trelMsg').textContent, t.el('trel-on').getAttribute('aria-pressed'), t.el('trel-on').disabled];
+        """
+        )
+        assert "confirm or revert" in r[0]
+        assert r[1:] == ["true", False]
+
+    def test_switch_sends_the_settings_running_now(self):
+        # On Off after another client made the port static: the PUT carries the static settings read just before it.
+        r = scenario(
+            page(
+                "ethernet",
+                "(() => { let n = 0; return (u, o) => o.method === 'PUT' ? ({status: 200, body: {status: 'applied'}})"
+                " : u === '/device/diag' ? ({status: 200, body: H.DIAG})"
+                f" : u === '/device/status' ? ({{status: 200, body: {TREL_STATUS}}})"
+                f" : ({{status: 200, body: n++ === 0 ? H.NETWORK : {STATIC_NET}}}); }})()",
+            )
+            + START
+            + """
+            await t.page.setTrel(false);
+            const put = t.calls.find((c) => c.method === 'PUT');
+            return [JSON.parse(put.body).single.ipv4.dhcp, t.el('trelMsg').textContent, t.el('actionBar').hidden()];
+        """
+        )
+        assert r == [False, "TREL off.", True]
+
+    def test_switch_answered_with_a_trial_waits_for_the_board(self):
+        # On a trial answer (the board still saw another change): the reboot note, and the page waits for the board.
+        r = scenario(
+            page("ethernet", routes(status_js=TREL_STATUS))
+            + START
+            + """
+            await t.page.setTrel(false);
+            return [t.el('trelMsg').textContent, t.page.kit.isWaiting()];
+        """
+        )
+        assert "trial" in r[0]
+        assert r[1] is True
+
+    def test_review_left_with_only_trel_is_applied_without_a_reboot(self):
+        # An interface edit undone after TREL joined the draft: Apply sends a trel-only PUT, the board applies it live.
+        r = scenario(
+            page(
+                "ethernet",
+                routes(
+                    status_js=TREL_STATUS,
+                    put="{status: 200, body: {status: 'applied'}}",
+                ),
+            )
+            + START
+            + """
+            t.el('if-single-edit').click(); t.el('if-single-tagged').click(); t.el('if-single-vlan').type('7');
+            await t.page.setTrel(false);
+            t.el('if-single-untagged').click();
+            t.el('reviewBtn').click();
+            await t.page.apply();
+            const put = t.calls.find((c) => c.method === 'PUT');
+            return [JSON.parse(put.body).trel, t.el('netMsg').textContent, t.page.kit.isWaiting(),
+                    t.el('actionBar').hidden(), t.el('trel-off').getAttribute('aria-pressed')];
+        """
+        )
+        assert r == [False, "TREL off.", False, True, "true"]
+
+    def test_failed_status_refresh_marks_the_card_stale(self):
+        # On a status poll that fails after a good one: the stale line names the failure; the next good poll hides it.
+        r = scenario(
+            page(
+                "ethernet",
+                "(() => { let n = 0; return (u, o) => o.method === 'PUT' ? ({status: 500, body: {}})"
+                " : u === '/device/status' ? (n++ === 1 ? ({status: 503, body: {error: 'busy', detail: 'try again'}})"
+                f" : ({{status: 200, body: {TREL_STATUS}}})) : u === '/device/diag' ? ({{status: 200, body: H.DIAG}})"
+                " : ({status: 200, body: H.NETWORK}); })()",
+            )
+            + START
+            + """
+            const before = t.el('trel-stale').hidden();
+            await t.page.refreshTrel();
+            const failed = [t.el('trel-stale').hidden(), t.el('trel-stale').textContent];
+            await t.page.refreshTrel();
+            return [before, failed, t.el('trel-stale').hidden()];
+        """
+        )
+        assert r[0] is True
+        assert r[1][0] is False
+        assert "could not be read" in r[1][1]
+        assert r[2] is True
+
+    def test_apply_waits_while_the_switch_is_being_sent(self):
+        # On Apply while the TREL PUT is still in flight: Apply sends nothing, so the trial never carries a stale trel.
+        r = scenario(
+            page(
+                "ethernet",
+                routes(
+                    status_js=TREL_STATUS,
+                    put="{status: 200, body: {status: 'applied'}}",
+                ),
+            )
+            + START
+            + """
+            const sending = t.page.setTrel(false);
+            t.el('if-single-edit').click(); t.el('if-single-staticbtn').click(); t.el('if-single-cidr').type('10.0.0.2/24');
+            t.el('reviewBtn').click();
+            const disabled = t.el('applyBtn').disabled;
+            await t.page.apply();
+            await sending;
+            return [disabled, t.calls.filter((c) => c.method === 'PUT').length];
+        """
+        )
+        assert r == [True, 1]
+
+    def test_edits_wait_while_the_switch_is_being_sent(self):
+        # On an interface edit while the TREL PUT is in flight: the edit is not taken (the draft is about to be replaced
+        # by the running settings, which would drop it unseen); after the switch the page shows no pending change.
+        r = scenario(
+            page(
+                "ethernet",
+                routes(
+                    status_js=TREL_STATUS,
+                    put="{status: 200, body: {status: 'applied'}}",
+                ),
+            )
+            + START
+            + """
+            const sending = t.page.setTrel(false);
+            t.el('if-single-edit').click(); t.el('if-single-tagged').click();
+            const during = t.el('actionBar').hidden();
+            await sending;
+            const put = t.calls.find((c) => c.method === 'PUT');
+            return [during, t.el('actionBar').hidden(), JSON.parse(put.body).single.vlan];
+        """
+        )
+        assert r == [True, True, 0]
+
+    def test_running_trel_off_is_shown_pressed_off(self):
+        r = scenario(
+            page(
+                "ethernet",
+                routes(
+                    NET_TREL_OFF,
+                    status_js="H.fixture(H.STATUS, {trel: {enabled: false, active: false, peers: 0, tx_packets: 0,"
+                    " tx_failures: 0, rx_packets: 0, peer_list: []}})",
+                ),
+            )
+            + START
+            + "return [t.el('trel-off').getAttribute('aria-pressed'), t.el('trel-chip').textContent, t.el('actionBar').hidden()];"
+        )
+        assert r == ["true", "Off", True]

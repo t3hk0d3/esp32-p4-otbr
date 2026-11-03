@@ -34,6 +34,7 @@
 #include "openthread/link_raw.h"
 #include "openthread/platform/radio.h"
 #include "openthread/thread.h"
+#include "openthread/trel.h"
 #include "mode_fsm.h"
 #include "rcp_sync.h"
 #include "sdkconfig.h"
@@ -60,8 +61,15 @@ static const char *TAG = "br_core";
 #define FAULT_NO_RCP "no rcp firmware"
 #define FAULT_INCOMPATIBLE "rcp incompatible"
 #define FAULT_ROM_RECOVERY "rom recovery failed"
-// Spinel SPI endpoint, an eventfd each for the netif, the task queue and the border router.
+// Spinel SPI endpoint, an eventfd each for the netif, the task queue and the border router, and one for TREL reception.
+#if CONFIG_OPENTHREAD_RADIO_TREL
+#define EVENTFD_COUNT 5
+#else
 #define EVENTFD_COUNT 4
+#endif
+#define TREL_SET_LOCK_MS 1000
+#define TREL_QUERY_MS 3000 // how long a peer query collects answers (esp mdns sends it about once a second)
+#define TREL_QUERY_DELAY_MS 100 // after an address event: a burst of them gets one query
 
 typedef struct {
     StaticSemaphore_t mutex_storage;
@@ -112,6 +120,12 @@ static void (*s_border_router_up_cb)(otInstance *instance);
 static esp_openthread_platform_config_t s_platform_config;
 
 static bool ot_ready_now(void);
+// TREL setting (br_core_set_trel); applied after every esp_openthread_init.
+static atomic_bool s_trel_wanted = true;
+#if CONFIG_OPENTHREAD_RADIO_TREL
+static esp_timer_handle_t s_trel_query_timer; // runs send_trel_query
+static mdns_search_once_t *s_trel_query;      // the last peer query; used by the esp_timer task only
+#endif
 
 static void set_reason(const char *reason)
 {
@@ -334,12 +348,60 @@ static void note_address(void)
     xSemaphoreGive(s_core.mutex);
 }
 
+// The IDF port browses for TREL peers with a single query, sent when TREL is enabled. That is before the backbone has an
+// address, or before the switch port forwards, so the query is lost; esp mdns repeats browses on a new address only
+// for its predefined netifs, which netcfg does not use. Peers already on the link would never be found. A PTR query
+// once an address shows the link works makes them answer, and the browse takes the answers.
+#if CONFIG_OPENTHREAD_RADIO_TREL
+// A query still running may have sent its last packet before the address came: start a new one once it has ended.
+static void send_trel_query(void *arg)
+{
+    if (!atomic_load(&s_trel_wanted)) {
+        return;
+    }
+    if (s_trel_query) {
+        mdns_result_t *results = NULL;
+
+        if (!mdns_query_async_get_results(s_trel_query, 0, &results, NULL)) {
+            esp_timer_start_once(s_trel_query_timer, TREL_QUERY_MS * 1000ULL);
+            return;
+        }
+        mdns_query_results_free(results);
+        mdns_query_async_delete(s_trel_query);
+    }
+    s_trel_query = mdns_query_async_new(NULL, "_trel", "_udp", MDNS_TYPE_PTR, TREL_QUERY_MS, 1, NULL);
+}
+#endif
+
+static void query_trel_peers(void)
+{
+#if CONFIG_OPENTHREAD_RADIO_TREL
+    if (s_trel_query_timer) {
+        esp_timer_stop(s_trel_query_timer); // not armed: nothing to stop
+        esp_timer_start_once(s_trel_query_timer, TREL_QUERY_DELAY_MS * 1000ULL);
+    }
+#endif
+}
+
 static void on_got_ip6(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     const ip_event_got_ip6_t *event = data;
 
     if (event->esp_netif == s_core.backbone) {
         note_address();
+        // A link-local address exists before the switch port forwards; a SLAAC address needed a router advertisement.
+        if (esp_netif_ip6_get_addr_type(&event->ip6_info.ip) != ESP_IP6_ADDR_IS_LINK_LOCAL) {
+            query_trel_peers();
+        }
+    }
+}
+
+static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    const ip_event_got_ip_t *event = data;
+
+    if (event->esp_netif == s_core.backbone) {
+        query_trel_peers();
     }
 }
 
@@ -364,6 +426,11 @@ static esp_err_t init_openthread(void)
     s_platform_config = platform_config();
     ESP_RETURN_ON_ERROR(esp_openthread_init(&s_platform_config), TAG, "esp_openthread_init");
     s_core.ot_initialised = true;
+#if CONFIG_OPENTHREAD_RADIO_TREL
+    esp_openthread_lock_acquire(portMAX_DELAY);
+    otTrelSetEnabled(esp_openthread_get_instance(), atomic_load(&s_trel_wanted));
+    esp_openthread_lock_release();
+#endif
 
     esp_netif_config_t netif_config = ESP_NETIF_DEFAULT_OPENTHREAD();
     esp_netif_t *netif = esp_netif_new(&netif_config);
@@ -561,7 +628,12 @@ esp_err_t br_core_start(esp_netif_t *backbone)
     if (mdns_err != ESP_OK) {
         ESP_LOGE(TAG, "mDNS did not start (%s), continuing without it", esp_err_to_name(mdns_err));
     }
+#if CONFIG_OPENTHREAD_RADIO_TREL
+    const esp_timer_create_args_t trel_query_timer = {.callback = send_trel_query, .name = "trel_query"};
+    ESP_RETURN_ON_ERROR(esp_timer_create(&trel_query_timer, &s_trel_query_timer), TAG, "TREL query timer");
+#endif
     ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_GOT_IP6, on_got_ip6, NULL), TAG, "event handler");
+    ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, on_got_ip, NULL), TAG, "event handler");
 
     ESP_RETURN_ON_ERROR(start_ot_task(), TAG, "cannot create the OpenThread task");
     if (xSemaphoreTake(s_core.boot_done, pdMS_TO_TICKS(BOOT_WAIT_MS)) != pdTRUE) {
@@ -638,6 +710,90 @@ void br_core_get_status(br_core_status_t *out)
     }
     esp_openthread_lock_release();
     br_core_ot_session_end();
+}
+
+// OpenThread can be called: initialised and not in the radio fault mode (where the init may be parked).
+static bool ot_callable(void)
+{
+    if (!s_core.started) {
+        return false;
+    }
+    xSemaphoreTake(s_core.mutex, portMAX_DELAY);
+    const bool callable = s_core.ot_ready && br_core_get_mode() != BR_MODE_RADIO_FAULT;
+
+    xSemaphoreGive(s_core.mutex);
+    return callable;
+}
+
+esp_err_t br_core_set_trel(bool enabled)
+{
+#if CONFIG_OPENTHREAD_RADIO_TREL
+    atomic_store(&s_trel_wanted, enabled);
+    if (!ot_callable()) {
+        return ESP_ERR_INVALID_STATE; // stored, applied by the next esp_openthread_init
+    }
+    if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(TREL_SET_LOCK_MS))) {
+        ESP_LOGW(TAG, "TREL %s: OpenThread busy, applied at the next start", enabled ? "on" : "off");
+        return ESP_ERR_TIMEOUT;
+    }
+    if (!ot_callable()) { // OpenThread stopped while this task waited for the lock
+        esp_openthread_lock_release();
+        return ESP_ERR_INVALID_STATE;
+    }
+    otTrelSetEnabled(esp_openthread_get_instance(), enabled);
+    esp_openthread_lock_release();
+    ESP_LOGI(TAG, "TREL %s", enabled ? "on" : "off");
+    return ESP_OK;
+#else
+    (void)enabled;
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+bool br_core_trel_wanted(void)
+{
+    return atomic_load(&s_trel_wanted);
+}
+
+void br_core_get_trel(br_core_trel_t *out)
+{
+    memset(out, 0, sizeof(*out));
+#if CONFIG_OPENTHREAD_RADIO_TREL
+    out->built = true;
+    out->enabled = br_core_trel_wanted();
+    if (!ot_callable() || !esp_openthread_lock_acquire(pdMS_TO_TICKS(STATUS_LOCK_MS))) {
+        return;
+    }
+    if (!ot_callable()) { // OpenThread stopped while this task waited for the lock
+        esp_openthread_lock_release();
+        return;
+    }
+    otInstance *instance = esp_openthread_get_instance();
+    const otTrelCounters *counters = otTrelGetCounters(instance);
+    otTrelPeerIterator iterator;
+    const otTrelPeer *peer;
+
+    out->state_valid = true;
+    out->active = otTrelIsEnabled(instance) && otThreadGetDeviceRole(instance) != OT_DEVICE_ROLE_DISABLED;
+    out->peers = otTrelGetNumberOfPeers(instance);
+    if (counters) {
+        out->tx_packets = counters->mTxPackets;
+        out->tx_bytes = counters->mTxBytes;
+        out->tx_failures = counters->mTxFailure;
+        out->rx_packets = counters->mRxPackets;
+        out->rx_bytes = counters->mRxBytes;
+    }
+    otTrelInitPeerIterator(instance, &iterator);
+    while (out->peer_count < BR_CORE_TREL_PEERS_MAX && (peer = otTrelGetNextPeer(instance, &iterator)) != NULL) {
+        br_core_trel_peer_t *entry = &out->peer_list[out->peer_count++];
+
+        for (size_t i = 0; i < sizeof(peer->mExtAddress.m8); i++) {
+            snprintf(&entry->ext_address[2 * i], 3, "%02x", peer->mExtAddress.m8[i]);
+        }
+        otIp6SockAddrToString(&peer->mSockAddr, entry->sock_address, sizeof(entry->sock_address));
+    }
+    esp_openthread_lock_release();
+#endif
 }
 
 // ---- mode state machine: real operations (run under the OpenThread lock) ----

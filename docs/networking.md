@@ -18,7 +18,8 @@ changes, then apply) or with `PUT /device/network`, for example:
 curl -X PUT http://<board>/device/network -d '{"mode":"split","mgmt":{"vlan":10,"ipv4":{"dhcp":true}},"thread_bb":{"vlan":20,"ipv4":{"dhcp":true}}}'
 ```
 
-Shape: `{"mode": "single"|"split", "single"|"mgmt"|"thread_bb": {"vlan": 0|1..4094, "ipv4": {"dhcp": true} | {"dhcp": false, "addr", "mask", "gw", "dns"}}}`.
+Shape: `{"mode": "single"|"split", "single"|"mgmt"|"thread_bb": {"vlan": 0|1..4094, "ipv4": {"dhcp": true} | {"dhcp": false, "addr", "mask", "gw", "dns"}}, "trel": true|false}`.
+`trel` is optional in a PUT: left out, the running value stays (see [TREL](#trel-thread-over-ethernet)).
 `vlan: 0` is untagged. The switch port must carry the VLANs before you apply.
 
 <table>
@@ -86,6 +87,27 @@ renewal on save, so the router learns the name without the address changing. Wit
 DHCP and the setting has no effect.
 
 `net reset` touches neither section.
+
+## TREL (Thread over Ethernet)
+
+TREL (Thread Radio Encapsulation Link) carries Thread mesh links over Ethernet, next to the 15.4 radio: border routers of
+the same Thread network on the same link become direct neighbours, so two radio islands joined only by the LAN form one
+Thread network, and the mesh can route around weak radio hops. Thread devices themselves keep using the radio.
+
+- On by default. It runs on the backbone interface: `thread_bb` in split mode, the Ethernet port otherwise. Peers are found
+  with mDNS (`_trel._udp`) on that link, and only peers of the same Thread network (extended PAN ID) are used.
+- It needs a partner: another border router of the same Thread network on that link that speaks TREL (OpenThread
+  border routers built with TREL, such as ot-br-posix with `OTBR_TREL`, or another ESP Thread border router). To see
+  which ones do: `avahi-browse -rt _trel._udp` (macOS: `dns-sd -B _trel._udp`). Without one, TREL does nothing.
+- Switch it on the Ethernet page ("Thread over Ethernet": Off/On), or with `PUT /device/network` and only `trel` changed
+  (send the active config with `trel` flipped). Such a change is applied at once and stored, without a trial or a
+  reboot (`{"status":"applied"}`; `"saved"` when OpenThread was busy: it then applies at its next start). It is refused
+  with 409 while a network trial runs. Changed together with interface settings, it goes through the trial with them.
+- State, peers and counters: `trel` in `GET /device/status`, the card on the Ethernet page, `br_trel_*` in
+  [metrics](metrics.md), and `ot trel` on the test build console.
+- In split mode UDP port 12390 (TREL) is dropped on `mgmt`.
+
+<img src="images/ethernet-trel.png" width="640" alt="Thread over Ethernet card on the Ethernet page: TREL active on the Thread backbone, the Off/On switch on On, 2 peers, sent and received packet counters and the peer table">
 
 ## DHCPv6 prefix delegation
 

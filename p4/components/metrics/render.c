@@ -387,6 +387,20 @@ static void event_family(metrics_writer_t *w, const char *name, const char *help
     }
 }
 
+static void render_trel(metrics_writer_t *w, const metrics_thread_t *t)
+{
+    single(w, "br_trel_enabled", "gauge", "TREL is switched on (1) or off (0).", t->trel.enabled);
+    single(w, "br_trel_active", "gauge", "OpenThread runs TREL: switched on and Thread up.", t->trel.active);
+    single(w, "br_trel_peers", "gauge", "TREL peers found on the backbone link.", t->trel.peers);
+    family(w, "br_trel_packets_total", "counter", "TREL packets.");
+    labelled_u64(w, "br_trel_packets_total", "direction", "tx", t->trel.tx_packets);
+    labelled_u64(w, "br_trel_packets_total", "direction", "rx", t->trel.rx_packets);
+    family(w, "br_trel_bytes_total", "counter", "TREL bytes.");
+    labelled_u64(w, "br_trel_bytes_total", "direction", "tx", t->trel.tx_bytes);
+    labelled_u64(w, "br_trel_bytes_total", "direction", "rx", t->trel.rx_bytes);
+    single(w, "br_trel_tx_failures_total", "counter", "TREL packets that could not be sent.", t->trel.tx_failures);
+}
+
 static void render_thread(metrics_writer_t *w, const metrics_thread_t *t)
 {
     state_set(w, "br_thread_role", "Thread device role.", "role", role_names, COUNT(role_names), t->role);
@@ -419,6 +433,9 @@ static void render_thread(metrics_writer_t *w, const metrics_thread_t *t)
               t->srp_state);
     single(w, "br_srp_hosts", "gauge", "Hosts registered with the SRP server.", t->srp_hosts);
     single(w, "br_srp_services", "gauge", "Services registered with the SRP server.", t->srp_services);
+    if (t->trel.built) {
+        render_trel(w, t);
+    }
 }
 
 // ---- routing ----

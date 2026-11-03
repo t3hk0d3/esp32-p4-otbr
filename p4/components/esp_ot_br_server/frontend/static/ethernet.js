@@ -10,6 +10,10 @@
  * The page edits a draft: {mode: 'single'|'split', single|mgmt|thread_bb: {tagged, vlan, dhcp, cidr, gw, dns}} with the
  * form strings as typed. It is filled once from the running configuration (the trial when one runs, else the active
  * one), compared with it for the review, and turned into the PUT body of the API only on Apply.
+ *
+ * TREL (`trel` of the draft) is part of the same configuration. Flipped while nothing else is changed, it is sent at
+ * once: the board applies a change of `trel` alone live, without a trial or a reboot. With other changes pending it
+ * becomes one more row of the review and goes through the trial with them.
  */
 'use strict';
 
@@ -20,6 +24,7 @@ var IDS = [ 'single', 'mgmt', 'thread_bb' ];
 var NAMES = {single : 'Ethernet port', mgmt : 'Management', thread_bb : 'Thread backbone'};
 var API_NAMES = {single : 'eth', mgmt : 'mgmt', thread_bb : 'thread_bb'};
 var MODE_NAMES = {single : 'Single port', split : 'Split management and Thread'};
+var TREL_NAME = 'TREL (Thread over Ethernet)';
 
 function ipv4Valid(text) {
   var parts = String(text).trim().split('.');
@@ -105,8 +110,15 @@ function ifaceConfig(name, f) {
   return {vlan : vlan, ipv4 : ipv4};
 }
 
-/** Body of PUT /device/network from {mode, single|mgmt|thread_bb: {vlan, dhcp, addr, mask, gw, dns}}. */
+/** Body of PUT /device/network from {mode, trel, single|mgmt|thread_bb: {vlan, dhcp, addr, mask, gw, dns}}. */
 function networkConfig(form) {
+  var body = interfacesConfig(form);
+  if (typeof form.trel === 'boolean')
+    body.trel = form.trel;
+  return body;
+}
+
+function interfacesConfig(form) {
   if (form.mode === 'single')
     return {mode : 'single', single : ifaceConfig(NAMES.single, form.single || {})};
   if (form.mode === 'split') {
@@ -128,7 +140,8 @@ function defaultIface(id) {
 
 /** Draft of an API configuration ({mode, single|mgmt|thread_bb: {vlan, ipv4}}), or of the default when null. */
 function draftFromConfig(cfg) {
-  var d = {mode : cfg && cfg.mode === 'split' ? 'split' : 'single'};
+  // A configuration without "trel" (older firmware) runs TREL: the board's default.
+  var d = {mode : cfg && cfg.mode === 'split' ? 'split' : 'single', trel : !(cfg && cfg.trel === false)};
   IDS.forEach(function(id) {
     var c = cfg && cfg[id];
     if (!c) {
@@ -246,12 +259,67 @@ function changes(cur, d) {
         rows.push({what : NAMES[id] + f[0], from : from, to : to});
     });
   });
+  if (cur.trel !== d.trel)
+    rows.push({what : TREL_NAME, from : onOff(cur.trel), to : onOff(d.trel)});
   return rows;
+}
+
+function onOff(on) { return on ? 'On' : 'Off'; }
+
+/** True when the draft differs from the running draft in TREL only: such a change is sent at once, without a trial. */
+function trelOnly(cur, d) {
+  var rows = changes(cur, d);
+  return rows.length === 1 && rows[0].what === TREL_NAME;
+}
+
+/** Number with thin groups of three digits, or '-' for null/undefined. */
+function count(n) {
+  if (n === null || n === undefined)
+    return '-';
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '\u2009');
+}
+
+/*
+ * What the TREL card shows for the "trel" object of GET /device/status (null in a build without TREL: no card) and the
+ * running mode: {available, chip, chipClass, where, peers, tx, rx, failures, peerList, hint}.
+ */
+function trelView(trel, mode) {
+  if (!trel)
+    return {available : false};
+  var v = {
+    available : true,
+    where : mode === 'split' ? 'On Thread backbone' : 'On Ethernet port',
+    peers : count(trel.peers),
+    tx : count(trel.tx_packets),
+    rx : count(trel.rx_packets),
+    failures : count(trel.tx_failures),
+    peerList : trel.peer_list || []
+  };
+  if (!trel.enabled) {
+    v.chip = 'Off';
+    v.chipClass = 'chip';
+    v.hint = trel.active === true ? 'Turning off: TREL still runs and stops at the next Thread start.'
+                                  : 'Thread mesh links use the radio only.';
+  } else if (trel.active === null || trel.active === undefined) {
+    v.chip = 'Unknown';
+    v.chipClass = 'chip chip-warn';
+    v.hint = 'The state could not be read right now (OpenThread busy or not running).';
+  } else if (!trel.active) {
+    v.chip = 'Waiting for Thread';
+    v.chipClass = 'chip chip-warn';
+    v.hint = 'TREL starts when Thread runs.';
+  } else {
+    v.chip = 'Active';
+    v.chipClass = 'chip chip-ok';
+    v.hint = trel.peers ? '' : 'No peers yet: no other border router of this Thread network speaks TREL on this link. ' +
+                                   'Check with avahi-browse -rt _trel._udp.';
+  }
+  return v;
 }
 
 /** PUT /device/network body of a draft (validate it first; throws like networkConfig). */
 function requestBody(d) {
-  var form = {mode : d.mode};
+  var form = {mode : d.mode, trel : d.trel};
   ifaceIds(d.mode).forEach(function(id) {
     var i = d[id], p = i.dhcp ? null : parseCidr(i.cidr);
     form[id] = {
@@ -303,7 +371,9 @@ return {
   changes : changes,
   requestBody : requestBody,
   reachText : reachText,
-  taggedVlans : taggedVlans
+  taggedVlans : taggedVlans,
+  trelOnly : trelOnly,
+  trelView : trelView
 };
 })();
 
@@ -316,6 +386,8 @@ var draft = null;   // what the person edits
 var editing = {};
 var review = false;
 var ack = false;
+var trel;               // "trel" of the last GET /device/status; undefined until read, null without TREL
+var trelSending = false; // a TREL-only PUT is on its way
 var kit = C.DeviceKit(env, {
   actionIds : [ 'discardBtn', 'backBtn' ],
   trial : false,
@@ -431,7 +503,125 @@ function render() {
   show('ackRow', tagged.length > 0);
   setText('vlanList', tagged.map(function(t) { return 'VLAN ' + t; }).join(' and '));
   $('ackBox').checked = ack;
-  $('applyBtn').disabled = kit.isBusy() || !canApply();
+  $('applyBtn').disabled = kit.isBusy() || trelSending || !canApply();
+  if (trel !== undefined)
+    renderTrel();
+}
+
+function renderTrel() {
+  var v = L.trelView(trel, net ? net.mode : 'single');
+  show('trelSection', !!v.available);
+  if (!v.available)
+    return;
+  setText('trel-chip', v.chip);
+  $('trel-chip').className = v.chipClass;
+  setText('trel-where', v.where);
+  pressed('trel-on', draft ? draft.trel : trel.enabled);
+  pressed('trel-off', draft ? !draft.trel : !trel.enabled);
+  $('trel-on').disabled = $('trel-off').disabled = trelSending || kit.isBusy();
+  setText('trel-peers', v.peers);
+  setText('trel-tx', v.tx);
+  setText('trel-rx', v.rx);
+  setText('trel-fail', v.failures);
+  show('trel-peerwrap', v.peerList.length > 0);
+  var body = $('trel-peerlist'), key = JSON.stringify(v.peerList);
+  if (body.getAttribute('data-shown') !== key) {
+    body.setAttribute('data-shown', key);
+    kit.clear(body);
+    v.peerList.forEach(function(p) {
+      var tr = el('tr');
+      tr.appendChild(el('td', p.ext_address, 'mono'));
+      tr.appendChild(el('td', p.address, 'mono'));
+      body.appendChild(tr);
+    });
+  }
+  setText('trel-hint', v.hint);
+}
+
+function refreshTrel() {
+  return kit.request('GET', '/device/status', {timeoutMs : 5000}).then(function(r) {
+    if (r.status !== 200 || !r.body) {
+      setText('trel-stale', 'The TREL state could not be read: ' + kit.failure(r));
+      show('trel-stale', true);
+      return false;
+    }
+    show('trel-stale', false);
+    trel = r.body.trel === undefined ? null : r.body.trel;
+    renderTrel();
+    return true;
+  }, function() {
+    setText('trel-stale', 'The TREL state could not be read: no answer from the device.');
+    show('trel-stale', true);
+    return false;
+  });
+}
+
+/* The Off/On switch. Alone it is sent at once (no trial); with other changes pending it joins them. */
+function setTrel(on) {
+  if (!draft || kit.isBusy() || trelSending || draft.trel === on)
+    return Promise.resolve(null);
+  var next = clone(draft);
+  next.trel = on;
+  if (!L.trelOnly(cur, next)) {
+    // Other changes are pending, or this undoes a pending TREL change: one more edit of the draft.
+    draft.trel = on;
+    review = false;
+    ack = false;
+    render();
+    return Promise.resolve(null);
+  }
+  if (net && net.trial) {
+    note('trelMsg', 'Keep or undo the network settings on trial first.', true);
+    return Promise.resolve(null);
+  }
+  trelSending = true;
+  note('trelMsg', '', false);
+  renderTrel();
+  // Another client may have changed the running settings: send the switch on top of what runs now, or the board
+  // would read the stale interfaces as a change and start a trial.
+  return refreshNetwork()
+      .then(function(ok) {
+        if (!ok) {
+          note('trelMsg', 'The network state could not be read; TREL was not switched.', true);
+          return null;
+        }
+        if (net.trial) {
+          note('trelMsg', 'Keep or undo the network settings on trial first.', true);
+          return null;
+        }
+        draft = clone(cur);
+        var body = clone(cur);
+        body.trel = on;
+        return kit.request('PUT', '/device/network', {headers : {'Content-Type' : 'application/json'},
+                                                      body : JSON.stringify(L.requestBody(body))})
+            .then(function(r) {
+              if (r.status !== 200) {
+                note('trelMsg', kit.failure(r), true);
+                return r;
+              }
+              var status = r.body && r.body.status;
+              if (status !== 'applied' && status !== 'saved') {
+                // The board still saw another change and started a trial: same as Apply.
+                note('trelMsg', 'Saved as a trial. The board is rebooting: open ' + L.reachText(body) +
+                                    ' and press Keep new settings within 5 minutes.', false);
+                kit.waitForBoard('trelMsg', 'The board did not come back at this address. Press Keep new settings ' +
+                                                'within 5 minutes of its reboot, or it goes back to the previous ' +
+                                                'settings by itself.');
+                return {handoff : true};
+              }
+              cur.trel = on;
+              draft.trel = on;
+              note('trelMsg', status === 'saved' ? r.body.detail : 'TREL ' + (on ? 'on.' : 'off.'), false);
+              return r;
+            }, function(e) { note('trelMsg', e.message, true); });
+      })
+      .then(function(r) {
+        trelSending = false;
+        render();
+        if (r && r.handoff)
+          return r;
+        return refreshTrel().then(function() { return r; });
+      });
 }
 
 function canApply() {
@@ -475,8 +665,9 @@ function refreshNetwork() {
 /* Every change of the draft goes through here: it ends the review and asks for the VLAN tick again. */
 function edit(fn) {
   return function(ev) {
-    // While the board reboots into what was applied, the review and its instructions stay as they are.
-    if (!draft || kit.isBusy())
+    // While the board reboots into what was applied, the review and its instructions stay as they are. While a TREL
+    // switch is on its way the draft is about to be replaced by the running settings: an edit would be lost.
+    if (!draft || kit.isBusy() || trelSending)
       return;
     fn(ev);
     review = false;
@@ -514,7 +705,7 @@ function openReview() {
 }
 
 function apply() {
-  if (!draft || kit.isBusy() || !canApply())
+  if (!draft || kit.isBusy() || trelSending || !canApply())
     return Promise.resolve(null);
   var body, reach = L.reachText(draft);
   try {
@@ -528,6 +719,17 @@ function apply() {
         .then(function(r) {
           if (r.status !== 200) {
             note('netMsg', kit.failure(r), true);
+            return r;
+          }
+          var status = r.body && r.body.status;
+          if (status === 'applied' || status === 'saved') {
+            // Only TREL differed from the running config: applied live, no trial and no reboot.
+            cur = clone(draft);
+            review = false;
+            ack = false;
+            note('netMsg', status === 'saved' ? r.body.detail : 'TREL ' + (draft.trel ? 'on.' : 'off.'), false);
+            render();
+            refreshTrel();
             return r;
           }
           note('netMsg', 'Saved as a trial. The board is rebooting: open ' + reach + ' and press Keep new settings ' +
@@ -571,14 +773,25 @@ function init() {
     render();
   });
   $('applyBtn').addEventListener('click', apply);
+  $('trel-on').addEventListener('click', function() { setTrel(true); });
+  $('trel-off').addEventListener('click', function() { setTrel(false); });
   kit.start();
   kit.poller(refreshNetwork, 10000, 'ethSection');
+  kit.poller(refreshTrel, 10000, 'ethSection');
 }
 
 /* The names section stays still during a trial and while the board reboots into what was applied. */
 function isBlocked() { return kit.isBusy() || !!(net && net.trial); }
 
-return {init : init, refreshNetwork : refreshNetwork, apply : apply, kit : kit, isBlocked : isBlocked};
+return {
+  init : init,
+  refreshNetwork : refreshNetwork,
+  refreshTrel : refreshTrel,
+  setTrel : setTrel,
+  apply : apply,
+  kit : kit,
+  isBlocked : isBlocked
+};
 }
 
 if (typeof module !== 'undefined' && module.exports) {

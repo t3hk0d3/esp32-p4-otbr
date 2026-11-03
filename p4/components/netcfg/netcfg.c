@@ -145,6 +145,7 @@ static bool running_is_defaults(void)
     netcfg_config_t defaults;
 
     netcfg_defaults(&defaults);
+    defaults.trel = s.running.trel; // only the interfaces decide whether a fallback can help
     return netcfg_equal(&defaults, &s.running);
 }
 
@@ -185,7 +186,10 @@ esp_err_t netcfg_start(esp_eth_handle_t eth)
         ESP_LOGE(TAG, "the stored network config cannot be applied (%s): falling back to the defaults", esp_err_to_name(err));
         snprintf(s.fallback_error, sizeof(s.fallback_error), "%s", esp_err_to_name(err));
         netcfg_ifaces_destroy();
+        const bool trel = s.running.trel; // the stored TREL choice survives an interface fallback
+
         netcfg_defaults(&s.running);
+        s.running.trel = trel;
         s.fallback = true;
         err = bring_up(eth);
         action = netcfg_apply_decide(err == ESP_OK, false, true);
@@ -257,6 +261,43 @@ esp_err_t netcfg_confirm(httpd_req_t *req)
         ESP_LOGI(TAG, "trial confirmed: now the active config");
     }
     return err;
+}
+
+esp_err_t netcfg_get_running(netcfg_config_t *out)
+{
+    ESP_RETURN_ON_FALSE(s.ready, ESP_ERR_INVALID_STATE, TAG, "not started");
+    xSemaphoreTake(s.lock, portMAX_DELAY);
+    *out = s.running;
+    xSemaphoreGive(s.lock);
+    return ESP_OK;
+}
+
+esp_err_t netcfg_set_trel(bool enabled)
+{
+    ESP_RETURN_ON_FALSE(s.ready, ESP_ERR_INVALID_STATE, TAG, "not started");
+    xSemaphoreTake(s.lock, portMAX_DELAY);
+    const esp_err_t err = netcfg_trial_set_trel(&s.trial, enabled);
+
+    if (err == ESP_OK) {
+        s.running.trel = enabled;
+    }
+    xSemaphoreGive(s.lock);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "TREL %s", enabled ? "on" : "off");
+    }
+    return err;
+}
+
+bool netcfg_trel_enabled(void)
+{
+    if (!s.ready) {
+        return true;
+    }
+    xSemaphoreTake(s.lock, portMAX_DELAY);
+    const bool enabled = s.running.trel;
+
+    xSemaphoreGive(s.lock);
+    return enabled;
 }
 
 esp_err_t netcfg_reset(void)
