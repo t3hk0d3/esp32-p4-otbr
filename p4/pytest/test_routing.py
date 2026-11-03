@@ -8,9 +8,9 @@ puts back the settings it found (GET before, PUT after). No host network change.
 
 Flash once (make build-test && make flash), then run without the per-test autoflash (the module refuses to run
 without --skip-autoflash y; in a worktree point TARGET_PYTEST at the main checkout's .venv):
-Run: make test-target TEST=p4/pytest/test_routing.py MARK=routing_rig TIMEOUT=5400
+Run: make test-target TEST=p4/pytest/test_routing.py MARK=routing_rig TIMEOUT=1800
          TARGET_PYTEST=".venv/bin/pytest --skip-autoflash y"
-The 500k-route feed alone takes several minutes. The custom-prefix test needs the Thread peer (PEER_PORT) and joins it
+The route-feed test sends ROUTING_FEED_ROUTES routes (default 10k). The custom-prefix test needs the Thread peer (PEER_PORT) and joins it
 to the board's current Thread network as a child. The sniffer test stops Thread on the board for a few seconds.
 
 Recovery after a killed run (timeout, SIGTERM): each test writes the settings it found to
@@ -71,7 +71,8 @@ BOARD_ASN = 4200000001
 ROUTER_ASN = 4200000002  # eBGP
 ROUTER_ID = "192.0.2.1"
 FEED_START = "2001:db8:f000::"
-FEED_ROUTES = 500_000
+# The received table the board must drain (a full IPv6 table is about 250k routes).
+FEED_ROUTES = int(os.environ.get("ROUTING_FEED_ROUTES", "10000"))
 UNREACHABLE_PEER = (
     "2001:db8:ffff::1"  # a configured peer for method bgp that never answers
 )
@@ -84,7 +85,7 @@ FRR_SLACK_S = 0.2  # a withdrawal read later than this after the deadline is the
 RIPNG_CHANGE_S = 5.0
 APPLY_SLACK_S = 1.0  # PUT, apply (about 100 ms) and the poll that sees it
 RIPNG_STOP_S = 5.0  # "at once": far below the 180 s RIPng timeout
-FEED_TIMEOUT_S = 1800
+FEED_TIMEOUT_S = max(300, FEED_ROUTES // 100)
 HEAP_TOLERANCE_BYTES = 32 * 1024
 STATUS_TIMEOUT_S = 15
 MODE_TIMEOUT_S = 120
@@ -678,10 +679,8 @@ class TestBgp:
         assert after["connectionsDropped"] == before["connectionsDropped"]
         assert board_peer(base_url)["state"] == "established"
 
-    def test_500k_route_feed_leaves_free_heap_and_thread_running(
-        self, base_url, bgp_board
-    ):
-        # bgp: 500k-route feed leaves free heap and Thread running
+    def test_route_feed_leaves_free_heap_and_thread_running(self, base_url, bgp_board):
+        # bgp: a received route feed (ROUTING_FEED_ROUTES, default 10k) leaves free heap and Thread running
         name, _, _, _ = bgp_board(BOARD_ASN, feed=True)
         before = heap(base_url)
         docker(

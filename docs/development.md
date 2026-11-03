@@ -90,8 +90,8 @@ make lan-ping-down
 - **Settings are erased:** the fixtures erase the board's NVS and form a new network, so the board leaves any network it
   was on.
 - `pd_router`: delegating server in Docker, env `PD_HOST_IF`.
-- `routing_rig`: FRR and BIRD routers in Docker for the mesh routing tests, env `ROUTING_HOST_IF` (and `TIMEOUT=5400`:
-  the 500k-route feed alone takes minutes). Flash once (`make build-test && make flash`) and pass
+- `routing_rig`: FRR and BIRD routers in Docker for the mesh routing tests, env `ROUTING_HOST_IF` (and `TIMEOUT=1800`;
+  `ROUTING_FEED_ROUTES` sets the size of the received-route feed, default 10k). Flash once (`make build-test && make flash`) and pass
   `TARGET_PYTEST=".venv/bin/pytest --skip-autoflash y"`: without it every test would flash the board again, so
   `test_routing.py` refuses to run. The PUT validation tests (`test_routing_api.py`) need no rig and run unmarked.
 
