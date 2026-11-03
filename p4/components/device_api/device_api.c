@@ -1427,8 +1427,14 @@ static esp_err_t routing_put_handler(httpd_req_t *req)
 static esp_err_t send_thread_invalid(httpd_req_t *req, const char *field)
 {
     char error[256];
+    const char *reason = "a JSON object with leader_weight_adjustment and/or become_leader"; // field "body"
 
-    if (device_api_names_error_json(error, sizeof(error), field, "missing, of the wrong type or out of range (-16..16)") < 0) {
+    if (strcmp(field, "leader_weight_adjustment") == 0) {
+        reason = "an integer from -16 to 16";
+    } else if (strcmp(field, "become_leader") == 0) {
+        reason = "true or false";
+    }
+    if (device_api_names_error_json(error, sizeof(error), field, reason) < 0) {
         return send_error(req, 400, "invalid_config", field, false);
     }
     httpd_resp_set_status(req, device_api_status_line(400));
@@ -1485,7 +1491,7 @@ static esp_err_t thread_put_handler(httpd_req_t *req)
         t.has_applied = true;
         t.applied = applied;
         if (!applied) { // applied is false when OpenThread is not ready (not BR_RUNNING) or its lock stayed busy for 1 s
-            t.detail = br_core_get_mode() == BR_MODE_BR_RUNNING ? "OpenThread is busy, applied at the next start"
+            t.detail = br_core_get_mode() == BR_MODE_BR_RUNNING ? "OpenThread is busy, applied within seconds or at the next start"
                        : "Thread is not running";
         }
     }
