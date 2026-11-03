@@ -37,8 +37,10 @@ Out of scope: TREL-only mode (no 15.4), OpenThread-managed DNS-SD (`OPENTHREAD_C
 
 - `netcfg`: `netcfg_config_t` gets `bool trel`; JSON parse/print, `netcfg_equal`, and a pure
   `netcfg_diff_only_trel(a, b)`. New runtime calls `netcfg_set_trel(bool)` (rewrites `active`, refuses during a trial)
-  and `netcfg_trel_enabled()`. Isolation: pure `netcfg_ip6_udp_drop(input_is_mgmt, dport)`, applied in
-  `__wrap_lwip_hook_ip6_input` when the next header is UDP.
+  and `netcfg_trel_enabled()`. Isolation: pure `netcfg_ip6_udp_drop(input_is_mgmt, dest_port, trel_port)` and
+  `netcfg_ip6_udp_dest_port(pkt, len, &dest_port)`, which finds the UDP header as lwIP does, behind Hop-by-Hop,
+  Routing, Destination Options and Fragment headers. `udp_drop()` in `ip6_hooks.c` applies them in
+  `__wrap_lwip_hook_ip6_input`; on `mgmt` a chain longer than any real packet carries is dropped when TREL is built.
 - `br_core`: `br_core_set_trel(bool)` calls `otTrelSetEnabled` under the OpenThread lock in `BR_RUNNING`, otherwise
   remembers the value; bring-up applies `netcfg_trel_enabled()` before Thread is enabled. `br_core_get_trel(*)` fills
   the status snapshot (`otTrelIsEnabled`, `otTrelGetNumberOfPeers`, `otTrelGetCounters`, `otTrelGetNextPeer`) with a
