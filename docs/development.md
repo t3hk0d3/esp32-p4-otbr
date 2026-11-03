@@ -30,11 +30,12 @@ filter), together with the REST guard table (which endpoint answers 409 or 503 i
 
 ## sdkconfig
 
-`p4/sdkconfig` is generated from `p4/sdkconfig.defaults` and not tracked. ESP-IDF applies the defaults only to options
-the existing `p4/sdkconfig` does not set, so a changed default (for example `CONFIG_LWIP_MAX_SOCKETS`) does not reach an
-old checkout: after pulling a change to `p4/sdkconfig.defaults`, delete `p4/sdkconfig` and build again (local
-`menuconfig` changes are lost; keep them in the defaults). `routing/task.c` stops the build with an `#error` when the
-socket limit is below what the image needs.
+`p4/sdkconfig` (like the C6 projects' `sdkconfig`) is generated from `sdkconfig.defaults` and not tracked. ESP-IDF
+applies the defaults only to options the existing `sdkconfig` does not set, so `make build` and `make build-test`
+delete a project's `sdkconfig` when one of its `sdkconfig.defaults*` files is newer and let ESP-IDF generate it again.
+Local `menuconfig` changes are lost then; keep them in the defaults. A plain `idf.py build` does not do this: after
+pulling a change to the defaults, delete `sdkconfig` yourself. `routing/task.c` stops the build with an `#error` when
+the socket limit (`CONFIG_LWIP_MAX_SOCKETS`) is below what the image needs.
 
 ## Testing
 
