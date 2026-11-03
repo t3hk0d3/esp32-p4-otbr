@@ -52,6 +52,19 @@ static const char *TAG = "routing";
 #define HOP_LIMIT 255
 #define IFNAME_MAX 8
 
+/*
+ * lwIP sockets the image needs at once (see p4/sdkconfig.defaults): the web server (max_open_sockets 7 plus its
+ * listener and two control sockets, esp_br_web.c), routing at worst (BGP: the listener and every connection slot;
+ * RIPng is one socket and never runs with BGP) and one HTTP client (OTA or a radio firmware URL).
+ */
+#define WEB_SERVER_SOCKETS (7 + 3)
+#define ROUTING_SOCKETS (1 + MAX_CONNS)
+#define HTTP_CLIENT_SOCKETS 1
+#define SOCKETS_NEEDED (WEB_SERVER_SOCKETS + ROUTING_SOCKETS + HTTP_CLIENT_SOCKETS)
+#if CONFIG_LWIP_MAX_SOCKETS < SOCKETS_NEEDED
+#error "CONFIG_LWIP_MAX_SOCKETS is below what the web server and routing need: p4/sdkconfig predates p4/sdkconfig.defaults (an existing sdkconfig keeps its values). Delete p4/sdkconfig and build again (docs/development.md)."
+#endif
+
 typedef struct {
     esp_netif_t *netif;
     int index; /**< lwIP netif index, the zone of link-local addresses */

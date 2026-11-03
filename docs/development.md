@@ -28,6 +28,14 @@ change to them and the link-time mDNS filter for `espressif/mdns` is listed in
 [`p4/components/PATCHES.md`](../p4/components/PATCHES.md) (patches 1 to 15; 4 and 6 were not applied, 13 is the mDNS
 filter), together with the REST guard table (which endpoint answers 409 or 503 in which mode). They stay under Apache-2.0.
 
+## sdkconfig
+
+`p4/sdkconfig` is generated from `p4/sdkconfig.defaults` and not tracked. ESP-IDF applies the defaults only to options
+the existing `p4/sdkconfig` does not set, so a changed default (for example `CONFIG_LWIP_MAX_SOCKETS`) does not reach an
+old checkout: after pulling a change to `p4/sdkconfig.defaults`, delete `p4/sdkconfig` and build again (local
+`menuconfig` changes are lost; keep them in the defaults). `routing/task.c` stops the build with an `#error` when the
+socket limit is below what the image needs.
+
 ## Testing
 
 ```

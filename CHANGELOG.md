@@ -39,6 +39,8 @@ release's `versions.txt`.
   button goes below at full width.
 - DHCPv6-PD is on only with the route method `pd` (the default, so nothing changes without routing settings); with any
   other method the client is off and `pd.state` reads `disabled`.
+- lwIP sockets 10 → 18 (web server 10, mesh routing up to 7, one HTTP client). An existing `p4/sdkconfig` keeps the old
+  value and the build stops with an `#error` in `routing/task.c`: delete `p4/sdkconfig` after pulling and build again.
 
 ## [0.2.1] - 2026-11-02
 
