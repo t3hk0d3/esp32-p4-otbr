@@ -51,6 +51,8 @@ Console (`make monitor`, USB-C port, 115200 baud, any build): `net show` prints 
 The **Names** section at the end of the Ethernet page (or `GET`/`PUT /device/names`, see [API](api.md)) sets how the
 board is named on the network. A save takes effect at once: no reboot, no trial, and the IPv4 lease is kept.
 
+<img src="images/ethernet-names.png" width="640" alt="The Names section of the Ethernet page: hostname kitchen with the .local suffix, Same as hostname ticked for the Home Assistant name, Advertise the web UI unticked, an empty DHCP client name with the default esp-otbr in its hint, and the Discard and Save buttons">
+
 | Setting | What it is | Default |
 | --- | --- | --- |
 | Hostname | the mDNS name, `<name>.local` | `esp-otbr-<last six hex digits of the MAC>` |
@@ -64,6 +66,9 @@ DHCP name means the default.
 
 - **Conflicts:** when another device already uses the hostname, the board answers as `<name>-2.local`. The page shows
   a **Renamed** chip and the name in use (`hostname_live`). Saving the same name again tries it again.
+
+  <img src="images/ethernet-names-conflict.png" width="640" alt="The Names section after a conflict: a Renamed chip and a banner saying another device already uses kitchen.local, so the board answers as kitchen-2.local; Save is enabled to try the name again">
+
 - **Moving to the new name:** a page opened at the old `.local` name moves to the new one after a save.
 - **DHCP name:** the board asks for a lease renewal on save, so the router learns the name without the address
   changing. With a static IPv4 address there is no DHCP and the setting has no effect.
