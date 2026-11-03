@@ -9,7 +9,8 @@ Espressif's ESP-Hosted firmware, which this project overwrites. Three paths:
   broken C6 later.
 - **USB-UART on H7** (Path 3): a 3.3 V adapter on the C6 header writes the first C6 images.
 
-Every path needs an antenna and ends with the RCP firmware upload.
+Every path needs an antenna, [flashes the P4](#flash-the-p4) (Paths 1 and 2 first, Path 3 after the C6) and ends with
+[the radio firmware upload](#upload-the-radio-firmware).
 
 ## Before you start
 
@@ -28,6 +29,24 @@ Every path needs an antenna and ends with the RCP firmware upload.
 - Tools: ESP-IDF (the Makefile activates it; it also provides `esptool`), `curl`.
 - The board's USB-C port shows up as a serial port (`/dev/ttyACM0` below).
 
+## Flash the P4
+
+Paths 1 and 2 start here; Path 3 comes back here after writing the C6. Connect the USB-C cable to the P4 port and flash
+the P4 (`PORT=/dev/ttyACM0` by default). The `make erase` line is only for a board that ran something else before (see
+[Building](building.md#flash)); it also deletes the stored Thread dataset and network configuration, so skip it on a
+board in service:
+
+```
+# make erase
+make flash
+make monitor
+```
+
+With a release instead: unpack `p4-flash.zip` and run `esptool --chip esp32p4 -p /dev/ttyACM0 write-flash @flash_args`
+in it.
+
+Then follow the path that fits your board.
+
 ## Path 1: no wires (factory C6)
 
 > **NOTE: tested with a stand-in, not yet on an untouched factory C6.** The path ran end to end on the board with the
@@ -40,7 +59,7 @@ P4 over the SDIO lines between the chips; the P4 uses that once to send `c6_inst
 the C6 bootloader, partition table and updater, then restarts into the updater. From then on the C6 is updated like on
 any other board.
 
-1. Flash the P4 as in Path 2 step 1.
+1. [Flash the P4](#flash-the-p4).
 2. The board boots, the P4 probes the C6 (three attempts, about 10 s), finds the updater silent and then ESP-Hosted
    answering on SDIO. Nothing is written to the C6. `/device/status` shows `"mode":"RADIO_FAULT"`,
    `"fault_reason":"esp-hosted firmware"`; the Firmware page says to install `c6_installer.bin` first.
@@ -62,7 +81,7 @@ any other board.
    Refusals, nothing written: 400 `invalid_image` when the file is not `c6_installer.bin` (`c6_rcp.bin` cannot be sent
    to ESP-Hosted) or when its C6 base version differs from the P4's (another release; the detail names both versions). 502 `install_failed` when the
    transfer to ESP-Hosted failed (the detail names the step); the C6 then still runs ESP-Hosted, retry the upload.
-4. Upload the radio firmware as in Path 2 step 4. The border router starts and the mode becomes `BR_RUNNING`.
+4. [Upload the radio firmware](#upload-the-radio-firmware).
 
 ## Maintenance jumper wiring
 
@@ -93,19 +112,7 @@ The pins are fixed in `p4/main/board.h`. The firmware detects the jumper by itse
 
 ## Path 2: with the jumper (P4 USB-C only)
 
-1. Connect the USB-C cable to the P4 port and flash the P4 (`PORT=/dev/ttyACM0` by default). The `make erase` line is only
-   for a board that ran something else before (see [Building](building.md#flash)); it also deletes the stored Thread dataset
-   and network configuration, so skip it on a board in service:
-
-   ```
-   # make erase
-   make flash
-   make monitor
-   ```
-
-   With a release instead: unpack `p4-flash.zip` and run `esptool --chip esp32p4 -p /dev/ttyACM0 write-flash @flash_args`
-   in it.
-
+1. [Flash the P4](#flash-the-p4).
 2. The board boots and gets its Ethernet address (log: `eth: got ip`). The P4 probes the C6 (three attempts, about 10 s,
    `rcp_sync: attempt N: no HELLO reply`); the factory ESP-Hosted firmware does not speak the updater protocol, so
    the updater is silent, and the P4 starts the automatic ROM recovery over the jumper (`ROM recovery of the C6 base image
@@ -126,21 +133,7 @@ The pins are fixed in `p4/main/board.h`. The firmware detects the jumper by itse
    instead, run `curl -X POST http://<board>/device/radio/recover` and look at `/device/status` again. On a C6 that has no RCP
    firmware this request answers 200 `{"recovered":true,"rcp":"no rcp firmware",...}` (OpenThread cannot start without
    firmware: the status shows `no rcp firmware`); `recovery_failed` (502) means the recovery itself failed.
-4. Upload the radio firmware on the Firmware page (`http://<board>/firmware.html`, "Radio"). The page highlights the
-   Radio card while the C6 has no radio firmware:
-
-   <img src="images/firmware-radio-fault.png" width="640" alt="Firmware page in RADIO_FAULT: the Radio (ESP32-C6) card is outlined and says the C6 has no valid radio firmware, install c6_rcp.bin below">
-
-   Or from a checkout:
-
-   ```
-   make radio BOARD=<board>
-   ```
-
-   (with a release file: `curl --data-binary @c6_rcp.bin http://<board>/device/radio/firmware`)
-
-   The upload takes about 3 seconds. The reply is `{"installed": "<version>"}`; the border router starts and the mode becomes `BR_RUNNING`.
-5. Create a Thread network (see below). The board never forms or joins a network by itself.
+4. [Upload the radio firmware](#upload-the-radio-firmware).
 
 ## Path 3: USB-UART on H7 (3.3 V adapter)
 
@@ -175,11 +168,30 @@ jumper is fitted. You write the three C6 images yourself with `esptool` over H7,
    ```
 
    **Warning:** the C6 erase wipes the whole C6 flash, including both RCP firmware slots. The RCP firmware is gone
-   afterwards and must be uploaded again (`c6_rcp.bin`, step 4 of Path 2).
+   afterwards and must be uploaded again (`c6_rcp.bin`, [Upload the radio firmware](#upload-the-radio-firmware)).
 
    (The layout is 4 MB-safe; the C6 has 8 MiB of flash and the rest stays unused.)
-4. Remove the IO9-to-GND wire and the adapter. Flash the P4 as in Path 2 step 1 and continue with step 3 there: the updater
-   answers, there is no RCP firmware, `RADIO_FAULT` `no rcp firmware`, and you upload `c6_rcp.bin`.
+4. Remove the IO9-to-GND wire and the adapter, and [flash the P4](#flash-the-p4) again. The updater answers, there is
+   no RCP firmware, and the board reports `RADIO_FAULT` `no rcp firmware` (check as in Path 2 step 3).
+5. [Upload the radio firmware](#upload-the-radio-firmware).
+
+## Upload the radio firmware
+
+Every path ends here, with `RADIO_FAULT` `no rcp firmware`. Upload the radio firmware on the Firmware page
+(`http://<board>/firmware.html`, "Radio"). The page highlights the Radio card while the C6 has no radio firmware:
+
+<img src="images/firmware-radio-fault.png" width="640" alt="Firmware page in RADIO_FAULT: the Radio (ESP32-C6) card is outlined and says the C6 has no valid radio firmware, install c6_rcp.bin below">
+
+Or from a checkout:
+
+```
+make radio BOARD=<board>
+```
+
+(with a release file: `curl --data-binary @c6_rcp.bin http://<board>/device/radio/firmware`)
+
+The upload takes about 3 seconds. The reply is `{"installed": "<version>"}`; the border router starts and the mode
+becomes `BR_RUNNING`. Then create a Thread network (below): the board never forms or joins a network by itself.
 
 ## Creating a Thread network
 
@@ -211,7 +223,7 @@ Within about half a minute `curl http://<board>/node/state` goes from `"detached
 
 ## Troubleshooting the first install
 
-- `RADIO_FAULT` `rom recovery failed` (jumper path): check the four wires and their pin positions, then
+- `RADIO_FAULT` `rom recovery failed` (jumper path): check the three wires and their pin positions, then
   `curl http://<board>/device/radio/log` for the C6 output and `curl -X POST http://<board>/device/radio/recover`.
 - `RADIO_FAULT` `esp-hosted firmware`: the C6 still runs its factory firmware and no jumper was seen; follow Path 1
   from step 3 (or fit the jumper and reboot for Path 2).

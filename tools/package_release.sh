@@ -8,7 +8,7 @@
 #   c6_installer.bin             one-time C6 installer for a factory C6 (ESP-Hosted), POST /device/radio/firmware before
 #                                c6_rcp.bin; its version is the c6 base version
 #   p4-flash.zip                 full P4 USB flash: images and flash_args (esptool --chip esp32p4 write-flash @flash_args)
-#   c6-updater-flash.zip         C6 base images for the no-jumper first install (docs/first-install.md, Path 3)
+#   c6-updater-flash.zip         C6 base images for the USB-UART first install (docs/first-install.md, Path 3)
 #   third-party-licenses.zip     license texts of the code linked into the images
 #   versions.txt, SHA256SUMS
 set -euo pipefail
@@ -52,7 +52,7 @@ flash_zip() {
     (cd "$dir" && zip -q -r "$out/$zip_name.zip" .)
 }
 
-# The C6 base images for the no-jumper install, laid out as the P4's ROM recovery writes them: the updater goes into the
+# The C6 base images for the USB-UART install, laid out as the P4's ROM recovery writes them: the updater goes into the
 # test partition. (The flash_args of the c6_updater build would put it into ota_0, the first RCP slot.)
 c6_base_zip() {
     local dir="$tmp/c6-updater-flash" build="$root/c6_updater/build" test_offset

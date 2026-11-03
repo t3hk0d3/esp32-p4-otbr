@@ -69,17 +69,20 @@ down, the others keep the network reachable.
 
 You need [the board](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.htm), a 2.4 GHz antenna on the C6 antenna connector, a USB-C cable for the first flash, and Ethernet.
 
-1. Download `p4-flash.zip` and `c6_rcp.bin` from the [latest release](https://github.com/t3hk0d3/esp32-p4-otbr/releases),
-   or build them yourself with `make build`.
+1. Download `p4-flash.zip`, `c6_installer.bin` and `c6_rcp.bin` from the
+   [latest release](https://github.com/t3hk0d3/esp32-p4-otbr/releases), or build them yourself with `make build`. Take
+   all three from the same release or build: the installer must match the P4 firmware.
 2. Flash the P4 over USB-C: unpack `p4-flash.zip` and run `esptool --chip esp32p4 write-flash @flash_args` in it, or
    run `make flash` from a checkout.
-3. Upload the radio firmware on the Firmware page at `http://<board>/firmware.html`.
-4. Add the board to Home Assistant ([how](docs/home-assistant.md)), or form a network in its web UI.
+3. A new board's C6 still runs its factory firmware (Espressif ESP-Hosted). Upload `c6_installer.bin` once on the
+   Firmware page at `http://<board>/firmware.html`: the P4 sends it through ESP-Hosted's own update, and it installs
+   what the radio updates need. Skip this step if the maintenance jumper is fitted (the P4 then replaces the factory
+   firmware by itself) or if the C6 already runs this project's firmware.
+4. Upload the radio firmware `c6_rcp.bin` on the same page.
+5. Add the board to Home Assistant ([how](docs/home-assistant.md)), or form a network in its web UI.
 
-A new board's C6 still has its factory firmware (Espressif ESP-Hosted). Without any wires, upload `c6_installer.bin`
-once on the Firmware page before `c6_rcp.bin`: the P4 sends it through ESP-Hosted's own update and it installs what
-the radio updates need. With the maintenance jumper fitted, the P4 replaces the factory firmware by itself; a USB-UART
-adapter on the C6 header also works. [First install](docs/first-install.md) walks through all three paths.
+[First install](docs/first-install.md) walks through all three ways to bring up a new board: no wires, the maintenance
+jumper, or a USB-UART adapter on the C6 header.
 
 ## Documentation
 
