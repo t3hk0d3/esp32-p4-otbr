@@ -42,7 +42,7 @@ esp_err_t routing_apply(const routing_settings_t *s);
 
 /**
  * The latest stored settings and the status the task last published (it refreshes it after every wake-up, at least
- * every 100 ms). Either pointer may be NULL. ESP_ERR_INVALID_STATE before routing_start.
+ * every 100 ms). Either pointer may be NULL. ESP_ERR_INVALID_STATE (not logged) before routing_start or when it failed.
  */
 esp_err_t routing_get(routing_settings_t *settings, routing_status_t *status);
 
@@ -54,7 +54,10 @@ esp_err_t routing_get(routing_settings_t *settings, routing_status_t *status);
  */
 esp_err_t routing_validate_ctx_fill(routing_validate_ctx_t *ctx);
 
-/** The figures for /metrics, as of the task's last status. ESP_ERR_INVALID_STATE before routing_start. */
+/**
+ * The figures for /metrics, as of the task's last status. ESP_ERR_INVALID_STATE (not logged) before routing_start or
+ * when it failed.
+ */
 esp_err_t routing_metrics_view(routing_metrics_view_t *out);
 
 /** Register the console command `routing` (`routing show`); the console must be initialised. */

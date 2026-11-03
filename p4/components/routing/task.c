@@ -987,9 +987,12 @@ esp_err_t routing_apply(const routing_settings_t *s)
     return ESP_OK;
 }
 
+/* routing_get and routing_metrics_view fail quietly: /device/status and /metrics ask on every poll */
 esp_err_t routing_get(routing_settings_t *settings, routing_status_t *status)
 {
-    ESP_RETURN_ON_FALSE(s_started, ESP_ERR_INVALID_STATE, TAG, "not started");
+    if (!s_started) {
+        return ESP_ERR_INVALID_STATE;
+    }
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     if (settings) {
         *settings = s_settings;
@@ -1003,7 +1006,9 @@ esp_err_t routing_get(routing_settings_t *settings, routing_status_t *status)
 
 esp_err_t routing_metrics_view(routing_metrics_view_t *out)
 {
-    ESP_RETURN_ON_FALSE(s_started, ESP_ERR_INVALID_STATE, TAG, "not started");
+    if (!s_started) {
+        return ESP_ERR_INVALID_STATE;
+    }
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     *out = s_view;
     xSemaphoreGive(s_mutex);
