@@ -109,3 +109,22 @@ class TestLidOnBase:
 
         r = lid_seats(base, lid)
         assert r.ok, r.detail
+
+
+class TestLidLintel:
+    """lid.build_lid: The lintel over the cable-wall opening"""
+
+    def test_fills_the_cut_above_the_usb_flush_with_the_outer_face(self, lid):
+        assert solid(lid, 12.0, P.OUTER[2] + 0.1, P.TOP - 0.5)
+        assert solid(lid, 12.0, -1.5, P.LID_UNDERSIDE + 0.5)
+
+    def test_reaches_down_to_1_mm_above_the_rj45(self, lid):
+        bottom = P.RJ45_BOX.z1 + P.OPENING_TOP_MARGIN
+        assert solid(lid, 30.0, -1.5, P.BOARD_Z_IN_CASE + bottom + 0.1)
+        assert not solid(lid, 30.0, -1.5, P.BOARD_Z_IN_CASE + bottom - 0.1)
+
+    def test_keeps_lid_clearance_to_the_opening_sides(self, lid):
+        x0, x1 = P.CABLE_OPENING_X
+        assert not solid(lid, x0 + 0.1, -1.5, P.TOP - 0.5)
+        assert solid(lid, x0 + 0.3, -1.5, P.TOP - 0.5)
+        assert not solid(lid, x1 - 0.1, -1.5, P.TOP - 0.5)

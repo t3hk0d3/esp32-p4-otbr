@@ -157,14 +157,15 @@ top flush) and half the wall thickness wide. The lid is stepped: a 1 mm flange s
 sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 
 - **Cable wall (Y = 0 edge):**
-  - **Openings:** one for the USB stack (USB-C and USB-A together), one for the RJ45 and one slot for the microSD.
-    - Each is the connector envelope plus 0.5 mm, except the top edge of the USB and RJ45 openings, which gets 1 mm of
-      extra room.
-    - The USB opening's top edge (case Z ≈ 25.6) leaves 1 mm of wall below the rebate floor (26.6).
+  - **Openings:** one shared opening for the USB stack (USB-C and USB-A) and the RJ45, and one slot for the microSD.
+    - The shared opening spans the two connectors plus 0.5 mm at each end (X 3.76–38.40), from 0.5 mm below the
+      board's top face up through the top of the wall. There is no pillar between USB and RJ45 (it would be 0.9 mm
+      wide) and no strip above them (it would be 1 mm tall): both were too thin to print well.
+    - The lid's lintel (5.3) closes the opening above the connectors.
   - **microSD:** the slot runs from 0.6 mm below the board's top face to 2 mm above it, across X 39.2–51.4. It has a
     thumb scoop in the outer face below it, so a fingernail or pencil can push the card in and out.
   - The connector faces end up 0.5–0.8 mm behind the outer face.
-  - The tops of these openings print as bridges up to about 17 mm. That's accepted (see section 8).
+  - The shared opening has no top, so it needs no bridge; the microSD slot's top bridges 12.2 mm.
 - **Header-end wall (Y = 68 edge):**
   - A cable slot 54 mm wide (X 0.5–54.5), cut from case Z 22.1 up through the top of the wall so it needs no bridge.
     The lid closes it from above. The narrowest point of the path into the case is at the wall's inner face, between
@@ -196,6 +197,10 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
   - Honeycomb inside the frame, holes 3.5 mm across flats, 1 mm walls (about 60% open).
   - One cross rib about 1.8 mm wide across the middle (around board Y 34) stiffens it.
   - The grille sits flat on the build plate when printing, so it has no bridges.
+- **Lintel:** a block on the lid's cable-end edge that fills the base's shared opening above the connectors, flush with
+  the wall's outer face, with 0.2 mm (LID_CLEAR) to the opening's sides. It stops 1 mm above the USB stack (at the
+  lid's underside) and 1 mm above the RJ45, stepping between them. When the lid prints top-face down, it stands up from
+  the top face, so it needs no support.
 - **Corner tabs (snaps and guide pins):**
   - Four identical tabs, hanging from the frame's underside into the four inner corners of the base, against the side
     walls. Each is 10 mm long along the side wall and reaches 3.5 mm below the lid's underside, to about 13.5 mm above the
@@ -288,7 +293,7 @@ These are automated checks, run against the vendor STEP:
 - With the lid fitted, the lid and the base do not overlap anywhere.
 - Both parts are watertight solids.
 - Printability: with the stated print orientations, there are no unsupported overhangs past 45°, except bridges of
-  18 mm or less (the cable-wall openings).
+  18 mm or less (the microSD slot's top, 12.2 mm).
 
 The physical check is the user's: they print both parts, fit the board, plug every connector, press both buttons with a
 pencil, insert and eject a card, fit and remove the lid, and hang the case both ways.

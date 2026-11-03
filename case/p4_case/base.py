@@ -113,12 +113,11 @@ def _keyholes() -> Part:
 
 def _cable_wall_openings() -> Part:
     y0, y1 = P.OUTER[2] - 1, P.INNER[2] + EPS
-    m, top_m = P.OPENING_MARGIN, P.OPENING_TOP_MARGIN
-    usb, rj = P.USB_BOX, P.RJ45_BOX
     sx0, sx1, sz0, sz1 = P.SD_SLOT
+    cx0, cx1 = P.CABLE_OPENING_X
     cuts = [
-        block(usb.x0 - m, usb.x1 + m, y0, y1, P.OPENING_BOTTOM, usb.z1 + top_m),
-        block(rj.x0 - m, rj.x1 + m, y0, y1, P.OPENING_BOTTOM, rj.z1 + top_m),
+        # one opening for USB and RJ45, open to the wall top: no thin pillar, no bridge; the lid's lintel closes it
+        block(cx0, cx1, y0, y1, P.OPENING_BOTTOM, board_z(P.TOP) + 1),
         block(sx0, sx1, y0, y1, sz0, sz1),
     ]
     scoop_y = P.OUTER[2] - (P.SCOOP_R - P.SCOOP_DEPTH)
