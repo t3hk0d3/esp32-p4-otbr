@@ -17,6 +17,62 @@
     <h1 class="page-title">Network Management</h1>
     <p class="page-desc">Discover, join, or form Thread networks</p>
 
+    <!-- Leader Section -->
+    <div class="card section" id="ld-card" aria-labelledby="ld-title">
+        <div class="flex-between mb-16">
+            <h2 class="card-header" id="ld-title" style="border:none;margin:0;padding:0">Leader</h2>
+            <span style="font-size:13px;color:var(--text-light)">Role: <strong id="ld-role" style="color:var(--text)">&mdash;</strong></span>
+        </div>
+        <p class="text-muted mb-16" style="font-size:13px">When border routers' partitions merge, the one with the highest leader weight wins and its leader stays leader. A healthy leader is never replaced by weight alone: use Become leader for that.</p>
+        <div id="ld-comparison" class="hidden">
+            <div class="ld-tiles">
+                <div class="ld-tile">
+                    <div class="ld-tile-title">This board</div>
+                    <div class="ld-tile-body"><span class="ld-weight ld-weight-own" id="ld-own-weight">&mdash;</span><span class="text-muted" style="font-size:13px" id="ld-own-breakdown"></span></div>
+                </div>
+                <div class="ld-tile">
+                    <div class="ld-tile-title">Current leader</div>
+                    <div class="ld-tile-body"><span class="ld-weight ld-weight-leader" id="ld-leader-weight">&mdash;</span><span class="text-muted" style="font-size:13px" id="ld-leader-who"></span></div>
+                </div>
+            </div>
+            <div class="ld-scale" aria-hidden="true">
+                <div class="ld-scale-bar"></div>
+                <div class="ld-mark-leader" id="ld-scale-leader"></div>
+                <div class="ld-mark-own" id="ld-scale-own"></div>
+                <span class="ld-scale-end" style="left:0">48</span>
+                <span class="ld-scale-end" style="right:0">96</span>
+            </div>
+            <p class="ld-verdict" id="ld-verdict" role="status"></p>
+        </div>
+        <div class="form-group">
+            <label class="form-label" for="ld-adj" id="ld-adj-label">Weight adjustment: 0</label>
+            <div class="ld-slider-row">
+                <span class="text-muted" style="font-size:12px" aria-hidden="true">&minus;16</span>
+                <input type="range" id="ld-adj" min="-16" max="16" step="1" value="0">
+                <span class="text-muted" style="font-size:12px" aria-hidden="true">+16</span>
+                <button type="button" class="btn btn-primary" id="ld-save" disabled>Save</button>
+            </div>
+            <div class="form-hint">Stored on the board and applied whenever Thread starts. Range &minus;16 to +16 (OpenThread limit).</div>
+            <div id="ld-save-msg" style="font-size:13px" role="status" aria-live="polite"></div>
+        </div>
+        <div class="ld-become-row">
+            <button type="button" class="btn btn-primary" id="ld-become" disabled>Become leader</button>
+            <span class="form-hint" id="ld-become-hint">Reading &hellip;</span>
+        </div>
+        <div id="ld-become-msg" style="font-size:13px;margin-top:8px" role="status" aria-live="polite"></div>
+        <details class="ld-explain" open>
+            <summary>What Become leader does</summary>
+            <ol>
+                <li><strong>This board starts a new partition with itself as leader.</strong> It is the same Thread network (same name, key, channel and devices); only the partition is new.</li>
+                <li><strong>The other routers move over.</strong> They see a partition with a higher leader weight and join it, the current leader (<span id="ld-name-1">the current leader</span>) included, which becomes a normal router. Their end devices follow them.</li>
+                <li><strong>Traffic pauses briefly.</strong> While routers rejoin, mesh traffic can drop for a few seconds. Devices keep their addresses, and nothing needs to be paired again.</li>
+                <li><strong>Nothing else changes.</strong> The network settings (dataset) stay the same, and <span id="ld-name-2">the current leader</span> keeps working as a border router.</li>
+            </ol>
+            <p><strong style="color:var(--text)">Afterwards:</strong> the role is not saved, only the weight is. If this board restarts or is offline for more than about 2 minutes, another router takes over and keeps the role, even with a lower weight. Press Become leader again then. The higher weight only decides who wins when partitions merge, for example after the leader is lost.</p>
+            <p><strong style="color:var(--text)">Why it can be greyed out:</strong> OpenThread only lets a router take over from a leader with a strictly lower weight, so a misconfigured board can't steal the role back and forth.</p>
+        </details>
+    </div>
+
     <!-- Scan Section -->
     <div class="card section">
         <div class="flex-between mb-16">
@@ -158,8 +214,27 @@
     </div>
 </div>
 
+<!-- Become leader confirm dialog -->
+<div class="modal-overlay" id="ld-modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ld-modal-title">
+        <h3 class="modal-title" id="ld-modal-title">Become leader?</h3>
+        <p style="font-size:14px;margin-bottom:12px">This board starts a new partition with itself as leader (weight <span id="ld-modal-weight"></span>). The other routers, including <strong id="ld-modal-name"></strong> (weight <span id="ld-modal-leader-weight"></span>), move over to it.</p>
+        <ul class="ld-explain-list">
+            <li>Same network: dataset, addresses and pairings don't change.</li>
+            <li>Mesh traffic can drop for a few seconds while routers rejoin.</li>
+            <li><span id="ld-modal-name-2">The current leader</span> becomes a normal router and keeps working as a border router.</li>
+        </ul>
+        <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" id="ld-cancel">Cancel</button>
+            <button type="button" class="btn btn-primary" id="ld-confirm">Become leader</button>
+        </div>
+    </div>
+</div>
+
 <script src="/static/api.js"></script>
 <script src="/static/mgmt.js"></script>
+<script src="/static/device_common.js"></script>
+<script src="/static/leader.js"></script>
 <script>
 function toggleVis(btn) {
     var inp = btn.previousElementSibling;

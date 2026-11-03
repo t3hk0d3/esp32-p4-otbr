@@ -10,10 +10,10 @@ const path = require('path');
 const FRONTEND = path.join(__dirname, '..', '..', 'p4', 'components', 'esp_ot_br_server', 'frontend');
 const Common = require(path.join(FRONTEND, 'static', 'device_common.js'));
 const SCRIPTS = {index: 'status', ethernet: 'ethernet', routing: 'routing', firmware: 'firmware', capture: 'capture',
-                 diagnostics: 'diagnostics', names: 'names',
+                 diagnostics: 'diagnostics', names: 'names', leader: 'leader',
                  topology: 'topology'};
-/* Scripts that live on another script's page: the names section is part of the Ethernet page. */
-const HTML = {names: 'ethernet'};
+/* Scripts that live on another script's page: the names section is part of the Ethernet page, the Leader card of Network. */
+const HTML = {names: 'ethernet', leader: 'network'};
 
 class El {
   constructor(doc, tag, id, classes) {
@@ -298,6 +298,10 @@ const NAMES = {
   dhcp_name_default: 'esp-otbr', mode: 'single'
 };
 
+/* GET /device/thread with the stored adjustment 0 (weight 65 = base 65) and GET /node as a router under a leader of 65. */
+const THREAD = {leader_weight_adjustment: 0, leader_weight: 65, leader_weight_base: 65};
+const NODE = {state: 'router', leaderData: {weighting: 65, leaderRouterId: 11, partitionId: 1745592081}};
+
 /* GET /get_properties and /ipaddr of the Thread web GUI ({error, result, message}). */
 const PROPS = {error: 0, message: 'OK', result: {
   'Network:Name': 'MyHome', 'Thread:Role': 'leader', 'IPv6:RoutingLocalAddress': 'fdde:ad00:beef:0:0:ff:fe00:7800', 'RCP:Channel': '15', 'RCP:TxPower': '20 dBm',
@@ -311,4 +315,4 @@ const IPADDR = {error: 0, message: 'OK', result: [
 /* Deep copy of a fixture, with `patch` merged at the top level. */
 function fixture(obj, patch) { return Object.assign(JSON.parse(JSON.stringify(obj)), patch || {}); }
 
-module.exports = {makeEnv, STATUS, DIAG, NETWORK, NAMES, PROPS, IPADDR, fixture, Common};
+module.exports = {makeEnv, STATUS, DIAG, NETWORK, NAMES, THREAD, NODE, PROPS, IPADDR, fixture, Common};
