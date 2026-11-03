@@ -318,14 +318,24 @@ class TestNamesPage:
         )
         assert r == [False, True, True]
 
+    def test_no_conflict_shows_the_announced_chip(self):
+        # On hostname_live = the hostname: the Announced chip, no Renamed chip, no banner.
+        r = scenario(
+            page("names", routes())
+            + START
+            + "return [t.el('nm-announced').hidden(), t.el('nm-renamed').hidden(), t.el('nm-conflict').hidden()];"
+        )
+        assert r == [False, True, True]
+
     def test_conflict_shows_the_chip_and_banner(self):
         # On hostname_live kitchen-2: the Renamed chip and a banner naming both names.
         r = scenario(
             page("names", routes("H.fixture(H.NAMES, {hostname_live: 'kitchen-2'})"))
             + START
-            + "return [t.el('nm-renamed').hidden(), t.el('nm-conflict').hidden(), t.el('nm-conflict').allText()];"
+            + "return [t.el('nm-renamed').hidden(), t.el('nm-conflict').hidden(), t.el('nm-conflict').allText(), t.el('nm-announced').hidden()];"
         )
         assert r[0:2] == [False, False]
+        assert r[3] is True
         assert "kitchen.local" in r[2]
         assert "kitchen-2.local" in r[2]
 

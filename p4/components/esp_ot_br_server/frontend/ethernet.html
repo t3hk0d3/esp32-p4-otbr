@@ -277,18 +277,16 @@
         <div class="card">
             <div class="iface-title">
                 <h3>Names on the network</h3>
+                <span class="chip chip-ok hidden" id="nm-announced">Announced</span>
                 <span class="chip chip-warn hidden" id="nm-renamed">Renamed</span>
             </div>
-            <p class="iface-role">How the board shows up in browsers, in Home Assistant and in your router. Saved changes
-                take effect at once, without a reboot.</p>
+            <p class="iface-role">How the board shows up in browsers, in Home Assistant and in your router.</p>
             <div class="disabled-banner hidden" id="nm-conflict" role="status"></div>
-            <div class="editor">
+            <div class="names-form">
                 <fieldset>
                     <legend>Hostname</legend>
-                    <label class="field" for="nm-hostname">Name on the local network (mDNS)
-                        <span class="input-suffix"><input type="text" id="nm-hostname" size="24" autocomplete="off"
-                            spellcheck="false"><span class="suffix">.local</span></span>
-                    </label>
+                    <span class="input-suffix"><input type="text" id="nm-hostname" size="22" autocomplete="off"
+                        spellcheck="false" aria-label="Hostname"><span class="suffix">.local</span></span>
                     <p class="form-hint" id="nm-hostname-hint"></p>
                     <p class="form-hint hidden" id="nm-hostname-split">In split mode this name resolves on the Thread
                         backbone only. Open this page by its management IP address.</p>
@@ -296,41 +294,34 @@
                 </fieldset>
                 <fieldset>
                     <legend>Name in Home Assistant</legend>
-                    <label class="ack" for="nm-follows">
-                        <input type="checkbox" id="nm-follows" checked>
-                        <span>Same as hostname</span>
-                    </label>
-                    <label class="field" for="nm-ha">Name Home Assistant shows for this border router
-                        <input type="text" id="nm-ha" size="32" autocomplete="off">
-                    </label>
+                    <label class="check-row" for="nm-follows"><input type="checkbox" id="nm-follows" checked> Same as
+                        hostname</label>
+                    <input type="text" id="nm-ha" size="30" autocomplete="off" aria-label="Name in Home Assistant">
                     <p class="form-hint">Up to 63 bytes. Thread adds a short code to the end, for example
                         <span class="mono">#1A2B</span>.</p>
                     <div id="nm-ha-err" role="alert"></div>
                 </fieldset>
                 <fieldset>
                     <legend>Web UI</legend>
-                    <label class="ack" for="nm-http">
-                        <input type="checkbox" id="nm-http">
-                        <span>Advertise the web UI (<span class="mono">_http._tcp</span>). Lets network browsers and
-                            discovery apps find this page.</span>
-                    </label>
+                    <label class="check-row check-top" for="nm-http"><input type="checkbox" id="nm-http">
+                        <span>Advertise the web UI (<span class="mono">_http._tcp</span>)<br><span class="form-hint">Lets
+                            network browsers and discovery apps find this page.</span></span></label>
                     <p class="form-hint hidden" id="nm-http-split">Not available in split mode: the web UI is on the
                         management VLAN, and mDNS runs only on the Thread backbone.</p>
                 </fieldset>
                 <fieldset>
                     <legend>Name shown to your router (DHCP)</legend>
-                    <label class="field" for="nm-dhcp">DHCP client name
-                        <input type="text" id="nm-dhcp" size="24" autocomplete="off" spellcheck="false">
-                    </label>
+                    <input type="text" id="nm-dhcp" size="22" autocomplete="off" spellcheck="false"
+                        aria-label="DHCP client name">
                     <p class="form-hint" id="nm-dhcp-hint"></p>
                     <div id="nm-dhcp-err" role="alert"></div>
                 </fieldset>
+                <div class="actions-end">
+                    <button class="btn btn-outline" id="nm-discard" type="button" disabled>Discard</button>
+                    <button class="btn btn-primary" id="nm-save" type="button" disabled>Save</button>
+                </div>
+                <div class="form-hint" id="nm-msg" role="status" aria-live="polite"></div>
             </div>
-            <div class="actions-end mt-16">
-                <button class="btn btn-outline" id="nm-discard" type="button" disabled>Discard</button>
-                <button class="btn btn-primary" id="nm-save" type="button" disabled>Save</button>
-            </div>
-            <div class="form-hint" id="nm-msg" role="status" aria-live="polite"></div>
         </div>
     </section>
 </div>

@@ -532,6 +532,17 @@ tr:hover td { background: var(--primary-light); }
 .steps li { margin-bottom: 4px; }
 .ack { display: flex; gap: 10px; align-items: flex-start; background: #f3f7fb; border: 1px solid #cfe0f0; border-radius: var(--radius); padding: 12px 14px; font-size: 14px; cursor: pointer; margin: 12px 0; }
 .ack input { width: 18px; height: 18px; margin-top: 2px; flex: none; }
+.names-form { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 16px; }
+.names-form fieldset { border: 0; padding: 0; margin: 0 0 18px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.names-form legend { font-size: 15px; font-weight: 600; margin-bottom: 6px; padding: 0; }
+.names-form input[type="text"] { min-height: 38px; padding: 7px 9px; border: 1px solid #c9c9c9; border-radius: 6px; font-size: 15px; max-width: 100%; }
+.names-form input[type="text"]:disabled { background: var(--muted-bg); color: var(--text-muted); }
+.names-form .form-hint { font-size: 13px; margin: 0; }
+.names-form .mono { font-family: 'Courier New', Consolas, monospace; }
+.check-row { display: flex; gap: 8px; align-items: center; font-size: 15px; cursor: pointer; }
+.check-row input { width: 16px; height: 16px; margin: 0; flex: none; }
+.check-top { align-items: flex-start; }
+.check-top input { margin-top: 3px; }
 .input-suffix { display: flex; max-width: 100%; }
 .input-suffix input { border-top-right-radius: 0; border-bottom-right-radius: 0; min-width: 0; }
 .input-suffix .suffix { padding: 0 10px; display: flex; align-items: center; border: 1px solid #c9c9c9; border-left: 0; border-radius: 0 6px 6px 0; background: var(--muted-bg); color: var(--text-muted); font-size: 14px; }

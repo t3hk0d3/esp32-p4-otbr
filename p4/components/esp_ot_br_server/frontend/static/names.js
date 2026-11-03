@@ -185,6 +185,7 @@ function render() {
                               'Save; it only matters with an automatic (DHCP) address.');
   Object.keys(FIELDS).forEach(function(f) { messages(FIELDS[f] + '-err', v.errors[f] || serverErrors[f]); });
   var renamed = L.conflict(api);
+  show('nm-announced', !renamed);
   show('nm-renamed', renamed);
   setText('nm-conflict', renamed ? 'Another device on the network already uses ' + L.effectiveHostname(api) +
                                        '.local, so the board answers as ' + api.hostname_live +
