@@ -555,8 +555,12 @@ static bool io_publisher_apply(void *ctx, const routing_settings_t *s)
         /* the hook has not finished: it applies s_settings and re-reads them if a PUT changed them meanwhile */
         return true;
     }
-    if (br_core_get_mode() != BR_MODE_BR_RUNNING ||
-            !esp_openthread_lock_acquire(pdMS_TO_TICKS(OT_LOCK_APPLY_MS))) {
+    /* the br_core session keeps a radio push from deleting the lock and the instance under this task */
+    if (br_core_get_mode() != BR_MODE_BR_RUNNING || !br_core_ot_session_begin()) {
+        return false;
+    }
+    if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(OT_LOCK_APPLY_MS))) {
+        br_core_ot_session_end();
         return false;
     }
     /* false when an OpenThread call failed: the engine keeps the apply pending and retries it at the next poll */
@@ -565,6 +569,7 @@ static bool io_publisher_apply(void *ctx, const routing_settings_t *s)
         s_publisher_retry = false;
     }
     esp_openthread_lock_release();
+    br_core_ot_session_end();
     return ok;
 }
 
@@ -623,8 +628,10 @@ static bool poll_state(uint32_t now)
     backbone_t bb;
 
     memset(&st, 0, sizeof(st));
-    if (br_core_get_mode() == BR_MODE_BR_RUNNING) {
+    /* without a session (OpenThread not up, or a radio push stopping it) the state is read as "no border router" */
+    if (br_core_get_mode() == BR_MODE_BR_RUNNING && br_core_ot_session_begin()) {
         if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(OT_LOCK_POLL_MS))) {
+            br_core_ot_session_end();
             return false;
         }
         otInstance *ins = esp_openthread_get_instance();
@@ -633,6 +640,7 @@ static bool poll_state(uint32_t now)
             read_ot(ins, &st);
         }
         esp_openthread_lock_release();
+        br_core_ot_session_end();
     }
     if (st.ula_known) {
         s_ula_known = true;
@@ -1077,10 +1085,11 @@ esp_err_t routing_validate_ctx_fill(routing_validate_ctx_t *ctx)
         add_own(ctx, mgmt);
         add_onlink_of(ctx, mgmt);
     }
-    if (br_core_get_mode() != BR_MODE_BR_RUNNING) {
+    if (br_core_get_mode() != BR_MODE_BR_RUNNING || !br_core_ot_session_begin()) {
         return ESP_OK; /* no border routing manager, no received RAs */
     }
     if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(OT_LOCK_APPLY_MS))) {
+        br_core_ot_session_end();
         return ESP_ERR_TIMEOUT;
     }
     otInstance *ins = esp_openthread_get_instance();
@@ -1095,5 +1104,6 @@ esp_err_t routing_validate_ctx_fill(routing_validate_ctx_t *ctx)
         }
     }
     esp_openthread_lock_release();
+    br_core_ot_session_end();
     return ESP_OK;
 }
