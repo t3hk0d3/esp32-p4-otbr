@@ -16,6 +16,7 @@
 #include "console.h"
 #include "eth.h"
 #include "netcfg.h"
+#include "netnames.h"
 #include "storage.h"
 
 static const char *TAG = "app";
@@ -37,11 +38,16 @@ static void net_init_task(void *arg)
         ESP_LOGE(TAG, "eth_driver_start failed: %s", esp_err_to_name(err));
         vTaskDelete(NULL);
     }
+    err = netcfg_set_dhcp_hostname(netnames_dhcp_name());
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "netcfg_set_dhcp_hostname: %s", esp_err_to_name(err));
+    }
     err = netcfg_start(eth);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "netcfg_start failed: %s: no network, the border router is NOT started (HTTP server and console stay; `net reset` + reboot)", esp_err_to_name(err));
         vTaskDelete(NULL);
     }
+    netnames_set_mode(netcfg_running_mode());
     err = br_core_start(netcfg_backbone_netif());
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "br_core_start failed: %s", esp_err_to_name(err));
@@ -80,9 +86,17 @@ void app_main(void)
     // the radio sync so that it is reachable during a long RCP push. It listens on any address, so it needs no
     // network. The server task runs on core 1 (patch 1) and every handler that touches OpenThread is guarded by
     // the mode (patch 2), so starting it before OpenThread exists is safe.
-    err = br_core_mdns_start();
+    // The names (stored or default) before mDNS, the netifs and OpenThread take them.
+    err = netnames_init();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "br_core_mdns_start: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "netnames_init: %s", esp_err_to_name(err));
+    }
+    err = br_core_mdns_start(netnames_hostname(), netnames_ha_name());
+    if (err == ESP_OK) {
+        err = netnames_mdns_started();
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "mDNS start: %s", esp_err_to_name(err));
     }
     // device_api registers its handlers while the server starts, before the catch-all GET handler (patch 10); it
     // needs no OpenThread, so it is also served in RADIO_FAULT.

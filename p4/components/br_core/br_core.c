@@ -10,7 +10,6 @@
 #include "esp_event.h"
 #include "esp_br_web.h"
 #include "esp_log.h"
-#include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_openthread.h"
 #include "esp_openthread_border_router.h"
@@ -43,8 +42,6 @@
 
 static const char *TAG = "br_core";
 
-#define HOSTNAME_PREFIX "esp-otbr-"
-#define HOSTNAME_LEN (sizeof(HOSTNAME_PREFIX) + 6)
 #define OT_TASK_NAME "ot_main"
 #define OT_TASK_STACK 12288
 #define OT_TASK_PRIORITY CONFIG_OPENTHREAD_TASK_PRIORITY
@@ -86,6 +83,8 @@ typedef struct {
     atomic_bool push_busy;     // a firmware push is running (one long operation at a time)
     bool started;
     bool mdns_started;
+    char mdns_hostname[64]; // as given to br_core_mdns_start, for the retry in br_core_start
+    char mdns_instance[64];
 } core_state_t;
 
 static core_state_t s_core;
@@ -484,21 +483,21 @@ static esp_err_t start_ot_task(void)
                                    NET_CORE) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
-esp_err_t br_core_mdns_start(void)
+esp_err_t br_core_mdns_start(const char *hostname, const char *instance)
 {
-    uint8_t mac[6];
-    char hostname[HOSTNAME_LEN];
-
+    ESP_RETURN_ON_FALSE(hostname && hostname[0] && instance, ESP_ERR_INVALID_ARG, TAG, "no mDNS names");
     if (s_core.mdns_started) {
         return ESP_OK;
     }
-    ESP_RETURN_ON_ERROR(esp_read_mac(mac, ESP_MAC_ETH), TAG, "reading the MAC");
-    snprintf(hostname, sizeof(hostname), HOSTNAME_PREFIX "%02x%02x%02x", mac[3], mac[4], mac[5]);
+    if (hostname != s_core.mdns_hostname) {
+        strlcpy(s_core.mdns_hostname, hostname, sizeof(s_core.mdns_hostname));
+        strlcpy(s_core.mdns_instance, instance, sizeof(s_core.mdns_instance));
+    }
     ESP_RETURN_ON_ERROR(mdns_init(), TAG, "mdns_init");
-    ESP_RETURN_ON_ERROR(mdns_hostname_set(hostname), TAG, "mdns_hostname_set");
-    ESP_RETURN_ON_ERROR(mdns_instance_name_set(hostname), TAG, "mdns_instance_name_set");
+    ESP_RETURN_ON_ERROR(mdns_hostname_set(s_core.mdns_hostname), TAG, "mdns_hostname_set");
+    ESP_RETURN_ON_ERROR(mdns_instance_name_set(s_core.mdns_instance), TAG, "mdns_instance_name_set");
     s_core.mdns_started = true;
-    ESP_LOGI(TAG, "mDNS hostname %s.local", hostname);
+    ESP_LOGI(TAG, "mDNS hostname %s.local", s_core.mdns_hostname);
     return ESP_OK;
 }
 
@@ -526,7 +525,7 @@ esp_err_t br_core_start(esp_netif_t *backbone)
     // mDNS first (normally started earlier by app_main): it answers while the radio boots.
     // Not essential for the radio: without mDNS the board is reachable by its address, and an early return here would leave
     // the mode STARTING with no reason and no OpenThread task.
-    const esp_err_t mdns_err = br_core_mdns_start();
+    const esp_err_t mdns_err = br_core_mdns_start(s_core.mdns_hostname, s_core.mdns_instance);
 
     if (mdns_err != ESP_OK) {
         ESP_LOGE(TAG, "mDNS did not start (%s), continuing without it", esp_err_to_name(mdns_err));
