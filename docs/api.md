@@ -21,6 +21,8 @@ below, any of them can answer 500 `internal` or `no_memory`.
 | `POST /device/network/confirm` | commit the trial config | 409 `no_trial`; 403 `wrong_interface`; 500 `store_failed` |
 | `GET /device/names` | network names: `hostname`, `hostname_default`, `hostname_live` (differs after an mDNS conflict rename), `ha_name_follows_hostname`, `ha_name`, `ha_name_effective`, `http_advert`, `http_advert_available` (false in split mode), `dhcp_name`, `dhcp_name_default`, `mode` | |
 | `PUT /device/names` | body `{hostname, ha_name_follows_hostname, ha_name, http_advert, dhcp_name}` (all required; empty hostname / DHCP name = default); applied live, no reboot; replies the GET body plus `applied` and, when a live step failed, `detail` | 400 `invalid_config` with `field` (`hostname`, `ha_name`, `dhcp_name`, or a missing / wrongly typed key, `body` for no JSON object), `length_required`, `invalid_request`; 413 `payload_too_large`; 500 `storage_failed` |
+| `GET /device/thread` | leader weight: `leader_weight_adjustment` (stored, -16..16), `leader_weight` (this board's local weight) and `leader_weight_base` (weight minus adjustment); only the adjustment while OpenThread is not running, plus `partial: true` when its lock was not free in time | |
+| `PUT /device/thread` | body `{leader_weight_adjustment?, become_leader?}` (at least one; `8.0` counts as 8; `become_leader: false` does nothing). Order: validate the whole body, store and apply the adjustment, then take over as leader (only from a strictly lower weight; never automatic). Replies the GET body plus `applied` (and `detail` when false: `Thread is not running` or `OpenThread is busy, applied within seconds or at the next start`) and `"become_leader":"started"` (`"partial": true` can follow a started take-over when the weight read times out) | 400 `invalid_config` with `field` (`leader_weight_adjustment`, `become_leader`, `body`), `length_required`, `invalid_request`; 409 `cannot_take_over` with `detail` `weight not higher` / `already leader` / `not attached` / `not router eligible` (an adjustment sent in the same body stays stored); 409 `busy` (`mode <MODE>`); 413 `payload_too_large`; 500 `storage_failed`, `internal` (`taking over failed`); 503 `busy` (`OpenThread is busy, retry` or `OpenThread is restarting, retry`). When the body also had an adjustment, a 409/503/500 from the take-over step also carries `leader_weight_adjustment` (the stored value) and `applied` |
 | `POST /device/topology` | start a mesh scan (or join the running one); 202 with the state object | 409 `busy` (`mode <MODE>`, an update or radio job running, `a capture stream is already running` while a capture stream holds the pcap slot, `mesh diagnostics are in use`); 503 `busy` (`OpenThread is busy, retry`, or `topology scan unavailable` when the scan component failed to start at boot); 500 `no_memory` |
 | `GET /device/topology` | the scan state, progress and the last result (no mesh traffic) | |
 | `GET /device/routing` | routing settings and status, see [Routing](#routing) | 503 `not_started` |
@@ -177,6 +179,32 @@ curl -X PUT -H 'Content-Type: application/json' -d '"enable"' http://<new-board>
 The last call is only needed when Thread was off on the new board (no dataset before): `GET /node/state` says `disabled`.
 On a board that is already on a network, the `PUT` of the dataset restarts Thread on the new one by itself, and enabling a
 running Thread would start a fresh attach.
+
+#### Choosing the leader
+
+Two boards that join the same network do not trade the leader role by themselves. Both start with the same leader weight
+(65), and a healthy leader is never replaced because of weight: only a partition merge compares weights, and equal
+weights are decided by a random partition ID. So the board that formed the network stays leader.
+
+To make another board the leader, raise its weight above the current leader's. The Leader card on the Network page has
+an adjustment slider (-16 to +16, stored across restarts) that is added to the base weight; `PUT /device/thread` with
+`leader_weight_adjustment` does the same. The adjustment alone changes no role.
+Sent together with `become_leader`, the adjustment is stored first; if the take-over is then refused (409) or fails (503/500), the
+error reply carries the stored `leader_weight_adjustment` and `applied` next to its own `detail`.
+
+<img src="images/leader.png" width="640" alt="Leader card on the Network page: this board 66 (65 base, +1 adjustment) against the current leader 65 (router 0x1000), a 48 to 96 scale with both marks, the verdict Higher than the leader: this board wins the next merge, the weight adjustment slider at +1 with Save, and the Become leader button enabled">
+
+The **Become leader** button (`{"become_leader": true}`) then asks this board to take over. OpenThread only agrees when
+this board's weight is strictly higher than the current leader's, so equal weights refuse with 409 `cannot_take_over`
+and `detail` `weight not higher`. Traffic over the mesh pauses briefly while the role changes; the Thread dataset stays
+the same.
+
+<img src="images/leader-confirm.png" width="640" alt="Become leader? confirmation: this board starts a new partition with itself as leader (weight 66) and router 0x1000 (weight 65) moves over; the dataset, addresses and pairings don't change, mesh traffic can drop for a few seconds, router 0x1000 keeps working as a border router; Cancel and Become leader buttons">
+
+Afterwards, only the weight is stored, not the role. A quick restart of this board keeps the role. If it is offline for
+more than about 2 minutes, another router takes over and keeps the role, even with a lower weight: the weight only counts
+when partitions merge, and a board that comes back joins the existing partition. Press Become leader again then. If the
+weight read times out right after a started take-over, the reply carries `"partial": true`.
 
 In Home Assistant, add each board as its own OpenThread Border Router integration entry. Running several of these boards
 on one network has not been tested on hardware yet.

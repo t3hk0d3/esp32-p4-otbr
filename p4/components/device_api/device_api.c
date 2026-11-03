@@ -37,6 +37,7 @@
 #include "esp_br_http_ota.h"
 #include "netcfg.h"
 #include "names_json.h"
+#include "thread_json.h"
 #include "netnames.h"
 #include "rcp_sync.h"
 #include "routing.h"
@@ -1417,6 +1418,140 @@ static esp_err_t routing_put_handler(httpd_req_t *req)
     return send_routing_state(req);
 }
 
+/* ---- /device/thread ---- */
+
+#define THREAD_BODY_MAX 256
+#define THREAD_JSON_MAX 256
+
+// The 400 reply of a body the parser refused, built like the /device/names one.
+static esp_err_t send_thread_invalid(httpd_req_t *req, const char *field)
+{
+    char error[256];
+    const char *reason = "a JSON object with leader_weight_adjustment and/or become_leader"; // field "body"
+
+    if (strcmp(field, "leader_weight_adjustment") == 0) {
+        reason = "an integer from -16 to 16";
+    } else if (strcmp(field, "become_leader") == 0) {
+        reason = "true or false";
+    }
+    if (device_api_names_error_json(error, sizeof(error), field, reason) < 0) {
+        return send_error(req, 400, "invalid_config", field, false);
+    }
+    httpd_resp_set_status(req, device_api_status_line(400));
+    return send_json(req, error);
+}
+
+static esp_err_t thread_get_handler(httpd_req_t *req)
+{
+    device_api_thread_t t = {.adjustment = br_core_leader_adjustment()};
+    char body[THREAD_JSON_MAX];
+    const esp_err_t err = br_core_leader_weight(&t.weight);
+
+    t.weight_known = err == ESP_OK;
+    t.partial = err == ESP_ERR_TIMEOUT;
+    if (device_api_thread_json(body, sizeof(body), &t) < 0) {
+        return send_error(req, 500, "internal", "the reply does not fit its buffer", false);
+    }
+    return send_json(req, body);
+}
+
+// An error of the PUT; after a stored adjustment (t->has_applied) it carries the adjustment and `applied` too.
+static esp_err_t send_thread_error(httpd_req_t *req, int http_status, const char *code, const char *detail,
+                                   const device_api_thread_t *t)
+{
+    char body[384];
+
+    if (device_api_thread_error_json(body, sizeof(body), code, detail, t) < 0) {
+        return send_error(req, http_status, code, detail, false);
+    }
+    httpd_resp_set_status(req, device_api_status_line(http_status));
+    return send_json(req, body);
+}
+
+static esp_err_t thread_put_handler(httpd_req_t *req)
+{
+    const int length_status = device_api_length_check(req->content_len, THREAD_BODY_MAX);
+
+    if (length_status != 0) {
+        return send_error(req, length_status, length_status == 413 ? "payload_too_large" : "length_required",
+                          "send the leader weight settings as a JSON body", true);
+    }
+    char *raw = read_small_body(req);
+
+    if (!raw) {
+        return send_error(req, 400, "invalid_request", "the body could not be read", true);
+    }
+    device_api_thread_put_t put;
+    const char *field = NULL;
+    const esp_err_t parse_err = device_api_thread_parse(raw, &put, &field);
+
+    free(raw);
+    if (parse_err != ESP_OK) {
+        return send_thread_invalid(req, field);
+    }
+    device_api_thread_t t = {0};
+
+    if (put.has_adjustment) {
+        br_core_leader_apply_t applied = BR_CORE_LEADER_NOT_READY;
+        const esp_err_t err = br_core_set_leader_adjustment(put.adjustment, &applied);
+
+        if (err == ESP_ERR_INVALID_ARG) { // the parser checks the range; cannot happen
+            return send_thread_invalid(req, "leader_weight_adjustment");
+        }
+        if (err != ESP_OK) { // ESP_ERR_INVALID_STATE (storage degraded) or an NVS error
+            return send_error(req, 500, "storage_failed", "the leader weight adjustment could not be stored", false);
+        }
+        t.has_applied = true;
+        t.adjustment = put.adjustment; // for an error reply of the take-over; the final reply re-reads it
+        t.applied = applied == BR_CORE_LEADER_APPLIED;
+        if (applied == BR_CORE_LEADER_NOT_READY) {
+            t.detail = "Thread is not running";
+        } else if (applied == BR_CORE_LEADER_BUSY) {
+            t.detail = "OpenThread is busy, applied within seconds or at the next start";
+        }
+    }
+    uint8_t started_weight = 0;
+
+    if (put.become_leader) {
+        br_core_leader_refusal_t refusal = BR_CORE_LEADER_OK;
+        const esp_err_t err = br_core_become_leader(&refusal, &started_weight);
+
+        if (err == ESP_ERR_INVALID_STATE) {
+            int status;
+            const char *code;
+            char detail[64];
+
+            device_api_thread_refusal(refusal, br_core_get_mode(), &status, &code, detail, sizeof(detail));
+            return send_thread_error(req, status, code, detail, &t);
+        }
+        if (err == ESP_ERR_NOT_FINISHED) {
+            return send_thread_error(req, 503, "busy", "OpenThread is restarting, retry", &t);
+        }
+        if (err == ESP_ERR_TIMEOUT) {
+            return send_thread_error(req, 503, "busy", "OpenThread is busy, retry", &t);
+        }
+        if (err != ESP_OK) {
+            return send_thread_error(req, 500, "internal", "taking over failed", &t);
+        }
+        t.become_started = true;
+    }
+    t.adjustment = br_core_leader_adjustment();
+    const esp_err_t weight_err = br_core_leader_weight(&t.weight);
+    char body[THREAD_JSON_MAX];
+
+    t.weight_known = weight_err == ESP_OK;
+    t.partial = weight_err == ESP_ERR_TIMEOUT;
+    if (!t.weight_known && t.become_started) { // the weight the take-over read under its own lock
+        t.weight = started_weight;
+        t.weight_known = true;
+        t.partial = false;
+    }
+    if (device_api_thread_json(body, sizeof(body), &t) < 0) {
+        return send_error(req, 500, "internal", "the reply does not fit its buffer", false);
+    }
+    return send_json(req, body);
+}
+
 /* ---- registration ---- */
 
 typedef struct {
@@ -1464,6 +1599,8 @@ esp_err_t device_api_register(httpd_handle_t server)
         {"/device/network/confirm", HTTP_POST, network_confirm_post_handler},
         {"/device/names", HTTP_GET, names_get_handler},
         {"/device/names", HTTP_PUT, names_put_handler},
+        {"/device/thread", HTTP_GET, thread_get_handler},
+        {"/device/thread", HTTP_PUT, thread_put_handler},
         {"/device/topology", HTTP_POST, topology_post_handler},
         {"/device/topology", HTTP_GET, topology_get_handler},
         {"/device/routing", HTTP_GET, routing_get_handler},
