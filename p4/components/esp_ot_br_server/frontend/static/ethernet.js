@@ -665,8 +665,9 @@ function refreshNetwork() {
 /* Every change of the draft goes through here: it ends the review and asks for the VLAN tick again. */
 function edit(fn) {
   return function(ev) {
-    // While the board reboots into what was applied, the review and its instructions stay as they are.
-    if (!draft || kit.isBusy())
+    // While the board reboots into what was applied, the review and its instructions stay as they are. While a TREL
+    // switch is on its way the draft is about to be replaced by the running settings: an edit would be lost.
+    if (!draft || kit.isBusy() || trelSending)
       return;
     fn(ev);
     review = false;

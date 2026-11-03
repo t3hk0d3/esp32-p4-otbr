@@ -1164,6 +1164,29 @@ class TestTrelCard:
         )
         assert r == [True, 1]
 
+    def test_edits_wait_while_the_switch_is_being_sent(self):
+        # On an interface edit while the TREL PUT is in flight: the edit is not taken (the draft is about to be replaced
+        # by the running settings, which would drop it unseen); after the switch the page shows no pending change.
+        r = scenario(
+            page(
+                "ethernet",
+                routes(
+                    status_js=TREL_STATUS,
+                    put="{status: 200, body: {status: 'applied'}}",
+                ),
+            )
+            + START
+            + """
+            const sending = t.page.setTrel(false);
+            t.el('if-single-edit').click(); t.el('if-single-tagged').click();
+            const during = t.el('actionBar').hidden();
+            await sending;
+            const put = t.calls.find((c) => c.method === 'PUT');
+            return [during, t.el('actionBar').hidden(), JSON.parse(put.body).single.vlan];
+        """
+        )
+        assert r == [True, True, 0]
+
     def test_running_trel_off_is_shown_pressed_off(self):
         r = scenario(
             page(
