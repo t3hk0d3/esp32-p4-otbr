@@ -10,7 +10,9 @@ const path = require('path');
 const FRONTEND = path.join(__dirname, '..', '..', 'p4', 'components', 'esp_ot_br_server', 'frontend');
 const Common = require(path.join(FRONTEND, 'static', 'device_common.js'));
 const SCRIPTS = {index: 'status', ethernet: 'ethernet', firmware: 'firmware', capture: 'capture',
-                 diagnostics: 'diagnostics'};
+                 diagnostics: 'diagnostics', names: 'names'};
+/* Scripts that live on another script's page: the names section is part of the Ethernet page. */
+const HTML = {names: 'ethernet'};
 
 class El {
   constructor(doc, tag, id, classes) {
@@ -117,7 +119,8 @@ class Doc {
  * connection.
  */
 function makeEnv(page, routes) {
-  const html = typeof page === 'string' ? fs.readFileSync(path.join(FRONTEND, page + '.html'), 'utf8') : page.html;
+  const html = typeof page === 'string' ? fs.readFileSync(path.join(FRONTEND, (HTML[page] || page) + '.html'), 'utf8')
+                                        : page.html;
   const doc = new Doc(html);
   doc.absent = new Set(page.absent || []); // ids the page lacks on purpose: null instead of a test error
   const calls = [];
@@ -128,6 +131,7 @@ function makeEnv(page, routes) {
   let inFlight = 0;
   let maxInFlight = 0;
   let confirms = [];
+  const navigations = [];
   const env = {
     document: doc,
     location: {host: 'board.lan'},
@@ -156,13 +160,16 @@ function makeEnv(page, routes) {
     now() { return now; },
     confirm(t) { confirms.push(t); return true; },
     reload() { reloads++; },
+    navigate(url) { navigations.push(url); },
     AbortController: function() { this.signal = {}; this.abort = function() {}; },
     IntersectionObserver: null
   };
   let page_ = null, kit = null, Logic = null;
+  const handle = {};
   if (typeof page === 'string') {
     Logic = require(path.join(FRONTEND, 'static', SCRIPTS[page] + '.js'));
-    page_ = Logic.Page(env);
+    // The names section asks the Ethernet page whether it is busy; a test sets `t.blocked`.
+    page_ = Logic.Page(env, {isBlocked: () => !!handle.blocked});
   } else {
     kit = Common.DeviceKit(env, page.kit || {});
   }
@@ -185,8 +192,9 @@ function makeEnv(page, routes) {
     now = end;
     await flush();
   };
-  return {env, page: page_, kit, Logic, Common, doc, calls, flush, advance, el: (id) => doc.getElementById(id),
-          reloads: () => reloads, maxInFlight: () => maxInFlight, confirms: () => confirms};
+  return Object.assign(handle, {env, page: page_, kit, Logic, Common, doc, calls, flush, advance,
+                                el: (id) => doc.getElementById(id), reloads: () => reloads, maxInFlight: () => maxInFlight,
+                                confirms: () => confirms, navigations: () => navigations});
 }
 
 const STATUS = {
@@ -222,6 +230,13 @@ const NETWORK = {
   fallback: false
 };
 
+/* GET /device/names: a set hostname the HA name follows, no web UI advert, the default DHCP name. */
+const NAMES = {
+  hostname: 'kitchen', hostname_default: 'esp-otbr-a1b2c3', hostname_live: 'kitchen', ha_name_follows_hostname: true,
+  ha_name: '', ha_name_effective: 'kitchen', http_advert: false, http_advert_available: true, dhcp_name: '',
+  dhcp_name_default: 'esp-otbr', mode: 'single'
+};
+
 /* GET /get_properties and /ipaddr of the Thread web GUI ({error, result, message}). */
 const PROPS = {error: 0, message: 'OK', result: {
   'Network:Name': 'MyHome', 'Thread:Role': 'leader', 'IPv6:RoutingLocalAddress': 'fdde:ad00:beef:0:0:ff:fe00:7800', 'RCP:Channel': '15', 'RCP:TxPower': '20 dBm',
@@ -235,4 +250,4 @@ const IPADDR = {error: 0, message: 'OK', result: [
 /* Deep copy of a fixture, with `patch` merged at the top level. */
 function fixture(obj, patch) { return Object.assign(JSON.parse(JSON.stringify(obj)), patch || {}); }
 
-module.exports = {makeEnv, STATUS, DIAG, NETWORK, PROPS, IPADDR, fixture, Common};
+module.exports = {makeEnv, STATUS, DIAG, NETWORK, NAMES, PROPS, IPADDR, fixture, Common};

@@ -575,7 +575,10 @@ function init() {
   kit.poller(refreshNetwork, 10000, 'ethSection');
 }
 
-return {init : init, refreshNetwork : refreshNetwork, apply : apply, kit : kit};
+/* The names section stays still during a trial and while the board reboots into what was applied. */
+function isBlocked() { return kit.isBusy() || !!(net && net.trial); }
+
+return {init : init, refreshNetwork : refreshNetwork, apply : apply, kit : kit, isBlocked : isBlocked};
 }
 
 if (typeof module !== 'undefined' && module.exports) {
@@ -583,5 +586,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports.Page = EthernetPage;
 }
 
-if (typeof document !== 'undefined')
-  EthernetPage(DeviceCommon.DeviceEnv()).init();
+// A global: names.js, loaded after this script, asks it whether the page is busy.
+var ethernetPage = typeof document !== 'undefined' ? EthernetPage(DeviceCommon.DeviceEnv()) : null;
+if (ethernetPage)
+  ethernetPage.init();

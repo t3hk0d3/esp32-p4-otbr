@@ -25,6 +25,9 @@ DEVICE_MENU = [
 ]
 
 # page -> (script, endpoints its script names)
+# Scripts of sections that share a page, loaded after the page's own script.
+EXTRA_SCRIPTS = {"ethernet": ["names"]}
+
 PAGES = {
     "index": (
         "status",
@@ -37,7 +40,7 @@ PAGES = {
         ],
     ),
     "diagnostics": ("diagnostics", ["/device/diag"]),
-    "ethernet": ("ethernet", ["/device/network"]),
+    "ethernet": ("ethernet", ["/device/network", "/device/names"]),
     "firmware": (
         "firmware",
         [
@@ -168,7 +171,8 @@ class TestPages:
     """every device page and its script"""
 
     def test_page_loads_style_nav_api_common_and_its_script_in_order(self, name):
-        # On the page: shared stylesheet, nav placeholder, then api.js, device_common.js and its own script.
+        # On the page: shared stylesheet, nav placeholder, then api.js, device_common.js, its own script and the
+        # scripts of its extra sections (the Ethernet page's names section).
         html = html_of(name)
         script = PAGES[name][0]
         assert '<link rel="stylesheet" href="/static/style.css">' in html
@@ -179,7 +183,7 @@ class TestPages:
             "/static/api.js",
             "/static/device_common.js",
             f"/static/{script}.js",
-        ]
+        ] + [f"/static/{extra}.js" for extra in EXTRA_SCRIPTS.get(name, [])]
 
     def test_page_has_the_trial_banner_and_the_source_link(self, name):
         # On the page: the shared banner ids and the AGPL source link in the footer.
@@ -229,7 +233,8 @@ class TestPages:
 
     def test_each_endpoint_is_named_by_the_script_and_registered(self, name):
         # On the endpoints of the page: quoted in its script and registered (device_api, or the Thread web GUI).
-        source, routes = js_of(PAGES[name][0]), DEVICE_API.read_text()
+        scripts = [PAGES[name][0]] + EXTRA_SCRIPTS.get(name, [])
+        source, routes = "".join(js_of(s) for s in scripts), DEVICE_API.read_text()
         for endpoint in PAGES[name][1]:
             assert re.search(rf"['\"]{re.escape(endpoint)}['\"?]", source), endpoint
             assert (
