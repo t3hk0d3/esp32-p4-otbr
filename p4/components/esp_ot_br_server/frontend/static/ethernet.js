@@ -574,26 +574,52 @@ function setTrel(on) {
     note('trelMsg', 'Keep or undo the network settings on trial first.', true);
     return Promise.resolve(null);
   }
-  var body = clone(cur);
-  body.trel = on;
   trelSending = true;
   note('trelMsg', '', false);
   renderTrel();
-  return kit.request('PUT', '/device/network', {headers : {'Content-Type' : 'application/json'},
-                                                body : JSON.stringify(L.requestBody(body))})
-      .then(function(r) {
-        if (r.status !== 200) {
-          note('trelMsg', kit.failure(r), true);
-          return r;
+  // Another client may have changed the running settings: send the switch on top of what runs now, or the board
+  // would read the stale interfaces as a change and start a trial.
+  return refreshNetwork()
+      .then(function(ok) {
+        if (!ok) {
+          note('trelMsg', 'The network state could not be read; TREL was not switched.', true);
+          return null;
         }
-        cur.trel = on;
-        draft.trel = on;
-        note('trelMsg', r.body && r.body.status === 'saved' ? r.body.detail : 'TREL ' + (on ? 'on.' : 'off.'), false);
-        return r;
-      }, function(e) { note('trelMsg', e.message, true); })
+        if (net.trial) {
+          note('trelMsg', 'Keep or undo the network settings on trial first.', true);
+          return null;
+        }
+        draft = clone(cur);
+        var body = clone(cur);
+        body.trel = on;
+        return kit.request('PUT', '/device/network', {headers : {'Content-Type' : 'application/json'},
+                                                      body : JSON.stringify(L.requestBody(body))})
+            .then(function(r) {
+              if (r.status !== 200) {
+                note('trelMsg', kit.failure(r), true);
+                return r;
+              }
+              var status = r.body && r.body.status;
+              if (status !== 'applied' && status !== 'saved') {
+                // The board still saw another change and started a trial: same as Apply.
+                note('trelMsg', 'Saved as a trial. The board is rebooting: open ' + L.reachText(body) +
+                                    ' and press Keep new settings within 5 minutes.', false);
+                kit.waitForBoard('trelMsg', 'The board did not come back at this address. Press Keep new settings ' +
+                                                'within 5 minutes of its reboot, or it goes back to the previous ' +
+                                                'settings by itself.');
+                return {handoff : true};
+              }
+              cur.trel = on;
+              draft.trel = on;
+              note('trelMsg', status === 'saved' ? r.body.detail : 'TREL ' + (on ? 'on.' : 'off.'), false);
+              return r;
+            }, function(e) { note('trelMsg', e.message, true); });
+      })
       .then(function(r) {
         trelSending = false;
         render();
+        if (r && r.handoff)
+          return r;
         return refreshTrel().then(function() { return r; });
       });
 }

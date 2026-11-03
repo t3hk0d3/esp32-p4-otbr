@@ -64,13 +64,23 @@ static netcfg_dest_kind_t classify(struct netif *inp, const ip6_addr_t *dest)
 #define TREL_PORT 0
 #endif
 
-// UDP port rules (netcfg_ip6_udp_drop). The UDP header is looked for behind any extension headers, as lwIP finds it.
+// UDP port rules (netcfg_ip6_udp_drop). The UDP header is looked for behind any extension headers, as lwIP finds it;
+// a chain too long to follow may hide a TREL datagram, so on mgmt it is dropped too when TREL is built.
 static bool udp_drop(const struct pbuf *p, bool input_is_mgmt)
 {
     uint16_t dest_port;
 
-    return input_is_mgmt && netcfg_ip6_udp_dest_port(p->payload, p->len, &dest_port) &&
-           netcfg_ip6_udp_drop(true, dest_port, TREL_PORT);
+    if (!input_is_mgmt) {
+        return false;
+    }
+    switch (netcfg_ip6_udp_dest_port(p->payload, p->len, &dest_port)) {
+    case NETCFG_UDP_PORT_FOUND:
+        return netcfg_ip6_udp_drop(true, dest_port, TREL_PORT);
+    case NETCFG_UDP_PORT_UNKNOWN:
+        return TREL_PORT != 0;
+    default:
+        return false;
+    }
 }
 
 int __wrap_lwip_hook_ip6_input(struct pbuf *p, struct netif *inp)

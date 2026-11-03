@@ -33,13 +33,20 @@ bool netcfg_ip6_input_drop(bool input_is_mgmt, netcfg_dest_kind_t dest, bool rou
  */
 bool netcfg_ip6_udp_drop(bool input_is_mgmt, uint16_t dest_port, uint16_t trel_port);
 
+typedef enum {
+    NETCFG_UDP_PORT_FOUND,   /**< a UDP header, `*dest_port` set */
+    NETCFG_UDP_PORT_NONE,    /**< not UDP, or a packet lwIP never hands to a UDP socket */
+    NETCFG_UDP_PORT_UNKNOWN, /**< more extension headers than the walk follows: it may be UDP */
+} netcfg_udp_port_t;
+
 /**
  * Find the UDP destination port of an IPv6 packet (`pkt` starts at the fixed header, `len` bytes are readable), as lwIP
  * finds the UDP header: behind any Hop-by-Hop, Routing, Destination Options and Fragment headers, all within `len`.
- * False when the packet is not UDP, the headers run past `len` (lwIP drops such a packet itself), or it is a
- * non-first fragment (without the first one, which carries the port, it is never reassembled).
+ * NONE when the packet is not UDP, the headers run past `len` (lwIP drops such a packet itself), or it is a
+ * non-first fragment (without the first one, which carries the port, it is never reassembled). UNKNOWN when the chain
+ * is longer than any real packet carries: lwIP would still follow it, so a caller filtering by port drops it.
  */
-bool netcfg_ip6_udp_dest_port(const uint8_t *pkt, size_t len, uint16_t *dest_port);
+netcfg_udp_port_t netcfg_ip6_udp_dest_port(const uint8_t *pkt, size_t len, uint16_t *dest_port);
 
 typedef enum {
     NETCFG_ROUTE_ORIGINAL, /**< use the answer of the original hook (lwIP's own routing follows if it is NULL) */

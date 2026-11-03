@@ -20,17 +20,16 @@ net="${name}-lan"
 image="${OTBR_IMAGE:-openthread/border-router:latest}"
 rcp="$(readlink -f "${RCP_DEVICE:-/dev/ttyACM1}")"
 
-if ! docker network inspect "${net}" > /dev/null 2>&1; then
-    args=(-d macvlan -o parent="${LAN_IF}" --subnet "${LAN_SUBNET}" --gateway "${LAN_GATEWAY}")
-    if [ -n "${LAN_SUBNET6:-}" ]; then
-        args+=(--ipv6 --subnet "${LAN_SUBNET6}")
-    fi
-    docker network create "${args[@]}" "${net}"
+# Recreated on each run, so a changed LAN_IF or subnet takes effect.
+"$(dirname "$0")/down.sh" > /dev/null
+args=(-d macvlan -o parent="${LAN_IF}" --subnet "${LAN_SUBNET}" --gateway "${LAN_GATEWAY}")
+if [ -n "${LAN_SUBNET6:-}" ]; then
+    args+=(--ipv6 --subnet "${LAN_SUBNET6}")
 fi
+docker network create "${args[@]}" "${net}"
 # On an IPv4-only network Docker turns IPv6 off on the interface: TREL needs it, and RAs for SLAAC.
 sysctls="net.ipv6.conf.IFNAME.disable_ipv6=0,net.ipv6.conf.IFNAME.accept_ra=2,net.ipv6.conf.IFNAME.accept_ra_rt_info_max_plen=64"
 
-docker rm -f "${name}" > /dev/null 2>&1 || true
 docker pull "${image}"
 docker run -d --name "${name}" \
     --network "name=${net},ip=${PEER_IP},\"driver-opt=com.docker.network.endpoint.sysctls=${sysctls}\"" \

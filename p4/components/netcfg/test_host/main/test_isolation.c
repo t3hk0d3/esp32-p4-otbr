@@ -112,7 +112,7 @@ TEST_CASE("On a UDP header right after the fixed header: its port is found", "[n
     uint16_t port = 0;
     const size_t len = build_packet(buf, 17, NULL, 0, 12390);
 
-    TEST_ASSERT_TRUE(netcfg_ip6_udp_dest_port(buf, len, &port));
+    TEST_ASSERT_EQUAL(NETCFG_UDP_PORT_FOUND, netcfg_ip6_udp_dest_port(buf, len, &port));
     TEST_ASSERT_EQUAL_UINT16(12390, port);
 }
 
@@ -124,7 +124,7 @@ TEST_CASE("On UDP behind Destination Options and Hop-by-Hop headers: its port is
     const uint8_t ext[24] = {60, 0, [8] = 17, 1};
     const size_t len = build_packet(buf, 0, ext, sizeof(ext), 12390);
 
-    TEST_ASSERT_TRUE(netcfg_ip6_udp_dest_port(buf, len, &port));
+    TEST_ASSERT_EQUAL(NETCFG_UDP_PORT_FOUND, netcfg_ip6_udp_dest_port(buf, len, &port));
     TEST_ASSERT_EQUAL_UINT16(12390, port);
 }
 
@@ -135,7 +135,7 @@ TEST_CASE("On the first fragment of a UDP datagram: its port is found", "[netcfg
     const uint8_t ext[8] = {17, 0, 0x00, 0x01}; // offset 0, more fragments
     const size_t len = build_packet(buf, 44, ext, sizeof(ext), 12390);
 
-    TEST_ASSERT_TRUE(netcfg_ip6_udp_dest_port(buf, len, &port));
+    TEST_ASSERT_EQUAL(NETCFG_UDP_PORT_FOUND, netcfg_ip6_udp_dest_port(buf, len, &port));
     TEST_ASSERT_EQUAL_UINT16(12390, port);
 }
 
@@ -146,13 +146,27 @@ TEST_CASE("On a later fragment, a header past the end, or no UDP: no port", "[ne
     const uint8_t later[8] = {17, 0, 0x00, 0x08}; // offset 8
     size_t len = build_packet(buf, 44, later, sizeof(later), 12390);
 
-    TEST_ASSERT_FALSE(netcfg_ip6_udp_dest_port(buf, len, &port));
+    TEST_ASSERT_EQUAL(NETCFG_UDP_PORT_NONE, netcfg_ip6_udp_dest_port(buf, len, &port));
     len = build_packet(buf, 17, NULL, 0, 12390);
-    TEST_ASSERT_FALSE(netcfg_ip6_udp_dest_port(buf, len - 1, &port));
+    TEST_ASSERT_EQUAL(NETCFG_UDP_PORT_NONE, netcfg_ip6_udp_dest_port(buf, len - 1, &port));
     const uint8_t long_opts[8] = {17, 4}; // claims 40 bytes, only 8 + UDP present
     len = build_packet(buf, 60, long_opts, sizeof(long_opts), 12390);
-    TEST_ASSERT_FALSE(netcfg_ip6_udp_dest_port(buf, len, &port));
+    TEST_ASSERT_EQUAL(NETCFG_UDP_PORT_NONE, netcfg_ip6_udp_dest_port(buf, len, &port));
     len = build_packet(buf, 6, NULL, 0, 12390); // TCP
-    TEST_ASSERT_FALSE(netcfg_ip6_udp_dest_port(buf, len, &port));
-    TEST_ASSERT_FALSE(netcfg_ip6_udp_dest_port(buf, 20, &port));
+    TEST_ASSERT_EQUAL(NETCFG_UDP_PORT_NONE, netcfg_ip6_udp_dest_port(buf, len, &port));
+    TEST_ASSERT_EQUAL(NETCFG_UDP_PORT_NONE, netcfg_ip6_udp_dest_port(buf, 20, &port));
+}
+
+TEST_CASE("On a chain of more extension headers than the walk follows: the port is unknown", "[netcfg]")
+{
+    uint8_t buf[128];
+    uint16_t port = 0;
+    uint8_t ext[72] = {0};
+
+    for (int i = 0; i < 9; i++) { // nine 8-byte Destination Options headers, the last one followed by UDP
+        ext[i * 8] = i < 8 ? 60 : 17;
+    }
+    const size_t len = build_packet(buf, 60, ext, sizeof(ext), 12390);
+
+    TEST_ASSERT_EQUAL(NETCFG_UDP_PORT_UNKNOWN, netcfg_ip6_udp_dest_port(buf, len, &port));
 }

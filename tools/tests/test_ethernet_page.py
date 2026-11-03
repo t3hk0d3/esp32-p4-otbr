@@ -1061,6 +1061,38 @@ class TestTrelCard:
         assert "confirm or revert" in r[0]
         assert r[1:] == ["true", False]
 
+    def test_switch_sends_the_settings_running_now(self):
+        # On Off after another client made the port static: the PUT carries the static settings read just before it.
+        r = scenario(
+            page(
+                "ethernet",
+                "(() => { let n = 0; return (u, o) => o.method === 'PUT' ? ({status: 200, body: {status: 'applied'}})"
+                " : u === '/device/diag' ? ({status: 200, body: H.DIAG})"
+                f" : u === '/device/status' ? ({{status: 200, body: {TREL_STATUS}}})"
+                f" : ({{status: 200, body: n++ === 0 ? H.NETWORK : {STATIC_NET}}}); }})()",
+            )
+            + START
+            + """
+            await t.page.setTrel(false);
+            const put = t.calls.find((c) => c.method === 'PUT');
+            return [JSON.parse(put.body).single.ipv4.dhcp, t.el('trelMsg').textContent, t.el('actionBar').hidden()];
+        """
+        )
+        assert r == [False, "TREL off.", True]
+
+    def test_switch_answered_with_a_trial_waits_for_the_board(self):
+        # On a trial answer (the board still saw another change): the reboot note, and the page waits for the board.
+        r = scenario(
+            page("ethernet", routes(status_js=TREL_STATUS))
+            + START
+            + """
+            await t.page.setTrel(false);
+            return [t.el('trelMsg').textContent, t.page.kit.isWaiting()];
+        """
+        )
+        assert "trial" in r[0]
+        assert r[1] is True
+
     def test_review_left_with_only_trel_is_applied_without_a_reboot(self):
         # An interface edit undone after TREL joined the draft: Apply sends a trel-only PUT, the board applies it live.
         r = scenario(
