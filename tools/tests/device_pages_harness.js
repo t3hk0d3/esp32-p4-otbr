@@ -9,7 +9,7 @@ const path = require('path');
 
 const FRONTEND = path.join(__dirname, '..', '..', 'p4', 'components', 'esp_ot_br_server', 'frontend');
 const Common = require(path.join(FRONTEND, 'static', 'device_common.js'));
-const SCRIPTS = {index: 'status', ethernet: 'ethernet', firmware: 'firmware', capture: 'capture',
+const SCRIPTS = {index: 'status', ethernet: 'ethernet', routing: 'routing', firmware: 'firmware', capture: 'capture',
                  diagnostics: 'diagnostics', names: 'names',
                  topology: 'topology'};
 /* Scripts that live on another script's page: the names section is part of the Ethernet page. */
@@ -171,7 +171,7 @@ function fakeClipboard() {
 }
 
 /*
- * `page`: a page name (device, ethernet, firmware, capture, diagnostics) or {html, kit} to run DeviceKit alone on the
+ * `page`: a page name (device, ethernet, routing, firmware, capture, diagnostics) or {html, kit} to run DeviceKit alone on the
  * given markup with the given options. routes: function(url, opts) -> {status, body} | throws to simulate a dropped
  * connection.
  */

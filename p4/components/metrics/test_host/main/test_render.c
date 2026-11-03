@@ -88,7 +88,10 @@ TEST_CASE("On any input: families in the catalogue's order", "[metrics]")
                            "# TYPE br_heap_free_bytes ", "# TYPE br_ot_lock_acquisitions_total ", "# TYPE br_storage_ok ",
                            "# TYPE br_scrape_partial ", "# TYPE br_thread_role ", "# TYPE br_mac_tx_frames_total ",
                            "# TYPE br_border_routing_state ", "# TYPE br_srp_hosts ", "# TYPE br_thread_collect_age_seconds ",
-                           "# TYPE br_thread_collect_failures_total "
+                           "# TYPE br_thread_collect_failures_total ", "# TYPE br_routing_method ",
+                           "# TYPE br_routing_announced_prefixes ", "# TYPE br_routing_omr_custom ",
+                           "# TYPE br_bgp_peer_state ", "# TYPE br_bgp_peer_uptime_seconds ",
+                           "# TYPE br_bgp_received_dropped_total ", "# TYPE br_bgp_session_resets_total "
                           };
     const char *prev = out;
 
@@ -335,16 +338,199 @@ TEST_CASE("On a writer error: metrics_render returns it", "[metrics]")
     sink_free(&sink);
 }
 
-TEST_CASE("Sample for the format check: written to METRICS_SAMPLE_PATH", "[metrics]")
+// ---- routing ----
+
+static const char *const bgp_families[] = {"br_bgp_peer_state", "br_bgp_peer_uptime_seconds",
+                                           "br_bgp_received_dropped_total", "br_bgp_session_resets_total"
+                                          };
+static const char *const ripng_families[] = {"br_ripng_updates_sent_total", "br_ripng_requests_answered_total",
+                                             "br_ripng_responses_dropped_total"
+                                            };
+
+#define ASSERT_NO_FAMILIES(out, names) \
+    for (size_t i_ = 0; i_ < sizeof(names) / sizeof((names)[0]); i_++) { \
+        TEST_ASSERT_NULL_MESSAGE(strstr(out, (names)[i_]), (names)[i_]); \
+    }
+
+static void with_method(routing_method_t method)
 {
     with_sample();
+    s_in.routing.method = method;
+    if (method != ROUTING_METHOD_BGP) {
+        s_in.routing.peer_count = 0;
+    }
+}
+
+TEST_CASE("Routing bgp: br_routing_method has one series per method, bgp at 1", "[metrics]")
+{
+    with_method(ROUTING_METHOD_BGP);
     char *out = render();
-    FILE *f = fopen(METRICS_SAMPLE_PATH, "w");
+
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE br_routing_method gauge"));
+    TEST_ASSERT_EQUAL(4, count_prefix(out, "br_routing_method{"));
+    TEST_ASSERT_EQUAL(1, ones(out, "br_routing_method"));
+    TEST_ASSERT_TRUE(has_line(out, "br_routing_method{method=\"pd\"} 0"));
+    TEST_ASSERT_TRUE(has_line(out, "br_routing_method{method=\"ripng\"} 0"));
+    TEST_ASSERT_TRUE(has_line(out, "br_routing_method{method=\"bgp\"} 1"));
+    TEST_ASSERT_TRUE(has_line(out, "br_routing_method{method=\"off\"} 0"));
+    free(out);
+}
+
+TEST_CASE("Routing bgp: announced prefix count and custom OMR flag as gauges", "[metrics]")
+{
+    with_method(ROUTING_METHOD_BGP);
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE br_routing_announced_prefixes gauge"));
+    TEST_ASSERT_TRUE(has_line(out, "br_routing_announced_prefixes 2"));
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE br_routing_omr_custom gauge"));
+    TEST_ASSERT_TRUE(has_line(out, "br_routing_omr_custom 1"));
+    free(out);
+}
+
+TEST_CASE("Routing bgp: one state series per state and peer, one at 1 per peer", "[metrics]")
+{
+    with_method(ROUTING_METHOD_BGP);
+    char *out = render();
+    const char *states[] = {"idle", "connect", "active", "opensent", "openconfirm", "established"};
+
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE br_bgp_peer_state gauge"));
+    TEST_ASSERT_EQUAL(12, count_prefix(out, "br_bgp_peer_state{"));
+    TEST_ASSERT_EQUAL(2, ones(out, "br_bgp_peer_state"));
+    for (size_t i = 0; i < sizeof(states) / sizeof(states[0]); i++) {
+        char line[128];
+
+        snprintf(line, sizeof(line), "br_bgp_peer_state{peer=\"2001:db8::1\",state=\"%s\"} %d", states[i],
+                 i == ROUTING_BGP_ESTABLISHED);
+        TEST_ASSERT_TRUE_MESSAGE(has_line(out, line), line);
+        snprintf(line, sizeof(line), "br_bgp_peer_state{peer=\"fe80::211:22ff:fe33:4455\",state=\"%s\"} %d",
+                 states[i], i == ROUTING_BGP_ACTIVE);
+        TEST_ASSERT_TRUE_MESSAGE(has_line(out, line), line);
+    }
+    free(out);
+}
+
+TEST_CASE("Routing bgp: uptime gauge, dropped and resets counters per peer", "[metrics]")
+{
+    with_method(ROUTING_METHOD_BGP);
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE br_bgp_peer_uptime_seconds gauge"));
+    TEST_ASSERT_TRUE(has_line(out, "br_bgp_peer_uptime_seconds{peer=\"2001:db8::1\"} 7200"));
+    TEST_ASSERT_TRUE(has_line(out, "br_bgp_peer_uptime_seconds{peer=\"fe80::211:22ff:fe33:4455\"} 0"));
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE br_bgp_received_dropped_total counter"));
+    TEST_ASSERT_TRUE(has_line(out, "br_bgp_received_dropped_total{peer=\"2001:db8::1\"} 40"));
+    TEST_ASSERT_TRUE(has_line(out, "br_bgp_received_dropped_total{peer=\"fe80::211:22ff:fe33:4455\"} 41"));
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE br_bgp_session_resets_total counter"));
+    TEST_ASSERT_TRUE(has_line(out, "br_bgp_session_resets_total{peer=\"2001:db8::1\"} 3"));
+    TEST_ASSERT_TRUE(has_line(out, "br_bgp_session_resets_total{peer=\"fe80::211:22ff:fe33:4455\"} 4"));
+    free(out);
+}
+
+TEST_CASE("Routing bgp: no RIPng series", "[metrics]")
+{
+    with_method(ROUTING_METHOD_BGP);
+    char *out = render();
+
+    ASSERT_NO_FAMILIES(out, ripng_families);
+    free(out);
+}
+
+TEST_CASE("Routing bgp with no peers: no peer families, method still written", "[metrics]")
+{
+    with_method(ROUTING_METHOD_BGP);
+    s_in.routing.peer_count = 0;
+    char *out = render();
+
+    ASSERT_NO_FAMILIES(out, bgp_families);
+    TEST_ASSERT_TRUE(has_line(out, "br_routing_method{method=\"bgp\"} 1"));
+    free(out);
+}
+
+TEST_CASE("Routing ripng: the three RIPng counters", "[metrics]")
+{
+    with_method(ROUTING_METHOD_RIPNG);
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "br_routing_method{method=\"ripng\"} 1"));
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE br_ripng_updates_sent_total counter"));
+    TEST_ASSERT_TRUE(has_line(out, "br_ripng_updates_sent_total 120"));
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE br_ripng_requests_answered_total counter"));
+    TEST_ASSERT_TRUE(has_line(out, "br_ripng_requests_answered_total 5"));
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE br_ripng_responses_dropped_total counter"));
+    TEST_ASSERT_TRUE(has_line(out, "br_ripng_responses_dropped_total 9"));
+    free(out);
+}
+
+TEST_CASE("Routing ripng: no bgp series", "[metrics]")
+{
+    with_method(ROUTING_METHOD_RIPNG);
+    char *out = render();
+
+    ASSERT_NO_FAMILIES(out, bgp_families);
+    free(out);
+}
+
+TEST_CASE("Routing pd or off: method, prefixes and OMR flag only, no BGP or RIPng series", "[metrics]")
+{
+    const routing_method_t methods[] = {ROUTING_METHOD_PD, ROUTING_METHOD_OFF};
+
+    for (size_t m = 0; m < 2; m++) {
+        with_method(methods[m]);
+        char *out = render();
+
+        TEST_ASSERT_EQUAL(1, ones(out, "br_routing_method"));
+        TEST_ASSERT_NOT_NULL(strstr(out, "\nbr_routing_announced_prefixes "));
+        TEST_ASSERT_NOT_NULL(strstr(out, "\nbr_routing_omr_custom "));
+        ASSERT_NO_FAMILIES(out, bgp_families);
+        ASSERT_NO_FAMILIES(out, ripng_families);
+        free(out);
+    }
+}
+
+TEST_CASE("Routing absent: no routing series", "[metrics]")
+{
+    with_sample();
+    s_in.in.routing = NULL;
+    char *out = render();
+
+    TEST_ASSERT_NULL(strstr(out, "br_routing_"));
+    TEST_ASSERT_NULL(strstr(out, "br_bgp_"));
+    TEST_ASSERT_NULL(strstr(out, "br_ripng_"));
+    free(out);
+}
+
+TEST_CASE("Routing absent: br_scrape_partial 1", "[metrics]")
+{
+    with_sample();
+    s_in.in.routing = NULL;
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "br_scrape_partial 1"));
+    free(out);
+}
+
+static void write_sample(const char *path)
+{
+    char *out = render();
+    FILE *f = fopen(path, "w");
 
     TEST_ASSERT_NOT_NULL(f);
     fputs(out, f);
     fclose(f);
     free(out);
+}
+
+TEST_CASE("Sample for the format check: written to METRICS_SAMPLE_PATH", "[metrics]")
+{
+    with_sample();
+    write_sample(METRICS_SAMPLE_PATH);
+}
+
+TEST_CASE("Sample for the format check, routing ripng: written to METRICS_SAMPLE_RIPNG_PATH", "[metrics]")
+{
+    with_method(ROUTING_METHOD_RIPNG);
+    write_sample(METRICS_SAMPLE_RIPNG_PATH);
 }
 
 void app_main(void)

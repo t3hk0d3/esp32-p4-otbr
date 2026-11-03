@@ -300,6 +300,6 @@ direct_dependencies:
 - espressif/esp_serial_slave_link
 - espressif/ethernet_init
 - espressif/mdns
-manifest_hash: fb69e0d8f1f291756e59c5c30229dfc0f0dc7807bbea748802a4357ec49dc748
+manifest_hash: 2b8e3e0319f76fd6d9faa2c2ca9fec532dbb9ec9ac1502b5e35d9da77cf940d6
 target: esp32p4
 version: 3.0.0

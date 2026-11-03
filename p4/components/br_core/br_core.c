@@ -106,6 +106,8 @@ static struct {
     bool has_dataset;
     otOperationalDatasetTlvs dataset;
 } s_saved;
+// Runs once the border router is up, with the OpenThread lock held (br_core_set_border_router_up_cb).
+static void (*s_border_router_up_cb)(otInstance *instance);
 // The platform config must outlive esp_openthread_init: OpenThread keeps pointers into it.
 static esp_openthread_platform_config_t s_platform_config;
 
@@ -255,7 +257,7 @@ static esp_openthread_platform_config_t platform_config(void)
     return config;
 }
 
-// Border router start: DHCPv6-PD on, Thread on when a dataset is stored. Spec 5.3 step 5.
+// Border router start: the border-router-up hook (DHCPv6-PD, OMR), Thread on when a dataset is stored. Spec 5.3 step 5.
 static void bringup_task(void *arg)
 {
     otInstance *instance = esp_openthread_get_instance();
@@ -281,8 +283,11 @@ static void bringup_task(void *arg)
         return;
     }
     s_core.border_router_up = true;
-    otBorderRoutingDhcp6PdSetEnabled(instance, true);
-    ESP_LOGI(TAG, "DHCPv6-PD enabled");
+    if (s_border_router_up_cb) {
+        s_border_router_up_cb(instance);
+    } else {
+        ESP_LOGW(TAG, "no routing hook registered, DHCPv6-PD stays off");
+    }
 
     if (otDatasetIsCommissioned(instance)) {
         otError ip6 = otIp6SetEnabled(instance, true);
@@ -1070,6 +1075,11 @@ esp_err_t br_core_enter_sniffer(uint8_t channel, otLinkRawReceiveDone receive_cb
 void br_core_set_sniffer_end_cb(void (*cb)(void))
 {
     mode_fsm_set_sniffer_end_cb(&s_fsm, cb);
+}
+
+void br_core_set_border_router_up_cb(void (*cb)(otInstance *instance))
+{
+    s_border_router_up_cb = cb;
 }
 
 esp_err_t br_core_leave_sniffer(void)
