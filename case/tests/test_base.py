@@ -43,7 +43,7 @@ class TestDefaultBase:
             assert solid(
                 base, x, y, 26.1
             )  # below the rebate floor: wall (header end has the slot)
-        for x, y in ((x0 - 1.5, 34), (x1 + 1.5, 34), (27.5, y0 - 1.5)):
+        for x, y in ((x0 - 1.5, 34), (x1 + 1.5, 34), (45.0, y0 - 1.5)):
             assert solid(base, x, y, 27.1)  # outer half reaches the top
 
     def test_has_the_usb_rj45_and_sd_openings_at_the_spec_positions(self, base):
@@ -58,11 +58,16 @@ class TestDefaultBase:
         assert not solid_bz(base, 45.0, y, 1.0)  # microSD slot
         assert solid_bz(base, 45.0, y, 2.3)  # above the slot
 
-    def test_leaves_at_least_1_mm_of_wall_above_the_usb_opening(self, base):
-        top = P.USB_BOX.z1 + P.OPENING_TOP_MARGIN
-        assert not solid_bz(base, 12.0, -1.5, top - 0.05)
-        assert solid_bz(base, 12.0, -1.5, top + 0.05)
-        assert P.REBATE_FLOOR - (top + P.BOARD_Z_IN_CASE) >= 1.0 - 1e-6
+    def test_has_one_usb_and_rj45_opening_open_to_the_wall_top(self, base):
+        y = -1.5
+        mid = P.LINTEL_SPLIT_X
+        assert not solid_bz(base, mid, y, 8.0)  # no pillar between USB and RJ45
+        assert not solid(base, 12.0, y, P.TOP - 0.1)  # open to the top: no bridge
+        assert not solid(base, 30.0, y, P.TOP - 0.1)
+        assert solid_bz(base, P.CABLE_OPENING_X[0] - 0.2, y, 8.0)
+        assert solid_bz(
+            base, P.CABLE_OPENING_X[1] + 0.3, y, 8.0
+        )  # above the microSD slot
 
     def test_has_the_header_slot_open_to_the_top_with_3_5_clear(self, base):
         y = P.INNER[3] + 1.5  # outer half of the header-end wall

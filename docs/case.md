@@ -53,9 +53,10 @@ make case-test    # the model's tests (about 1.5 min)
 - PETG is best because the lid tabs flex. PLA works if you'll rarely open the lid.
 - 0.4 mm nozzle and 0.2 mm layers.
 - No supports, no brim needed.
-- **Base:** back plate on the bed. The tops of the cable-wall openings bridge up to 17 mm.
-- **Lid:** top face on the bed, tabs pointing up. Give it solid (100 %) infill, or at least 4 perimeters. The tabs grow
-  layer by layer along their length, so the layer bonds take the load when the lid clicks in.
+- **Base:** back plate on the bed. The only bridge is the top of the microSD slot (12 mm).
+- **Lid:** top face on the bed, the tabs and the cable-end lintel pointing up. Give it solid (100 %) infill, or at
+  least 4 perimeters. The tabs grow layer by layer along their length, so the layer bonds take the load when the lid
+  clicks in.
 
 ## Parts
 
