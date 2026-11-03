@@ -745,3 +745,13 @@ tr:hover td { background: var(--primary-light); }
 /* Thread management pages: invalid fields and the Home Assistant URL box on the Dashboard */
 .form-input[aria-invalid="true"] { border-color: var(--danger); }
 #t-ha-url { user-select: all; word-break: break-all; }
+
+/* Routing page (routing.html): four method cards whose "In use now" chip keeps its space on every card, so picking a
+   method never reflows them; BGP peer rows. */
+.mode-cards.four { grid-template-columns: repeat(4, 1fr); }
+.mode-cards.four .mode-card { display: flex; flex-direction: column; }
+.mode-cards.four .now { margin-top: auto; align-self: flex-start; }
+.now.off { visibility: hidden; }
+.peer-row { display: grid; grid-template-columns: 2fr 1fr auto; gap: 12px; align-items: end; margin-top: 8px; }
+@media (max-width: 900px) { .mode-cards.four { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 600px) { .peer-row, .mode-cards.four { grid-template-columns: 1fr; } }

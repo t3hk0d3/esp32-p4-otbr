@@ -222,6 +222,14 @@ reason, spec reference.
    no longer cover (only the `+30` slack of `max_uri_handlers` hides the shortfall; running out silently drops the later
    registrations, the catch-all first). 24 leaves 3 slots of headroom.
    (docs/superpowers/specs/2026-11-03-mesh-routing-design.md sections 5, 6)
+19. Applied (mesh routing, Task 10). `esp_ot_br_server` frontend: Routing page. New files `frontend/routing.html` and
+   `frontend/static/routing.js` (pure logic exported for node, page code guarded by `typeof document`, text only through
+   `textContent`), built from the approved mockup `docs/superpowers/specs/2026-11-03-routing-page-mockup.html`. It reads
+   and writes `GET`/`PUT /device/routing` (no reboot, no trial), reads the PD state from `GET /device/status` while the
+   saved method is `pd`, refreshes every 5 s keeping unsaved edits, and shows a 400's field next to its input. Edits:
+   `frontend/static/api.js`, "Routing" after "Ethernet" in the Device dropdown; `frontend/static/style.css`, new rules
+   appended (`.mode-cards.four`, `.now.off`, `.peer-row`; no existing rule changed). Host tests:
+   `tools/tests/test_routing_page.py`. (docs/superpowers/specs/2026-11-03-mesh-routing-design.md section 8)
 
 17. Applied (2026-11). `esp_ot_br_server` frontend, upstream pages: new
    `frontend/static/mgmt.js` (pure logic exported for node: mode banner, random network parameters, Form Network and
