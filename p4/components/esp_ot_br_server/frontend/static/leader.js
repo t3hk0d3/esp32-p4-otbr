@@ -92,7 +92,7 @@ function view(thread, node, pendingAdj) {
     }
   }
   if (!node)
-    v.hint = 'Thread is not running.';
+    v.hint = hasWeight ? 'Could not read the Thread state just now.' : 'Thread is not running.';
   else if (!attached)
     v.hint = 'This board is not attached to a Thread network.';
   else if (!shown)
@@ -114,7 +114,7 @@ function view(thread, node, pendingAdj) {
   return v;
 }
 
-return {view : view, leaderName : leaderName, sign : sign, scalePos : scalePos};
+return {view : view, leaderName : leaderName};
 })();
 
 /* The card: reads both replies every 5 s, owns the slider, Save, the confirm dialog and the fast polling after a take-over. */

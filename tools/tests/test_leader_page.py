@@ -123,13 +123,42 @@ class TestLeaderLogic:
             assert v["hint"] == "This board is not attached to a Thread network.", state
 
     def test_a_failed_node_read_keeps_save_working(self):
-        # On GET /node failed (null): comparison hidden, button disabled, "Thread is not running.", Save when dirty.
+        # On GET /node failed (null): comparison hidden, button disabled, "Could not read ...", Save when dirty.
         v = view(thread(adj=8), None, pending=2)
         assert v["comparisonShown"] is False
         assert v["buttonEnabled"] is False
-        assert v["hint"] == "Thread is not running."
+        assert v["hint"] == "Could not read the Thread state just now."
         assert v["saveEnabled"] is True
         assert v["adjustment"] == 8
+
+    def test_a_failed_node_read_with_a_live_weight_is_not_thread_not_running(self):
+        # On GET /node failed (null) while /device/thread reported a weight: "Could not read ...", comparison hidden, button off.
+        v = view(thread(adj=8), None)
+        assert v["hint"] == "Could not read the Thread state just now."
+        assert v["comparisonShown"] is False
+        assert v["buttonEnabled"] is False
+
+    def test_a_failed_node_read_without_a_weight_says_thread_is_not_running(self):
+        # On GET /node failed (null) and a thread reply without a weight: "Thread is not running."
+        v = view({"leader_weight_adjustment": 8}, None)
+        assert v["hint"] == "Thread is not running."
+        assert v["buttonEnabled"] is False
+
+    def test_the_labels_use_signs_and_a_real_minus(self):
+        # On adjustments +8, 0, -3 (U+2212) and a pending +2: breakdown and label show the signed value.
+        assert (
+            view(thread(adj=8), node())["breakdown"] == "65 base \u00b7 +8 adjustment"
+        )
+        assert view(thread(adj=0), node())["breakdown"] == "65 base \u00b7 0 adjustment"
+        assert (
+            view(thread(adj=-3), node())["breakdown"]
+            == "65 base \u00b7 \u22123 adjustment"
+        )
+        assert view(thread(adj=-3), node())["label"] == "Weight adjustment: \u22123"
+        assert (
+            view(thread(adj=0), node(), pending=2)["label"]
+            == "Weight adjustment: +2  (weight 67, not saved)"
+        )
 
     def test_a_partial_reply_hides_the_comparison(self):
         # On a thread reply without weights (partial): comparison hidden, button disabled.
@@ -401,7 +430,7 @@ class TestLeaderPage:
             return [shown, t.calls.filter(c => c.method === 'PUT').map(c => c.body), t.el('ld-adj').value];
         """
         )
-        assert r[0] == ["8", True, True, "Thread is not running."]
+        assert r[0] == ["8", True, True, "Could not read the Thread state just now."]
         assert r[1] == ['{"leader_weight_adjustment":3}']
         assert r[2] == "3"
 
