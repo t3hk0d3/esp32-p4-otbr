@@ -7,6 +7,8 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-03
+
 ### Added
 
 - TREL (Thread over Ethernet): Thread mesh links over the backbone interface to other border routers of the same Thread
@@ -124,7 +126,8 @@ on-board ESP32-C6 as the radio co-processor over SPI.
 
 See `docs/troubleshooting.md` for the full list.
 
-[Unreleased]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/t3hk0d3/esp32-p4-otbr/releases/tag/v0.1.0
