@@ -139,11 +139,15 @@ static bool get_backbone(backbone_t *bb)
     return true;
 }
 
-static int netif_ip6(esp_netif_t *netif, uint8_t out[][16], int cap)
+/* The valid (preferred or deprecated) IPv6 addresses of `netif`, or with `preferred_only` the preferred ones. */
+static int netif_ip6_of(esp_netif_t *netif, bool preferred_only, uint8_t out[][16], int cap)
 {
     esp_ip6_addr_t addrs[CONFIG_LWIP_IPV6_NUM_ADDRESSES];
-    int n = netif ? esp_netif_get_all_ip6(netif, addrs) : 0;
+    int n = 0;
 
+    if (netif) {
+        n = preferred_only ? esp_netif_get_all_preferred_ip6(netif, addrs) : esp_netif_get_all_ip6(netif, addrs);
+    }
     n = MIN(n, cap);
     for (int i = 0; i < n; i++) {
         memcpy(out[i], addrs[i].addr, 16);
@@ -151,7 +155,27 @@ static int netif_ip6(esp_netif_t *netif, uint8_t out[][16], int cap)
     return n;
 }
 
-/* The backbone addresses for the engine: IPv4 (router ID), link-local and a global next-hop (GUA before ULA). */
+static int netif_ip6(esp_netif_t *netif, uint8_t out[][16], int cap)
+{
+    return netif_ip6_of(netif, false, out, cap);
+}
+
+/* The best global address of `addrs` into the next-hop, GUA before ULA; false when there is none. */
+static bool pick_global(uint8_t addrs[][16], int n, routing_bgp_nexthop_t *nh)
+{
+    for (int i = 0; i < n; i++) {
+        if (!is_link_local(addrs[i]) && (!nh->has_global || (is_ula(nh->global) && !is_ula(addrs[i])))) {
+            nh->has_global = true;
+            memcpy(nh->global, addrs[i], 16);
+        }
+    }
+    return nh->has_global;
+}
+
+/*
+ * The backbone addresses for the engine: IPv4 (router ID), link-local and a global next-hop (GUA before ULA). The
+ * next-hop is a preferred address; a deprecated one only when the backbone has no preferred global address.
+ */
 static void read_backbone(const backbone_t *bb, routing_engine_state_t *st)
 {
     uint8_t addrs[CONFIG_LWIP_IPV6_NUM_ADDRESSES][16];
@@ -162,15 +186,16 @@ static void read_backbone(const backbone_t *bb, routing_engine_state_t *st)
         st->backbone_ipv4 = ntohl(ip4.ip.addr);
     }
     for (int i = 0; i < n; i++) {
-        if (is_link_local(addrs[i])) {
-            if (!st->have_link_local) {
-                st->have_link_local = true;
-                memcpy(st->nexthop.link_local, addrs[i], 16);
-            }
-        } else if (!st->nexthop.has_global || (is_ula(st->nexthop.global) && !is_ula(addrs[i]))) {
-            st->nexthop.has_global = true;
-            memcpy(st->nexthop.global, addrs[i], 16);
+        if (is_link_local(addrs[i]) && !st->have_link_local) {
+            st->have_link_local = true;
+            memcpy(st->nexthop.link_local, addrs[i], 16);
         }
+    }
+    uint8_t preferred[CONFIG_LWIP_IPV6_NUM_ADDRESSES][16];
+    int n_preferred = netif_ip6_of(bb->netif, true, preferred, CONFIG_LWIP_IPV6_NUM_ADDRESSES);
+
+    if (!pick_global(preferred, n_preferred, &st->nexthop)) {
+        pick_global(addrs, n, &st->nexthop);
     }
 }
 
