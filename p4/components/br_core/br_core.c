@@ -725,23 +725,45 @@ static bool ot_callable(void)
     return callable;
 }
 
+#if CONFIG_OPENTHREAD_RADIO_TREL
+// A session around the OpenThread access: a radio push otherwise deletes the lock and the instance while this task
+// waits for the lock (patch 22 in PATCHES.md, br_core.h). False, with nothing open, when OpenThread is not callable.
+static bool trel_session_begin(void)
+{
+    if (!ot_callable()) {
+        return false;
+    }
+    if (!br_core_ot_session_begin()) {
+        return false;
+    }
+    if (!ot_callable()) { // a radio fault came in between
+        br_core_ot_session_end();
+        return false;
+    }
+    return true;
+}
+#endif
+
 esp_err_t br_core_set_trel(bool enabled)
 {
 #if CONFIG_OPENTHREAD_RADIO_TREL
     atomic_store(&s_trel_wanted, enabled);
-    if (!ot_callable()) {
+    if (!trel_session_begin()) {
         return ESP_ERR_INVALID_STATE; // stored, applied by the next esp_openthread_init
     }
     if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(TREL_SET_LOCK_MS))) {
+        br_core_ot_session_end();
         ESP_LOGW(TAG, "TREL %s: OpenThread busy, applied at the next start", enabled ? "on" : "off");
         return ESP_ERR_TIMEOUT;
     }
-    if (!ot_callable()) { // OpenThread stopped while this task waited for the lock
+    if (!ot_callable()) { // a radio fault while this task waited for the lock
         esp_openthread_lock_release();
+        br_core_ot_session_end();
         return ESP_ERR_INVALID_STATE;
     }
     otTrelSetEnabled(esp_openthread_get_instance(), enabled);
     esp_openthread_lock_release();
+    br_core_ot_session_end();
     ESP_LOGI(TAG, "TREL %s", enabled ? "on" : "off");
     return ESP_OK;
 #else
@@ -761,11 +783,16 @@ void br_core_get_trel(br_core_trel_t *out)
 #if CONFIG_OPENTHREAD_RADIO_TREL
     out->built = true;
     out->enabled = br_core_trel_wanted();
-    if (!ot_callable() || !esp_openthread_lock_acquire(pdMS_TO_TICKS(STATUS_LOCK_MS))) {
+    if (!trel_session_begin()) {
         return;
     }
-    if (!ot_callable()) { // OpenThread stopped while this task waited for the lock
+    if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(STATUS_LOCK_MS))) {
+        br_core_ot_session_end();
+        return;
+    }
+    if (!ot_callable()) { // a radio fault while this task waited for the lock
         esp_openthread_lock_release();
+        br_core_ot_session_end();
         return;
     }
     otInstance *instance = esp_openthread_get_instance();
@@ -793,6 +820,7 @@ void br_core_get_trel(br_core_trel_t *out)
         otIp6SockAddrToString(&peer->mSockAddr, entry->sock_address, sizeof(entry->sock_address));
     }
     esp_openthread_lock_release();
+    br_core_ot_session_end();
 #endif
 }
 
