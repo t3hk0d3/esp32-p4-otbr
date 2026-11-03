@@ -5,3 +5,4 @@
 
 #include "routing_types.h"
 #include "settings.h"
+#include "announce.h"
