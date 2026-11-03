@@ -46,7 +46,16 @@ ATTACH_TIMEOUT_S = 120
 ADDRESS_WAIT_S = 60
 REPLY_TIME = re.compile(r"time=([0-9.]+) ms")
 # node_requests is the control for topology_requests: the same OpenThread lock use, but no diagnostic traffic on the radio.
-LOADS = ("ota_upload", "pcap_stream", "topology_requests", "node_requests")
+# device_topology_requests is the Topology page's scan: POST /device/topology, poll GET until it ends, repeat.
+LOADS = (
+    "ota_upload",
+    "pcap_stream",
+    "topology_requests",
+    "device_topology_requests",
+    "node_requests",
+)
+TOPOLOGY_SCAN_TIMEOUT_S = 60
+TOPOLOGY_POLL_S = 0.5
 
 
 def ping(address, interval=PING_INTERVAL_S, count=PING_COUNT):
@@ -294,6 +303,30 @@ def make_load(base_url, truncated_bundle):
             def on_stop():
                 stop_capture(base_url)
 
+        elif name == "device_topology_requests":
+
+            def work(load):
+                response = requests.post(f"{base_url}/device/topology", timeout=30)
+                if response.status_code != requests.codes.accepted:
+                    load.fail(
+                        f"POST /device/topology answered {response.status_code} (board not in BR_RUNNING?)"
+                    )
+                    return
+                deadline = time.monotonic() + TOPOLOGY_SCAN_TIMEOUT_S
+                state = response.json()["state"]
+                while state == "running" and not load.stop_event.is_set():
+                    if time.monotonic() > deadline:
+                        load.fail(
+                            f"the scan still runs after {TOPOLOGY_SCAN_TIMEOUT_S} s"
+                        )
+                        return
+                    time.sleep(TOPOLOGY_POLL_S)
+                    state = requests.get(
+                        f"{base_url}/device/topology", timeout=30
+                    ).json()["state"]
+                if state == "failed":
+                    load.fail("the scan failed")
+
         else:
             path = "/topology" if name == "topology_requests" else "/node"
 
@@ -357,7 +390,7 @@ class TestLatencyIsolation:
             pytest.param(
                 load,
                 marks=pytest.mark.xfail(
-                    load == "topology_requests",
+                    load in ("topology_requests", "device_topology_requests"),
                     strict=False,
                     reason="V3 measurement: a topology request sends a Thread Diagnostic Get to the mesh; the added p99 "
                     "(100-125 ms) comes from OpenThread's own processing and radio time, not from the REST handler "
