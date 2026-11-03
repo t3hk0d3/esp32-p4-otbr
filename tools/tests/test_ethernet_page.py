@@ -993,11 +993,15 @@ class TestTrelLogic:
         )
         assert [r["network"], r["networkClass"]] == ["other", "chip chip-bad"]
 
-    def test_other_networks_are_counted_beside_the_peers(self):
+    def test_peer_without_a_network_flag_is_unknown(self):
+        r = eth("L.trelPeerView({ext_address: 'a', preference: null, address: 'x'})")
+        assert [r["panId"], r["network"], r["networkClass"]] == ["-", "-", "chip"]
+
+    def test_peers_of_other_networks_are_counted_beside_the_peers(self):
         v = eth(
             "L.trelView({enabled: true, active: true, peers: 1, peers_other: 2}, 'single')"
         )
-        assert [v["peers"], v["peersOther"]] == ["1", "+ 2 other networks"]
+        assert [v["peers"], v["peersOther"]] == ["1", "+ 2 peers of other networks"]
 
     def test_no_other_network_count_without_foreign_peers(self):
         assert (
@@ -1070,7 +1074,7 @@ class TestTrelCard:
                     t.el('trel-peers-other').textContent];
         """
         )
-        assert r == ["1", False, "+ 1 other network"]
+        assert r == ["1", False, "+ 1 peer of another network"]
 
     def test_no_other_network_note_without_foreign_peers(self):
         r = scenario(

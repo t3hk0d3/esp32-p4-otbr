@@ -845,7 +845,7 @@ bool br_core_trel_wanted(void)
 static br_core_trel_sort_t s_trel_sort;
 #endif
 
-void br_core_trel_read_locked(otInstance *instance, br_core_trel_t *out, bool with_peers)
+void br_core_trel_read_locked(otInstance *instance, br_core_trel_state_t *out, br_core_trel_list_t *list)
 {
 #if CONFIG_OPENTHREAD_RADIO_TREL
     const otTrelCounters *counters = otTrelGetCounters(instance);
@@ -861,33 +861,37 @@ void br_core_trel_read_locked(otInstance *instance, br_core_trel_t *out, bool wi
         out->rx_packets = counters->mRxPackets;
         out->rx_bytes = counters->mRxBytes;
     }
-    // Without an active dataset the board has no network: every peer is another network's.
-    br_core_trel_sort_init(&s_trel_sort,
-                           otDatasetIsCommissioned(instance) ? otThreadGetExtendedPanId(instance)->m8 : NULL, !with_peers);
+    br_core_trel_sort_init(&s_trel_sort, otThreadGetExtendedPanId(instance)->m8, otDatasetIsCommissioned(instance),
+                           list == NULL);
     otTrelInitPeerIterator(instance, &iterator);
     while ((peer = otTrelGetNextPeer(instance, &iterator)) != NULL) {
-        char sock_address[OT_IP6_SOCK_ADDR_STRING_SIZE];
-        otMultiRadioNeighborInfo radios;
+        char sock_address[OT_IP6_SOCK_ADDR_STRING_SIZE] = "";
         br_core_trel_raw_peer_t raw = {.sock_address = sock_address};
 
         memcpy(raw.ext_address, peer->mExtAddress.m8, sizeof(raw.ext_address));
         memcpy(raw.ext_pan_id, peer->mExtPanId.m8, sizeof(raw.ext_pan_id));
-        if (!with_peers) { // counted by its network only
-            br_core_trel_sort_add(&s_trel_sort, &raw);
-            continue;
-        }
-        otIp6SockAddrToString(&peer->mSockAddr, sock_address, sizeof(sock_address));
-        if (otMultiRadioGetNeighborInfo(instance, &peer->mExtAddress, &radios) == OT_ERROR_NONE) {
-            raw.neighbor = true;
-            raw.pref_154 = radios.mSupportsIeee802154 ? radios.mIeee802154Info.mPreference : BR_CORE_TREL_PREF_NONE;
-            raw.pref_trel = radios.mSupportsTrelUdp6 ? radios.mTrelUdp6Info.mPreference : BR_CORE_TREL_PREF_NONE;
+        if (br_core_trel_sort_keeps(&s_trel_sort, raw.ext_pan_id)) { // a peer only counted needs neither
+            otMultiRadioNeighborInfo info;
+            br_core_trel_radios_t radios = {
+                .found = otMultiRadioGetNeighborInfo(instance, &peer->mExtAddress, &info) == OT_ERROR_NONE,
+            };
+
+            if (radios.found) {
+                radios.has_154 = info.mSupportsIeee802154;
+                radios.pref_154 = info.mIeee802154Info.mPreference;
+                radios.has_trel = info.mSupportsTrelUdp6;
+                radios.pref_trel = info.mTrelUdp6Info.mPreference;
+            }
+            otIp6SockAddrToString(&peer->mSockAddr, sock_address, sizeof(sock_address));
+            br_core_trel_raw_set_radios(&raw, &radios);
         }
         br_core_trel_sort_add(&s_trel_sort, &raw);
     }
-    br_core_trel_sort_finish(&s_trel_sort, out);
+    br_core_trel_sort_finish(&s_trel_sort, out, list);
 #else
     (void)instance;
     (void)out;
+    (void)list;
 #endif
 }
 
@@ -909,7 +913,7 @@ void br_core_get_trel(br_core_trel_t *out)
         br_core_ot_session_end();
         return;
     }
-    br_core_trel_read_locked(esp_openthread_get_instance(), out, true);
+    br_core_trel_read_locked(esp_openthread_get_instance(), &out->state, &out->list);
     esp_openthread_lock_release();
     br_core_ot_session_end();
 #endif

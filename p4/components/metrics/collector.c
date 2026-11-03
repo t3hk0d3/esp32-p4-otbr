@@ -127,10 +127,9 @@ static void read_srp(otInstance *ins, metrics_thread_t *t)
 static void read_trel(otInstance *ins, metrics_thread_t *t)
 {
 #if CONFIG_OPENTHREAD_RADIO_TREL
-    static br_core_trel_t trel; // the collector task only; kept off its stack
+    br_core_trel_state_t trel = {0};
 
-    memset(&trel, 0, sizeof(trel));
-    br_core_trel_read_locked(ins, &trel, false); // the same walk as /device/status, counts only: both report alike
+    br_core_trel_read_locked(ins, &trel, NULL); // the same walk as /device/status, counts only: both report alike
     t->trel.built = true;
     t->trel.enabled = br_core_trel_wanted();
     t->trel.active = trel.active;

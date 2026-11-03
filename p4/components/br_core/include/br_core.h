@@ -89,12 +89,12 @@ bool br_core_trel_wanted(void);
 void br_core_get_trel(br_core_trel_t *out);
 
 /**
- * Fill the OpenThread part of `out` (state_valid, active, counters, both peer counts and, with `with_peers`, the sorted
- * peer list) from one walk of the TREL peer table. The caller holds the OpenThread lock and has checked that
- * OpenThread is up. Leaves `out` untouched in a build without TREL. Shared by br_core_get_trel and the metrics
- * collector (counts only), so both report alike.
+ * Fill `out` (state_valid, active, counters, both peer counts) and, unless `list` is NULL, the sorted peer list from one
+ * walk of the TREL peer table. The caller holds the OpenThread lock and has checked that OpenThread is up. Leaves both
+ * untouched in a build without TREL. Shared by br_core_get_trel and the metrics collector (counts only), so both
+ * report alike.
  */
-void br_core_trel_read_locked(otInstance *instance, br_core_trel_t *out, bool with_peers);
+void br_core_trel_read_locked(otInstance *instance, br_core_trel_state_t *out, br_core_trel_list_t *list);
 
 /**
  * OpenThread session: while one is open a radio push or ROM recovery does not tear OpenThread down (its lock and

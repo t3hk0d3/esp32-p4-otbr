@@ -24,17 +24,33 @@ typedef struct {
     int16_t pref_trel;     /**< OpenThread's TREL preference 0..255, BR_CORE_TREL_PREF_NONE when not used */
 } br_core_trel_peer_t;
 
+/** What OpenThread reports of TREL: small, so the metrics collector keeps one without the peer list. */
 typedef struct {
-    bool built;       /**< the firmware has TREL (CONFIG_OPENTHREAD_RADIO_TREL) */
-    bool enabled;     /**< the setting (br_core_set_trel) */
     bool state_valid; /**< the fields below were read from OpenThread; false when it is not up or its lock was busy */
     bool active;      /**< OpenThread runs TREL: enabled and Thread up (otTrelIsEnabled) */
     uint16_t peers;       /**< peers of the board's Thread network */
     uint16_t peers_other; /**< peers advertising another Thread network */
     uint64_t tx_packets, tx_bytes, tx_failures, rx_packets, rx_bytes;
-    size_t peer_count; /**< entries in peer_list, at most BR_CORE_TREL_PEERS_MAX: this network's peers first */
-    br_core_trel_peer_t peer_list[BR_CORE_TREL_PEERS_MAX];
+} br_core_trel_state_t;
+
+typedef struct {
+    size_t count; /**< entries in peers, at most BR_CORE_TREL_PEERS_MAX: this network's peers first */
+    br_core_trel_peer_t peers[BR_CORE_TREL_PEERS_MAX];
+} br_core_trel_list_t;
+
+typedef struct {
+    bool built;   /**< the firmware has TREL (CONFIG_OPENTHREAD_RADIO_TREL) */
+    bool enabled; /**< the setting (br_core_set_trel) */
+    br_core_trel_state_t state;
+    br_core_trel_list_t list;
 } br_core_trel_t;
+
+/** OpenThread's view of one peer as a Thread neighbour (otMultiRadioGetNeighborInfo). */
+typedef struct {
+    bool found; /**< the lookup succeeded: the peer is a Thread neighbour of the board */
+    bool has_154, has_trel;
+    uint8_t pref_154, pref_trel;
+} br_core_trel_radios_t;
 
 /** One peer of OpenThread's TREL peer table, as the sorter takes it. */
 typedef struct {
@@ -58,15 +74,23 @@ typedef struct {
 } br_core_trel_sort_t;
 
 /**
- * Start a sort. `own_ext_pan_id`: the board's extended PAN ID, NULL when it has none (no active dataset). With
- * `count_only`, peers are counted but not listed (finish writes peer_count 0).
+ * Start a sort. `own_ext_pan_id`: the board's extended PAN ID, used only when `commissioned` (an active dataset);
+ * otherwise the board has no network and every peer is another network's. With `count_only`, peers are counted but
+ * not listed.
  */
-void br_core_trel_sort_init(br_core_trel_sort_t *s, const uint8_t *own_ext_pan_id, bool count_only);
+void br_core_trel_sort_init(br_core_trel_sort_t *s, const uint8_t *own_ext_pan_id, bool commissioned, bool count_only);
 
+/** A peer advertising `ext_pan_id` would be listed: worth reading its address and radios before adding it. */
+bool br_core_trel_sort_keeps(const br_core_trel_sort_t *s, const uint8_t ext_pan_id[8]);
+
+/** Set `peer`'s neighbour flag and preferences from a neighbour lookup; a radio the neighbour does not use is NONE. */
+void br_core_trel_raw_set_radios(br_core_trel_raw_peer_t *peer, const br_core_trel_radios_t *radios);
+
+/** Count `peer`, and list it when there is room. Only a peer of this network is reported as a neighbour. */
 void br_core_trel_sort_add(br_core_trel_sort_t *s, const br_core_trel_raw_peer_t *peer);
 
-/** Write peers, peers_other, peer_count and peer_list: this network's peers first, then the others. */
-void br_core_trel_sort_finish(const br_core_trel_sort_t *s, br_core_trel_t *out);
+/** Write state's peers and peers_other and, unless `list` is NULL, the list: this network's peers first. */
+void br_core_trel_sort_finish(const br_core_trel_sort_t *s, br_core_trel_state_t *state, br_core_trel_list_t *list);
 
 #ifdef __cplusplus
 }

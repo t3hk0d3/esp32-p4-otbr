@@ -107,7 +107,7 @@ Thread network, and the mesh can route around weak radio hops. Thread devices th
 - State, peers and counters: `trel` in `GET /device/status`, the card on the Ethernet page, `br_trel_*` in
   [metrics](metrics.md), and `ot trel` on the test build console.
 - TREL border routers of other Thread networks on the same link are found too, but never used. They are listed with
-  their extended PAN ID and a red "other" chip and counted apart ("+ N other network", `peers_other`,
+  their extended PAN ID and a red "other" chip and counted apart ("+ N peers of other networks", `peers_other`,
   `br_trel_peers_other`); "Peers" counts this network only.
 - Preference: for a peer that is a Thread neighbour, the card shows OpenThread's preference per radio as a percentage
   (the API gives the raw 0 to 255; up on frames received and sends acknowledged, down on failures, -100 per lost TREL

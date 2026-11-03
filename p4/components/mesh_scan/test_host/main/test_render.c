@@ -197,6 +197,20 @@ TEST_CASE("On this board's router with TREL built: a radio the neighbour does no
     sink_free(&s);
 }
 
+TEST_CASE("On this board's link missing from its diagnostic answer: written from the snapshot", "[mesh_scan]")
+{
+    mesh_scan_result_t *r = transport_result();
+
+    r->this_links[3].lq_in = 2; // linked by the time of the snapshot, after this board answered
+    const mesh_scan_view_t view = done_view(r);
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "\"links\":[{\"router_id\":3,\"lq_in\":2,\"transport\":{\"ieee802154\":200,\"trel\":200}},");
+    assert_json(out);
+    sink_free(&s);
+}
+
 TEST_CASE("On another router's links: no transport key", "[mesh_scan]")
 {
     const mesh_scan_view_t view = done_view(transport_result());

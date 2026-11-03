@@ -1357,8 +1357,6 @@ function renderMap() {
   map.setAttribute('viewBox', '0 0 ' + lay.width + ' ' + lay.height);
   var edges = svg('g', {}, map), nodes = svg('g', {}, map);
   var board = model.devs.filter(function(d) { return d.thisBoard; })[0];
-  if (board && pos[board.id] && lay.home)
-    drawUplink(edges, board, pos[board.id], lay.home);
   model.devs.forEach(function(d) {
     if (d.parentId === null || !pos[d.id] || !pos[d.parentId])
       return;
@@ -1380,6 +1378,9 @@ function renderMap() {
       trelLinks++;
     }
   });
+  // After the TREL curves, so the home box sits on top of them where they pass through it.
+  if (board && pos[board.id] && lay.home)
+    drawUplink(edges, board, pos[board.id], lay.home);
   show('t-lg-trel', trelLinks > 0);
   model.devs.forEach(function(d) {
     if (pos[d.id])
@@ -1418,7 +1419,7 @@ function renderChips() {
   });
 }
 
-/* "15.4 255 · TREL 55, sends over 15.4" with the TREL figure red when it is below 15.4's. */
+/* "15.4 90% · TREL 22%, sends over 15.4" with the TREL figure red when it is below 15.4's. */
 function transportSpan(transport) {
   var span = el('span', null, 't-transport');
   L.transportParts(transport).forEach(function(p) { span.appendChild(el('span', p.text, p.low ? 'pref-low' : '')); });

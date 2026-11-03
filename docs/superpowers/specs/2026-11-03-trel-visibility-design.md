@@ -66,9 +66,10 @@ Anti-goals (a failure even if it technically works):
 
 - The peer table gains a column "Network (ext. PAN ID)": the extended PAN ID followed by a chip, green "this" for
   `same_network`, red "other" otherwise.
-- The "Peers" figure shows `peers`; when `peers_other` > 0, "+ N other network" follows in muted text.
-- A "Preference" column shows the per-radio preference, e.g. "TREL 255 · 15.4 200"; "-" when `preference` is `null`.
-  The TREL figure is red when it is lower than the 15.4 figure.
+- The "Peers" figure shows `peers`; when `peers_other` > 0, "+ N peers of other networks" follows in muted text.
+- A "Preference" column shows the per-radio preference as a percentage of 255 (user, 2026-11-03; the API keeps
+  0..255), e.g. "15.4 78% · TREL 100%"; "-" when `preference` is `null`. The TREL figure is red when it is lower than
+  the 15.4 figure.
 - Existing stale/error handling of the card is unchanged.
 
 ### 3.3 Transport of the board's router links (scan data)
@@ -92,15 +93,15 @@ Anti-goals (a failure even if it technically works):
 - A link from this board whose transport includes TREL is drawn twice:
   - the straight line as today when it also runs over 15.4 (colour and dashes by link quality, LQI badge);
   - a **dashed purple curve** (Bézier) from this board through the "Home network · Ethernet" box to the neighbour,
-    with a badge "TREL <preference>", e.g. "TREL 255". A TREL-only link (`ieee802154` null) has only the curve: no
+    with a badge "TREL <preference>", e.g. "TREL 100%". A TREL-only link (`ieee802154` null) has only the curve: no
     straight line is drawn for it, even when the other router reports a link quality for it.
 - The TREL badge is red when TREL's preference is lower than 15.4's (user, 2026-11-03).
 - The colour is distinct from the three link-quality colours, so the curve cannot be read as a quality 1 radio link
   (red dashes).
 - Legend: one new entry, "dashed purple = TREL (tunnel over Ethernet)", shown only when a TREL link is on the map.
 - Device details panel and the "Connected via" column of the device list name the transport of this board's link to
-  that router in words, with both preferences and the radio OpenThread sends on: "15.4 255", "TREL 255", or
-  "15.4 255 · TREL 55, sends over 15.4". The TREL figure is red under the same rule as the badge.
+  that router in words, with both preferences and the radio OpenThread sends on: "15.4 100%", "TREL 100%", or
+  "15.4 90% · TREL 22%, sends over 15.4". The TREL figure is red under the same rule as the badge.
 - Link quality of a link that also runs over TREL: OpenThread keeps one link quality per neighbour, fed by both radios,
   and counts every TREL frame as -20 dBm, so the value leans toward 3. The straight line keeps its LQI badge as
   reported; the details panel says "link quality includes TREL frames" for such a link. (Builder's call, see 6.)
@@ -109,8 +110,9 @@ Anti-goals (a failure even if it technically works):
 
 - Styleguide: `STYLEGUIDE.md` (naming, formatting, errors, tests). Frontend follows the existing page code
   (`topology.js`, `ethernet.js`) and its host-test harness in `tools/tests/`.
-- `/device/status` still fits its 2048-byte buffer with 8 peers carrying the three new fields (host test).
-- Web image budget: 384 KB (`tools/tests/test_device_pages.py`).
+- `/device/status` fits its handler buffer (`STATUS_BODY_MAX`, raised from 2048 to 3072 bytes) with 8 peers carrying
+  the three new fields (host test).
+- Web image budget: 192 KB gzipped (`tools/tests/test_pack_web.py`).
 - Hardware: one batched on-board pass after review (see the hardware budget rule): the TREL peer rig
   (`tools/trel_peer`) for 3.1, 3.2 and the map; a foreign-network peer can be made with a second `ot-ctl` network on the
   peer (`dataset init new`).

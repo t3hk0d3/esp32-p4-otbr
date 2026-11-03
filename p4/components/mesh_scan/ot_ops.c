@@ -466,6 +466,7 @@ static void snapshot_transport(otInstance *ins, mesh_scan_result_t *r)
         }
         r->this_links[id] = (mesh_scan_transport_t) {
             .valid = true,
+            .lq_in = router.mLinkQualityIn,
             .pref_154 = radios.mSupportsIeee802154 ? radios.mIeee802154Info.mPreference : MESH_SCAN_PREF_NONE,
             .pref_trel = radios.mSupportsTrelUdp6 ? radios.mTrelUdp6Info.mPreference : MESH_SCAN_PREF_NONE,
         };

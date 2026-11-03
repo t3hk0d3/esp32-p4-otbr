@@ -280,24 +280,25 @@ function count(n) {
 }
 
 /*
- * What the TREL card shows for the "trel" object of GET /device/status (null in a build without TREL: no card) and the
- * running mode: {available, chip, chipClass, where, peers, tx, rx, failures, peerList, hint}.
- */
-/*
  * One row of the TREL peer table. `preference` is null for a peer that is not a Thread neighbour (every peer of another
- * network): no preference parts, shown "-".
+ * network): no preference parts, shown "-". A `same_network` that is not a boolean is unknown: "-", neutral chip.
  */
 function trelPeerView(p) {
+  var known = typeof p.same_network === 'boolean';
   return {
     ext_address : p.ext_address,
     address : p.address,
     panId : p.ext_pan_id || '-',
-    network : p.same_network ? 'this' : 'other',
-    networkClass : p.same_network ? 'chip chip-ok' : 'chip chip-bad',
+    network : !known ? '-' : p.same_network ? 'this' : 'other',
+    networkClass : !known ? 'chip' : p.same_network ? 'chip chip-ok' : 'chip chip-bad',
     prefParts : C.preferenceParts(p.preference)
   };
 }
 
+/*
+ * What the TREL card shows for the "trel" object of GET /device/status (null in a build without TREL: no card) and the
+ * running mode: {available, chip, chipClass, where, peers, peersOther, tx, rx, failures, peerList, hint}.
+ */
 function trelView(trel, mode) {
   if (!trel)
     return {available : false};
@@ -306,7 +307,7 @@ function trelView(trel, mode) {
     available : true,
     where : mode === 'split' ? 'On Thread backbone' : 'On Ethernet port',
     peers : count(trel.peers),
-    peersOther : other > 0 ? '+ ' + count(other) + (other === 1 ? ' other network' : ' other networks') : '',
+    peersOther : other > 0 ? '+ ' + count(other) + (other === 1 ? ' peer of another network' : ' peers of other networks') : '',
     tx : count(trel.tx_packets),
     rx : count(trel.rx_packets),
     failures : count(trel.tx_failures),

@@ -315,22 +315,22 @@ static void fill_trel(device_api_trel_t *out)
     br_core_get_trel(t);
     out->built = t->built;
     out->enabled = t->enabled;
-    out->state_valid = t->state_valid;
-    out->active = t->active;
-    out->peers = t->peers;
-    out->peers_other = t->peers_other;
-    out->tx_packets = t->tx_packets;
-    out->tx_failures = t->tx_failures;
-    out->rx_packets = t->rx_packets;
-    out->peer_count = t->peer_count < DEVICE_API_TREL_PEERS_MAX ? t->peer_count : DEVICE_API_TREL_PEERS_MAX;
+    out->state_valid = t->state.state_valid;
+    out->active = t->state.active;
+    out->peers = t->state.peers;
+    out->peers_other = t->state.peers_other;
+    out->tx_packets = t->state.tx_packets;
+    out->tx_failures = t->state.tx_failures;
+    out->rx_packets = t->state.rx_packets;
+    out->peer_count = t->list.count < DEVICE_API_TREL_PEERS_MAX ? t->list.count : DEVICE_API_TREL_PEERS_MAX;
     for (size_t i = 0; i < out->peer_count; i++) {
-        strlcpy(out->peer_list[i].ext_address, t->peer_list[i].ext_address, sizeof(out->peer_list[i].ext_address));
-        strlcpy(out->peer_list[i].ext_pan_id, t->peer_list[i].ext_pan_id, sizeof(out->peer_list[i].ext_pan_id));
-        out->peer_list[i].same_network = t->peer_list[i].same_network;
-        out->peer_list[i].neighbor = t->peer_list[i].neighbor;
-        out->peer_list[i].pref_154 = t->peer_list[i].pref_154;
-        out->peer_list[i].pref_trel = t->peer_list[i].pref_trel;
-        strlcpy(out->peer_list[i].address, t->peer_list[i].sock_address, sizeof(out->peer_list[i].address));
+        strlcpy(out->peer_list[i].ext_address, t->list.peers[i].ext_address, sizeof(out->peer_list[i].ext_address));
+        strlcpy(out->peer_list[i].ext_pan_id, t->list.peers[i].ext_pan_id, sizeof(out->peer_list[i].ext_pan_id));
+        out->peer_list[i].same_network = t->list.peers[i].same_network;
+        out->peer_list[i].neighbor = t->list.peers[i].neighbor;
+        out->peer_list[i].pref_154 = t->list.peers[i].pref_154;
+        out->peer_list[i].pref_trel = t->list.peers[i].pref_trel;
+        strlcpy(out->peer_list[i].address, t->list.peers[i].sock_address, sizeof(out->peer_list[i].address));
     }
     free(t);
 }

@@ -1620,6 +1620,14 @@ class TestTrelMap:
         assert r[1] == [["7 4", "#7b3fb5", True], ["7 4", "#7b3fb5", True]]
         assert "3" in r[2]  # the 15.4 line to the leader stays
 
+    def test_home_box_is_drawn_over_the_trel_curves(self):
+        r = run(
+            self.LOAD_TR + " const all = t.el('t-map').findAll(() => true);"
+            " const at = (cls) => all.map((e, i) => e.classes.has(cls) ? i : -1).filter((i) => i >= 0);"
+            " return [Math.max(...at('t-trel-edge')) < Math.min(...at('t-uplink')), at('t-uplink').length];"
+        )
+        assert r == [True, 1]
+
     def test_trel_only_link_has_no_straight_line(self):
         # R's badges are ["2", "3", "1/3", "3/0", "2"]; the last one is the board's link to r40, TREL only in TR.
         r = run(

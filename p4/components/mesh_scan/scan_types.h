@@ -101,6 +101,7 @@ typedef struct {
 /** How this board reaches one router neighbour (OpenThread multi-radio: 15.4 and TREL). */
 typedef struct {
     bool valid;        /**< this board has a link to that router and OpenThread knows its radios */
+    uint8_t lq_in;     /**< this board's incoming link quality from that router, as its own router table has it */
     int16_t pref_154;  /**< OpenThread's 15.4 preference 0..255, MESH_SCAN_PREF_NONE when not used */
     int16_t pref_trel; /**< OpenThread's TREL preference 0..255, MESH_SCAN_PREF_NONE when not used */
 } mesh_scan_transport_t;

@@ -316,6 +316,18 @@ static void write_transport(writer_t *w, const mesh_scan_result_t *res, const me
     raw(w, "}");
 }
 
+/*
+ * A router's incoming link quality from router `id`, 0 for no link. This board's own links also come from its local
+ * snapshot, so a link its diagnostic answer missed (it was taken earlier) still carries its transport.
+ */
+static uint8_t link_lq_in(const mesh_scan_result_t *res, const mesh_scan_router_t *r, size_t id)
+{
+    if (r->lq_in[id] > 0 || !r->this_device || !res->has_transport || !res->this_links[id].valid) {
+        return r->lq_in[id];
+    }
+    return res->this_links[id].lq_in;
+}
+
 static void write_router(writer_t *w, const mesh_scan_result_t *res, const mesh_scan_router_t *r)
 {
     if (!r->responded) {
@@ -341,10 +353,12 @@ static void write_router(writer_t *w, const mesh_scan_result_t *res, const mesh_
     size_t links = 0;
 
     for (size_t id = 0; id < MESH_SCAN_MAX_ROUTERS; id++) {
-        if (r->lq_in[id] > 0) {
+        const uint8_t lq_in = link_lq_in(res, r, id);
+
+        if (lq_in > 0) {
             comma(w, links++);
             key_u64(w, "{\"router_id\":", id);
-            key_u64(w, ",\"lq_in\":", r->lq_in[id]);
+            key_u64(w, ",\"lq_in\":", lq_in);
             write_transport(w, res, r, id);
             raw(w, "}");
         }
