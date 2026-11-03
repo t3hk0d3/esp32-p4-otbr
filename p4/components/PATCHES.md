@@ -110,8 +110,9 @@ reason, spec reference.
    httpd refuses (and would shadow) any GET path registered after it, so `GET /device/status` and
    `GET /device/sniffer.pcap` could not be added from `app_main` after `esp_br_web_start`. `app_main` sets
    `device_api_register` as the callback before starting the server. (spec 5.7)
-   `EXTRA_HANDLER_SLOTS` (the handlers the callback and the catch-all may add to `max_uri_handlers`) is 20 since the
-   network names (`GET`/`PUT /device/names`, spec 2026-11-03-network-names-design.md).
+   `EXTRA_HANDLER_SLOTS` (the handlers the callback and the catch-all may add to `max_uri_handlers`) was 20 since the
+   network names (`GET`/`PUT /device/names`, spec 2026-11-03-network-names-design.md) and is 24 since mesh routing
+   (patch 18).
 11. Applied (Task 18). `esp_ot_br_server`: the Thread REST background worker `thread_rest` (`rest_process_task`,
    `src/esp_br_web_api.c`) is created with `xTaskCreatePinnedToCore(..., 1)` instead of `xTaskCreate`. Reason: it takes
    the OpenThread lock every 100 ms and was unpinned, so it could run on core 0 next to the network path; it belongs to
@@ -215,6 +216,12 @@ reason, spec reference.
    `otThreadGetNextDiagnosticTlv` and a tick clock that `vTaskDelay` advances) for `test_topology_collector`, and scans `tests/host_platform.c` for the OpenThread functions to mock; `tests/test_rest.c` `test_actions` asserts
    the filtered sends and that a discovery answer without TLV 0 adds no device. The mux itself is tested in
    `p4/components/netdiag_mux/test_host/`.
+18. Applied (mesh routing, Task 8). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 20 -> 24, the slots
+   patch 10 reserves for the `device_api` routes and the catch-all `/*` GET handler. With `GET`/`PUT /device/routing`
+   `device_api` registers 20 routes (18 before: the names and topology routes), plus the catch-all: 21, which 20 slots
+   no longer cover (only the `+30` slack of `max_uri_handlers` hides the shortfall; running out silently drops the later
+   registrations, the catch-all first). 24 leaves 3 slots of headroom.
+   (docs/superpowers/specs/2026-11-03-mesh-routing-design.md sections 5, 6)
 
 17. Applied (2026-11). `esp_ot_br_server` frontend, upstream pages: new
    `frontend/static/mgmt.js` (pure logic exported for node: mode banner, random network parameters, Form Network and
