@@ -199,6 +199,40 @@ esp_err_t br_core_push_radio_firmware(const rcp_fw_source_t *source, char *err_d
 esp_err_t br_core_rom_recover(char *err_detail, size_t err_cap);
 
 /**
+ * Store the leader weight adjustment (NVS namespace `thread`, key `leader_adj`; written only when it changes, `net reset`
+ * keeps it) and apply it at once in BR_RUNNING: OpenThread's device properties recompute the local leader weight. In any
+ * other mode, or when the OpenThread lock is not free within 1 s, the value is stored and applied at the next border
+ * router start. Call it from one task at a time (the HTTP server task).
+ * @param adj BR_CORE_LEADER_ADJ_MIN..BR_CORE_LEADER_ADJ_MAX
+ * @param applied set to whether OpenThread uses the value now (false on every error)
+ * @return ESP_ERR_INVALID_ARG out of range or NULL `applied` (nothing stored), ESP_ERR_INVALID_STATE when storage is
+ *         degraded (nothing changes), the NVS error when the write fails
+ */
+esp_err_t br_core_set_leader_adjustment(int8_t adj, bool *applied);
+
+/** The stored leader weight adjustment: 0 when nothing is stored or storage is degraded. Never takes a lock. */
+int8_t br_core_leader_adjustment(void);
+
+/**
+ * This board's leader weight (otThreadGetLocalLeaderWeight: 64 + border router + power supply + the adjustment), with
+ * the bounded lock wait of br_core_get_status.
+ * @return ESP_ERR_INVALID_STATE when OpenThread is not running (RADIO_FAULT, not started, a push), ESP_ERR_TIMEOUT when
+ *         the lock was not free in time
+ */
+esp_err_t br_core_leader_weight(uint8_t *out);
+
+/**
+ * Take over as leader on explicit user request (never automatic): under the OpenThread lock (1 s wait) read the role,
+ * router eligibility and both weights, run br_core_leader_check, then otThreadBecomeLeader. OpenThread starts a new
+ * partition with this board as leader; the old leader reattaches.
+ * @param refusal set to BR_CORE_LEADER_OK, or the reason with ESP_ERR_INVALID_STATE (not BR_RUNNING: NOT_RUNNING;
+ *        OpenThread's own refusal: OT_ERROR_NOT_CAPABLE as WEIGHT_NOT_HIGHER, OT_ERROR_INVALID_STATE as NOT_ATTACHED)
+ * @return ESP_OK started, ESP_ERR_INVALID_STATE refused, ESP_ERR_TIMEOUT when the lock was not free within 1 s,
+ *         ESP_ERR_INVALID_ARG for NULL, ESP_FAIL for any other OpenThread error
+ */
+esp_err_t br_core_become_leader(br_core_leader_refusal_t *refusal);
+
+/**
  * Start the app validity timer: once the image is pending-verify, the app has run 60 s and the HTTP server
  * is listening (esp_br_web_is_server_started), mark it valid. Radio state, Ethernet link, sync result and
  * OpenThread state are deliberately not criteria. Safe to call early: the 60 s count from boot.

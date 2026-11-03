@@ -26,6 +26,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "mdns.h"
+#include "nvs.h"
 #include "openthread/border_routing.h"
 #include "openthread/dataset.h"
 #include "openthread/dataset_ftd.h"
@@ -34,6 +35,7 @@
 #include "openthread/link_raw.h"
 #include "openthread/platform/radio.h"
 #include "openthread/thread.h"
+#include "openthread/thread_ftd.h"
 #include "openthread/trel.h"
 #include "mode_fsm.h"
 #include "rcp_sync.h"
@@ -57,6 +59,9 @@ static const char *TAG = "br_core";
 // REST flag going off, so this only bounds a session held by slow HTTP I/O or a stuck OpenThread call.
 #define SESSION_DRAIN_MS 45000
 #define STATUS_LOCK_MS 100
+#define LEADER_LOCK_MS 1000 // the PUT /device/thread wait for the OpenThread lock
+#define LEADER_NVS_NAMESPACE "thread"
+#define LEADER_NVS_KEY "leader_adj"
 #define REBOOT_DELAY_MS 1500 // lets the caller of a push report its result before the reboot
 #define FAULT_NO_RCP "no rcp firmware"
 #define FAULT_INCOMPATIBLE "rcp incompatible"
@@ -104,6 +109,9 @@ typedef struct {
 
 static core_state_t s_core;
 static bool s_storage_degraded; // set by br_core_note_storage_init before br_core_start
+// Stored leader weight adjustment (NVS thread/leader_adj), loaded by br_core_note_storage_init; 0 when nothing is stored
+// or storage is degraded. Read without any lock (bring-up, the HTTP handlers); written only by the setter.
+static atomic_int s_leader_adj;
 static const mode_fsm_ops_t s_ops;
 // The only owner of the mode (spec 5.4). Its operations run under the OpenThread lock, except the push.
 static mode_fsm_t s_fsm = {.ops = &s_ops, .mode = BR_MODE_STARTING};
@@ -271,6 +279,17 @@ static esp_openthread_platform_config_t platform_config(void)
     return config;
 }
 
+// The stored leader weight adjustment into OpenThread's device properties (which recompute the local leader weight).
+// Called with the OpenThread lock held. OpenThread keeps the properties in the host instance only: they last until
+// esp_openthread_deinit, so every (re)start applies them again in bringup_task.
+static void apply_leader_adjustment(otInstance *instance, int8_t adj)
+{
+    otDeviceProperties props = *otThreadGetDeviceProperties(instance);
+
+    props.mLeaderWeightAdjustment = adj;
+    otThreadSetDeviceProperties(instance, &props);
+}
+
 // Border router start: the border-router-up hook (DHCPv6-PD, OMR), Thread on when a dataset is stored. Spec 5.3 step 5.
 static void bringup_task(void *arg)
 {
@@ -301,6 +320,13 @@ static void bringup_task(void *arg)
         s_border_router_up_cb(instance);
     } else {
         ESP_LOGW(TAG, "no routing hook registered, DHCPv6-PD stays off");
+    }
+
+    // Before Thread starts, so that the first leader weight it advertises already has the adjustment.
+    const int8_t adj = (int8_t)atomic_load(&s_leader_adj);
+    apply_leader_adjustment(instance, adj);
+    if (adj != 0) {
+        ESP_LOGI(TAG, "leader weight adjustment %+d (weight %u)", adj, otThreadGetLocalLeaderWeight(instance));
     }
 
     if (otDatasetIsCommissioned(instance)) {
@@ -596,13 +622,36 @@ esp_err_t br_core_mdns_start(const char *hostname, const char *instance)
     return ESP_OK;
 }
 
+// The stored leader weight adjustment, once NVS is usable. Nothing stored (or a value out of range): 0.
+static void load_leader_adjustment(void)
+{
+    nvs_handle_t handle;
+    int8_t value = 0;
+
+    if (nvs_open(LEADER_NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        return; // the namespace does not exist before the first write
+    }
+    const esp_err_t err = nvs_get_i8(handle, LEADER_NVS_KEY, &value);
+    nvs_close(handle);
+    if (err != ESP_OK) {
+        return;
+    }
+    if (!br_core_leader_adjustment_valid(value)) {
+        ESP_LOGW(TAG, "stored leader weight adjustment %d is out of range, using 0", value);
+        return;
+    }
+    atomic_store(&s_leader_adj, value);
+}
+
 void br_core_note_storage_init(esp_err_t storage_init_err)
 {
     s_storage_degraded = mode_fsm_storage_degraded(storage_init_err);
     if (s_storage_degraded) {
         ESP_LOGE(TAG, "storage init failed (%s): booting DEGRADED, OpenThread will not start; NVS is NOT erased "
                  "(it holds the Thread credentials)", esp_err_to_name(storage_init_err));
+        return;
     }
+    load_leader_adjustment();
 }
 
 esp_err_t br_core_start(esp_netif_t *backbone)
@@ -1400,4 +1449,137 @@ esp_err_t br_core_rom_recover(char *err_detail, size_t err_cap)
     // Before anything is stopped: without the jumper there is nothing to recover with.
     ESP_RETURN_ON_FALSE(rcp_sync_jumper_present(), ESP_ERR_NOT_SUPPORTED, TAG, "no maintenance jumper");
     return run_radio_job(NULL, err_detail, err_cap);
+}
+
+// ---- leader weight and take-over ----
+
+static esp_err_t store_leader_adjustment(int8_t adj)
+{
+    nvs_handle_t handle;
+
+    ESP_RETURN_ON_ERROR(nvs_open(LEADER_NVS_NAMESPACE, NVS_READWRITE, &handle), TAG, "nvs_open");
+    esp_err_t err = nvs_set_i8(handle, LEADER_NVS_KEY, adj);
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return err;
+}
+
+// Takes the OpenThread lock within `wait_ms` while OpenThread runs and the mode is still `mode` after the wait (a push
+// clears ot_ready under the lock before it tears OpenThread down). ESP_ERR_INVALID_STATE when it does not run or the
+// mode changed, ESP_ERR_TIMEOUT when the lock was not free in time. On ESP_OK the caller releases the lock.
+static esp_err_t ot_lock_in_mode(br_core_mode_t mode, uint32_t wait_ms)
+{
+    if (!ot_ready_now() || br_core_get_mode() != mode) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(wait_ms))) {
+        return ESP_ERR_TIMEOUT;
+    }
+    if (!ot_ready_now() || br_core_get_mode() != mode) {
+        esp_openthread_lock_release();
+        return ESP_ERR_INVALID_STATE;
+    }
+    return ESP_OK;
+}
+
+esp_err_t br_core_set_leader_adjustment(int8_t adj, bool *applied)
+{
+    ESP_RETURN_ON_FALSE(applied, ESP_ERR_INVALID_ARG, TAG, "no applied flag");
+    *applied = false;
+    ESP_RETURN_ON_FALSE(br_core_leader_adjustment_valid(adj), ESP_ERR_INVALID_ARG, TAG, "leader weight adjustment %d out of range", adj);
+    ESP_RETURN_ON_FALSE(!s_storage_degraded, ESP_ERR_INVALID_STATE, TAG, "storage is unavailable");
+
+    // One HTTP server task calls this, so the compare and the store need no lock of their own.
+    const bool changed = atomic_load(&s_leader_adj) != adj;
+    if (changed) {
+        ESP_RETURN_ON_ERROR(store_leader_adjustment(adj), TAG, "storing the leader weight adjustment");
+        atomic_store(&s_leader_adj, adj);
+    }
+
+    if (ot_lock_in_mode(BR_MODE_BR_RUNNING, LEADER_LOCK_MS) != ESP_OK) {
+        if (changed) {
+            ESP_LOGI(TAG, "leader weight adjustment %+d stored, applied at the next Thread start", adj);
+        }
+        return ESP_OK;
+    }
+    otInstance *instance = esp_openthread_get_instance();
+    const int8_t live = otThreadGetDeviceProperties(instance)->mLeaderWeightAdjustment;
+    if (live != adj) {
+        apply_leader_adjustment(instance, adj);
+        ESP_LOGI(TAG, "leader weight adjustment %+d (weight %u)", adj, otThreadGetLocalLeaderWeight(instance));
+    }
+    esp_openthread_lock_release();
+    *applied = true;
+    return ESP_OK;
+}
+
+int8_t br_core_leader_adjustment(void)
+{
+    return (int8_t)atomic_load(&s_leader_adj);
+}
+
+esp_err_t br_core_leader_weight(uint8_t *out)
+{
+    ESP_RETURN_ON_FALSE(out, ESP_ERR_INVALID_ARG, TAG, "no output");
+    // Like br_core_get_status: OpenThread takes calls in every mode but RADIO_FAULT.
+    if (!ot_ready_now() || br_core_get_mode() == BR_MODE_RADIO_FAULT) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(STATUS_LOCK_MS))) {
+        return ESP_ERR_TIMEOUT;
+    }
+    if (!ot_ready_now()) {
+        esp_openthread_lock_release();
+        return ESP_ERR_INVALID_STATE;
+    }
+    *out = otThreadGetLocalLeaderWeight(esp_openthread_get_instance());
+    esp_openthread_lock_release();
+    return ESP_OK;
+}
+
+esp_err_t br_core_become_leader(br_core_leader_refusal_t *refusal)
+{
+    ESP_RETURN_ON_FALSE(refusal, ESP_ERR_INVALID_ARG, TAG, "no refusal output");
+    *refusal = BR_CORE_LEADER_OK;
+
+    const esp_err_t lock_err = ot_lock_in_mode(BR_MODE_BR_RUNNING, LEADER_LOCK_MS);
+    if (lock_err == ESP_ERR_TIMEOUT) {
+        return ESP_ERR_TIMEOUT;
+    }
+    if (lock_err != ESP_OK) {
+        *refusal = br_core_leader_check(false, false, false, false, 0, 0);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    otInstance *instance = esp_openthread_get_instance();
+    const otDeviceRole role = otThreadGetDeviceRole(instance);
+    const bool attached = role == OT_DEVICE_ROLE_CHILD || role == OT_DEVICE_ROLE_ROUTER || role == OT_DEVICE_ROLE_LEADER;
+    const uint8_t own = otThreadGetLocalLeaderWeight(instance);
+    const uint8_t leader = otThreadGetLeaderWeight(instance);
+
+    *refusal = br_core_leader_check(true, attached, role == OT_DEVICE_ROLE_LEADER, otThreadIsRouterEligible(instance), own,
+                                    leader);
+    if (*refusal != BR_CORE_LEADER_OK) {
+        esp_openthread_lock_release();
+        return ESP_ERR_INVALID_STATE;
+    }
+    const otError error = otThreadBecomeLeader(instance);
+    esp_openthread_lock_release();
+
+    switch (error) {
+    case OT_ERROR_NONE:
+        ESP_LOGI(TAG, "taking over as leader (weight %u > %u)", own, leader);
+        return ESP_OK;
+    case OT_ERROR_NOT_CAPABLE:
+        *refusal = BR_CORE_LEADER_WEIGHT_NOT_HIGHER;
+        return ESP_ERR_INVALID_STATE;
+    case OT_ERROR_INVALID_STATE:
+        *refusal = BR_CORE_LEADER_NOT_ATTACHED;
+        return ESP_ERR_INVALID_STATE;
+    default:
+        ESP_LOGE(TAG, "becoming leader: %s", otThreadErrorToString(error));
+        return ESP_FAIL;
+    }
 }
