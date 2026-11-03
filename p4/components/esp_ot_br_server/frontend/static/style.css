@@ -485,6 +485,7 @@ tr:hover td { background: var(--primary-light); }
 .chip-ok { background: var(--ok-bg); color: #1e5e2c; }
 .chip-bad { background: #f8d7da; color: #721c24; }
 .chip-warn { background: var(--primary-light); color: #8a4700; }
+.pref-low { color: var(--danger); font-weight: 600; } /* TREL preference below 15.4's (Ethernet page, Topology) */
 
 .seg { display: inline-flex; flex-wrap: wrap; background: var(--muted-bg); border-radius: var(--radius); padding: 3px; gap: 2px; }
 .seg button { min-height: 36px; padding: 6px 14px; border: 0; border-radius: 6px; background: transparent; color: #4a4a4a; font: inherit; font-size: 14px; cursor: pointer; }

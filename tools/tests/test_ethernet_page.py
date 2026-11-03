@@ -869,9 +869,21 @@ class TestEthernetPrReview:
 
 
 TREL_STATUS = (
-    "H.fixture(H.STATUS, {trel: {enabled: true, active: true, peers: 2, tx_packets: 18204, tx_failures: 0,"
-    " rx_packets: 17951, peer_list: [{ext_address: '1a2b3c4d5e6f7081', address: '[fe80::1]:12390'},"
-    " {ext_address: '9f8e7d6c5b4a3921', address: '[fe80::2]:12390'}]}})"
+    "H.fixture(H.STATUS, {trel: {enabled: true, active: true, peers: 2, peers_other: 0, tx_packets: 18204,"
+    " tx_failures: 0, rx_packets: 17951, peer_list: ["
+    "{ext_address: '1a2b3c4d5e6f7081', ext_pan_id: 'adf0d025c4b51f00', same_network: true,"
+    " preference: {ieee802154: 255, trel: 255}, address: '[fe80::1]:12390'},"
+    " {ext_address: '9f8e7d6c5b4a3921', ext_pan_id: 'adf0d025c4b51f00', same_network: true,"
+    " preference: {ieee802154: 230, trel: 55}, address: '[fe80::2]:12390'}]}})"
+)
+# One partner of this network, one advertiser of another network (not a neighbour: no preference).
+TREL_TWO_NETWORKS = (
+    "H.fixture(H.STATUS, {trel: {enabled: true, active: true, peers: 1, peers_other: 1, tx_packets: 1,"
+    " tx_failures: 0, rx_packets: 1, peer_list: ["
+    "{ext_address: '1a2b3c4d5e6f7081', ext_pan_id: 'adf0d025c4b51f00', same_network: true,"
+    " preference: {ieee802154: null, trel: 255}, address: '[fe80::1]:12390'},"
+    " {ext_address: '7e287c8b8b140ee6', ext_pan_id: '5965b57e30c0def4', same_network: false, preference: null,"
+    " address: '[fe80::2]:48949'}]}})"
 )
 NET_TREL_OFF = "H.fixture(H.NETWORK, {active: {mode: 'single', single: {vlan: 0, ipv4: {dhcp: true}}, trel: false}})"
 
@@ -964,6 +976,48 @@ class TestTrelLogic:
         )
 
 
+    def test_peer_of_this_network_gets_the_this_chip(self):
+        r = eth(
+            "L.trelPeerView({ext_address: 'a', ext_pan_id: 'adf0d025c4b51f00', same_network: true,"
+            " preference: null, address: 'x'})"
+        )
+        assert [r["panId"], r["network"], r["networkClass"]] == [
+            "adf0d025c4b51f00",
+            "this",
+            "chip chip-ok",
+        ]
+
+    def test_peer_of_another_network_gets_the_other_chip(self):
+        r = eth(
+            "L.trelPeerView({ext_address: 'a', ext_pan_id: '5965b57e30c0def4', same_network: false,"
+            " preference: null, address: 'x'})"
+        )
+        assert [r["network"], r["networkClass"]] == ["other", "chip chip-bad"]
+
+    def test_other_networks_are_counted_beside_the_peers(self):
+        v = eth("L.trelView({enabled: true, active: true, peers: 1, peers_other: 2}, 'single')")
+        assert [v["peers"], v["peersOther"]] == ["1", "+ 2 other network"]
+
+    def test_no_other_network_count_without_foreign_peers(self):
+        assert (
+            eth("L.trelView({enabled: true, active: true, peers: 1, peers_other: 0}, 'single').peersOther")
+            == ""
+        )
+        assert eth("L.trelView({enabled: true, active: true, peers: 1}, 'single').peersOther") == ""
+
+    def test_trel_below_the_radio_is_low(self):
+        r = eth("L.trelPeerView({same_network: true, preference: {ieee802154: 230, trel: 55}})")
+        assert [r["prefTrel"], r["pref154"], r["trelLow"]] == [55, 230, True]
+
+    def test_trel_at_or_above_the_radio_or_alone_is_not_low(self):
+        assert eth("L.trelPeerView({preference: {ieee802154: 200, trel: 255}}).trelLow") is False
+        assert eth("L.trelPeerView({preference: {ieee802154: null, trel: 55}}).trelLow") is False
+
+    def test_non_neighbour_has_no_preference(self):
+        r = eth("L.trelPeerView({same_network: false, preference: null})")
+        assert [r["prefTrel"], r["pref154"], r["trelLow"]] == [None, None, False]
+
+
 @needs_node
 class TestTrelCard:
     """The TREL card of ethernet.js against a fake DOM and fetch"""
@@ -979,6 +1033,58 @@ class TestTrelCard:
         """
         )
         assert r == [False, "Active", "On Ethernet port", "true", "2", False, 2]
+
+    def test_network_column_shows_the_pan_id_and_a_chip(self):
+        r = scenario(
+            page("ethernet", routes(status_js=TREL_TWO_NETWORKS))
+            + START
+            + """
+            const rows = t.el('trel-peerlist').children;
+            return rows.map((tr) => [tr.children[1].allText().replace(/\s+/g, ' '), tr.children[1].children[0].className]);
+        """
+        )
+        assert r == [
+            ["adf0d025c4b51f00 this", "chip chip-ok"],
+            ["5965b57e30c0def4 other", "chip chip-bad"],
+        ]
+
+    def test_peers_figure_counts_this_network_and_names_the_others(self):
+        r = scenario(
+            page("ethernet", routes(status_js=TREL_TWO_NETWORKS))
+            + START
+            + """
+            return [t.el('trel-peers').textContent, t.el('trel-peers-other').hidden(),
+                    t.el('trel-peers-other').textContent];
+        """
+        )
+        assert r == ["1", False, "+ 1 other network"]
+
+    def test_no_other_network_note_without_foreign_peers(self):
+        r = scenario(
+            page("ethernet", routes(status_js=TREL_STATUS))
+            + START
+            + "return t.el('trel-peers-other').hidden();"
+        )
+        assert r is True
+
+    def test_preference_column_reads_both_radios_with_a_low_trel_in_red(self):
+        r = scenario(
+            page("ethernet", routes(status_js=TREL_STATUS))
+            + START
+            + """
+            const cells = t.el('trel-peerlist').children.map((tr) => tr.children[2]);
+            return cells.map((td) => [td.allText().replace(/\s+/g, ' '), td.findAll((e) => e.className === 'pref-low').length]);
+        """
+        )
+        assert r == [["TREL 255 \u00b7 15.4 255", 0], ["TREL 55 \u00b7 15.4 230", 1]]
+
+    def test_preference_of_a_non_neighbour_is_a_dash(self):
+        r = scenario(
+            page("ethernet", routes(status_js=TREL_TWO_NETWORKS))
+            + START
+            + "return t.el('trel-peerlist').children.map((tr) => tr.children[2].allText().replace(/\\s+/g, ' '));"
+        )
+        assert r == ["TREL 255", "-"]
 
     def test_build_without_trel_hides_the_card(self):
         r = scenario(

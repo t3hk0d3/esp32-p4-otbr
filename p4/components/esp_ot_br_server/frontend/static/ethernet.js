@@ -283,17 +283,40 @@ function count(n) {
  * What the TREL card shows for the "trel" object of GET /device/status (null in a build without TREL: no card) and the
  * running mode: {available, chip, chipClass, where, peers, tx, rx, failures, peerList, hint}.
  */
+/* Preference value or null: a number 0..255, anything else (null, missing) is "radio not used". */
+function pref(p, radio) { return p && typeof p[radio] === 'number' ? p[radio] : null; }
+
+/*
+ * One row of the TREL peer table. `preference` is null for a peer that is not a Thread neighbour (every peer of another
+ * network); trelLow: TREL's preference is below 15.4's, the tunnel is losing to the radio.
+ */
+function trelPeerView(p) {
+  var trel = pref(p.preference, 'trel'), radio = pref(p.preference, 'ieee802154');
+  return {
+    ext_address : p.ext_address,
+    address : p.address,
+    panId : p.ext_pan_id || '-',
+    network : p.same_network ? 'this' : 'other',
+    networkClass : p.same_network ? 'chip chip-ok' : 'chip chip-bad',
+    prefTrel : trel,
+    pref154 : radio,
+    trelLow : trel !== null && radio !== null && trel < radio
+  };
+}
+
 function trelView(trel, mode) {
   if (!trel)
     return {available : false};
+  var other = typeof trel.peers_other === 'number' ? trel.peers_other : 0;
   var v = {
     available : true,
     where : mode === 'split' ? 'On Thread backbone' : 'On Ethernet port',
     peers : count(trel.peers),
+    peersOther : other > 0 ? '+ ' + count(other) + ' other network' : '',
     tx : count(trel.tx_packets),
     rx : count(trel.rx_packets),
     failures : count(trel.tx_failures),
-    peerList : trel.peer_list || []
+    peerList : (trel.peer_list || []).map(trelPeerView)
   };
   if (!trel.enabled) {
     v.chip = 'Off';
@@ -373,6 +396,7 @@ return {
   reachText : reachText,
   taggedVlans : taggedVlans,
   trelOnly : trelOnly,
+  trelPeerView : trelPeerView,
   trelView : trelView
 };
 })();
@@ -520,6 +544,8 @@ function renderTrel() {
   pressed('trel-off', draft ? !draft.trel : !trel.enabled);
   $('trel-on').disabled = $('trel-off').disabled = trelSending || kit.isBusy();
   setText('trel-peers', v.peers);
+  setText('trel-peers-other', v.peersOther);
+  show('trel-peers-other', !!v.peersOther);
   setText('trel-tx', v.tx);
   setText('trel-rx', v.rx);
   setText('trel-fail', v.failures);
@@ -531,11 +557,29 @@ function renderTrel() {
     v.peerList.forEach(function(p) {
       var tr = el('tr');
       tr.appendChild(el('td', p.ext_address, 'mono'));
+      var network = el('td', p.panId + ' ', 'mono');
+      network.appendChild(el('span', p.network, p.networkClass));
+      tr.appendChild(network);
+      tr.appendChild(preferenceCell(p));
       tr.appendChild(el('td', p.address, 'mono'));
       body.appendChild(tr);
     });
   }
   setText('trel-hint', v.hint);
+}
+
+/* "TREL 255 · 15.4 200", the TREL figure red when it is below 15.4's; "-" for a peer that is not a neighbour. */
+function preferenceCell(p) {
+  var td = el('td', p.prefTrel === null && p.pref154 === null ? '-' : '');
+  if (p.prefTrel !== null) {
+    td.appendChild(el('span', 'TREL '));
+    td.appendChild(el('span', String(p.prefTrel), p.trelLow ? 'pref-low' : ''));
+  }
+  if (p.prefTrel !== null && p.pref154 !== null)
+    td.appendChild(el('span', ' \u00b7 '));
+  if (p.pref154 !== null)
+    td.appendChild(el('span', '15.4 ' + p.pref154));
+  return td;
 }
 
 function refreshTrel() {
