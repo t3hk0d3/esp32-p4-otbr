@@ -23,6 +23,8 @@ fi
 out="$(mkdir -p "$1" && cd "$1" && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+# zip adds to an existing archive: start from scratch so a re-run into the same directory ships no stale files.
+rm -f "$out/p4-flash.zip" "$out/c6-updater-flash.zip" "$out/third-party-licenses.zip"
 
 project_version() {
     python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["project_version"])' \

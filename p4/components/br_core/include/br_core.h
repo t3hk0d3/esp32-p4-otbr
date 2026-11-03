@@ -72,6 +72,19 @@ void br_core_get_status(br_core_status_t *out);
 void br_core_get_status_brief(br_core_status_t *out);
 
 /**
+ * OpenThread session: while one is open a radio push or ROM recovery does not tear OpenThread down (its lock and
+ * instance stay valid), so the holder may take and release the OpenThread lock as often as it needs, including around
+ * long waits for OpenThread callbacks. Returns false while OpenThread is not running or a push is about to stop it:
+ * then nothing is open and the caller must not touch OpenThread. Does not take the OpenThread lock. Sessions nest.
+ * Every task other than the OpenThread task opens one around its OpenThread access. Close it with
+ * br_core_ot_session_end; a push waits up to 45 s for the open sessions to close and is refused if they do not.
+ */
+bool br_core_ot_session_begin(void);
+
+/** Closes a session opened by br_core_ot_session_begin (only after it returned true). */
+void br_core_ot_session_end(void);
+
+/**
  * BR_RUNNING to SNIFFER (spec 5.4): Thread stops, the OpenThread netif goes down (Ethernet stays up), the raw link
  * receives promiscuously on `channel`. `receive_cb` runs in the OpenThread task for every frame.
  * ESP_ERR_INVALID_STATE unless BR_RUNNING (also while a firmware push has taken OpenThread over), ESP_ERR_INVALID_ARG unless 11..26 and `receive_cb` is not NULL (nothing changes then). If the raw link cannot be enabled,
@@ -111,7 +124,9 @@ void br_core_sniffer_keepalive(void);
  * OpenThread with the previous firmware and returns the push error. Blocks for seconds to minutes; it runs on
  * the caller's (management) task and takes the OpenThread lock only around the stop/start. Not callable from
  * the OpenThread task. The Thread REST API is switched off before OpenThread stops.
- * ESP_ERR_INVALID_STATE in SNIFFER and STARTING, or while another push runs (nothing is started then);
+ * ESP_ERR_INVALID_STATE in SNIFFER and STARTING, while the boot of the radio is still running, or while another
+ * push runs (nothing is started then); ESP_ERR_TIMEOUT when OpenThread sessions (br_core_ot_session_begin) stay open
+ * for 45 s (nothing was stopped then);
  * ESP_ERR_INVALID_ARG for a NULL source or read. `err_detail` (may be NULL) gets a short reason on failure.
  * Refused with ESP_ERR_INVALID_STATE as well when called from the OpenThread task, before anything is touched.
  * Refusal in STARTING also covers a border router start that failed (the mode stays STARTING): reboot instead.

@@ -230,6 +230,20 @@ reason, spec reference.
    `about.html`: project texts and links, `/device/status` fields. Every upstream page gets the project footer instead
    of the Espressif copyright line. Host tests: `tools/tests/test_mgmt_pages.py`.
 
+18. Applied. OpenThread sessions around every OpenThread user outside the OpenThread task, so that a radio push or ROM
+   recovery (which deletes the OpenThread lock and instance in `esp_openthread_deinit`) cannot run under them.
+   `esp_ot_br_server/src/esp_br_web.c`: every Web GUI handler (`s_resource_handlers`, `s_web_gui_handlers`) is registered
+   behind `ot_session_handler`, which opens a `br_core_ot_session_begin` session for the whole handler; `guard_now` sees
+   OpenThread as ready only inside one (`ot_ready_for_request`). The Thread REST dispatcher opens its own session around
+   the guard and `esp_br_thread_rest_request`. `esp_br_web_api.c`: `rest_process_once` opens one per poll; the scan waits
+   at most 30 s for its end callback (was `portMAX_DELAY`: a radio fault that stops the main loop mid-scan hung the only
+   HTTP task) and no new scan starts while one whose wait timed out still runs. Before: the handlers checked the ready
+   flag, then waited for the lock, and the pending-dataset write (30 s) and ping (14 s) released the lock and took it
+   again without a re-check, so a push started meanwhile deleted the lock under them (use-after-free). Now `br_core`
+   clears its ready state, waits up to 45 s for open sessions to close (the main loop keeps running, so their callbacks
+   arrive) and refuses the push with `ESP_ERR_TIMEOUT` if they do not. Host tests: `tests/test_rest.c`
+   `test_no_openthread_without_a_session` (mocks `br_core_ot_session_begin/end` in `tests/host_platform.c`).
+
 ### REST guard classification (patches 2 and 9)
 
 Classes: `NONE` no OpenThread access, always served. `READ` reads OpenThread state: 200 while OpenThread runs (patch 9

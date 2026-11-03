@@ -535,9 +535,16 @@ static void build_availableNetworks_list(otActiveScanResult *result)
     return;
 }
 
+/* Patch 16: the HTTP task waits for the end of a scan at most SCAN_WAIT_MS (a radio fault can stop the main loop
+ * mid-scan; an unbounded wait would hang the only HTTP task). A scan whose wait timed out may still deliver results
+ * into s_networkList, so no new scan starts until its end callback ran. Written under the OpenThread lock. */
+#define SCAN_WAIT_MS 30000
+static bool s_scan_running;
+
 static void handle_active_scan_event(otActiveScanResult *aResult, void *aContext)
 {
     if ((aResult) == NULL) {
+        s_scan_running = false;
         xSemaphoreGive(s_discover_done_semaphore);
     } else {
         build_availableNetworks_list(aResult);
@@ -554,11 +561,16 @@ static otError get_openthread_available_networks(void)
         ESP_GOTO_ON_FALSE(OT_ERROR_NONE == (ret = otIp6SetEnabled(ins, true)), ret, exit, API_TAG,
                           "Failed to enable IPv6 interface for scanning");
     }
+    xSemaphoreTake(s_discover_done_semaphore, 0); /* patch 16: drop the end of an earlier scan whose wait timed out */
+    s_scan_running = true;
     ESP_GOTO_ON_FALSE(OT_ERROR_NONE ==
                           (ret = otThreadDiscover(ins, scanChannels, OT_PANID_BROADCAST, false, false,
                                                   &handle_active_scan_event, NULL)),
                       ret, exit, API_TAG, "Failed to discover network");
 exit:
+    if (ret != OT_ERROR_NONE) {
+        s_scan_running = false;
+    }
     esp_openthread_lock_release();
     return ret;
 }
@@ -567,6 +579,12 @@ cJSON *handle_openthread_available_network_request(void)
 {
     otError ret = OT_ERROR_NONE;
     cJSON *networks = cJSON_CreateArray();
+
+    /* Patch 16: an earlier scan still running (its wait timed out) owns s_networkList. */
+    esp_openthread_lock_acquire(portMAX_DELAY);
+    const bool scan_running = s_scan_running;
+    esp_openthread_lock_release();
+    ESP_GOTO_ON_FALSE(!scan_running, OT_ERROR_BUSY, exit, API_TAG, "An earlier scan is still running");
 
     destroy_available_thread_networks_list(s_networkList);
 
@@ -578,7 +596,8 @@ cJSON *handle_openthread_available_network_request(void)
 
     ESP_GOTO_ON_FALSE(!get_openthread_available_networks(), OT_ERROR_FAILED, exit, API_TAG,
                       "Failed to get thread network list");
-    xSemaphoreTake(s_discover_done_semaphore, portMAX_DELAY);
+    ESP_GOTO_ON_FALSE(xSemaphoreTake(s_discover_done_semaphore, pdMS_TO_TICKS(SCAN_WAIT_MS)) == pdTRUE, OT_ERROR_FAILED,
+                      exit, API_TAG, "Scan did not end within %d ms", SCAN_WAIT_MS); /* patch 16 */
 
     ESP_GOTO_ON_FALSE(s_networkList, OT_ERROR_INVALID_ARGS, exit, API_TAG, "Invalid network list");
 
@@ -3364,17 +3383,18 @@ static void rest_poll_guarded(void)
     rest_poll(esp_openthread_get_instance());
 }
 
-/* Patch 2: while OpenThread is not ready (stopped, being torn down for a radio push or recovery) the OpenThread
- * lock may be deleted at any moment, so the worker must not touch it. The readiness flag is cleared before the
- * lock is destroyed; the guard is checked again under the lock in rest_poll_guarded(). */
+/* Patch 2: while OpenThread is not ready (stopped, being torn down for a radio push or recovery) the worker must
+ * not touch it; the guard is checked again under the lock in rest_poll_guarded(). Patch 16: the br_core session keeps
+ * a push from deleting the lock while the worker waits for it. */
 static void rest_process_once(void)
 {
-    if (!esp_br_web_openthread_ready()) {
+    if (!esp_br_web_openthread_ready() || !br_core_ot_session_begin()) {
         return;
     }
     esp_openthread_lock_acquire(portMAX_DELAY);
     rest_poll_guarded();
     esp_openthread_lock_release();
+    br_core_ot_session_end();
 }
 
 static void rest_process_task(void *argument)
