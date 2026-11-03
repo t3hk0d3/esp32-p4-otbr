@@ -23,6 +23,7 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "malloc.h"
+#include "netdiag_mux.h"
 #include "stdio.h"
 #include "stdlib.h"
 #include "string.h"
@@ -972,27 +973,37 @@ static void update_diagnosticTlv(char *key, thread_diagnosticTlv_list_t *diag_li
  * @param[in]  aMessageInfo  A pointer to the message info for @param aMessage. Available only when
  *                           @param aError is `OT_ERROR_NONE`.
  */
-static void get_diagnosticTlv_information(otError aError, const otMessage *aMessage, const otMessageInfo *aMessageInfo)
+static bool get_diagnosticTlv_information(otError aError, const otMessage *aMessage,
+                                          const otMessageInfo *aMessageInfo)
 {
     thread_diagnosticTlv_list_t *diag_list = (thread_diagnosticTlv_list_t *)malloc(sizeof(thread_diagnosticTlv_list_t));
     if (diag_list == NULL) {
         ESP_LOGW(API_TAG, "Diagnostic: out of memory, skipping node");
-        return;
+        return false;
     }
     otNetworkDiagTlv diagTlv;
     otNetworkDiagIterator iterator = OT_NETWORK_DIAGNOSTIC_ITERATOR_INIT;
     otError error;
     char rloc[7];
     char keyRloc[7] = "0xffee";
+    bool has_address16 = false;
     initialize_thread_diagnosticTlv_list(diag_list);
     while ((error = otThreadGetNextDiagnosticTlv(aMessage, &iterator, &diagTlv)) == OT_ERROR_NONE) {
         if (diagTlv.mType == OT_NETWORK_DIAGNOSTIC_TLV_SHORT_ADDRESS) {
             sprintf(rloc, "0x%04x", diagTlv.mData.mAddr16);
             strcpy(keyRloc, rloc);
+            has_address16 = true;
         }
         append_thread_diagnosticTlv_list(diag_list, diagTlv);
     }
+    /* Patch 17: an answer without Address16 (TLV 1), e.g. one meant for another sender, is not a router entry: skip it
+       instead of storing it under "0xffee" and counting it (it could end the collection early). */
+    if (!has_address16) {
+        destroy_thread_diagnosticTlv_list(diag_list);
+        return false;
+    }
     update_diagnosticTlv(keyRloc, diag_list);
+    return true;
 }
 
 /**
@@ -1034,9 +1045,10 @@ static void diagnosticTlv_result_handler(otError aError, otMessage *aMessage, co
         }
         if (xSemaphoreTake(s_diagnostic_semaphore, pdMS_TO_TICKS(1000)) == pdTRUE) {
             if (s_diag_collecting) {
-                get_diagnosticTlv_information(aError, aMessage, aMessageInfo);
-                s_diag_response_count++;
-                s_diag_last_response_tick = xTaskGetTickCount();
+                if (get_diagnosticTlv_information(aError, aMessage, aMessageInfo)) {
+                    s_diag_response_count++;
+                    s_diag_last_response_tick = xTaskGetTickCount();
+                }
             }
             xSemaphoreGive(s_diagnostic_semaphore);
         } else {
@@ -1056,13 +1068,14 @@ static esp_err_t build_thread_network_topology(void)
     esp_openthread_lock_acquire(portMAX_DELAY);
     otIp6Address rloc16address = *otThreadGetRloc(ins);
     otIp6Address multicastAddress;
-    ESP_GOTO_ON_FALSE(otThreadSendDiagnosticGet(ins, &rloc16address, kAllTlvTypes, sizeof(kAllTlvTypes),
-                                                &diagnosticTlv_result_handler, NULL) == OT_ERROR_NONE,
+    /* Patch 17: netdiag_mux owns OpenThread's single netdiag callback; filter_peer keeps other senders' answers out. */
+    ESP_GOTO_ON_FALSE(netdiag_mux_send_get(&rloc16address, kAllTlvTypes, sizeof(kAllTlvTypes),
+                                           &diagnosticTlv_result_handler, NULL, true) == OT_ERROR_NONE,
                       ESP_FAIL, exit, API_TAG, "Fail to send diagnostic rloc16address.");
     ESP_GOTO_ON_FALSE(otIp6AddressFromString(kMulticastAddrAllRouters, &multicastAddress) == OT_ERROR_NONE, ESP_FAIL,
                       exit, API_TAG, "Fail to convert ipv6 to string.");
-    ESP_GOTO_ON_FALSE(otThreadSendDiagnosticGet(ins, &multicastAddress, kAllTlvTypes, sizeof(kAllTlvTypes),
-                                                &diagnosticTlv_result_handler, NULL) == OT_ERROR_NONE,
+    ESP_GOTO_ON_FALSE(netdiag_mux_send_get(&multicastAddress, kAllTlvTypes, sizeof(kAllTlvTypes),
+                                           &diagnosticTlv_result_handler, NULL, true) == OT_ERROR_NONE,
                       ESP_FAIL, exit, API_TAG, "Fail to send diagnostic multicastAddress.");
 exit:
     esp_openthread_lock_release();
@@ -3225,9 +3238,11 @@ static void rest_poll(otInstance *instance)
                 action->attempts++;
                 rest_status(action, "active");
                 const uint8_t types[] = {0, 1, 2, 8, 23};
-                otThreadSendDiagnosticGet(instance, otThreadGetRealmLocalAllThreadNodesMulticastAddress(instance),
-                                          types, sizeof(types), rest_discover_devices_callback,
-                                          (void *)(uintptr_t)action->token);
+                /* Patch 17: through netdiag_mux (multicast: every answer reaches the callback, which drops answers
+                 * without the Ext Address TLV). */
+                netdiag_mux_send_get(otThreadGetRealmLocalAllThreadNodesMulticastAddress(instance),
+                                     types, sizeof(types), rest_discover_devices_callback,
+                                     (void *)(uintptr_t)action->token, true);
             } else {
                 s_rest_mesh_action = NULL;
             }
@@ -3313,8 +3328,9 @@ static void rest_poll(otInstance *instance)
                 rest_status(action, "active");
                 continue;
             }
-            otError error = otThreadSendDiagnosticGet(instance, &destination, types, count, rest_diagnostic_callback,
-                                                      (void *)(uintptr_t)action->token);
+            /* Patch 17: through netdiag_mux; for a unicast destination only its answers reach the callback. */
+            otError error = netdiag_mux_send_get(&destination, types, count, rest_diagnostic_callback,
+                                                 (void *)(uintptr_t)action->token, true);
             if (error == OT_ERROR_NONE) {
                 action->active = true;
                 rest_status(action, "active");

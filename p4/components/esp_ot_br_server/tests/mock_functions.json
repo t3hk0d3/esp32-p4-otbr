@@ -31,6 +31,7 @@
   "otMeshDiagQueryChildrenIp6Addrs": "return OT_ERROR_NONE;",
   "otMeshDiagQueryRouterNeighborTable": "return OT_ERROR_NONE;",
   "otThreadSendDiagnosticGet": "diagnostic_callback=p4;diagnostic_context=p5;return OT_ERROR_NONE;",
+  "otThreadGetNextDiagnosticTlv": "return mock_next_diag_tlv(p1,p2);",
   "otThreadSendDiagnosticReset": "return OT_ERROR_NONE;",
   "otBorderAgentEphemeralKeyGenerateTap": "strcpy(p0->mTap,\"123456789\");return OT_ERROR_NONE;",
   "otBorderAgentEphemeralKeyStart": "return OT_ERROR_NONE;",

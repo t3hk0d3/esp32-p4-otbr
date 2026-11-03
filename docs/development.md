@@ -39,6 +39,9 @@ make lint            # formatting and lint (pre-commit)
 - `make test-tools`: tests of the tools and of the device page scripts (needs `node`).
 - `make test-vendored`: the upstream esp_ot_br_server REST tests (needs `clang++` and a `make build` for the managed
   components).
+- `python3 tools/topology_preview.py --port 8765`: serves the frontend on localhost with canned `/device/topology`
+  (the test fixture's result), `/ping` and `/device/status` answers, to look at the Topology page without a board
+  (needs `node`).
 
 On-board tests need the board with the Thread peer (an ESP32-C6 or H2 devkit running `ot_cli` on a second serial port) and
 run against a test build, which the fixtures flash themselves:

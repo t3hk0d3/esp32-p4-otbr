@@ -39,7 +39,11 @@ The Dashboard shows the fault in red, with what to do and a link to the page tha
   firmware. Put it on a trusted network. `https://` URLs are not supported for downloads.
 - DHCPv6-PD makes Thread devices globally addressable; rely on the upstream router's firewall.
 - Requests for the mesh topology (`/topology`, `/api/diagnostics`) add roughly 100 ms to the latency of pings through the
-  border router while they run (Diagnostic Get traffic).
+  border router while they run (Diagnostic Get traffic). That figure was measured on the `/topology` multicast
+  diagnostic get, which the Topology page no longer uses. The page's scan (`POST /device/topology`) sends one discover,
+  then two unicast mesh-diagnostics queries per router (its child table and its children's addresses), one scan at a
+  time. Its added latency has not been measured yet;
+  `p4/pytest/test_latency.py` has the load `device_topology_requests` for it.
 - Flash writes (OTA) use XIP from PSRAM so traffic keeps flowing, but the P4 reboots after an update.
 - The `-dirty` flag of the app version stamp is as of the last configure (see [Building](building.md#versions)); a new commit
   refreshes the stamp.

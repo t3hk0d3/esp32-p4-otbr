@@ -34,7 +34,12 @@ void mock_reset(void) {
     mock_calls[0]=0;
     pending_callback=NULL;
     diagnostic_callback=NULL;
+    mock_netdiag_sends=0;
+    mock_netdiag_filtered_sends=0;
     mock_time=0;
+    mock_ticks=0;
+    mock_on_delay=NULL;
+    mock_diag_tlv_count=0;
     mock_mode=BR_MODE_BR_RUNNING;
     mock_ot_ready=true;
     mock_ot_writes=0;
@@ -46,4 +51,9 @@ void mock_complete_pending(void) {
 void mock_deliver_diagnostic(uintptr_t token) {
     otMessageInfo info={0};
     if(diagnostic_callback) {diagnostic_callback(OT_ERROR_NONE,(otMessage *)(uintptr_t)1,&info,(void *)(token?token:(uintptr_t)diagnostic_context));}
+}
+otError mock_next_diag_tlv(otNetworkDiagIterator *iterator, otNetworkDiagTlv *tlv) {
+    if(*iterator>=mock_diag_tlv_count) {return OT_ERROR_NOT_FOUND;}
+    *tlv=mock_diag_tlvs[(*iterator)++];
+    return OT_ERROR_NONE;
 }

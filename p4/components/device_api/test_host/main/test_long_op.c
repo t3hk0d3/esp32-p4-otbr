@@ -130,3 +130,17 @@ TEST_CASE("On an OTA or a push while a ROM recovery runs: it is refused and the 
     release_all();
     TEST_ASSERT_FALSE(device_api_op_long_running());
 }
+
+TEST_CASE("On a capture stream: device_api_op_pcap_running is true until it is released, and only for the pcap slot",
+          "[device_api]")
+{
+    release_all();
+    TEST_ASSERT_FALSE(device_api_op_pcap_running());
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_OTA)); /* a long operation is not a capture */
+    TEST_ASSERT_FALSE(device_api_op_pcap_running());
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_PCAP));
+    TEST_ASSERT_TRUE(device_api_op_pcap_running());
+    device_api_op_end(DEVICE_API_OP_PCAP);
+    TEST_ASSERT_FALSE(device_api_op_pcap_running());
+    release_all();
+}

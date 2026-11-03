@@ -300,6 +300,8 @@ class TestBootRadioFault:
         assert refused == {key: 503 for key in refused}
         # The board is still alive and serving.
         assert requests.get(base + "/index.html", timeout=10).status_code == 200
+        # /device/* is not behind the guard: the topology state (no mesh traffic) is served in RADIO_FAULT too.
+        assert requests.get(base + "/device/topology", timeout=10).status_code == 200
 
 
 class TestBootMdns:

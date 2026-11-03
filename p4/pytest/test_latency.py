@@ -46,7 +46,17 @@ ATTACH_TIMEOUT_S = 120
 ADDRESS_WAIT_S = 60
 REPLY_TIME = re.compile(r"time=([0-9.]+) ms")
 # node_requests is the control for topology_requests: the same OpenThread lock use, but no diagnostic traffic on the radio.
-LOADS = ("ota_upload", "pcap_stream", "topology_requests", "node_requests")
+# device_topology_requests is the Topology page's scan: POST /device/topology, poll GET until it ends, repeat.
+LOADS = (
+    "ota_upload",
+    "pcap_stream",
+    "topology_requests",
+    "device_topology_requests",
+    "node_requests",
+)
+TOPOLOGY_SCAN_TIMEOUT_S = 60
+TOPOLOGY_POLL_S = 0.5
+TOPOLOGY_DRAIN_S = 65  # the scan's 60 s cap plus slack
 
 
 def ping(address, interval=PING_INTERVAL_S, count=PING_COUNT):
@@ -293,6 +303,46 @@ def make_load(base_url, truncated_bundle):
 
             def on_stop():
                 stop_capture(base_url)
+
+        elif name == "device_topology_requests":
+
+            def work(load):
+                response = requests.post(f"{base_url}/device/topology", timeout=30)
+                if response.status_code != requests.codes.accepted:
+                    load.fail(
+                        f"POST /device/topology answered {response.status_code} (board not in BR_RUNNING?)"
+                    )
+                    return
+                deadline = time.monotonic() + TOPOLOGY_SCAN_TIMEOUT_S
+                state = response.json()["state"]
+                while state == "running" and not load.stop_event.is_set():
+                    if time.monotonic() > deadline:
+                        load.fail(
+                            f"the scan still runs after {TOPOLOGY_SCAN_TIMEOUT_S} s"
+                        )
+                        return
+                    time.sleep(TOPOLOGY_POLL_S)
+                    state = requests.get(
+                        f"{base_url}/device/topology", timeout=30
+                    ).json()["state"]
+                if state == "failed":
+                    load.fail("the scan failed")
+
+            def on_stop():
+                # The worker may still be in a POST that starts one more scan: let it finish, then wait for the board's
+                # scan to end, so that it does not run into the next load (node_requests, the control).
+                load.thread.join(timeout=TOPOLOGY_DRAIN_S)
+                deadline = time.monotonic() + TOPOLOGY_DRAIN_S
+                while time.monotonic() < deadline:
+                    state = requests.get(
+                        f"{base_url}/device/topology", timeout=30
+                    ).json()["state"]
+                    if state != "running":
+                        return
+                    time.sleep(TOPOLOGY_POLL_S)
+                raise AssertionError(
+                    f"the topology scan still runs {TOPOLOGY_DRAIN_S} s after the load stopped"
+                )
 
         else:
             path = "/topology" if name == "topology_requests" else "/node"

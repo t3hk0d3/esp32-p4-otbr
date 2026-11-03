@@ -32,6 +32,20 @@
 #include "br_core_mode.h"
 #include "esp_br_guard.h"
 
+#define ESP_RETURN_ON_FALSE(cond, err, tag, ...) \
+    do {                                         \
+        if (!(cond)) {                           \
+            return err;                          \
+        }                                        \
+    } while (0)
+#define ESP_GOTO_ON_FALSE(cond, err, label, tag, ...) \
+    do {                                              \
+        if (!(cond)) {                                \
+            ret = err;                                \
+            goto label;                               \
+        }                                             \
+    } while (0)
+#define ESP_ERR_INVALID_ARG -3
 #define ESP_OK 0
 #define ESP_FAIL -1
 #define ESP_ERR_NO_MEM -2
@@ -40,6 +54,9 @@
 #define pdPASS 1
 #define pdMS_TO_TICKS(ms) (ms)
 typedef int esp_err_t;
+#define API_TAG "web_api"
+#define BASE_TAG "web_base"
+#define OPENTHREAD_INVALID_RLOC16 "0xffff"
 typedef void *TaskHandle_t;
 typedef struct {
     bool ready;
@@ -92,8 +109,14 @@ bool esp_br_web_openthread_ready(void);
 void mock_reset(void);
 #ifndef ESP_LOGI
 #define ESP_LOGI(tag, ...) ((void)0) /* logging is not checked on the host */
+#define ESP_LOGW(tag, ...) ((void)0)
 #endif
 void mock_deliver_diagnostic(uintptr_t token);
+/* netdiag_mux (patch 17): the host build forwards to the mocked otThreadSendDiagnosticGet, which captures the callback. */
+otError netdiag_mux_send_get(const otIp6Address *dest, const uint8_t *tlvs, uint8_t count,
+                             otReceiveDiagnosticGetCallback cb, void *ctx, bool filter_peer);
+extern unsigned mock_netdiag_sends;           /* netdiag_mux_send_get() calls so far */
+extern unsigned mock_netdiag_filtered_sends;  /* of those, with filter_peer set */
 otInstance *esp_openthread_get_instance(void);
 bool esp_openthread_lock_acquire(uint32_t timeout);
 void esp_openthread_lock_release(void);
@@ -114,6 +137,15 @@ extern bool mock_netcfg_deny;
 extern netcfg_service_t mock_netcfg_last_service;
 bool netcfg_request_allowed(httpd_req_t *req, netcfg_service_t svc);
 void vTaskDelay(uint32_t ticks);
+/* The /topology collector (patch 17): time advances with vTaskDelay; mock_on_delay runs at each delay. */
+typedef uint32_t TickType_t;
+TickType_t xTaskGetTickCount(void);
+uint32_t esp_get_free_heap_size(void);
+extern TickType_t mock_ticks;
+extern void (*mock_on_delay)(void);
+/* Scripted otThreadGetNextDiagnosticTlv answer: the TLVs the next iteration over a message returns. */
+extern otNetworkDiagTlv mock_diag_tlvs[8];
+extern unsigned mock_diag_tlv_count;
 size_t strlcpy(char *dest, const char *source, size_t length);
 size_t httpd_req_get_hdr_value_len(httpd_req_t *req, const char *key);
 int httpd_req_get_hdr_value_str(httpd_req_t *req, const char *key, char *value, size_t capacity);

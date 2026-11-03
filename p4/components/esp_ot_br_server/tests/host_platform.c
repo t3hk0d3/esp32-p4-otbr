@@ -35,6 +35,15 @@ otInstance *esp_openthread_get_instance(void)
 {
     return (otInstance *)(uintptr_t)1;
 }
+unsigned mock_netdiag_sends;
+unsigned mock_netdiag_filtered_sends;
+otError netdiag_mux_send_get(const otIp6Address *dest, const uint8_t *tlvs, uint8_t count,
+                             otReceiveDiagnosticGetCallback cb, void *ctx, bool filter_peer)
+{
+    mock_netdiag_sends++;
+    mock_netdiag_filtered_sends += filter_peer;
+    return otThreadSendDiagnosticGet(esp_openthread_get_instance(), dest, tlvs, count, cb, ctx);
+}
 bool esp_openthread_lock_acquire(uint32_t timeout)
 {
     (void)timeout;
@@ -103,9 +112,26 @@ int xTaskCreate(void (*task)(void *), const char *name, unsigned stack, void *ar
     }
     return 1;
 }
+TickType_t mock_ticks;
+void (*mock_on_delay)(void);
+otNetworkDiagTlv mock_diag_tlvs[8];
+unsigned mock_diag_tlv_count;
 void vTaskDelay(uint32_t ticks)
 {
-    (void)ticks;
+    mock_ticks += ticks;
+    if (mock_on_delay) {
+        void (*hook)(void) = mock_on_delay;
+        mock_on_delay = NULL;
+        hook();
+    }
+}
+TickType_t xTaskGetTickCount(void)
+{
+    return mock_ticks;
+}
+uint32_t esp_get_free_heap_size(void)
+{
+    return 1000000;
 }
 size_t strlcpy(char *dest, const char *src, size_t length)
 {

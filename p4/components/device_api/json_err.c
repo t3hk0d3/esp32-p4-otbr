@@ -27,6 +27,8 @@ const char *device_api_status_line(int http_status)
     switch (http_status) {
     case 200:
         return "200 OK";
+    case 202:
+        return "202 Accepted";
     case 400:
         return "400 Bad Request";
     case 403:
