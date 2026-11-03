@@ -76,7 +76,9 @@ Task names are FreeRTOS names. When two tasks share a name, the second one is la
 | `br_thread_collect_age_seconds` | gauge | |
 | `br_thread_collect_failures_total` | counter | |
 
-NAT64 translation counters are not exported: the NAT64 translator is not part of this firmware.
+NAT64 translation counters are not exported. NAT64 itself works (verified in the bring-up), but the translation does not
+run in OpenThread's own NAT64 translator, which these counters belong to: it is not in the linked libraries
+(`otNat64GetCounters` is absent).
 
 ## Example alerts
 
