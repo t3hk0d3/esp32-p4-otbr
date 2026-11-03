@@ -68,7 +68,8 @@ static const char *TAG = "br_core";
 #define EVENTFD_COUNT 4
 #endif
 #define TREL_SET_LOCK_MS 1000
-#define TREL_QUERY_MS 3000 // how long a peer query collects answers
+#define TREL_QUERY_MS 3000 // how long a peer query collects answers (esp mdns sends it about once a second)
+#define TREL_QUERY_DELAY_MS 100 // after an address event: a burst of them gets one query
 
 typedef struct {
     StaticSemaphore_t mutex_storage;
@@ -122,7 +123,8 @@ static bool ot_ready_now(void);
 // TREL setting (br_core_set_trel); applied after every esp_openthread_init.
 static atomic_bool s_trel_wanted = true;
 #if CONFIG_OPENTHREAD_RADIO_TREL
-static mdns_search_once_t *s_trel_query; // the last peer query (query_trel_peers); used by the event loop task only
+static esp_timer_handle_t s_trel_query_timer; // runs send_trel_query
+static mdns_search_once_t *s_trel_query;      // the last peer query; used by the esp_timer task only
 #endif
 
 static void set_reason(const char *reason)
@@ -350,9 +352,10 @@ static void note_address(void)
 // address, or before the switch port forwards, so the query is lost; esp mdns repeats browses on a new address only
 // for its predefined netifs, which netcfg does not use. Peers already on the link would never be found. A PTR query
 // once an address shows the link works makes them answer, and the browse takes the answers.
-static void query_trel_peers(void)
-{
 #if CONFIG_OPENTHREAD_RADIO_TREL
+// A query still running may have sent its last packet before the address came: start a new one once it has ended.
+static void send_trel_query(void *arg)
+{
     if (!atomic_load(&s_trel_wanted)) {
         return;
     }
@@ -360,12 +363,23 @@ static void query_trel_peers(void)
         mdns_result_t *results = NULL;
 
         if (!mdns_query_async_get_results(s_trel_query, 0, &results, NULL)) {
-            return; // still running: it covers this address too
+            esp_timer_start_once(s_trel_query_timer, TREL_QUERY_MS * 1000ULL);
+            return;
         }
         mdns_query_results_free(results);
         mdns_query_async_delete(s_trel_query);
     }
     s_trel_query = mdns_query_async_new(NULL, "_trel", "_udp", MDNS_TYPE_PTR, TREL_QUERY_MS, 1, NULL);
+}
+#endif
+
+static void query_trel_peers(void)
+{
+#if CONFIG_OPENTHREAD_RADIO_TREL
+    if (s_trel_query_timer) {
+        esp_timer_stop(s_trel_query_timer); // not armed: nothing to stop
+        esp_timer_start_once(s_trel_query_timer, TREL_QUERY_DELAY_MS * 1000ULL);
+    }
 #endif
 }
 
@@ -614,6 +628,10 @@ esp_err_t br_core_start(esp_netif_t *backbone)
     if (mdns_err != ESP_OK) {
         ESP_LOGE(TAG, "mDNS did not start (%s), continuing without it", esp_err_to_name(mdns_err));
     }
+#if CONFIG_OPENTHREAD_RADIO_TREL
+    const esp_timer_create_args_t trel_query_timer = {.callback = send_trel_query, .name = "trel_query"};
+    ESP_RETURN_ON_ERROR(esp_timer_create(&trel_query_timer, &s_trel_query_timer), TAG, "TREL query timer");
+#endif
     ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_GOT_IP6, on_got_ip6, NULL), TAG, "event handler");
     ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, on_got_ip, NULL), TAG, "event handler");
 
