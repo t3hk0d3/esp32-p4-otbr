@@ -47,6 +47,8 @@ static const char *TAG = "routing";
 #define LISTEN_BACKLOG 2
 #define RIPNG_RX_MAX 1500
 #define RIPNG_RX_PER_WAKE 16
+#define SELECT_ERR_DELAY_MS 10   /* pause after a failed select */
+#define SELECT_ERR_LOG_MS 60000  /* a failing select is logged at most this often */
 #define HOP_LIMIT 255
 #define IFNAME_MAX 8
 
@@ -738,7 +740,21 @@ static void wait_sockets(uint32_t timeout_ms)
         vTaskDelay(pdMS_TO_TICKS(timeout_ms) + 1);
         return;
     }
-    if (select(max_fd + 1, &rd, &wr, NULL, &tv) <= 0) {
+    int ready = select(max_fd + 1, &rd, &wr, NULL, &tv);
+    if (ready < 0) {
+        /* without the wait select would have given, the loop would spin at this priority */
+        static uint32_t s_select_logged_ms;
+        static bool s_select_logged;
+        uint32_t now = now_ms();
+        if (!s_select_logged || now - s_select_logged_ms >= SELECT_ERR_LOG_MS) {
+            ESP_LOGW(TAG, "select failed (errno %d)", errno);
+            s_select_logged = true;
+            s_select_logged_ms = now;
+        }
+        vTaskDelay(pdMS_TO_TICKS(SELECT_ERR_DELAY_MS) + 1);
+        return;
+    }
+    if (ready == 0) {
         return;
     }
     uint32_t now = now_ms();
