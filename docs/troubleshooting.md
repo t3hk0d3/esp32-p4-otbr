@@ -38,12 +38,17 @@ The Dashboard shows the fault in red, with what to do and a link to the page tha
   `GET /node/dataset/active` (also from the `mgmt` VLAN: read-only `GET /node/*` is served there by design) or update its
   firmware. Put it on a trusted network. `https://` URLs are not supported for downloads.
 - DHCPv6-PD makes Thread devices globally addressable; rely on the upstream router's firewall.
-- Requests for the mesh topology (`/topology`, `/api/diagnostics`) add roughly 100 ms to the latency of pings through the
-  border router while they run (Diagnostic Get traffic). That figure was measured on the `/topology` multicast
-  diagnostic get, which the Topology page no longer uses. The page's scan (`POST /device/topology`) sends one discover,
-  then two unicast mesh-diagnostics queries per router (its child table and its children's addresses), one scan at a
-  time. Its added latency has not been measured yet;
-  `p4/pytest/test_latency.py` has the load `device_topology_requests` for it.
+- Mesh topology requests slow down pings through the border router while they run, because of the Diagnostic Get
+  traffic. Measured with `p4/pytest/test_latency.py` (one Thread peer, a ping every 100 ms, the requests repeated
+  back to back; 2026-11-03):
+  - **The page's scan** (`POST /device/topology`) adds about 105–117 ms to the 99th-percentile round trip, and no ping
+    is lost. A scan is one discover, then two unicast mesh-diagnostics queries per router (its child table and its
+    children's addresses), then one query per full-device child that reported no address. Only one scan runs at a time.
+  - **The old `/topology`** (a multicast diagnostic get, no longer used by the page) adds about 77 ms, and 13 of 1000
+    pings were lost.
+  - **For comparison,** `/node` requests add about 2 ms.
+
+  The page only scans when someone clicks Load, so in normal use this is a short, occasional delay.
 - Flash writes (OTA) use XIP from PSRAM so traffic keeps flowing, but the P4 reboots after an update.
 - The `-dirty` flag of the app version stamp is as of the last configure (see [Building](building.md#versions)); a new commit
   refreshes the stamp.

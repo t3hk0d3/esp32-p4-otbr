@@ -21,7 +21,7 @@ IDF := $(if $(shell command -v idf.py),,. "$(IDF_EXPORT)" >/dev/null &&)
 board_url = $(if $(BOARD),http://$(BOARD),$(error set BOARD=<board address>, e.g. make $@ BOARD=192.168.1.50))
 
 .PHONY: help build build-test reconfigure clean flash monitor erase c6-flash-base bundle package ota radio recover \
-	status test test-host test-vendored test-tools test-target lint
+	status test test-host test-vendored test-tools test-target lan-ping-up lan-ping-down lint
 
 help: ## List the targets
 	@awk -F':.*## ' '/^[a-z0-9-]+:.*## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -101,6 +101,12 @@ test-vendored: ## Upstream esp_ot_br_server REST tests (needs clang++ and a p4 b
 test-target: ## On-board tests against a build-test image: TEST=<file or node id>, MARK=<marker> (slow)
 	$(if $(TEST),,$(error set TEST=<test file or node id>, e.g. make test-target TEST=p4/pytest/test_br_boot.py))
 	$(IDF) timeout $(TIMEOUT) $(TARGET_PYTEST) $(TEST) --port $(PORT) -p no:cacheprovider $(if $(MARK),-m $(MARK))
+
+lan-ping-up: ## Disposable LAN container that reaches Thread through the board, for test_latency (LAN_IF, default mgmt0)
+	tools/lan_ping.sh up
+
+lan-ping-down: ## Remove the latency tests' LAN container
+	tools/lan_ping.sh down
 
 lint: ## Format and lint checks (pre-commit)
 	uvx pre-commit run --all-files
