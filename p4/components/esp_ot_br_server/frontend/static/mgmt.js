@@ -98,8 +98,9 @@ function validateForm(d) {
   var phrase = String(d.passphrase || '');
   if (phrase.length < 6 || phrase.length > 255)
     bad('passphrase', 'Passphrase: 6 to 255 characters.');
-  if (!/^[0-9a-fA-F:]+::$/.test(String(d.prefix || '')))
-    bad('prefix', 'On-mesh prefix: an IPv6 /64 prefix ending in "::", e.g. fd12:3456:789a::.');
+  var prefix = String(d.prefix || '');
+  if (!/^[0-9a-fA-F]{1,4}(:[0-9a-fA-F]{1,4}){0,3}::$/.test(prefix))
+    bad('prefix', 'On-mesh prefix: up to four groups of a /64 prefix ending in "::", e.g. fd12:3456:789a::.');
   return out;
 }
 
@@ -163,13 +164,37 @@ var MgmtPage = typeof document === 'undefined' ? null : (function() {
     box.appendChild(a);
   }
 
+  var disabledByGuard = []; // only what the guard disabled, so a restore leaves the page's own disabled controls alone
+  var RETRY_MS = 5000;
+
+  /* Disables the page's controls, the dialogs too (they sit outside .container), and closes an open dialog. */
   function disable() {
-    var els = document.querySelectorAll('.container button, .container input, .container select, .container textarea');
-    for (var i = 0; i < els.length; i++)
-      els[i].disabled = true;
+    var els = document.querySelectorAll(
+        '.container button, .container input, .container select, .container textarea, ' +
+        '.modal button, .modal input, .modal select, .modal textarea');
+    for (var i = 0; i < els.length; i++) {
+      if (!els[i].disabled) {
+        els[i].disabled = true;
+        disabledByGuard.push(els[i]);
+      }
+    }
     var cards = document.querySelectorAll('.card');
     for (var j = 0; j < cards.length; j++)
       cards[j].classList.add('card-disabled');
+    var open = document.querySelectorAll('.modal-overlay.active');
+    for (var k = 0; k < open.length; k++)
+      open[k].classList.remove('active');
+  }
+
+  function restore() {
+    disabledByGuard.forEach(function(el) { el.disabled = false; });
+    disabledByGuard = [];
+    var cards = document.querySelectorAll('.card-disabled');
+    for (var j = 0; j < cards.length; j++)
+      cards[j].classList.remove('card-disabled');
+    var box = document.getElementById('mgmtBanner');
+    if (box)
+      box.parentNode.removeChild(box);
   }
 
   function json(url) {
@@ -178,25 +203,42 @@ var MgmtPage = typeof document === 'undefined' ? null : (function() {
     });
   }
 
-  function guard(needsNetwork) {
+  /* One check: {running, attached, blocked}. */
+  function check(needsNetwork) {
     return json('/device/status').then(function(r) { return r.status === 200 ? r.body : null; }, function() { return null; })
         .then(function(s) {
           var b = MgmtLogic.modeBanner(s);
-          if (b) {
-            banner(b.text, b.href, b.label);
-            disable();
-            return {running : false, attached : false};
-          }
+          if (b)
+            return {running : false, attached : false, blocked : b};
           return json('/node/state').then(function(r) { return r.status === 200 ? r.body : ''; }, function() { return ''; })
               .then(function(role) {
                 var attached = role === 'child' || role === 'router' || role === 'leader';
-                if (needsNetwork && !attached) {
-                  banner('This border router is not on a Thread network yet.', '/network.html', 'Form or join one');
-                  disable();
+                var blocked = needsNetwork && !attached ? {
+                  text : 'This border router is not on a Thread network yet.',
+                  href : '/network.html',
+                  label : 'Form or join one'
                 }
-                return {running : true, attached : attached};
+                                                        : null;
+                return {running : true, attached : attached, blocked : blocked};
               });
         });
+  }
+
+  /*
+   * Checks now; while the page is blocked (no answer, a radio fault, a capture, no network) it checks again every
+   * 5 s and gives the controls back as soon as the reason is gone.
+   */
+  function guard(needsNetwork) {
+    return check(needsNetwork).then(function(r) {
+      if (r.blocked) {
+        banner(r.blocked.text, r.blocked.href, r.blocked.label);
+        disable();
+        setTimeout(function() { guard(needsNetwork); }, RETRY_MS);
+      } else if (disabledByGuard.length || document.getElementById('mgmtBanner')) {
+        restore();
+      }
+      return {running : r.running, attached : r.attached};
+    });
   }
 
   /* Random bytes for MgmtLogic.randomNetwork. */

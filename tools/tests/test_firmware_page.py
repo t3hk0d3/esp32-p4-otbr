@@ -1,7 +1,7 @@
 """Firmware page (BDD: FirmwareLogic, FirmwarePage). Runs static/firmware.js under node."""
 
 import pytest
-from device_js import logic, needs_node, page, scenario
+from device_js import FRONTEND, logic, needs_node, page, scenario
 
 
 def fw(expression):
@@ -343,6 +343,17 @@ class TestInstallConfirms:
     def test_radio_question_says_thread_stops(self):
         assert "stops" in fw("L.installQuestion('rcp', 'c6_rcp.bin', '0.2.0')")
 
+    def test_installer_question_warns_not_to_power_off(self):
+        q = fw(
+            "L.installQuestion('rcp', 'c6_installer.bin', '0.2.0', 'esp-hosted firmware')"
+        )
+        assert "power off" in q
+
+    def test_page_passes_the_fault_reason_and_skips_the_note_while_waiting(self):
+        js = (FRONTEND / "static" / "firmware.js").read_text()
+        assert js.count("running, faultReason)))") == 2
+        assert "kit.isWaiting() ? null : L.afterUpdateText(" in js
+
     def test_after_update_text(self):
         assert fw("L.afterUpdateText(null, '0.3.0')") is None
         assert (
@@ -387,9 +398,18 @@ class TestInstallConfirms:
             t.el('otaFile').files = [{name: 'otbr.bundle', size: 1234}];
             await t.page.install('ota');
             const kept = store['ota:before'];
+            await t.page.refreshStatus();          // still waiting for the reboot: the note is kept for later
+            const keptWhileWaiting = store['ota:before'];
             store['ota:before'] = '0.9';           // as if the board came back on 1.0 after the reload
-            await t.page.refreshStatus();
-            return [kept, t.el('otaMsg').textContent, 'ota:before' in store];
-        """
+            const t2 = H.makeEnv('firmware', ROUTES_AGAIN);
+            t2.env.storage = t.env.storage;
+            t2.page.init(); await t2.advance(100);
+            return [kept, keptWhileWaiting, t2.el('otaMsg').textContent, 'ota:before' in store];
+        """.replace("ROUTES_AGAIN", routes())
         )
-        assert r == ["1.0", "Update done: the board now runs 1.0 (before: 0.9).", False]
+        assert r == [
+            "1.0",
+            "1.0",
+            "Update done: the board now runs 1.0 (before: 0.9).",
+            False,
+        ]

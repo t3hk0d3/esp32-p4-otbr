@@ -446,19 +446,27 @@ function pollFormState() {
     }, 2000);
 }
 /* ──── This board's dataset (to copy into another border router) ──── */
+var ownDatasetReq = 0; // only the newest read may fill the box
 document.getElementById('ownDataset').addEventListener('toggle', function() {
     if (!this.open) return;
     var box = document.getElementById('ownDatasetTlvs');
     var st = document.getElementById('ownDatasetStatus');
+    var req = ++ownDatasetReq;
+    box.value = '';
     st.textContent = 'Reading...';
     fetch('/node/dataset/active', {headers: {'Accept': 'text/plain'}}).then(function(r) {
         return r.text().then(function(t) {
+            if (req !== ownDatasetReq) return;
             if (r.status === 204) { box.value = ''; st.textContent = 'This board has no network yet.'; return; }
             if (r.status !== 200) { box.value = ''; st.textContent = apiFailureText(r.status, null); return; }
             box.value = t.trim();
             st.textContent = 'Copy this into "Join with Dataset" on the other board.';
         });
-    }).catch(function() { st.textContent = 'No answer from the device.'; });
+    }).catch(function() {
+        if (req !== ownDatasetReq) return;
+        box.value = '';
+        st.textContent = 'No answer from the device.';
+    });
 });
 document.getElementById('ownDatasetTlvs').addEventListener('focus', function() { this.select(); });
 document.getElementById('formRandomBtn').addEventListener('click', fillRandom);

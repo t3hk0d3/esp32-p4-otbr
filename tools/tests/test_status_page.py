@@ -540,8 +540,9 @@ class TestUxReview:
         assert "reservation" not in v["note"]
 
     def test_ha_without_network_or_names_answer(self):
+        # No /device/network snapshot: no URL, rather than the status address that may be the wrong interface.
         v = st("L.haView({mode: 'RADIO_FAULT', eth: {ipv4: '10.0.0.5'}}, null, null)")
-        assert v["url"] == "http://10.0.0.5"
+        assert v["url"] == "-"
         assert v["mdns"] == "-"
         assert v["haName"] == "-"
         assert "once the border router runs" in v["note"]

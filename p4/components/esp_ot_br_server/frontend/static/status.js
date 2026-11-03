@@ -135,7 +135,7 @@ function haView(s, net, names) {
   var split = !!(net && net.mode === 'split');
   var name = split ? 'thread_bb' : 'eth';
   var iface = (net && net.interfaces || []).filter(function(i) { return i.name === name; })[0] || null;
-  var addr = iface ? iface.ipv4 : (split ? null : s.eth && s.eth.ipv4);
+  var addr = iface ? iface.ipv4 : null; // no network snapshot: no address rather than a stale or wrong one
   var host = names && names.hostname_live ? names.hostname_live + '.local' : '';
   var cfg = net && net.active && net.active[split ? 'thread_bb' : 'single'];
   var dhcp = !!(cfg && cfg.ipv4 && cfg.ipv4.dhcp);
@@ -256,8 +256,11 @@ function renderHa() {
 /* /device/network (the trial banner) and /device/names: the Home Assistant tile. */
 function refreshNetwork() {
   return kit.request('GET', '/device/network', {timeoutMs : 5000}).then(function(r) {
-    if (r.status !== 200 || !r.body)
+    if (r.status !== 200 || !r.body) {
+      lastNet = null;
+      renderHa();
       return false;
+    }
     lastNet = r.body;
     kit.renderTrial(r.body);
     renderHa();
@@ -267,7 +270,11 @@ function refreshNetwork() {
       renderHa();
       return true;
     }, function() { return true; });
-  }, function() { return false; });
+  }, function() {
+    lastNet = null;
+    renderHa();
+    return false;
+  });
 }
 
 function showOffline() {

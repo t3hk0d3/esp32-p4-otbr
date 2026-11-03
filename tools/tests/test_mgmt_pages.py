@@ -104,6 +104,8 @@ class TestValidateForm:
             ("{extPanId: '12'}", "extPanId"),
             ("{passphrase: 'short'}", "passphrase"),
             ("{prefix: 'fd12::/64'}", "prefix"),
+            ("{prefix: 'fd12:3456:789a::::'}", "prefix"),
+            ("{prefix: 'fd12:3456:789a:bcde:1::'}", "prefix"),
         ],
     )
     def test_each_bad_field_is_named(self, patch, field):
@@ -173,3 +175,26 @@ def test_management_page_is_guarded_by_the_mode(name):
 def test_api_js_no_longer_has_the_role_only_guard():
     api = (FRONTEND / "static" / "api.js").read_text()
     assert "disableManagementPage" not in api and "checkThreadState" not in api
+
+
+def test_random_bytes_come_from_crypto_not_math_random():
+    js = (FRONTEND / "static" / "mgmt.js").read_text()
+    assert "crypto.getRandomValues" in js and "Math.random" not in js
+
+
+def test_guard_retries_and_restores_while_blocked():
+    js = (FRONTEND / "static" / "mgmt.js").read_text()
+    assert "setTimeout(function() { guard(needsNetwork); }, RETRY_MS)" in js
+    assert "function restore()" in js and ".modal-overlay.active" in js
+
+
+def test_own_dataset_read_ignores_stale_answers_and_clears_on_failure():
+    html = (FRONTEND / "network.html").read_text()
+    assert "var req = ++ownDatasetReq;" in html
+    assert html.count("if (req !== ownDatasetReq) return;") == 2
+
+
+def test_nav_keeps_aria_expanded_in_step_with_hover_and_focus():
+    api = (FRONTEND / "static" / "api.js").read_text()
+    for ev in ("mouseenter", "mouseleave", "focusin", "focusout"):
+        assert f"'{ev}'" in api

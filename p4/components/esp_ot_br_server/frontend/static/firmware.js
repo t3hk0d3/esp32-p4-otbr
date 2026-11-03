@@ -50,11 +50,18 @@ function jumperPresent(status) {
   return !!(status && status.jumper && status.jumper.present === true);
 }
 
-/** Confirm text before an install: `card` 'ota' or 'rcp', `what` the file name or URL, `running` the P4 version. */
-function installQuestion(card, what, running) {
+/*
+ * Confirm text before an install: `card` 'ota' or 'rcp', `what` the file name or URL, `running` the Border Router
+ * version, `faultReason` status.fault_reason (the installer step must not lose power).
+ */
+function installQuestion(card, what, running, faultReason) {
   if (card === 'ota')
     return 'Install ' + what + ' and reboot? The board now runs ' + (running || 'an unknown version') +
            '; Thread and the web UI are gone for about a minute.';
+  if (faultReason === 'esp-hosted firmware')
+    return 'Install the radio firmware ' + what + '? This replaces the factory ESP-Hosted firmware and takes ' +
+           'about a minute. Do not power off or reset the board until it is done, or the radio may need the ' +
+           'maintenance jumper to recover.';
   return 'Install the radio firmware ' + what + '? The Thread network stops for about half a minute.';
 }
 
@@ -90,7 +97,8 @@ var L = FirmwareLogic;
 var kit = C.DeviceKit(env, {actionIds : [ 'otaInstall', 'rcpInstall', 'recoverBtn', 'logBtn' ]});
 var $ = kit.$, setText = kit.setText, show = kit.show, note = kit.note;
 var source = {ota : 'file', rcp : 'file'};
-var running = null; // P4 version from the last status
+var running = null; // Border Router version from the last status
+var faultReason = null; // fault_reason from the last status
 var OTA_KEY = 'ota:before'; // version before an update, kept across the reload that follows it
 
 function stored(key, value) {
@@ -113,7 +121,9 @@ function render(s) {
   show('fw-stale', false);
   setText('p4-version', s.app.version);
   running = s.app.version;
-  var after = L.afterUpdateText(stored(OTA_KEY), s.app.version);
+  faultReason = s.fault_reason || null;
+  // While an update is waited for, the status is still the old image's: keep the note for the board that comes back.
+  var after = kit.isWaiting() ? null : L.afterUpdateText(stored(OTA_KEY), s.app.version);
   if (after) {
     note('otaMsg', after, false);
     stored(OTA_KEY, null);
@@ -194,7 +204,7 @@ function sendFile(url, file, msgId, label) {
     note(msgId, tooBig, true);
     return Promise.resolve(null);
   }
-  if (!env.confirm(L.installQuestion(label === 'bundle' ? 'ota' : 'rcp', file.name, running)))
+  if (!env.confirm(L.installQuestion(label === 'bundle' ? 'ota' : 'rcp', file.name, running, faultReason)))
     return Promise.resolve(null);
   return kit.runOp(function() {
     note(msgId, 'Uploading ' + file.name + ' (' + file.size + ' bytes)...', false);
@@ -213,7 +223,7 @@ function sendUrl(url, src, msgId, label, jsonBody) {
     note(msgId, problem, true);
     return Promise.resolve(null);
   }
-  if (!env.confirm(L.installQuestion(label === 'bundle' ? 'ota' : 'rcp', src.trim(), running)))
+  if (!env.confirm(L.installQuestion(label === 'bundle' ? 'ota' : 'rcp', src.trim(), running, faultReason)))
     return Promise.resolve(null);
   return kit.runOp(function() {
     note(msgId, 'The device is downloading ' + src.trim() + ' ...', false);

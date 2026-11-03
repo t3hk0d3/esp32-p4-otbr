@@ -206,4 +206,18 @@ document.addEventListener('click', function(ev) {
   if (!nav.contains(ev.target))
     closeMenus(null);
 });
+/* Hover and keyboard focus open a menu by CSS: keep aria-expanded in step. */
+var drops = nav.querySelectorAll('.nav-dropdown');
+function syncExpanded(li, on) {
+  li.firstChild.setAttribute('aria-expanded', on || li.classList.contains('open') ? 'true' : 'false');
+}
+for (var d = 0; d < drops.length; d++) {
+  drops[d].addEventListener('mouseenter', function() { syncExpanded(this, true); });
+  drops[d].addEventListener('mouseleave', function() { syncExpanded(this, false); });
+  drops[d].addEventListener('focusin', function() { syncExpanded(this, true); });
+  drops[d].addEventListener('focusout', function(ev) {
+    if (!this.contains(ev.relatedTarget))
+      syncExpanded(this, false);
+  });
+}
 })();
