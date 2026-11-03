@@ -16,6 +16,9 @@
 extern "C" {
 #endif
 
+/** The web server's max_open_sockets (patch 20): the lwIP socket budget of the routing task counts it. */
+#define ESP_BR_WEB_MAX_OPEN_SOCKETS 7
+
 ESP_EVENT_DECLARE_BASE(ESP_BR_WEB_EVENT);
 
 typedef enum {

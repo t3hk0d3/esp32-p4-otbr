@@ -12,6 +12,7 @@
 #include "board_cores.h"
 #include "br_core.h"
 #include "engine.h"
+#include "esp_br_web.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -53,16 +54,16 @@ static const char *TAG = "routing";
 #define IFNAME_MAX 8
 
 /*
- * lwIP sockets the image needs at once (see p4/sdkconfig.defaults): the web server (max_open_sockets 7 plus its
+ * lwIP sockets the image needs at once (see p4/sdkconfig.defaults): the web server (its max_open_sockets plus its
  * listener and two control sockets, esp_br_web.c), routing at worst (BGP: the listener and every connection slot;
  * RIPng is one socket and never runs with BGP) and one HTTP client (OTA or a radio firmware URL).
  */
-#define WEB_SERVER_SOCKETS (7 + 3)
+#define WEB_SERVER_SOCKETS (ESP_BR_WEB_MAX_OPEN_SOCKETS + 3)
 #define ROUTING_SOCKETS (1 + MAX_CONNS)
 #define HTTP_CLIENT_SOCKETS 1
 #define SOCKETS_NEEDED (WEB_SERVER_SOCKETS + ROUTING_SOCKETS + HTTP_CLIENT_SOCKETS)
 #if CONFIG_LWIP_MAX_SOCKETS < SOCKETS_NEEDED
-#error "CONFIG_LWIP_MAX_SOCKETS is below what the web server and routing need: p4/sdkconfig predates p4/sdkconfig.defaults (an existing sdkconfig keeps its values). Delete p4/sdkconfig and build again (docs/development.md)."
+#error "CONFIG_LWIP_MAX_SOCKETS is below what the web server and routing need: raise it in p4/sdkconfig.defaults if ESP_BR_WEB_MAX_OPEN_SOCKETS or the routing sockets grew; else p4/sdkconfig predates p4/sdkconfig.defaults (an existing sdkconfig keeps its values): delete p4/sdkconfig and build again (docs/development.md)."
 #endif
 
 typedef struct {

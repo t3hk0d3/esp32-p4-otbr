@@ -1564,7 +1564,7 @@ static httpd_handle_t *start_esp_br_http_server(const char *base_path)
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.stack_size = 8 * 1024;
     config.core_id = 1; /* patch 1: management core (core 0 runs the network path) */
-    config.max_open_sockets = 7;
+    config.max_open_sockets = ESP_BR_WEB_MAX_OPEN_SOCKETS; /* patch 20 */
     config.lru_purge_enable = true;
     s_server.port = config.server_port;
 

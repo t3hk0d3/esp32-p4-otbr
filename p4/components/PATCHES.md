@@ -244,6 +244,11 @@ reason, spec reference.
    text/plain). `commission.html`: no default PSKd. `addresses.html`: confirms for remove/delete, no default prefix.
    `about.html`: project texts and links, `/device/status` fields. Every upstream page gets the project footer instead
    of the Espressif copyright line. Host tests: `tools/tests/test_mgmt_pages.py`.
+20. Applied (mesh routing, review fix). `esp_ot_br_server`: `include/esp_br_web.h` defines
+   `ESP_BR_WEB_MAX_OPEN_SOCKETS` (7, the upstream value), and `src/esp_br_web.c` sets `config.max_open_sockets` from it.
+   Reason: the routing task's compile-time lwIP socket budget (`p4/components/routing/task.c`, `SOCKETS_NEEDED` against
+   `CONFIG_LWIP_MAX_SOCKETS`) counts the web server's sockets; with one definition, raising it trips that check
+   instead of silently overrunning the budget. (docs/superpowers/specs/2026-11-03-mesh-routing-design.md section 5)
 
 ### REST guard classification (patches 2 and 9)
 
