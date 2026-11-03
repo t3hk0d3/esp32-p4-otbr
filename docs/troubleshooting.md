@@ -43,7 +43,7 @@ The Dashboard shows the fault in red, with what to do and a link to the page tha
 - Flash writes (OTA) use XIP from PSRAM so traffic keeps flowing, but the P4 reboots after an update.
 - The `-dirty` flag of the app version stamp is as of the last configure (see [Building](building.md#versions)); a new commit
   refreshes the stamp.
-- Untested on hardware: the no-jumper first install ([First install](first-install.md), Path 3, esptool over H7).
+- Untested on hardware: the USB-UART first install ([First install](first-install.md), Path 3, esptool over H7).
 - Untested on hardware: recovery of a truly blank C6 (bootloader, partition table and otadata erased).
 - The no-wires first install ([First install](first-install.md), Path 1) ran on the board against an ESP-Hosted 0.0.27
   stand-in, not yet against an untouched factory C6; nor the case where the installer lands in the slot it must overwrite

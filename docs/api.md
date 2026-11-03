@@ -1,25 +1,26 @@
 # HTTP API and web UI
 
-Everything is on port 80, no authentication. Errors on `/device/*` are JSON `{"error": "<code>", "detail": "<text>"}`.
+Everything is on port 80, no authentication. Errors on `/device/*` are JSON `{"error": "<code>", "detail": "<text>"}`. Besides the errors listed
+below, any of them can answer 500 `internal` or `no_memory`.
 
 ## Device API
 
 | Method and path | Purpose | Notable errors |
 | --- | --- | --- |
 | `GET /device/status` | mode, app version and slot, `rcp`, `jumper`, `eth` addresses, `pd`, `sniffer` stats, `fault_reason`, `storage_ok` | |
-| `GET /device/sniffer.pcap?channel=&duration=` | stream a pcap capture | 400 `invalid_channel`, `invalid_duration`, `no_channel`; 409 `busy` (not `BR_RUNNING`); 503 `busy` (no channel given and OpenThread's state could not be read within 100 ms: retry) |
+| `GET /device/sniffer.pcap?channel=&duration=` | stream a pcap capture | 400 `invalid_channel`, `invalid_duration`, `no_channel`; 409 `busy` (not `BR_RUNNING`); 503 `busy` (no channel given and OpenThread's state could not be read within 100 ms: retry); 500 `sniffer_failed` |
 | `DELETE /device/sniffer` | stop the running capture | 404 `not_found` |
 | `POST /device/ota` | upload an `otbr.bundle`, then reboot | 400 `length_required`, `invalid_bundle`; 413 `payload_too_large`; 409 `busy` |
-| `POST /device/ota/url` | body `{"url": "http://..."}`, same via download | 400 `invalid_request`, `https_not_supported`; 502 `transfer_failed` |
-| `POST /device/radio/firmware[?from_url=]` | push `c6_rcp.bin` to the C6, restart the BR; on a factory C6 (`fault_reason` `esp-hosted firmware`) only a `c6_installer.bin` with this firmware's C6 base version, sent through ESP-Hosted, then `{"installed":null}` and `no rcp firmware` | 400 `length_required`, `invalid_image` (also `c6_installer.bin` to our updater, anything else to ESP-Hosted, an installer with another base version), `https_not_supported`; 413 `payload_too_large`; 409 `busy` (sniffing, starting, update running); 502 `fetch_failed`, `push_failed`, `install_failed` (ESP-Hosted transfer of `c6_installer.bin`) |
+| `POST /device/ota/url` | body `{"url": "http://..."}`, same via download | 400 `invalid_request`, `https_not_supported`, `invalid_bundle`; 409 `busy`; 502 `transfer_failed` |
+| `POST /device/radio/firmware[?from_url=]` | push `c6_rcp.bin` to the C6, restart the BR; on a factory C6 (`fault_reason` `esp-hosted firmware`) only a `c6_installer.bin` with this firmware's C6 base version, sent through ESP-Hosted, then `{"installed":null}` and `no rcp firmware` | 400 `length_required`, `invalid_image` (also `c6_installer.bin` to our updater, anything else to ESP-Hosted, an installer with another base version), `image_too_large`, `https_not_supported`; 413 `payload_too_large`; 409 `busy` (sniffing, starting, update running); 502 `fetch_failed`, `push_failed`, `install_failed` (ESP-Hosted transfer of `c6_installer.bin`) |
 | `POST /device/radio/recover` | maintenance jumper: rewrite the C6 base image (no RCP firmware) and restart | 200 `{"recovered":true,"rcp":"<installed version>"\|"no rcp firmware"\|"unknown","mode":...}` (also when the C6 has no RCP firmware afterwards); 412 `no_jumper`; 409 `busy`; 502 `recovery_failed` (only when the recovery itself failed) |
 | `GET /device/radio/log` | jumper: the newest 16 KB of the C6 console (`text/plain`) | 412 `no_jumper` |
 | `GET /device/diag` | per-core load, per-task CPU/stack/affinity, memory, OpenThread lock stats, uptime, reset reason | |
 | `GET /device/network` | active config, pending trial with remaining time, interface state | |
-| `PUT /device/network` | store a trial network config and reboot into it | 400 `invalid_config` (`detail` names the field); 409 `busy`; 413 |
-| `POST /device/network/confirm` | commit the trial config | 409 `no_trial`; 403 `wrong_interface` |
+| `PUT /device/network` | store a trial network config and reboot into it | 400 `invalid_config` (`detail` names the field), `length_required`, `invalid_request`; 409 `busy`; 413 `payload_too_large`; 503 `not_started`; 500 `store_failed` |
+| `POST /device/network/confirm` | commit the trial config | 409 `no_trial`; 403 `wrong_interface`; 500 `store_failed` |
 | `GET /device/names` | network names: `hostname`, `hostname_default`, `hostname_live` (differs after an mDNS conflict rename), `ha_name_follows_hostname`, `ha_name`, `ha_name_effective`, `http_advert`, `http_advert_available` (false in split mode), `dhcp_name`, `dhcp_name_default`, `mode` | |
-| `PUT /device/names` | body `{hostname, ha_name_follows_hostname, ha_name, http_advert, dhcp_name}` (all required; empty hostname / DHCP name = default); applied live, no reboot; replies the GET body plus `applied` and, when a live step failed, `detail` | 400 `invalid_config` with `field` (`hostname`, `ha_name`, `dhcp_name`, or a missing / wrongly typed key, `body` for no JSON object); 413 `payload_too_large`; 500 `storage_failed` |
+| `PUT /device/names` | body `{hostname, ha_name_follows_hostname, ha_name, http_advert, dhcp_name}` (all required; empty hostname / DHCP name = default); applied live, no reboot; replies the GET body plus `applied` and, when a live step failed, `detail` | 400 `invalid_config` with `field` (`hostname`, `ha_name`, `dhcp_name`, or a missing / wrongly typed key, `body` for no JSON object), `length_required`, `invalid_request`; 413 `payload_too_large`; 500 `storage_failed` |
 | `POST /device/reboot` | reboot | 409 `busy` while an update or push runs |
 | `GET /metrics` | device health and Thread figures in the Prometheus text format, see [metrics](metrics.md) | 500 `no_memory` |
 

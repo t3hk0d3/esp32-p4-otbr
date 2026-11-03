@@ -1,27 +1,32 @@
 # Development
 
 Building and flashing: [building.md](building.md). Conventions (naming, formatting, errors, tests): `STYLEGUIDE.md`. Design:
-`docs/superpowers/specs/2026-10-30-esp32-p4-otbr-design.md`.
+`docs/superpowers/specs/2026-10-30-esp32-p4-otbr-design.md` (the whole firmware), plus the later feature specs in
+`docs/superpowers/specs/` (device pages, Prometheus metrics, network names) and the plans in `docs/superpowers/plans/` (among them the
+no-wires first install through ESP-Hosted).
 
 ## Repository layout
 
-- `p4/`: the ESP32-P4 firmware (components `br_core`, `device_api`, `netcfg`, `sniffer`, `diag`, `rcp_sync`, vendored
-  `esp_ot_br_server` and `esp_br_http_ota`); `p4/pytest/` holds the on-board tests.
+- `p4/`: the ESP32-P4 firmware (components `br_core`, `device_api`, `netcfg`, `netnames` (mDNS and DHCP names),
+  `sniffer`, `diag`, `metrics`, `rcp_sync`, `c6_hosted` (just enough of the ESP-Hosted protocol to send
+  `c6_installer.bin` to a factory C6), vendored `esp_ot_br_server` and `esp_br_http_ota`); `p4/pytest/` holds the on-board tests.
 - `c6_updater/`: the small, frozen C6 program that receives the RCP firmware from the P4 and writes it to flash.
+- `c6_installer/`: the one-time C6 app sent through ESP-Hosted on a factory C6; it writes the `c6_updater` bootloader,
+  partition table and updater, then restarts into the updater (`c6_installer.bin`).
 - `c6_rcp/`: the C6 radio firmware (`c6_rcp.bin`), an OpenThread RCP with SPI spinel.
 - `common/`: code shared by the projects (`c6_board` pins and C6 flash layout, `rcp_sync_proto`, `board_cores`).
 - `tools/`: the scripts behind the Makefile (`build_all.sh`, `run_host_tests.sh`, `run_vendored_rest_tests.sh`,
-  `package_release.sh`, `make_bundle.py`), `version.cmake`, `base_version.cmake`, `otbr_compat.py` (python-otbr-api
-  driver) and `tools/tests/` (tool tests).
+  `package_release.sh`, `make_bundle.py`), `version.cmake`, `base_version.cmake`, `test_build.cmake`,
+  `c6_updater_images.cmake`, `otbr_compat.py` (python-otbr-api driver) and `tools/tests/` (tool tests).
 - `docs/`: this documentation, the design spec and plan, Phase 0 results (hardware facts).
 - `IDF_VERSION`: the pinned ESP-IDF version.
 
 ## Vendored code
 
 `esp_ot_br_server` and `esp_br_http_ota` come from esp-thread-br commit `1f5af46d0ccb22fe01465ba6d16a33b276c20c1b`. Every
-change to them (patches 1 to 12) and the link-time mDNS filter for `espressif/mdns` (patch 13) is listed in
-[`p4/components/PATCHES.md`](../p4/components/PATCHES.md), together with the REST guard table (which endpoint answers 409 or
-503 in which mode). They stay under Apache-2.0.
+change to them and the link-time mDNS filter for `espressif/mdns` is listed in
+[`p4/components/PATCHES.md`](../p4/components/PATCHES.md) (patches 1 to 15; 4 and 6 were not applied, 13 is the mDNS
+filter), together with the REST guard table (which endpoint answers 409 or 503 in which mode). They stay under Apache-2.0.
 
 ## Testing
 
