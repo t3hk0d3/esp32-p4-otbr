@@ -115,7 +115,7 @@ reason, spec reference.
    `device_api_register` as the callback before starting the server. (spec 5.7)
    `EXTRA_HANDLER_SLOTS` (the handlers the callback and the catch-all may add to `max_uri_handlers`) was 20 since the
    network names (`GET`/`PUT /device/names`, spec 2026-11-03-network-names-design.md) and is 24 since mesh routing
-   (patch 19).
+   (patch 19). The leader weight (`GET`/`PUT /device/thread`) uses 2 of them: 22 routes plus the catch-all.
 11. Applied (Task 18). `esp_ot_br_server`: the Thread REST background worker `thread_rest` (`rest_process_task`,
    `src/esp_br_web_api.c`) is created with `xTaskCreatePinnedToCore(..., 1)` instead of `xTaskCreate`. Reason: it takes
    the OpenThread lock every 100 ms and was unpinned, so it could run on core 0 next to the network path; it belongs to
