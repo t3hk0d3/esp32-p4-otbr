@@ -3,6 +3,7 @@
 // Routing settings (spec section 6): defaults, the JSON form of GET and PUT /device/routing with its validation, the
 // change set between two settings (pure, host-tested), and the NVS copy (target only).
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -40,6 +41,13 @@ esp_err_t routing_settings_from_json(const char *json, const routing_settings_t 
 
 /** The GET /device/routing shape, with "status": null when `status` is NULL. Malloc'd, the caller frees; NULL on OOM. */
 char *routing_settings_to_json(const routing_settings_t *s, const routing_status_t *status);
+
+/**
+ * The settings from their stored JSON text, checked as a PUT body with the defaults as `current` and no context.
+ * NULL text (nothing stored): the defaults, true. Text that does not parse or validate: the defaults, false, with
+ * `*bad_field` (may be NULL) naming the offending field. Valid text: those settings, true.
+ */
+bool routing_settings_from_stored(const char *text, routing_settings_t *out, const char **bad_field);
 
 /** ROUTING_CHANGE_* flags for what differs between `a` and `b`; 0 when they are the same. */
 uint32_t routing_settings_diff(const routing_settings_t *a, const routing_settings_t *b);

@@ -506,6 +506,15 @@ esp_err_t routing_settings_from_json(const char *json, const routing_settings_t 
     return err;
 }
 
+bool routing_settings_from_stored(const char *text, routing_settings_t *out, const char **bad_field)
+{
+    routing_settings_defaults(out);
+    if (!text) {
+        return true;
+    }
+    return routing_settings_from_json(text, NULL, NULL, out, bad_field) == ESP_OK; /* out stays the defaults on error */
+}
+
 /* ---- JSON out ---- */
 
 static bool add_prefix(cJSON *obj, const char *key, bool known, const routing_prefix64_t *p)
@@ -720,16 +729,15 @@ esp_err_t routing_settings_load(routing_settings_t *out)
     ESP_RETURN_ON_ERROR(ret, TAG, "cannot open the %s storage", NVS_NAMESPACE);
     ret = nvs_get_str(nvs, NVS_KEY, NULL, &len);
     if (ret == ESP_ERR_NVS_NOT_FOUND) {
-        ret = ESP_OK;
-        goto done;
+        ret = ESP_OK; /* nothing stored: text stays NULL */
+    } else {
+        ESP_GOTO_ON_ERROR(ret, done, TAG, "reading the stored settings failed");
+        text = malloc(len);
+        ESP_GOTO_ON_FALSE(text, ESP_ERR_NO_MEM, done, TAG, "no memory for the stored settings");
+        ESP_GOTO_ON_ERROR(nvs_get_str(nvs, NVS_KEY, text, &len), done, TAG, "reading the stored settings failed");
     }
-    ESP_GOTO_ON_ERROR(ret, done, TAG, "reading the stored settings failed");
-    text = malloc(len);
-    ESP_GOTO_ON_FALSE(text, ESP_ERR_NO_MEM, done, TAG, "no memory for the stored settings");
-    ESP_GOTO_ON_ERROR(nvs_get_str(nvs, NVS_KEY, text, &len), done, TAG, "reading the stored settings failed");
-    if (routing_settings_from_json(text, NULL, NULL, out, &bad) != ESP_OK) {
+    if (!routing_settings_from_stored(text, out, &bad)) {
         ESP_LOGW(TAG, "stored settings do not parse (%s): using the defaults", bad);
-        routing_settings_defaults(out);
     }
 done:
     free(text);

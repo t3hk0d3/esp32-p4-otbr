@@ -271,17 +271,28 @@ TEST_CASE("Peer address multicast, unspecified, or one of the board's own addres
                                             "2001:db8:42::1/128", "not an address"
                                            };
     static const uint8_t own[16] = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x17};
+    static const uint8_t own_link_local[16] = {0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01};
     routing_validate_ctx_t ctx;
     char fields[256];
 
+    /* Only real addresses in the context, so that "::" is rejected for being unspecified, not for being "own". */
     memset(&ctx, 0, sizeof(ctx));
-    memcpy(ctx.own_addrs[3], own, 16);
-    ctx.own_count = 4;
+    memcpy(ctx.own_addrs[0], own_link_local, 16);
+    memcpy(ctx.own_addrs[1], own, 16);
+    ctx.own_count = 2;
     for (size_t i = 0; i < sizeof(bad_addrs) / sizeof(bad_addrs[0]); i++) {
         snprintf(fields, sizeof(fields), "\"local_asn\":65010,\"hold_time\":90,"
                  "\"peers\":[{\"address\":\"%s\",\"asn\":65010}]", bad_addrs[i]);
         assert_rejects("bgp.peers", make_body(METHOD_BGP, OMR_CUSTOM, bgp_with(fields)), &ctx);
     }
+    /* Multicast and unspecified are rejected without a context too. */
+    assert_rejects("bgp.peers", make_body(METHOD_BGP, OMR_CUSTOM, bgp_with("\"local_asn\":65010,\"hold_time\":90,"
+                                                                           "\"peers\":[{\"address\":\"::\",\"asn\":65010}]")), NULL);
+    assert_rejects("bgp.peers", make_body(METHOD_BGP, OMR_CUSTOM, bgp_with("\"local_asn\":65010,\"hold_time\":90,"
+                                                                           "\"peers\":[{\"address\":\"ff02::2\",\"asn\":65010}]")), NULL);
+    /* The own address is not rejected without the context. */
+    assert_accepts(make_body(METHOD_BGP, OMR_CUSTOM, bgp_with("\"local_asn\":65010,\"hold_time\":90,"
+                                                              "\"peers\":[{\"address\":\"2001:db8:42::17\",\"asn\":65010}]")), NULL);
 }
 
 TEST_CASE("Method bgp with no peers: bad_field bgp.peers", "[routing]")
@@ -301,6 +312,50 @@ TEST_CASE("Text that is not JSON, or trailing text: returns ESP_ERR_INVALID_ARG 
     assert_rejects("body", NULL, NULL);
     snprintf(body, sizeof(body), BODY_FMT "x", METHOD_BGP, OMR_CUSTOM, BGP_ONE_PEER);
     assert_rejects("body", body, NULL);
+}
+
+/* ---- routing_settings_from_stored ---- */
+
+TEST_CASE("Stored text missing: returns defaults", "[routing]")
+{
+    routing_settings_t out, defaults;
+
+    routing_settings_defaults(&defaults);
+    memset(&out, 0xa5, sizeof(out));
+    TEST_ASSERT_TRUE(routing_settings_from_stored(NULL, &out, NULL));
+    TEST_ASSERT_EQUAL_MEMORY(&defaults, &out, sizeof(out));
+}
+
+TEST_CASE("Stored text does not parse: returns defaults", "[routing]")
+{
+    static const char *const bad_texts[] = {"{\"method\":\"bgp\"", "{\"method\":\"ospf\",\"omr\":{\"mode\":\"auto\"},"
+                                            "\"announce_ula\":false}", ""
+                                           };
+    routing_settings_t out, defaults;
+    const char *bad = NULL;
+
+    routing_settings_defaults(&defaults);
+    for (size_t i = 0; i < sizeof(bad_texts) / sizeof(bad_texts[0]); i++) {
+        memset(&out, 0xa5, sizeof(out));
+        bad = NULL;
+        TEST_ASSERT_FALSE(routing_settings_from_stored(bad_texts[i], &out, &bad));
+        TEST_ASSERT_NOT_NULL(bad);
+        TEST_ASSERT_EQUAL_MEMORY(&defaults, &out, sizeof(out));
+    }
+}
+
+TEST_CASE("Stored text valid: returns it unchanged", "[routing]")
+{
+    routing_settings_t s, out;
+    char *json;
+
+    populated(&s);
+    json = routing_settings_to_json(&s, NULL);
+    TEST_ASSERT_NOT_NULL(json);
+    memset(&out, 0xa5, sizeof(out));
+    TEST_ASSERT_TRUE(routing_settings_from_stored(json, &out, NULL));
+    free(json);
+    TEST_ASSERT_EQUAL_MEMORY(&s, &out, sizeof(s));
 }
 
 /* ---- routing_settings_to_json ---- */
