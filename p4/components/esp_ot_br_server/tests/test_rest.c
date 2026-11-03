@@ -552,6 +552,41 @@ static void test_worker_polls_under_the_lock_when_ready(void)
     unsigned before = mock_lock_acquires;
     rest_process_once();
     assert(mock_lock_acquires == before + 1);
+    assert(mock_sessions_open == 0);
+}
+/* Patch 16: without a br_core session (a radio push is about to delete the lock) nothing touches OpenThread, and every
+ * session opened is closed again. */
+static void test_no_openthread_without_a_session(void)
+{
+    guard_enter_mode(BR_MODE_BR_RUNNING, true);
+    mock_session_refused = true;
+    unsigned before = mock_lock_acquires;
+    rest_process_once();
+    assert(mock_lock_acquires == before);
+    httpd_req_t req = request(HTTP_GET, "/node/state", NULL, NULL, NULL);
+    cJSON *json = run_request(&req, 503);
+    release(&req, json);
+    req = request(HTTP_PUT, "/node/state", "\"enable\"", NULL, "application/json");
+    json = run_request(&req, 503);
+    release(&req, json);
+    assert(mock_lock_acquires == before && mock_ot_writes == 0);
+    mock_session_refused = false;
+    req = request(HTTP_GET, "/node/state", NULL, NULL, NULL);
+    json = run_request(&req, 200);
+    release(&req, json);
+    assert(mock_sessions_open == 0);
+}
+/* Patch 16: a callback wait ends early once the REST flag is off (a radio push waits for the session), and still
+ * returns what the callback gave while it is on. */
+static void test_callback_wait_ends_when_not_ready(void)
+{
+    SemaphoreHandle_t semaphore = xSemaphoreCreateBinary();
+    xSemaphoreTake(semaphore, 0);
+    guard_enter_mode(BR_MODE_STARTING, false);
+    assert(!ot_wait_callback(semaphore, 30000));
+    guard_enter_mode(BR_MODE_BR_RUNNING, true);
+    xSemaphoreGive(semaphore);
+    assert(ot_wait_callback(semaphore, 30000));
 }
 /* Patch 12: a request the per-interface policy refuses never reaches the dispatcher; GET/HEAD read, the rest writes. */
 static void test_netcfg_gate(void)
@@ -631,6 +666,8 @@ int main(void)
     test_guard_background_poll();
     test_worker_does_not_touch_the_lock_when_not_ready();
     test_worker_polls_under_the_lock_when_ready();
+    test_no_openthread_without_a_session();
+    test_callback_wait_ends_when_not_ready();
     test_netcfg_gate();
     test_topology_collector();
     rest_collection_delete(&s_rest_actions, NULL, esp_openthread_get_instance());

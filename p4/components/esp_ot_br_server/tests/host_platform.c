@@ -7,9 +7,24 @@ bool mock_ot_ready = true;
 unsigned mock_ot_writes;
 void (*mock_on_lock)(void);
 unsigned mock_lock_acquires;
+bool mock_session_refused;
+int mock_sessions_open;
 br_core_mode_t br_core_get_mode(void)
 {
     return mock_mode;
+}
+bool br_core_ot_session_begin(void)
+{
+    if (mock_session_refused) {
+        return false;
+    }
+    mock_sessions_open++;
+    return true;
+}
+void br_core_ot_session_end(void)
+{
+    assert(mock_sessions_open > 0);
+    mock_sessions_open--;
 }
 bool esp_br_web_openthread_ready(void)
 {

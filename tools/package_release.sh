@@ -36,6 +36,8 @@ for project in p4 c6_rcp c6_updater c6_installer; do
         exit 1
     fi
 done
+# zip adds to an existing archive: the zips are built in the empty $tmp (no stale files on a re-run) and moved to $out
+# together once all three exist, so a failed run leaves the previous ones in place.
 
 # Zip the images named in a project's flash_args, flattened, with a flash_args that uses the flat names.
 flash_zip() {
@@ -49,7 +51,7 @@ flash_zip() {
         done
     } >"$dir/flash_args"
     cp "$root/LICENSE" "$root/NOTICE" "$dir/"
-    (cd "$dir" && zip -q -r "$out/$zip_name.zip" .)
+    (cd "$dir" && zip -q -r "$tmp/$zip_name.zip" .)
 }
 
 # The C6 base images for the USB-UART install, laid out as the P4's ROM recovery writes them: the updater goes into the
@@ -67,7 +69,7 @@ c6_base_zip() {
         echo "0x8000 partition-table.bin"
         echo "$test_offset c6_updater.bin"
     } >"$dir/flash_args"
-    (cd "$dir" && zip -q -r "$out/c6-updater-flash.zip" .)
+    (cd "$dir" && zip -q -r "$tmp/c6-updater-flash.zip" .)
 }
 
 python3 "$root/tools/make_bundle.py" --web "$root/p4/build/web_0.bin" --app "$root/p4/build/p4.bin" \
@@ -94,7 +96,8 @@ for component in "$root"/p4/managed_components/*/; do
     license="$(find "$component" -maxdepth 1 \( -iname 'LICENSE*' -o -iname 'COPYING*' \) | head -n 1)"
     [[ -n "$license" ]] && cp "$license" "$licenses/$(basename "$component").txt"
 done
-(cd "$licenses" && zip -q -r "$out/third-party-licenses.zip" .)
+(cd "$licenses" && zip -q -r "$tmp/third-party-licenses.zip" .)
+mv -f "$tmp/p4-flash.zip" "$tmp/c6-updater-flash.zip" "$tmp/third-party-licenses.zip" "$out/"
 
 {
     echo "p4 app:      $(project_version p4)"

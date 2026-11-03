@@ -176,13 +176,15 @@ static void collect_once(void)
 {
     metrics_thread_t fresh;
 
-    if (br_core_get_mode() != BR_MODE_BR_RUNNING) {
+    // The session keeps a radio push from deleting the OpenThread lock while this task waits for it.
+    if (br_core_get_mode() != BR_MODE_BR_RUNNING || !br_core_ot_session_begin()) {
         xSemaphoreTake(s_mutex, portMAX_DELAY);
         s_valid = false;
         xSemaphoreGive(s_mutex);
         return;
     }
     if (!esp_openthread_lock_acquire(pdMS_TO_TICKS(METRICS_COLLECT_LOCK_MS))) {
+        br_core_ot_session_end();
         xSemaphoreTake(s_mutex, portMAX_DELAY);
         s_failures++;
         xSemaphoreGive(s_mutex);
@@ -196,6 +198,7 @@ static void collect_once(void)
         read_thread(ins, &fresh);
     }
     esp_openthread_lock_release();
+    br_core_ot_session_end();
 
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     if (running) {

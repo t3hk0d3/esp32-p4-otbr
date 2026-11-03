@@ -177,7 +177,13 @@ static esp_err_t apply_ha_name(void)
     // The setter frees the previous name, which the role-change handler reads on the OpenThread task: under the lock while
     // OpenThread runs. STARTING and RADIO_FAULT have no running OpenThread task (and maybe no lock yet); the next start
     // publishes with the name stored here.
-    if (mode != BR_MODE_BR_RUNNING && mode != BR_MODE_SNIFFER) {
+    // The session keeps a radio push from deleting the lock under this call; none opens once a push has begun. During a
+    // push OpenThread may still run (the push waits for open sessions first), so the name is not set at all: it is
+    // stored, and the next boot publishes it.
+    if ((mode != BR_MODE_BR_RUNNING && mode != BR_MODE_SNIFFER) || !br_core_ot_session_begin()) {
+        if (br_core_radio_job_running()) {
+            return err == ESP_OK ? ESP_ERR_INVALID_STATE : err;
+        }
         esp_openthread_set_meshcop_instance_name(s.ha_name);
         return err;
     }
@@ -194,6 +200,7 @@ static esp_err_t apply_ha_name(void)
         err = err == ESP_OK ? published : err;
     }
     esp_openthread_lock_release();
+    br_core_ot_session_end();
     return err;
 }
 

@@ -53,6 +53,7 @@ void mode_fsm_init(mode_fsm_t *fsm, const mode_fsm_ops_t *ops)
     fsm->recovery_count = 0;
     fsm->sniffer_end_cb = NULL;
     fsm->thread_stopped_by_capture = false;
+    fsm->radio_job = false;
     atomic_init(&fsm->mode, BR_MODE_STARTING);
 }
 
@@ -68,6 +69,9 @@ bool mode_fsm_thread_ops_allowed(const mode_fsm_t *fsm)
 
 bool mode_fsm_set_started(mode_fsm_t *fsm)
 {
+    if (fsm->radio_job) {
+        return false; // the restart inside a push or ROM recovery: the job sets the final mode when it ends
+    }
     br_core_mode_t expected = BR_MODE_STARTING;
     const bool changed = atomic_compare_exchange_strong(&fsm->mode, &expected, BR_MODE_BR_RUNNING);
 
@@ -178,20 +182,44 @@ bool mode_fsm_rest_ready_after_push(br_core_mode_t mode, bool openthread_ready)
     return mode == BR_MODE_BR_RUNNING && openthread_ready;
 }
 
+esp_err_t mode_fsm_begin_radio_job(mode_fsm_t *fsm)
+{
+    const br_core_mode_t mode = mode_fsm_get_mode(fsm);
+
+    if (fsm->radio_job || mode_fsm_push_allowed(mode, false) != ESP_OK) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    fsm->radio_job = true;
+    fsm->radio_job_prev = mode;
+    set_mode(fsm, BR_MODE_STARTING); // OpenThread is stopped and started again: nothing may use it until then
+    return ESP_OK;
+}
+
+void mode_fsm_cancel_radio_job(mode_fsm_t *fsm)
+{
+    if (fsm->radio_job) {
+        fsm->radio_job = false;
+        br_core_mode_t expected = BR_MODE_STARTING; // a fault entered meanwhile stays
+        if (atomic_compare_exchange_strong(&fsm->mode, &expected, fsm->radio_job_prev)) {
+            ESP_LOGI(TAG, "mode %s", mode_name(fsm->radio_job_prev));
+        }
+    }
+}
+
 // The job of a radio request (a firmware push, a ROM recovery): `source` set = push, NULL = ROM recovery.
 static esp_err_t run_radio_job(mode_fsm_t *fsm, const rcp_fw_source_t *source, char *err_detail, size_t err_cap)
 {
     bool restarted = false;
 
-    if (mode_fsm_push_allowed(mode_fsm_get_mode(fsm), false) != ESP_OK) {
+    if (!fsm->radio_job && mode_fsm_begin_radio_job(fsm) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
-    set_mode(fsm, BR_MODE_RADIO_FAULT); // the radio is unusable until the job is through
     esp_err_t err = source ? fsm->ops->push_firmware(source, err_detail, err_cap, &restarted)
                     : fsm->ops->rom_recover(err_detail, err_cap, &restarted);
     if (restarted) {
         fsm->thread_stopped_by_capture = false; // OpenThread started afresh
     }
+    fsm->radio_job = false;
     set_mode(fsm, restarted ? BR_MODE_BR_RUNNING : BR_MODE_RADIO_FAULT);
     return err;
 }

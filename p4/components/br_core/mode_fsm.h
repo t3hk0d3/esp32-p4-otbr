@@ -59,6 +59,8 @@ typedef struct {
     size_t recovery_count;
     void (*sniffer_end_cb)(void); /**< see mode_fsm_set_sniffer_end_cb; NULL = none */
     bool thread_stopped_by_capture; /**< Thread/netif were stopped for a capture and not restored yet */
+    bool radio_job; /**< a push or ROM recovery began (mode_fsm_begin_radio_job) and has not ended */
+    br_core_mode_t radio_job_prev; /**< the mode before it, put back by mode_fsm_cancel_radio_job */
 } mode_fsm_t;
 
 /** Mode STARTING. `ops` must outlive the FSM. */
@@ -77,7 +79,8 @@ br_core_mode_t mode_fsm_get_mode(const mode_fsm_t *fsm);
 /** True only in BR_MODE_BR_RUNNING. */
 bool mode_fsm_thread_ops_allowed(const mode_fsm_t *fsm);
 
-/** STARTING to BR_RUNNING once the border router is up; any other mode stays (a fault entered meanwhile wins). */
+/** STARTING to BR_RUNNING once the border router is up; any other mode stays (a fault entered meanwhile wins). No
+ *  change while a push or ROM recovery runs (its STARTING ends with the job). */
 bool mode_fsm_set_started(mode_fsm_t *fsm);
 
 /** Unrecoverable-here fault (init failure, dead radio): RADIO_FAULT from any mode, no recovery attempt. */
@@ -124,9 +127,21 @@ mode_fsm_fault_action_t mode_fsm_fault_action(bool caller_is_openthread_task);
 bool mode_fsm_rest_ready_after_push(br_core_mode_t mode, bool openthread_ready);
 
 /**
- * Push an RCP image on request: ESP_ERR_INVALID_STATE in STARTING and SNIFFER (nothing is touched). Otherwise the
- * mode is RADIO_FAULT while the push runs and BR_RUNNING afterwards when OpenThread runs again (also after a
- * failed push, which then returns its error), RADIO_FAULT when it does not. Works from RADIO_FAULT.
+ * Start a push or ROM recovery: ESP_ERR_INVALID_STATE in STARTING and SNIFFER (nothing changes). Otherwise the mode
+ * becomes STARTING (the REST guard refuses Thread access, the border router start does not complete, an RCP failure
+ * only resets the C6) until the job ends. Called under the OpenThread lock while OpenThread runs, so that the check
+ * and the change cannot be separated by a mode change.
+ */
+esp_err_t mode_fsm_begin_radio_job(mode_fsm_t *fsm);
+
+/** A begun job that will not run (nothing was stopped): the mode before mode_fsm_begin_radio_job comes back. */
+void mode_fsm_cancel_radio_job(mode_fsm_t *fsm);
+
+/**
+ * Push an RCP image on request. Begins the job (mode_fsm_begin_radio_job) unless the caller already did:
+ * ESP_ERR_INVALID_STATE in STARTING and SNIFFER (nothing is touched). The mode is STARTING while the push runs and
+ * BR_RUNNING afterwards when OpenThread runs again (also after a failed push, which then returns its error),
+ * RADIO_FAULT when it does not. Works from RADIO_FAULT.
  */
 esp_err_t mode_fsm_push_firmware(mode_fsm_t *fsm, const rcp_fw_source_t *source, char *err_detail, size_t err_cap);
 

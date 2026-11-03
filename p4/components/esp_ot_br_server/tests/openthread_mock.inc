@@ -44,6 +44,7 @@ void mock_reset(void) {
     mock_ot_ready=true;
     mock_ot_writes=0;
     mock_on_lock=NULL;
+    mock_session_refused=false;
 }
 void mock_complete_pending(void) {
     if(pending_callback) {otDatasetMgmtSetCallback callback=pending_callback;pending_callback=NULL;callback(mock_pending_result,pending_context);}

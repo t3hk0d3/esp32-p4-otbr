@@ -105,6 +105,10 @@ extern unsigned mock_ot_writes; /* calls that change OpenThread state */
 extern unsigned mock_lock_acquires; /* esp_openthread_lock_acquire() calls so far */
 extern void (*mock_on_lock)(void); /* runs once, right after the next lock acquire */
 br_core_mode_t br_core_get_mode(void);
+extern bool mock_session_refused; /* br_core_ot_session_begin() refuses (a radio push is stopping OpenThread) */
+extern int mock_sessions_open;    /* sessions opened and not yet closed */
+bool br_core_ot_session_begin(void);
+void br_core_ot_session_end(void);
 bool esp_br_web_openthread_ready(void);
 void mock_reset(void);
 #ifndef ESP_LOGI
