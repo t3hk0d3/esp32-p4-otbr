@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "ipv6_text.h"
 
 #ifndef CONFIG_IDF_TARGET_LINUX
 #include "esp_check.h"
@@ -31,8 +32,7 @@
 #define HOLD_TIME_MIN 3 /* besides 0 */
 #define HOLD_TIME_MAX 65535
 #define IPV6_GROUPS 8
-#define IPV6_TEXT_MAX 40           /* "xxxx:" * 8, the last colon replaced by the terminator */
-#define PREFIX_TEXT_MAX 44         /* IPV6_TEXT_MAX + "/64" */
+#define PREFIX_TEXT_MAX 44         /* ROUTING_IPV6_TEXT_MAX + "/64" */
 #define PREFIX_SUFFIX "/64"
 #define IPV4_TEXT_MAX 16
 #define OCTETS 4
@@ -135,8 +135,7 @@ static bool parse_ipv6(const char *text, uint8_t out[16])
     return true;
 }
 
-/* RFC 5952 text: lower case, no leading zeros, the first longest run of two or more zero groups as "::". */
-static void format_ipv6(const uint8_t addr[16], char *buf, size_t cap)
+void routing_ipv6_to_text(const uint8_t addr[16], char *buf, size_t cap)
 {
     uint16_t groups[IPV6_GROUPS];
     int best = -1, best_len = 1;
@@ -173,7 +172,7 @@ static void format_ipv6(const uint8_t addr[16], char *buf, size_t cap)
 static bool parse_prefix64(const char *text, routing_prefix64_t *out)
 {
     const char *slash = strchr(text, '/');
-    char addr_text[IPV6_TEXT_MAX];
+    char addr_text[ROUTING_IPV6_TEXT_MAX];
     uint8_t addr[16];
 
     if (!slash || strcmp(slash, PREFIX_SUFFIX) != 0 || (size_t)(slash - text) >= sizeof(addr_text)) {
@@ -198,7 +197,7 @@ static void format_prefix64(const routing_prefix64_t *p, char *buf, size_t cap)
     uint8_t addr[16] = {0};
 
     memcpy(addr, p->b, sizeof(p->b));
-    format_ipv6(addr, buf, cap);
+    routing_ipv6_to_text(addr, buf, cap);
     strncat(buf, PREFIX_SUFFIX, cap - strlen(buf) - 1);
 }
 
@@ -543,9 +542,9 @@ static bool add_ipv4_or_null(cJSON *obj, const char *key, bool set, uint32_t v)
 
 static bool add_address(cJSON *obj, const uint8_t addr[16])
 {
-    char text[IPV6_TEXT_MAX];
+    char text[ROUTING_IPV6_TEXT_MAX];
 
-    format_ipv6(addr, text, sizeof(text));
+    routing_ipv6_to_text(addr, text, sizeof(text));
     return cJSON_AddStringToObject(obj, "address", text) != NULL;
 }
 

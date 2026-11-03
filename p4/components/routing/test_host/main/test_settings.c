@@ -4,6 +4,7 @@
 #include "unity.h"
 #include "unity_test_runner.h"
 #include "routing.h"
+#include "ipv6_text.h"
 
 /* A complete PUT body; tests replace one part of it. */
 #define BODY_FMT "{\"method\":%s,\"omr\":%s,\"announce_ula\":true,\"bgp\":%s}"
@@ -517,6 +518,37 @@ TEST_CASE("Method changed: reports METHOD", "[routing]")
     b = a;
     b.method = ROUTING_METHOD_RIPNG;
     TEST_ASSERT_EQUAL_UINT32(ROUTING_CHANGE_METHOD, routing_settings_diff(&a, &b));
+}
+
+/* routing_ipv6_to_text */
+
+static const char *ipv6_text(const char *hex)
+{
+    static char text[ROUTING_IPV6_TEXT_MAX];
+    uint8_t addr[16];
+
+    for (int i = 0; i < 16; i++) {
+        unsigned v;
+
+        sscanf(hex + 2 * i, "%2x", &v);
+        addr[i] = (uint8_t)v;
+    }
+    routing_ipv6_to_text(addr, text, sizeof(text));
+    return text;
+}
+
+TEST_CASE("Any address: lower case, no leading zeros, the first longest zero run as ::", "[routing]")
+{
+    TEST_ASSERT_EQUAL_STRING("2001:db8::1", ipv6_text("20010db8000000000000000000000001"));
+    TEST_ASSERT_EQUAL_STRING("fe80::211:22ff:fe33:4455", ipv6_text("fe80000000000000021122fffe334455"));
+    TEST_ASSERT_EQUAL_STRING("2001:db8:0:1:1:1:1:1", ipv6_text("20010db8000000010001000100010001"));
+    TEST_ASSERT_EQUAL_STRING("2001:0:0:1::1", ipv6_text("20010000000000010000000000000001"));
+    TEST_ASSERT_EQUAL_STRING("abcd::", ipv6_text("abcd0000000000000000000000000000"));
+}
+
+TEST_CASE("The longest address: fits ROUTING_IPV6_TEXT_MAX", "[routing]")
+{
+    TEST_ASSERT_EQUAL_STRING("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", ipv6_text("ffffffffffffffffffffffffffffffff"));
 }
 
 void app_main(void)
