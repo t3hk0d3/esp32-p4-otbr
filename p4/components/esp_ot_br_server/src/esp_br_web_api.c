@@ -537,14 +537,13 @@ static void build_availableNetworks_list(otActiveScanResult *result)
 
 /* Patch 16: the HTTP task waits for the end of a scan at most SCAN_WAIT_MS (a radio fault can stop the main loop
  * mid-scan; an unbounded wait would hang the only HTTP task). A scan whose wait timed out may still deliver results
- * into s_networkList, so no new scan starts until its end callback ran. Written under the OpenThread lock. */
+ * into s_networkList, so the list is not replaced or read while OpenThread reports a discover in progress (a per-instance
+ * state: a restarted OpenThread starts idle). */
 #define SCAN_WAIT_MS 30000
-static bool s_scan_running;
 
 static void handle_active_scan_event(otActiveScanResult *aResult, void *aContext)
 {
     if ((aResult) == NULL) {
-        s_scan_running = false;
         xSemaphoreGive(s_discover_done_semaphore);
     } else {
         build_availableNetworks_list(aResult);
@@ -562,17 +561,22 @@ static otError get_openthread_available_networks(void)
                           "Failed to enable IPv6 interface for scanning");
     }
     xSemaphoreTake(s_discover_done_semaphore, 0); /* patch 16: drop the end of an earlier scan whose wait timed out */
-    s_scan_running = true;
     ESP_GOTO_ON_FALSE(OT_ERROR_NONE ==
                           (ret = otThreadDiscover(ins, scanChannels, OT_PANID_BROADCAST, false, false,
                                                   &handle_active_scan_event, NULL)),
                       ret, exit, API_TAG, "Failed to discover network");
 exit:
-    if (ret != OT_ERROR_NONE) {
-        s_scan_running = false;
-    }
     esp_openthread_lock_release();
     return ret;
+}
+
+/* Patch 16: true while a discover (possibly one whose wait timed out) can still write s_networkList. */
+static bool scan_in_progress(void)
+{
+    esp_openthread_lock_acquire(portMAX_DELAY);
+    const bool running = otThreadIsDiscoverInProgress(esp_openthread_get_instance());
+    esp_openthread_lock_release();
+    return running;
 }
 
 cJSON *handle_openthread_available_network_request(void)
@@ -581,10 +585,7 @@ cJSON *handle_openthread_available_network_request(void)
     cJSON *networks = cJSON_CreateArray();
 
     /* Patch 16: an earlier scan still running (its wait timed out) owns s_networkList. */
-    esp_openthread_lock_acquire(portMAX_DELAY);
-    const bool scan_running = s_scan_running;
-    esp_openthread_lock_release();
-    ESP_GOTO_ON_FALSE(!scan_running, OT_ERROR_BUSY, exit, API_TAG, "An earlier scan is still running");
+    ESP_GOTO_ON_FALSE(!scan_in_progress(), OT_ERROR_BUSY, exit, API_TAG, "An earlier scan is still running");
 
     destroy_available_thread_networks_list(s_networkList);
 
@@ -733,6 +734,10 @@ otError handle_openthread_join_network_request(const cJSON *request, cJSON *log)
     /* join active dataset */
     if (!memcmp(param.credentialType, CREDENTIAL_TYPE_NETWORK_KEY, sizeof(CREDENTIAL_TYPE_NETWORK_KEY))) {
         cJSON_SetValuestring(log, "Warning: Click `scan` and Try against");
+        /* Patch 16: a scan whose wait timed out may still be appending to the list. */
+        ESP_RETURN_ON_FALSE(!scan_in_progress(), OT_ERROR_BUSY, API_TAG, "A scan is still running");
+        list = s_networkList;
+        count = s_networkList_count;
         ESP_RETURN_ON_FALSE(list && count, OT_ERROR_INVALID_ARGS, API_TAG,
                             "Try against after scanning the available network");
         cJSON_SetValuestring(log, "Error: Invalid Index");

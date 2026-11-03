@@ -23,8 +23,6 @@ fi
 out="$(mkdir -p "$1" && cd "$1" && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-# zip adds to an existing archive: start from scratch so a re-run into the same directory ships no stale files.
-rm -f "$out/p4-flash.zip" "$out/c6-updater-flash.zip" "$out/third-party-licenses.zip"
 
 project_version() {
     python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["project_version"])' \
@@ -38,6 +36,8 @@ for project in p4 c6_rcp c6_updater c6_installer; do
         exit 1
     fi
 done
+# zip adds to an existing archive: start from scratch so a re-run into the same directory ships no stale files.
+rm -f "$out/p4-flash.zip" "$out/c6-updater-flash.zip" "$out/third-party-licenses.zip"
 
 # Zip the images named in a project's flash_args, flattened, with a flash_args that uses the flat names.
 flash_zip() {
