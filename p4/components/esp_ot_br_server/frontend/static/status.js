@@ -18,6 +18,15 @@ function faultText(reason) {
   if (reason === 'rcp incompatible')
     return 'The radio firmware does not match this build, so the Thread network cannot start. Install the ' +
            'c6_rcp.bin of the same release.';
+  if (reason === 'esp-hosted firmware')
+    return 'The radio still runs its factory ESP-Hosted firmware. On the Firmware page, install c6_installer.bin ' +
+           'once, then c6_rcp.bin of the same release.';
+  if (reason === 'rom recovery failed')
+    return 'Rewriting the radio over the maintenance jumper failed. Reboot the board, or use Recover C6 on the ' +
+           'Firmware page.';
+  if (reason === 'storage unavailable')
+    return 'The settings storage did not start, so the Thread network cannot start. The rest of the board works; ' +
+           'see Troubleshooting in the documentation.';
   return 'The radio stopped answering' + (reason ? ' (' + reason + ')' : '') +
          '. Updating or recovering the radio firmware may help.';
 }
@@ -117,6 +126,37 @@ function roleLine(v) {
 /** A secret shown as 8 dots, whatever its length ("-" stays). */
 function maskSecret(s) { return s === '-' ? s : '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'; }
 
+/*
+ * The Home Assistant tile from /device/status, /device/network and /device/names (null when not read):
+ * {url, mdns, haName, iface, note}. Home Assistant must use the Thread backbone address: in split mode the management
+ * interface refuses Thread changes and is never announced over mDNS.
+ */
+function haView(s, net, names) {
+  var split = !!(net && net.mode === 'split');
+  var name = split ? 'thread_bb' : 'eth';
+  var iface = (net && net.interfaces || []).filter(function(i) { return i.name === name; })[0] || null;
+  var addr = iface ? iface.ipv4 : (split ? null : s.eth && s.eth.ipv4);
+  var host = names && names.hostname_live ? names.hostname_live + '.local' : '';
+  var cfg = net && net.active && net.active[split ? 'thread_bb' : 'single'];
+  var dhcp = !!(cfg && cfg.ipv4 && cfg.ipv4.dhcp);
+  var notes = [];
+  if (s.mode !== 'BR_RUNNING')
+    notes.push('Home Assistant can use the board once the border router runs.');
+  if (split)
+    notes.push('Home Assistant must reach the Thread backbone address; the management address refuses Thread changes.');
+  else
+    notes.push('Home Assistant finds the board by mDNS when both are on the same network segment.');
+  if (addr && dhcp)
+    notes.push('The address comes from DHCP: give it a reservation so the URL stays valid.');
+  return {
+    url : addr ? 'http://' + addr : host ? 'http://' + host : '-',
+    mdns : host || '-',
+    haName : names && names.ha_name_effective ? names.ha_name_effective : '-',
+    iface : split ? 'Thread backbone (VLAN ' + (iface ? iface.vlan : '?') + ')' : 'Ethernet port',
+    note : notes.join(' ')
+  };
+}
+
 /** Rows of the Thread address table from the result of /ipaddr. */
 function addressRows(list) {
   return list.map(function(a) {
@@ -131,6 +171,7 @@ return {
   threadView : threadView,
   roleLine : roleLine,
   maskSecret : maskSecret,
+  haView : haView,
   addressRows : addressRows
 };
 })();
@@ -138,13 +179,20 @@ return {
 function StatusPage(env) {
 var C = typeof DeviceCommon !== 'undefined' ? DeviceCommon : require('./device_common.js');
 var L = StatusLogic;
-var kit = C.DeviceKit(env, {actionIds : [ 'rebootBtn' ]});
+var kit = C.DeviceKit(env, {
+  actionIds : [ 'rebootBtn' ],
+  trial : false,
+  refreshNetwork : function() { return refreshNetwork(); }
+});
 var $ = kit.$, setText = kit.setText, show = kit.show, note = kit.note;
 var lastSeen = 0;
 var lastMode = null;   // mode of the last status answer: the Thread data is only asked for in BR_RUNNING
 var threadPoll = null;
 var pskc = '-';
 var pskcShown = false;
+var lastStatus = null; // for the Home Assistant tile, which also needs /device/network
+var lastNet = null;
+var lastNames = null;
 
 function rcpText(installed) {
   if (installed === null || installed === undefined)
@@ -175,7 +223,7 @@ function render(s) {
   setText('t-slot', 'Slot ' + s.app.slot);
   setText('t-storage', s.storage_ok === undefined ? '-' : s.storage_ok ? 'OK' : 'Failed: settings are not saved');
   setText('t-rcp', rcpText(s.rcp.installed));
-  setText('t-compat', s.rcp.compatible ? 'Yes' : 'No');
+  setText('t-compat', C.compatText(s.rcp));
   var j = s.jumper;
   setText('t-jumper', j.present ? (j.recovery_failed ? 'Fitted, last recovery failed' : 'Fitted') : 'Not fitted');
   setText('t-base', !j.present ? '-'
@@ -190,6 +238,36 @@ function render(s) {
   var sn = L.snifferText(s.sniffer);
   setText('t-sniffer-state', sn.state);
   setText('t-sniffer-detail', sn.detail);
+  lastStatus = s;
+  renderHa();
+}
+
+function renderHa() {
+  if (!lastStatus)
+    return;
+  var v = L.haView(lastStatus, lastNet, lastNames);
+  setText('t-ha-url', v.url);
+  setText('t-ha-mdns', v.mdns);
+  setText('t-ha-name', v.haName);
+  setText('t-ha-iface', v.iface);
+  setText('t-ha-hint', v.note);
+}
+
+/* /device/network (the trial banner) and /device/names: the Home Assistant tile. */
+function refreshNetwork() {
+  return kit.request('GET', '/device/network', {timeoutMs : 5000}).then(function(r) {
+    if (r.status !== 200 || !r.body)
+      return false;
+    lastNet = r.body;
+    kit.renderTrial(r.body);
+    renderHa();
+    return kit.request('GET', '/device/names', {timeoutMs : 5000}).then(function(n) {
+      if (n.status === 200 && n.body)
+        lastNames = n.body;
+      renderHa();
+      return true;
+    }, function() { return true; });
+  }, function() { return false; });
 }
 
 function showOffline() {
@@ -354,6 +432,7 @@ function init() {
   kit.poller(refreshStatus, 3000, 'statusSection');
   kit.poller(refreshDiag, 10000, 'statusSection');
   threadPoll = kit.poller(refreshThread, 10000, 'statusSection');
+  kit.poller(refreshNetwork, 10000, null);
 }
 
 return {
@@ -361,6 +440,7 @@ return {
   refreshStatus : refreshStatus,
   refreshDiag : refreshDiag,
   refreshThread : refreshThread,
+  refreshNetwork : refreshNetwork,
   reboot : reboot,
   kit : kit
 };

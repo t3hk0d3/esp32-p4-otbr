@@ -46,7 +46,8 @@ connects to `http://<board>`: `tools/otbr_compat.py` checks the `python-otbr-api
 
 `http://<board>/` serves the upstream pages (Dashboard, Network to form or join, Commissioner, Addresses, Tools, Topology,
 About). The Topology page runs a mesh scan (`/device/topology`) and shows a map of the routers and their links, a device table with search and filters, and a device dialog with its addresses and a ping; the last result is kept in the browser. The Dashboard (`/`) is the status page: mode, versions, radio, Ethernet, prefix delegation, load, and while the
-border router runs the Thread network, identifiers and Thread addresses. The "Device" menu holds `/ethernet.html` (single or split setup,
+border router runs the Thread network, identifiers and Thread addresses. Its Home Assistant tile shows the URL to enter
+in the integration (the Thread backbone address in split mode) and the mDNS name. The "Device" menu holds `/ethernet.html` (single or split setup,
 VLANs and addresses, with a review step before the reboot), `/firmware.html` (P4 bundle and C6 radio firmware, radio
 recovery with the jumper), `/capture.html` (packet capture) and `/diagnostics.html`. Every device page shows the trial
 banner with **Keep new settings** while network settings are on trial. They use only `/device/*`, so they also work in
@@ -79,7 +80,8 @@ The dataset is stored on the board and used again at every boot. `GET /node/stat
 
 Several boards can serve the same Thread network: each one adds coverage, and the others keep the network reachable when
 one goes down. Form the network on the first board, then give every other board the same active dataset, either with the
-Web UI (Network page, "Join with Dataset": paste the TLVs of the first board) or by copying it over the REST API:
+Web UI (on the first board open Network > "This board's dataset" and copy the TLVs; on the new board paste them into
+"Join with Dataset") or by copying it over the REST API:
 
 ```
 curl -H 'Accept: text/plain' http://<first-board>/node/dataset/active > dataset.tlv

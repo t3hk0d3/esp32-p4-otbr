@@ -233,13 +233,14 @@ class TestStatusPage:
         assert r[1] is False
 
     def test_init_polls_status_diag_thread_and_the_trial_banner(self):
-        # On init with a running border router: status, diag, network, and the Thread properties and addresses.
+        # On init with a running border router: status, diag, network, names, and the Thread properties and addresses.
         r = scenario(
             page("index", ROUTES)
             + "t.page.init(); await t.advance(100); return [...new Set(t.calls.map((c) => c.url))].sort();"
         )
         assert r == [
             "/device/diag",
+            "/device/names",
             "/device/network",
             "/device/status",
             "/get_properties",
@@ -481,3 +482,87 @@ class TestDashboardPrReview:
         """
         )
         assert r == 0
+
+
+@needs_node
+class TestUxReview:
+    """UX review: first-boot fault texts, the compatibility row and the Home Assistant tile"""
+
+    @pytest.mark.parametrize(
+        ("reason", "word"),
+        [
+            ("esp-hosted firmware", "c6_installer.bin"),
+            ("rom recovery failed", "Recover C6"),
+            ("storage unavailable", "storage"),
+        ],
+    )
+    def test_first_boot_faults_say_what_to_do(self, reason, word):
+        h = st(
+            f"L.heroFor({{mode: 'RADIO_FAULT', fault_reason: '{reason}', sniffer: {{}}}})"
+        )
+        assert word in h["text"]
+        assert "stopped answering" not in h["text"]
+
+    @pytest.mark.parametrize(
+        ("rcp", "text"),
+        [
+            ("{installed: null, compatible: false}", "unknown"),
+            ("{installed: '', compatible: false}", "-"),
+            ("{installed: '2.1', compatible: false}", "No"),
+            ("{installed: '2.1', compatible: true}", "Yes"),
+        ],
+    )
+    def test_compat_text(self, rcp, text):
+        assert logic("device_common", f"L.compatText({rcp})") == text
+
+    def test_ha_single_uses_the_port_address_and_the_mdns_name(self):
+        v = st(
+            "L.haView({mode: 'BR_RUNNING', eth: {ipv4: '10.0.0.5'}},"
+            " {mode: 'single', active: {single: {ipv4: {dhcp: true}}},"
+            "  interfaces: [{name: 'eth', vlan: 0, ipv4: '192.168.1.117'}]},"
+            " {hostname_live: 'esp-otbr-d2cafc', ha_name_effective: 'Kitchen BR'})"
+        )
+        assert v["url"] == "http://192.168.1.117"
+        assert v["mdns"] == "esp-otbr-d2cafc.local"
+        assert v["haName"] == "Kitchen BR"
+        assert v["iface"] == "Ethernet port"
+        assert "reservation" in v["note"]
+
+    def test_ha_split_uses_the_thread_backbone_not_the_management_address(self):
+        v = st(
+            "L.haView({mode: 'BR_RUNNING', eth: {ipv4: '10.0.0.5'}},"
+            " {mode: 'split', active: {thread_bb: {ipv4: {dhcp: false}}},"
+            "  interfaces: [{name: 'mgmt', vlan: 10, ipv4: '10.0.0.5'}, {name: 'thread_bb', vlan: 20, ipv4: '10.0.20.7'}]},"
+            " null)"
+        )
+        assert v["url"] == "http://10.0.20.7"
+        assert v["iface"] == "Thread backbone (VLAN 20)"
+        assert "reservation" not in v["note"]
+
+    def test_ha_without_network_or_names_answer(self):
+        v = st("L.haView({mode: 'RADIO_FAULT', eth: {ipv4: '10.0.0.5'}}, null, null)")
+        assert v["url"] == "http://10.0.0.5"
+        assert v["mdns"] == "-"
+        assert v["haName"] == "-"
+        assert "once the border router runs" in v["note"]
+
+    def test_ha_tile_fills_from_status_network_and_names(self):
+        routes = ROUTES.replace(
+            "u === '/device/network' ? H.NETWORK",
+            "u === '/device/network' ? H.NETWORK : u === '/device/names' ?"
+            " {hostname_live: 'esp-otbr-d2cafc', ha_name_effective: 'esp-otbr-d2cafc'}",
+        )
+        r = scenario(
+            page("index", routes)
+            + """
+            await t.page.refreshStatus(); await t.page.refreshNetwork();
+            return [t.el('t-ha-url').textContent, t.el('t-ha-mdns').textContent, t.el('t-ha-name').textContent,
+                    t.el('t-ha-iface').textContent];
+        """
+        )
+        assert r == [
+            "http://192.168.1.117",
+            "esp-otbr-d2cafc.local",
+            "esp-otbr-d2cafc",
+            "Ethernet port",
+        ]

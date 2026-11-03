@@ -28,19 +28,16 @@
             <table>
                 <thead>
                     <tr>
-                        <th>No.</th>
-                        <th>Network Name</th>
-                        <th>Ext PAN ID</th>
-                        <th>PAN ID</th>
-                        <th>MAC Address</th>
-                        <th>Ch</th>
-                        <th>RSSI</th>
-                        <th>LQI</th>
-                        <th>Action</th>
+                        <th scope="col">Network name</th>
+                        <th scope="col">Channel</th>
+                        <th scope="col">PAN ID</th>
+                        <th scope="col">Ext PAN ID</th>
+                        <th scope="col">Signal</th>
+                        <th scope="col"><span class="hidden">Action</span></th>
                     </tr>
                 </thead>
                 <tbody id="scanBody">
-                    <tr><td colspan="9" class="text-center text-muted">Click Scan to discover networks</td></tr>
+                    <tr><td colspan="6" class="text-center text-muted">Click Scan to discover networks</td></tr>
                 </tbody>
             </table>
         </div>
@@ -49,7 +46,7 @@
     <!-- Join with Dataset Section -->
     <div class="card section">
         <div class="card-header">Join with Dataset</div>
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Join an existing Thread network with its active dataset TLVs (hex), e.g. from another border router (<code>GET /node/dataset/active</code> with <code>Accept: text/plain</code>), Home Assistant or <code>ot-ctl dataset active -x</code>. A dataset already stored on this board is replaced.</p>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Join an existing Thread network with its active dataset TLVs (hex), e.g. copied from another of these boards (below), from Home Assistant or from <code>ot-ctl dataset active -x</code>. A dataset already stored on this board is replaced.</p>
         <div class="form-group">
             <label class="form-label" for="datasetTlvs">Active dataset TLVs (hex)</label>
             <textarea class="form-input" id="datasetTlvs" rows="4" spellcheck="false" autocomplete="off" style="font-family:monospace;resize:vertical" placeholder="0e080000000000010000000300000f..."></textarea>
@@ -59,34 +56,40 @@
             <button type="button" class="btn btn-primary" id="datasetJoinBtn" disabled>Join</button>
             <span id="datasetStatus" style="font-size:13px"></span>
         </div>
+        <details class="mt-16" id="ownDataset">
+            <summary style="cursor:pointer;font-size:13px;color:var(--primary);font-weight:600">This board's dataset, to add another border router</summary>
+            <p class="form-hint">The active dataset holds the network key: anyone with it can join the network.</p>
+            <textarea class="form-input" id="ownDatasetTlvs" rows="4" readonly spellcheck="false" style="font-family:monospace;resize:vertical" aria-label="This board's active dataset TLVs (hex)"></textarea>
+            <div id="ownDatasetStatus" style="font-size:13px" role="status" aria-live="polite"></div>
+        </details>
     </div>
 
     <!-- Form Network Section -->
     <div class="card section">
         <div class="card-header">Form New Network</div>
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Create a new Thread network with custom parameters. Fields marked * are required.</p>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Create a new Thread network. The key, IDs, passphrase and prefix are random for every page load; keep them unless you need specific values. <button type="button" class="btn btn-outline btn-sm" id="formRandomBtn">New random values</button></p>
         <form id="formNet" onsubmit="return false">
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">Network Name *</label>
-                    <input class="form-input" name="networkName" type="text" value="OpenThread-ESP" required>
+                    <label class="form-label" for="fnName">Network name (1-16 characters)</label>
+                    <input class="form-input" name="networkName" id="fnName" type="text" maxlength="16" required>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Network Key * (32 hex chars)</label>
+                    <label class="form-label" for="fnKey">Network key (32 hex characters)</label>
                     <div class="input-toggle-wrap">
-                        <input class="form-input" name="networkKey" type="password" value="00112233445566778899aabbccddeeff" required>
-                        <button type="button" class="toggle-vis" onclick="toggleVis(this)" title="Show/Hide">&#x1F441;</button>
+                        <input class="form-input" name="networkKey" id="fnKey" type="password" autocomplete="off" spellcheck="false" required>
+                        <button type="button" class="toggle-vis" onclick="toggleVis(this)" title="Show/Hide" aria-label="Show or hide the network key">&#x1F441;</button>
                     </div>
                 </div>
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">PAN ID * (0x prefix)</label>
-                    <input class="form-input" name="panId" type="text" value="0x1234" required>
+                    <label class="form-label" for="fnPan">PAN ID (0x0000-0xfffe)</label>
+                    <input class="form-input" name="panId" id="fnPan" type="text" required>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Channel * (11-26)</label>
-                    <input class="form-input" name="channel" type="number" min="11" max="26" value="15" required>
+                    <label class="form-label" for="fnChannel">Channel (11-26)</label>
+                    <input class="form-input" name="channel" id="fnChannel" type="number" min="11" max="26" value="15" required>
                 </div>
             </div>
             <details style="margin-bottom:14px">
@@ -94,17 +97,17 @@
                 <div style="margin-top:12px">
                     <div class="form-row">
                         <div class="form-group">
-                            <label class="form-label">Extended PAN ID (16 hex chars)</label>
-                            <input class="form-input" name="extPanId" type="text" value="1111111122222222">
+                            <label class="form-label" for="fnExtPan">Extended PAN ID (16 hex characters)</label>
+                            <input class="form-input" name="extPanId" id="fnExtPan" type="text">
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Passphrase</label>
-                            <input class="form-input" name="passphrase" type="text" value="j01Nme">
+                            <label class="form-label" for="fnPhrase">Commissioning passphrase (6-255 characters)</label>
+                            <input class="form-input" name="passphrase" id="fnPhrase" type="text" autocomplete="off">
                         </div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">On-Mesh Prefix</label>
-                        <input class="form-input" name="prefix" type="text" value="fd11:22::">
+                        <label class="form-label" for="fnPrefix">On-mesh prefix (/64)</label>
+                        <input class="form-input" name="prefix" id="fnPrefix" type="text">
                     </div>
                     <div class="form-check">
                         <input type="checkbox" name="defaultRoute" id="formDefRoute" checked>
@@ -113,14 +116,14 @@
                 </div>
             </details>
             <div class="flex-between">
-                <button type="button" class="btn btn-primary" onclick="formNetwork()">Form Network</button>
-                <span id="formStatus" style="font-size:13px"></span>
+                <button type="button" class="btn btn-primary" id="formBtn" onclick="formNetwork()">Form Network</button>
+                <span id="formStatus" style="font-size:13px" role="status" aria-live="polite"></span>
             </div>
         </form>
     </div>
 
 </div>
-<div class="footer">Copyright &copy; 2026 Espressif Systems. All rights reserved.</div>
+<div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
 
 <!-- Join Modal -->
 <div class="modal-overlay" id="joinModal">
@@ -129,23 +132,24 @@
         <form id="joinForm" onsubmit="return false">
             <input type="hidden" name="index" id="joinIndex">
             <div class="form-group">
-                <label class="form-label">Credential Type</label>
+                <label class="form-label" for="joinCredType">Credential type</label>
                 <select class="form-select" name="credentialType" id="joinCredType" onchange="toggleCredType()">
                     <option value="networkKeyType">Network Key</option>
                     <option value="pskdType">PSKd</option>
                 </select>
             </div>
             <div class="form-group" id="joinKeyGroup">
-                <label class="form-label">Network Key (32 hex chars)</label>
+                <label class="form-label" for="joinKey">Network key of that network (32 hex characters)</label>
                 <div class="input-toggle-wrap">
-                    <input class="form-input" name="networkKey" type="password" value="00112233445566778899aabbccddeeff">
-                    <button type="button" class="toggle-vis" onclick="toggleVis(this)" title="Show/Hide">&#x1F441;</button>
+                    <input class="form-input" name="networkKey" id="joinKey" type="password" autocomplete="off" spellcheck="false">
+                    <button type="button" class="toggle-vis" onclick="toggleVis(this)" title="Show/Hide" aria-label="Show or hide the network key">&#x1F441;</button>
                 </div>
             </div>
             <div class="form-group hidden" id="joinPskdGroup">
-                <label class="form-label">PSKd</label>
-                <input class="form-input" name="pskd" type="text" placeholder="Enter PSKd">
+                <label class="form-label" for="joinPskd">PSKd (joiner credential)</label>
+                <input class="form-input" name="pskd" id="joinPskd" type="text" autocomplete="off" placeholder="Needs a commissioner on that network">
             </div>
+            <div id="joinError" class="form-hint" role="alert" style="color:var(--danger)"></div>
             <div class="modal-actions">
                 <button type="button" class="btn btn-secondary" onclick="closeJoinModal()">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="submitJoin()">Join</button>
@@ -155,6 +159,7 @@
 </div>
 
 <script src="/static/api.js"></script>
+<script src="/static/mgmt.js"></script>
 <script>
 function toggleVis(btn) {
     var inp = btn.previousElementSibling;
@@ -218,7 +223,7 @@ function scanNetworks() {
     btn.disabled = true;
     btn.textContent = 'Scanning...';
     status.textContent = 'Scanning for Thread networks...';
-    document.getElementById('scanBody').innerHTML = '<tr><td colspan="9" class="text-center"><div class="spinner"></div></td></tr>';
+    document.getElementById('scanBody').innerHTML = '<tr><td colspan="6" class="text-center"><div class="spinner"></div></td></tr>';
 
     apiGet('/available_network').then(function(data) {
         btn.disabled = false;
@@ -226,29 +231,27 @@ function scanNetworks() {
         if (data.error || !data.result) {
             status.textContent = 'Scan failed: ' + (data.message || 'Unknown error');
             status.style.color = 'var(--danger)';
-            document.getElementById('scanBody').innerHTML = '<tr><td colspan="9" class="text-center text-muted">Scan failed</td></tr>';
+            document.getElementById('scanBody').innerHTML = '<tr><td colspan="6" class="text-center text-muted">Scan failed</td></tr>';
             return;
         }
         var nets = data.result;
+        _scanNets = nets;
         status.textContent = 'Found ' + nets.length + ' network(s)';
         status.style.color = 'var(--success)';
         if (nets.length === 0) {
-            document.getElementById('scanBody').innerHTML = '<tr><td colspan="9" class="text-center text-muted">No networks found</td></tr>';
+            document.getElementById('scanBody').innerHTML = '<tr><td colspan="6" class="text-center text-muted">No networks found</td></tr>';
             return;
         }
         var html = '';
         for (var i = 0; i < nets.length; i++) {
             var n = nets[i];
             html += '<tr>';
-            html += '<td>' + escapeHtml(n.id) + '</td>';
             html += '<td>' + escapeHtml(n.nn) + '</td>';
-            html += '<td style="font-size:11px">' + escapeHtml(n.ep) + '</td>';
-            html += '<td>' + escapeHtml(n.pi) + '</td>';
-            html += '<td style="font-size:11px">' + escapeHtml(n.ha) + '</td>';
             html += '<td>' + escapeHtml(n.ch) + '</td>';
-            html += '<td>' + escapeHtml(n.ri) + '</td>';
-            html += '<td>' + escapeHtml(n.li) + '</td>';
-            html += '<td><button class="btn btn-primary btn-sm" onclick="openJoinModal(' + n.id + ')">Join</button></td>';
+            html += '<td style="font-family:monospace">' + escapeHtml(n.pi) + '</td>';
+            html += '<td style="font-family:monospace;font-size:11px">' + escapeHtml(n.ep) + '</td>';
+            html += '<td>' + escapeHtml(n.ri) + ' dBm</td>';
+            html += '<td><button class="btn btn-primary btn-sm" onclick="openJoinModal(' + i + ')">Join</button></td>';
             html += '</tr>';
         }
         document.getElementById('scanBody').innerHTML = html;
@@ -257,13 +260,16 @@ function scanNetworks() {
         btn.textContent = 'Scan';
         status.textContent = 'Network error';
         status.style.color = 'var(--danger)';
-        document.getElementById('scanBody').innerHTML = '<tr><td colspan="9" class="text-center text-muted">Connection failed</td></tr>';
+        document.getElementById('scanBody').innerHTML = '<tr><td colspan="6" class="text-center text-muted">Connection failed</td></tr>';
     });
 }
 
 /* ──── Join ──── */
-function openJoinModal(idx) {
-    document.getElementById('joinIndex').value = idx;
+var _scanNets = [];
+function openJoinModal(i) {
+    document.getElementById('joinIndex').value = _scanNets[i] ? _scanNets[i].id : '';
+    document.getElementById('joinModal').dataset.net = i;
+    document.getElementById('joinError').textContent = '';
     document.getElementById('joinModal').classList.add('active');
 }
 
@@ -282,10 +288,25 @@ function submitJoin() {
     var data = {
         index: parseInt(document.getElementById('joinIndex').value),
         credentialType: form.credentialType.value,
-        networkKey: form.networkKey.value,
-        pskd: form.pskd.value || ''
+        networkKey: form.networkKey.value.trim(),
+        pskd: form.pskd.value.trim().toUpperCase()
     };
+    var problem = data.credentialType === 'networkKeyType'
+        ? (/^[0-9a-fA-F]{32}$/.test(data.networkKey) ? null : 'The network key has 32 hex characters.')
+        : MgmtLogic.checkPskd(data.pskd);
+    if (problem) {
+        document.getElementById('joinError').textContent = problem;
+        return;
+    }
+    var target = _scanNets[document.getElementById('joinModal').dataset.net] || {};
     closeJoinModal();
+    DatasetJoin.readCurrentNetwork(fetch.bind(window)).then(function(current) {
+        if (!window.confirm(MgmtLogic.replaceQuestion('Join ' + (target.nn || 'the network') + ' on channel ' + target.ch, current)))
+            return;
+        sendJoin(data);
+    });
+}
+function sendJoin(data) {
     showBlockingOverlay('Joining Thread Network', 'Submitting join request...');
 
     apiPost('/join_network', data).then(function(res) {
@@ -331,19 +352,56 @@ function pollJoinState() {
 }
 
 /* ──── Form Network ──── */
+var FORM_FIELDS = {networkName: 'fnName', networkKey: 'fnKey', panId: 'fnPan', channel: 'fnChannel',
+                   extPanId: 'fnExtPan', passphrase: 'fnPhrase', prefix: 'fnPrefix'};
+function fillRandom() {
+    var r = MgmtLogic.randomNetwork(MgmtPage.rnd);
+    ['networkName', 'networkKey', 'panId', 'extPanId', 'passphrase', 'prefix'].forEach(function(k) {
+        document.getElementById(FORM_FIELDS[k]).value = r[k];
+    });
+}
 function formNetwork() {
     var form = document.getElementById('formNet');
-    var data = {
+    var raw = {
         networkName: form.networkName.value,
-        networkKey: form.networkKey.value,
-        panId: form.panId.value,
-        channel: parseInt(form.channel.value),
-        extPanId: form.extPanId.value,
+        networkKey: form.networkKey.value.trim(),
+        panId: form.panId.value.trim(),
+        channel: form.channel.value,
+        extPanId: form.extPanId.value.trim(),
         passphrase: form.passphrase.value,
-        prefix: form.prefix.value,
+        prefix: form.prefix.value.trim()
+    };
+    var problems = MgmtLogic.validateForm(raw);
+    Object.keys(FORM_FIELDS).forEach(function(k) {
+        document.getElementById(FORM_FIELDS[k]).removeAttribute('aria-invalid');
+    });
+    var status = document.getElementById('formStatus');
+    if (problems.length) {
+        problems.forEach(function(p) { document.getElementById(FORM_FIELDS[p.field]).setAttribute('aria-invalid', 'true'); });
+        if (problems.some(function(p) { return p.field === 'extPanId' || p.field === 'passphrase' || p.field === 'prefix'; }))
+            form.querySelector('details').open = true;
+        status.textContent = problems.map(function(p) { return p.text; }).join(' ');
+        status.style.color = 'var(--danger)';
+        return;
+    }
+    status.textContent = '';
+    var data = {
+        networkName: raw.networkName,
+        networkKey: raw.networkKey,
+        panId: raw.panId,
+        channel: parseInt(raw.channel, 10),
+        extPanId: raw.extPanId,
+        passphrase: raw.passphrase,
+        prefix: raw.prefix,
         defaultRoute: form.defaultRoute.checked
     };
-
+    DatasetJoin.readCurrentNetwork(fetch.bind(window)).then(function(current) {
+        if (!window.confirm(MgmtLogic.replaceQuestion('Form the network ' + data.networkName + ' on channel ' + data.channel, current)))
+            return;
+        sendForm(data);
+    });
+}
+function sendForm(data) {
     showBlockingOverlay('Forming Thread Network', 'Submitting form request...');
 
     apiPost('/form_network', data).then(function(res) {
@@ -387,6 +445,26 @@ function pollFormState() {
         }).catch(function() { /* ignore transient errors */ });
     }, 2000);
 }
+/* ──── This board's dataset (to copy into another border router) ──── */
+document.getElementById('ownDataset').addEventListener('toggle', function() {
+    if (!this.open) return;
+    var box = document.getElementById('ownDatasetTlvs');
+    var st = document.getElementById('ownDatasetStatus');
+    st.textContent = 'Reading...';
+    fetch('/node/dataset/active', {headers: {'Accept': 'text/plain'}}).then(function(r) {
+        return r.text().then(function(t) {
+            if (r.status === 204) { box.value = ''; st.textContent = 'This board has no network yet.'; return; }
+            if (r.status !== 200) { box.value = ''; st.textContent = apiFailureText(r.status, null); return; }
+            box.value = t.trim();
+            st.textContent = 'Copy this into "Join with Dataset" on the other board.';
+        });
+    }).catch(function() { st.textContent = 'No answer from the device.'; });
+});
+document.getElementById('ownDatasetTlvs').addEventListener('focus', function() { this.select(); });
+document.getElementById('formRandomBtn').addEventListener('click', fillRandom);
+fillRandom();
+/* Outside BR_RUNNING nothing here can work: say why and disable the controls. */
+MgmtPage.guard(false);
 </script>
 <script src="/static/dataset_join.js"></script>
 </body>

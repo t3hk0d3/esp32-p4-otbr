@@ -50,6 +50,23 @@ function jumperPresent(status) {
   return !!(status && status.jumper && status.jumper.present === true);
 }
 
+/** Confirm text before an install: `card` 'ota' or 'rcp', `what` the file name or URL, `running` the P4 version. */
+function installQuestion(card, what, running) {
+  if (card === 'ota')
+    return 'Install ' + what + ' and reboot? The board now runs ' + (running || 'an unknown version') +
+           '; Thread and the web UI are gone for about a minute.';
+  return 'Install the radio firmware ' + what + '? The Thread network stops for about half a minute.';
+}
+
+/** Note after the reboot of an update: `before` the version before it (null: no update was waited for). */
+function afterUpdateText(before, now) {
+  if (!before)
+    return null;
+  if (before === now)
+    return 'The board is back and still runs ' + now + ' (the bundle had the same version, or the update was rolled back).';
+  return 'Update done: the board now runs ' + now + ' (before: ' + before + ').';
+}
+
 function rcpInstalledText(installed) {
   if (installed === null || installed === undefined)
     return 'unknown (probe failed)';
@@ -61,6 +78,8 @@ return {
   checkUpdateUrl : checkUpdateUrl,
   faultHint : faultHint,
   jumperPresent : jumperPresent,
+  installQuestion : installQuestion,
+  afterUpdateText : afterUpdateText,
   rcpInstalledText : rcpInstalledText
 };
 })();
@@ -71,13 +90,37 @@ var L = FirmwareLogic;
 var kit = C.DeviceKit(env, {actionIds : [ 'otaInstall', 'rcpInstall', 'recoverBtn', 'logBtn' ]});
 var $ = kit.$, setText = kit.setText, show = kit.show, note = kit.note;
 var source = {ota : 'file', rcp : 'file'};
+var running = null; // P4 version from the last status
+var OTA_KEY = 'ota:before'; // version before an update, kept across the reload that follows it
+
+function stored(key, value) {
+  try {
+    var s = env.storage || null;
+    if (!s)
+      return null;
+    if (value === undefined)
+      return s.getItem(key);
+    if (value === null)
+      s.removeItem(key);
+    else
+      s.setItem(key, value);
+  } catch (e) {
+  }
+  return null;
+}
 
 function render(s) {
   show('fw-stale', false);
   setText('p4-version', s.app.version);
+  running = s.app.version;
+  var after = L.afterUpdateText(stored(OTA_KEY), s.app.version);
+  if (after) {
+    note('otaMsg', after, false);
+    stored(OTA_KEY, null);
+  }
   setText('p4-slot', 'Slot ' + s.app.slot);
   setText('rcp-version', L.rcpInstalledText(s.rcp.installed));
-  setText('rcp-compat', s.rcp.compatible ? 'Yes' : 'No');
+  setText('rcp-compat', C.compatText(s.rcp));
   var hint = L.faultHint(s.fault_reason);
   setText('radioHint', hint.text);
   show('radioHint', hint.highlight);
@@ -151,6 +194,8 @@ function sendFile(url, file, msgId, label) {
     note(msgId, tooBig, true);
     return Promise.resolve(null);
   }
+  if (!env.confirm(L.installQuestion(label === 'bundle' ? 'ota' : 'rcp', file.name, running)))
+    return Promise.resolve(null);
   return kit.runOp(function() {
     note(msgId, 'Uploading ' + file.name + ' (' + file.size + ' bytes)...', false);
     // A File body makes the browser send Content-Length, which the device requires.
@@ -168,6 +213,8 @@ function sendUrl(url, src, msgId, label, jsonBody) {
     note(msgId, problem, true);
     return Promise.resolve(null);
   }
+  if (!env.confirm(L.installQuestion(label === 'bundle' ? 'ota' : 'rcp', src.trim(), running)))
+    return Promise.resolve(null);
   return kit.runOp(function() {
     note(msgId, 'The device is downloading ' + src.trim() + ' ...', false);
     var opts = jsonBody ? {headers : {'Content-Type' : 'application/json'}, body : JSON.stringify({url : src.trim()})}
@@ -185,6 +232,7 @@ function finishInstall(r, msgId, label) {
     return null;
   }
   if (label === 'bundle') {
+    stored(OTA_KEY, running || '');
     note(msgId, 'Update installed. The board is rebooting; this page reloads when it is back.', false);
     kit.waitForBoard(msgId);
     return {handoff : true};
@@ -214,6 +262,9 @@ function install(card) {
 /* ---- radio recovery ---- */
 
 function recover() {
+  if (kit.isBusy() || !env.confirm('Rewrite the C6 base image over the maintenance jumper? The Thread network stops ' +
+                                   'while it runs; the radio firmware may have to be installed again afterwards.'))
+    return Promise.resolve(null);
   return kit.runOp(function() {
     note('recoverMsg', 'Rewriting the C6 base image through the ROM loader (this takes a while)...', false);
     return kit.request('POST', '/device/radio/recover').then(function(r) {

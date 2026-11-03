@@ -330,3 +330,66 @@ def test_recovery_text_asks_for_a_reinstall_only_without_radio_firmware():
     html = (FRONTEND / "firmware.html").read_text()
     assert "Afterwards install the radio firmware again" not in html
     assert "If the Radio card then shows no installed firmware" in html
+
+
+@needs_node
+class TestInstallConfirms:
+    """UX review: every install and the recovery ask first; the version change is shown after the reboot"""
+
+    def test_bundle_question_names_the_file_and_the_running_version(self):
+        q = fw("L.installQuestion('ota', 'otbr.bundle', '0.2.0')")
+        assert "otbr.bundle" in q and "0.2.0" in q and "reboot" in q
+
+    def test_radio_question_says_thread_stops(self):
+        assert "stops" in fw("L.installQuestion('rcp', 'c6_rcp.bin', '0.2.0')")
+
+    def test_after_update_text(self):
+        assert fw("L.afterUpdateText(null, '0.3.0')") is None
+        assert (
+            fw("L.afterUpdateText('0.2.0', '0.3.0')")
+            == "Update done: the board now runs 0.3.0 (before: 0.2.0)."
+        )
+        assert "still runs 0.2.0" in fw("L.afterUpdateText('0.2.0', '0.2.0')")
+
+    @pytest.mark.parametrize("card", ["ota", "rcp"])
+    def test_cancelled_install_sends_nothing(self, card):
+        r = scenario(
+            page("firmware", routes())
+            + f"""
+            t.page.init(); await t.advance(100);
+            t.env.confirm = () => false;
+            t.el('{card}File').files = [{{name: 'x.bin', size: 1234}}];
+            await t.page.install('{card}');
+            return t.calls.filter((c) => c.method === 'POST').length;
+        """
+        )
+        assert r == 0
+
+    def test_cancelled_recovery_sends_nothing(self):
+        r = scenario(
+            page("firmware", routes())
+            + """
+            t.env.confirm = () => false;
+            await t.page.recover();
+            return t.calls.filter((c) => c.url === '/device/radio/recover').length;
+        """
+        )
+        assert r == 0
+
+    def test_version_before_the_update_is_kept_and_reported_after_the_reload(self):
+        r = scenario(
+            page("firmware", routes())
+            + """
+            const store = {};
+            t.env.storage = {getItem: (k) => k in store ? store[k] : null, setItem: (k, v) => { store[k] = v; },
+                             removeItem: (k) => { delete store[k]; }};
+            t.page.init(); await t.advance(100);
+            t.el('otaFile').files = [{name: 'otbr.bundle', size: 1234}];
+            await t.page.install('ota');
+            const kept = store['ota:before'];
+            store['ota:before'] = '0.9';           // as if the board came back on 1.0 after the reload
+            await t.page.refreshStatus();
+            return [kept, t.el('otaMsg').textContent, 'ota:before' in store];
+        """
+        )
+        assert r == ["1.0", "Update done: the board now runs 1.0 (before: 0.9).", False]

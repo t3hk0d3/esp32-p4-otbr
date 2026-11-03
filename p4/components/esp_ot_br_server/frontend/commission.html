@@ -25,32 +25,35 @@
         </p>
         <form id="commForm" onsubmit="return false">
             <div class="form-group">
-                <label class="form-label">PSKd (Joiner Credential)</label>
-                <input class="form-input" name="pskd" type="text" value="J01NME" placeholder="e.g. J01NME">
-                <div class="form-hint">Pre-shared key that the joining device will use</div>
+                <label class="form-label" for="commPskd">PSKd (joiner credential)</label>
+                <input class="form-input" name="pskd" id="commPskd" type="text" autocomplete="off" spellcheck="false" placeholder="The code printed on the new device">
+                <div class="form-hint">6 to 32 digits and capital letters (no I, O, Q or Z), as printed on the device or its QR code. Then start joining on the device.</div>
             </div>
             <div style="display:flex;align-items:center;gap:12px">
                 <button type="button" class="btn btn-primary" onclick="startCommission()">Start Commissioner</button>
-                <span id="commStatus" style="font-size:13px"></span>
+                <span id="commStatus" style="font-size:13px" role="status" aria-live="polite"></span>
             </div>
         </form>
     </div>
 
 </div>
-<div class="footer">Copyright &copy; 2026 Espressif Systems. All rights reserved.</div>
+<div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
 <script src="/static/api.js"></script>
+<script src="/static/mgmt.js"></script>
 <script>
 /* Disable page if Thread network is not connected */
-checkThreadState(function(role, connected) {
-    if (!connected) disableManagementPage();
-});
+MgmtPage.guard(true);
 
 function startCommission() {
     var form = document.getElementById('commForm');
-    var pskd = form.pskd.value.trim();
-    if (!pskd) { showToast('Please enter a PSKd', 'error'); return; }
-
+    var pskd = form.pskd.value.trim().toUpperCase();
     var status = document.getElementById('commStatus');
+    var problem = MgmtLogic.checkPskd(pskd);
+    if (problem) {
+        status.textContent = problem;
+        status.style.color = 'var(--danger)';
+        return;
+    }
     status.textContent = 'Starting...';
     status.style.color = 'var(--primary)';
 
@@ -60,7 +63,8 @@ function startCommission() {
             status.style.color = 'var(--danger)';
             showToast('Commissioner failed', 'error');
         } else {
-            status.textContent = 'Commissioner started';
+            status.textContent = 'Commissioner started: a device with this PSKd can join now. Start joining on the device; ' +
+                'the device itself reports whether it joined.';
             status.style.color = 'var(--success)';
             showToast('Commissioner started', 'success');
         }

@@ -216,6 +216,20 @@ reason, spec reference.
    the filtered sends and that a discovery answer without TLV 0 adds no device. The mux itself is tested in
    `p4/components/netdiag_mux/test_host/`.
 
+16. Applied (2026-11, web UI usability review). `esp_ot_br_server` frontend, upstream pages: new
+   `frontend/static/mgmt.js` (pure logic exported for node: mode banner, random network parameters, Form Network and
+   PSKd validation, the replace-network confirm; page code guarded by `typeof document`), loaded after `api.js` by
+   `network.html`, `commission.html`, `addresses.html`, `tools.html`, whose `checkThreadState`
+   /`disableManagementPage` guard (removed from `api.js`) is replaced by `MgmtPage.guard`, which reads `/device/status`
+   first. `api.js`: `apiGet`/`apiPost` resolve a 4xx/5xx to `{error: <status>, message}` (never cached); the nav brand is
+   "Thread Border Router"; dropdowns also open on a tap (`.nav-dropdown.open` in `style.css`, which also gets
+   `[aria-invalid]` and `#t-ha-url` rules appended). `network.html`: random defaults instead of the example key,
+   IDs, passphrase and prefix; labelled and validated fields; confirms for Form and scan Join (via
+   `DatasetJoin.readCurrentNetwork`); a shorter scan table; "This board's dataset" (`GET /node/dataset/active`,
+   text/plain). `commission.html`: no default PSKd. `addresses.html`: confirms for remove/delete, no default prefix.
+   `about.html`: project texts and links, `/device/status` fields. Every upstream page gets the project footer instead
+   of the Espressif copyright line. Host tests: `tools/tests/test_mgmt_pages.py`.
+
 ### REST guard classification (patches 2 and 9)
 
 Classes: `NONE` no OpenThread access, always served. `READ` reads OpenThread state: 200 while OpenThread runs (patch 9
