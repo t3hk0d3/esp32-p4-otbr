@@ -643,6 +643,29 @@ static void snapshot_own_info(otInstance *ins, mesh_scan_info_t *out)
     info_oui(out, &oui);
 }
 
+/**
+ * This board's child entry without addresses (its parent's answer failed or was empty): the board's own unicast
+ * addresses, as a parent would report them (no link-local, RLOC or ALOC).
+ */
+static void snapshot_own_child_addrs(otInstance *ins, mesh_scan_child_t *c)
+{
+    const uint8_t *ml_prefix = otThreadGetMeshLocalPrefix(ins)->m8;
+    uint16_t rloc16;
+
+    if (c->n_addrs > 0) {
+        return;
+    }
+    for (const otNetifAddress *a = otIp6GetUnicastAddresses(ins); a && c->n_addrs < MESH_SCAN_MAX_CHILD_ADDRS;
+            a = a->mNext) {
+        const uint8_t *addr = a->mAddress.mFields.m8;
+        if ((addr[0] == 0xfe && (addr[1] & 0xc0) == 0x80) || mesh_scan_rloc16_from_peer(addr, ml_prefix, &rloc16)) {
+            continue;
+        }
+        memcpy(c->addrs[c->n_addrs++], addr, sizeof(c->addrs[0]));
+    }
+    c->addresses_reported = true;
+}
+
 static uint16_t op_own_rloc16(void)
 {
     return otThreadGetRloc16(instance());
@@ -662,6 +685,7 @@ static void op_snapshot(mesh_scan_result_t *r)
         for (uint16_t i = 0; i < router->n_children; i++) {
             if (router->children[i].rloc16 == own) {
                 snapshot_own_info(ins, &router->children[i].info);
+                snapshot_own_child_addrs(ins, &router->children[i]);
             }
         }
     }

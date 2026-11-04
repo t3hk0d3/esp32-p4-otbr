@@ -69,8 +69,8 @@ struct mesh_scan_ops {
     uint8_t (*router_table)(uint16_t rloc16_out[MESH_SCAN_MAX_ROUTERS], uint8_t ids_out[MESH_SCAN_MAX_ROUTERS]);
     /**
      * Fills network, OMR, this board's SRP hosts (TXT into the empty pool) and the `info` of this board's own entry,
-     * the router with `this_device` set or the child with own_rloc16() (answered, local values); remote hosts are merged
-     * after it.
+     * the router with `this_device` set or the child with own_rloc16() (answered, local values; that child also gets
+     * this board's addresses when its parent reported none); remote hosts are merged after it.
      */
     void (*snapshot)(mesh_scan_result_t *r);
     /** This board's RLOC16: when it is a child, its own child entry is read by the snapshot, never asked. */

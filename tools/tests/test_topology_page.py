@@ -2320,6 +2320,13 @@ IR.routers[2].children = [{rloc16: 0x6401, ext_address: 'acebe6fffe0bffa4', mode
         )
         assert r == "Eve Systems · Silicon Labs EFR32 · SL-OpenThread 2.4.2.0"
 
+    def test_dialog_keeps_a_lone_vendor_model_beside_the_stack_summary(self):
+        r = sv(
+            self.INFO_RESULT
+            + "IR.routers[1].info.vendor_model = 'Eve Model'; await openSV('r12', IR); return fact('Hardware');"
+        )
+        assert r == "Eve Model · Silicon Labs EFR32 · SL-OpenThread 2.4.2.0"
+
     def test_dialog_summary_omits_missing_parts(self):
         r = sv(self.INFO_RESULT + "await openSV('r25', IR); return fact('Hardware');")
         assert r == "Espressif esp32c6"

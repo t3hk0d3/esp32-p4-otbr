@@ -1469,6 +1469,24 @@ TEST_CASE("Reply at or after its query's deadline, before the deadline timer ran
     TEST_ASSERT_EQUAL_STRING("", res->routers[R_A].info.vendor_name);
 }
 
+TEST_CASE("Reply after its query's deadline, before the deadline timer ran: ignored; the timer gives up on it",
+          "[mesh_scan]")
+{
+    const mesh_scan_info_t info = full_info("late");
+
+    info_scan(); // the awake queries sent at 1000 ms, due at 6000 ms
+    g_fake.now_ms = 1000 + MESH_SCAN_CHILD_DEADLINE_MS + 1;
+    answer_info(RLOC16(R_A), &info, 0);
+    TEST_ASSERT_EQUAL(0, view().info_answered);
+    TEST_ASSERT_EQUAL(4, view().awake_left);
+
+    mesh_scan_on_child_deadline(g_fake.armed_gen);
+    answer_all();
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_EQUAL(MESH_SCAN_INFO_NO_ANSWER, res->routers[R_A].info.state);
+    TEST_ASSERT_EQUAL_STRING("", res->routers[R_A].info.vendor_name);
+}
+
 TEST_CASE("This board as a child: its child entry is neither asked nor counted; its info is the snapshot's local one",
           "[mesh_scan]")
 {
