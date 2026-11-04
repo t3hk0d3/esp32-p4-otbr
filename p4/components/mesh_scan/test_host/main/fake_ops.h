@@ -9,6 +9,8 @@
 #include "scan.h"
 
 #define FAKE_MAX_QUERIES 256
+#define FAKE_VENDOR_NAME "ESP32-P4-WIFI6-POE-ETH"  /**< this board's info, as the fake snapshot fills it */
+#define FAKE_STACK_VERSION "openthread-esp32/test; esp32p4"
 
 /** One dns_browse or dns_resolve call. */
 typedef struct {
@@ -26,7 +28,7 @@ typedef struct {
     int discover_ret;
     int child_table_ret;
     int child_addrs_ret;
-    int child_diag_rets[FAKE_MAX_QUERIES]; /**< return code of each query_child_diag call, in call order */
+    int info_rets[FAKE_MAX_QUERIES]; /**< return code of each query_info call, in call order */
     uint8_t table_n; /**< the local router table */
     uint16_t table_rloc16[MESH_SCAN_MAX_ROUTERS];
     uint8_t table_ids[MESH_SCAN_MAX_ROUTERS];
@@ -46,9 +48,10 @@ typedef struct {
     int child_addrs_calls;
     uint16_t child_table_rloc16[FAKE_MAX_QUERIES]; /**< in call order */
     uint16_t child_addrs_rloc16[FAKE_MAX_QUERIES];
-    int child_diag_calls;
-    uint16_t child_diag_rloc16[FAKE_MAX_QUERIES];
-    uint32_t child_diag_gen[FAKE_MAX_QUERIES];
+    int info_calls;
+    uint16_t info_rloc16[FAKE_MAX_QUERIES];
+    bool info_want_addrs[FAKE_MAX_QUERIES];
+    uint32_t info_gen[FAKE_MAX_QUERIES];
     int deadline_calls;
     uint32_t deadline_ms;  /**< of the last arm_child_deadline */
     uint32_t deadline_gen;

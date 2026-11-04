@@ -1,9 +1,9 @@
 #pragma once
 
-// Scan state machine (private): discover -> per-router child table and child addresses -> snapshot, over an ops table
-// so the host tests can drive it without OpenThread. In parallel from the start, the SRP step browses (and, where a
-// browse answer does not describe an instance, resolves) the service types on every other SRP server of the network
-// data; finish waits for both, or the cap. ot_ops.c installs the real ops and wraps the core calls in the
+// Scan state machine (private): discover -> per-router child table and child addresses -> device info -> snapshot, over
+// an ops table so the host tests can drive it without OpenThread. In parallel from the start, the SRP step browses
+// (and, where a browse answer does not describe an instance, resolves) the service types on every other SRP server of
+// the network data; finish waits for both, or the cap. ot_ops.c installs the real ops and wraps the core calls in the
 // OpenThread lock. Lock order everywhere: OpenThread lock, then the scan mutex; the ops never take the OpenThread lock.
 
 #include <stdbool.h>
@@ -18,8 +18,11 @@ extern "C" {
 #endif
 
 #define MESH_SCAN_CAP_MS 60000
-#define MESH_SCAN_CHILD_DEADLINE_MS 5000 /**< per child address query (ruling R14) */
-#define MESH_SCAN_CHILD_QUERIES 4        /**< child address queries in flight at most */
+#define MESH_SCAN_CHILD_DEADLINE_MS 5000    /**< per info query to an awake device (ruling R14) */
+#define MESH_SCAN_CHILD_QUERIES 4           /**< info queries to awake devices in flight at most */
+#define MESH_SCAN_SLEEPY_QUERIES 16         /**< info queries to sleepy children in flight at most */
+#define MESH_SCAN_SLEEPY_CAP_MS 300000      /**< from scan start: the wait for sleepy answers ends here */
+#define MESH_SCAN_SLEEPY_DEFAULT_MS 240000  /**< deadline of a sleepy query when the child table has no timeout */
 
 // OpenThread error codes, as plain ints so the host tests need no OpenThread headers (static-asserted in ot_ops.c).
 #define MESH_SCAN_OT_ERROR_NONE 0
@@ -53,22 +56,26 @@ struct mesh_scan_ops {
     int (*query_child_table)(uint16_t rloc16);     /**< start a child-table query; OpenThread error code */
     int (*query_child_addrs)(uint16_t rloc16);     /**< start a children-addresses query; OpenThread error code */
     /**
-     * Start a Network Diagnostic Get of the IPv6 Address List TLV to the child's RLOC address; its answer reaches
-     * mesh_scan_on_child_diag() with `gen`. OpenThread error code.
+     * Start a Network Diagnostic Get of the device info TLVs (plus the IPv6 Address List TLV when `want_addrs`) to the
+     * RLOC address of `rloc16`; its answer reaches mesh_scan_on_info() with `gen`. OpenThread error code.
      */
-    int (*query_child_diag)(uint16_t rloc16, uint32_t gen);
+    int (*query_info)(uint16_t rloc16, bool want_addrs, uint32_t gen);
     /** One-shot: mesh_scan_on_child_deadline(gen) from the OT task after `ms`; re-arming replaces the previous one. */
     void (*arm_child_deadline)(uint32_t ms, uint32_t gen);
     void (*cancel)(void);                          /**< cancel whatever mesh-diag operation runs */
     /** The local router table: fills both arrays, returns the count. */
     uint8_t (*router_table)(uint16_t rloc16_out[MESH_SCAN_MAX_ROUTERS], uint8_t ids_out[MESH_SCAN_MAX_ROUTERS]);
-    /** Fills network, OMR and this board's SRP hosts (TXT into the empty pool); remote hosts are merged after it. */
+    /**
+     * Fills network, OMR, this board's SRP hosts (TXT into the empty pool) and the `info` of the router entry with
+     * `this_device` set (answered, local values); remote hosts are merged after it.
+     */
     void (*snapshot)(mesh_scan_result_t *r);
     bool (*br_running)(void);                      /**< the mode is BR_RUNNING */
     int64_t (*now_ms)(void);
     /**
-     * One-shot cap for the scan of generation `gen`; on expiry, mesh_scan_on_cap() from the OT task. Also arms the
-     * mode watchdog, which calls mesh_scan_on_mode_lost(gen) once the mode is not BR_RUNNING.
+     * One-shot cap for the scan of generation `gen`; on expiry, mesh_scan_on_cap() from the OT task; re-arming replaces
+     * the previous one (the sleepy cap). Also arms the mode watchdog, which calls mesh_scan_on_mode_lost(gen) once the
+     * mode is not BR_RUNNING.
      */
     void (*arm_cap)(uint32_t ms, uint32_t gen);
     void (*disarm_cap)(void);                      /**< stops the cap, the watchdog, the child and SRP deadlines */
@@ -128,12 +135,18 @@ void mesh_scan_on_child_table_done(int ot_error);
 void mesh_scan_on_child_addrs(uint16_t child_rloc16, const uint8_t (*addrs)[16], uint8_t n);
 void mesh_scan_on_child_addrs_done(int ot_error);
 /**
- * An answer to a child address query of the scan of generation `gen`, from the child with RLOC16 `peer_rloc16`.
- * Dropped unless that child's query is in flight in this scan.
+ * An answer to an info query of the scan of generation `gen`, from the device with RLOC16 `peer_rloc16`: the parsed
+ * TLVs in `info` (its state is ignored; empty strings are absent) and `n` addresses of an IPv6 Address List TLV.
+ * Dropped unless that device's query is in flight in this scan.
  */
-void mesh_scan_on_child_diag(uint32_t gen, uint16_t peer_rloc16, const uint8_t (*addrs)[16], uint8_t n);
-/** The child deadline armed for the scan of generation `gen` expired: gives up on the overdue queries. */
+void mesh_scan_on_info(uint32_t gen, uint16_t peer_rloc16, const mesh_scan_info_t *info, const uint8_t (*addrs)[16],
+                       uint8_t n);
+/** The info deadline armed for the scan of generation `gen` expired: gives up on the overdue queries. */
 void mesh_scan_on_child_deadline(uint32_t gen);
+/**
+ * The cap. The 60 s cap with only sleepy queries left keeps the scan waiting and re-arms the cap for the sleepy cap
+ * (MESH_SCAN_SLEEPY_CAP_MS from scan start); otherwise, and at the sleepy cap, the scan finishes with what it has.
+ */
 void mesh_scan_on_cap(void);
 
 /**

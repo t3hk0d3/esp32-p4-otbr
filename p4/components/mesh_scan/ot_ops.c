@@ -8,14 +8,13 @@
 // cancelling (the mode watchdog, a callback that finds the mode lost, a cancel without the OpenThread lock) rely on
 // OpenThread's single mesh-diag slot instead: a new discover gets OT_ERROR_BUSY until the abandoned operation has ended.
 //
-// The child address step (spec 3.4, ruling R14) sends Network Diagnostic Gets through netdiag_mux (spec 3.5), which
+// The info phase (spec 3.4, ruling R14) sends Network Diagnostic Gets through netdiag_mux (spec 3.5), which
 // otMeshDiagCancel does not cover. The mux owns OpenThread's single netdiag callback slot, so the vendored GUI/REST
-// API (esp_br_web_api.c) no longer takes our answers or replaces our callback; on_child_diag gets every answer
+// API (esp_br_web_api.c) no longer takes our answers or replaces our callback; on_info gets every answer
 // (filter_peer false) with the context of the scan's LATEST send, not of the query being answered. An answer is
-// matched to its child by the peer address (the child's RLOC), and the scan's gen/phase check is a second guard. An
-// answer without an IPv6 Address List TLV is dropped; one to another sender's query that carries the list describes
-// its peer correctly, so using it is harmless. Errors never reach us: a scan-owned deadline per query gives up on
-// children that don't answer.
+// matched to its device by the peer address (the device's RLOC), and the scan's gen/phase check is a second guard. An
+// answer to another sender's query describes its peer correctly, so using it is harmless. Errors never reach us: a
+// scan-owned deadline per query gives up on devices that don't answer.
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -215,9 +214,10 @@ static void on_child_addrs(otError error, uint16_t child_rloc16, otMeshDiagIp6Ad
 }
 
 /** Network Diagnostic Get answer (any sender's, via netdiag_mux); `ctx` is the scan generation of our latest send. */
-static void on_child_diag(otError error, otMessage *msg, const otMessageInfo *info, void *ctx)
+static void on_info(otError error, otMessage *msg, const otMessageInfo *info, void *ctx)
 {
     static otNetworkDiagTlv tlv; // OpenThread task only; a few hundred bytes, kept off its stack
+    static const mesh_scan_info_t no_fields = { .state = MESH_SCAN_INFO_ANSWERED }; // no info TLV parsed yet
     uint8_t addrs[MESH_SCAN_MAX_CHILD_ADDRS][16];
     uint8_t n = 0;
     uint16_t rloc16;
@@ -236,7 +236,7 @@ static void on_child_diag(otError error, otMessage *msg, const otMessageInfo *in
             memcpy(addrs[n++], tlv.mData.mIp6AddrList.mList[i].mFields.m8, sizeof(addrs[0]));
         }
     }
-    mesh_scan_on_child_diag((uint32_t)(uintptr_t)ctx, rloc16, (const uint8_t (*)[16])addrs, n);
+    mesh_scan_on_info((uint32_t)(uintptr_t)ctx, rloc16, &no_fields, (const uint8_t (*)[16])addrs, n);
 }
 
 // Cap timer
@@ -371,10 +371,12 @@ static int op_query_child_addrs(uint16_t rloc16)
     return otMeshDiagQueryChildrenIp6Addrs(instance(), rloc16, on_child_addrs, NULL);
 }
 
-static int op_query_child_diag(uint16_t rloc16, uint32_t gen)
+static int op_query_info(uint16_t rloc16, bool want_addrs, uint32_t gen)
 {
     static const uint8_t tlvs[] = { OT_NETWORK_DIAGNOSTIC_TLV_IP6_ADDR_LIST };
     otIp6Address dest = { 0 };
+
+    (void)want_addrs; // asks for addresses only, so far
 
     // The child's RLOC: mesh-local prefix + 0:ff:fe00:<rloc16>.
     memcpy(dest.mFields.m8, otThreadGetMeshLocalPrefix(instance())->m8, OT_MESH_LOCAL_PREFIX_SIZE);
@@ -382,8 +384,8 @@ static int op_query_child_diag(uint16_t rloc16, uint32_t gen)
     dest.mFields.m8[12] = 0xfe;
     dest.mFields.m8[14] = (uint8_t)(rloc16 >> 8);
     dest.mFields.m8[15] = (uint8_t)rloc16;
-    // Unfiltered: on_child_diag matches the peer to the child itself.
-    return netdiag_mux_send_get(&dest, tlvs, sizeof(tlvs), on_child_diag, (void *)(uintptr_t)gen, false);
+    // Unfiltered: on_info matches the peer to the child itself.
+    return netdiag_mux_send_get(&dest, tlvs, sizeof(tlvs), on_info, (void *)(uintptr_t)gen, false);
 }
 
 static void op_arm_child_deadline(uint32_t ms, uint32_t gen)
@@ -895,7 +897,7 @@ static const mesh_scan_ops_t real_ops = {
     .discover = op_discover,
     .query_child_table = op_query_child_table,
     .query_child_addrs = op_query_child_addrs,
-    .query_child_diag = op_query_child_diag,
+    .query_info = op_query_info,
     .arm_child_deadline = op_arm_child_deadline,
     .cancel = op_cancel,
     .router_table = op_router_table,

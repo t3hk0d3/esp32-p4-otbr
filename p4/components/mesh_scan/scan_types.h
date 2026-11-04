@@ -81,7 +81,7 @@ typedef struct {
     mesh_scan_ip6_t addrs[MESH_SCAN_MAX_CHILD_ADDRS];
     uint8_t n_addrs;
     bool addresses_reported; /**< false: asked directly (spec 3.4) and gave no answer; true otherwise */
-    bool ask_pending;        /**< internal to scan.c: picked for the child address step, not answered yet */
+    bool ask_pending;        /**< internal to scan.c: queued for the info phase, not asked yet */
     mesh_scan_info_t info;
 } mesh_scan_child_t;
 
@@ -191,10 +191,10 @@ typedef struct {
     mesh_scan_error_t error; /**< failed only */
     uint8_t routers;         /**< running: routers discovered, 0 until discover ends */
     uint8_t queried;         /**< running: routers finished */
-    uint16_t children_total;   /**< running: children asked for their addresses, 0 before that step */
+    uint16_t children_total;   /**< running: rx-on children asked for their addresses, 0 before that */
     uint16_t children_queried; /**< running: of those, answered or given up */
-    uint16_t info_total;       /**< running: devices to ask for their info, 0 before that step */
-    uint16_t info_answered;    /**< running: of those, answered or given up */
+    uint16_t info_total;       /**< running: devices to ask for their info, 0 before the info phase */
+    uint16_t info_answered;    /**< running: of those, answered */
     uint16_t sleepy_waiting;   /**< running: sleepy devices still waiting for an answer */
     uint16_t sleepy_wait_s;    /**< running: seconds until the latest sleepy deadline, 0 when none waits */
     uint32_t age_s;          /**< done and failed: seconds since the scan ended */
