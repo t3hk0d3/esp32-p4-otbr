@@ -18,6 +18,7 @@
 // children that don't answer.
 #include <stdatomic.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "br_core.h"
@@ -30,7 +31,10 @@
 #include "freertos/FreeRTOS.h"
 #include "mesh_scan.h"
 #include "netdiag_mux.h"
+#include "openthread/dns.h"
+#include "openthread/dns_client.h"
 #include "openthread/error.h"
+#include "openthread/ip6.h"
 #include "openthread/link.h"
 #include "openthread/mesh_diag.h"
 #include "openthread/multi_radio.h"
@@ -41,6 +45,7 @@
 #include "openthread/thread_ftd.h"
 #include "scan.h"
 #include "sdkconfig.h"
+#include "srp.h"
 
 static const char *TAG = "mesh_scan";
 
@@ -52,6 +57,7 @@ _Static_assert(MESH_SCAN_OT_ERROR_NONE == OT_ERROR_NONE, "OT error code");
 _Static_assert(MESH_SCAN_OT_ERROR_NO_BUFS == OT_ERROR_NO_BUFS, "OT error code");
 _Static_assert(MESH_SCAN_OT_ERROR_BUSY == OT_ERROR_BUSY, "OT error code");
 _Static_assert(MESH_SCAN_OT_ERROR_INVALID_STATE == OT_ERROR_INVALID_STATE, "OT error code");
+_Static_assert(MESH_SCAN_OT_ERROR_NOT_FOUND == OT_ERROR_NOT_FOUND, "OT error code");
 _Static_assert(MESH_SCAN_OT_ERROR_RESPONSE_TIMEOUT == OT_ERROR_RESPONSE_TIMEOUT, "OT error code");
 _Static_assert(MESH_SCAN_MAX_ROUTERS == OT_NETWORK_MAX_ROUTER_ID + 1, "router IDs");
 _Static_assert(sizeof(((mesh_scan_router_t *)0)->lq_in) == sizeof(((otMeshDiagRouterInfo *)0)->mLinkQualities),
@@ -70,6 +76,7 @@ static bool s_initialised;
 static esp_timer_handle_t s_cap_timer;
 static esp_timer_handle_t s_watchdog_timer;
 static esp_timer_handle_t s_child_timer;
+static esp_timer_handle_t s_srp_timer;
 /** Children of the router in a discover callback (OpenThread task only); PSRAM, MESH_SCAN_MAX_CHILDREN entries. */
 static mesh_scan_child_t *s_children;
 
@@ -85,6 +92,7 @@ static uint32_t s_cap_gen;          // OpenThread lock
 static int64_t s_cap_deadline_us;   // OpenThread lock
 static atomic_uint_fast32_t s_cap_armed_gen;
 static atomic_uint_fast32_t s_child_armed_gen; // child deadline: the generation it was armed for
+static atomic_uint_fast32_t s_srp_armed_gen;   // SRP deadline: the generation it was armed for
 
 static otInstance *instance(void)
 {
@@ -306,6 +314,33 @@ static void child_timer_cb(void *arg)
     br_core_ot_session_end();
 }
 
+// SRP deadline: the same hand-over again; scan.c checks the generation and whether the SRP step still runs.
+
+static void srp_deadline_on_ot_task(void *arg)
+{
+    const uint32_t gen = (uint32_t)(uintptr_t)arg;
+
+    if (gen == s_cap_gen) {
+        mesh_scan_on_srp_deadline(gen);
+    }
+}
+
+/** esp_timer task: hand the SRP deadline to the OpenThread task (or fail the scan outside BR_RUNNING). */
+static void srp_timer_cb(void *arg)
+{
+    (void)arg;
+    const uint32_t gen = (uint32_t)atomic_load(&s_srp_armed_gen);
+
+    if (br_core_get_mode() != BR_MODE_BR_RUNNING || !br_core_ot_session_begin()) {
+        mesh_scan_on_mode_lost(gen);
+        return;
+    }
+    if (esp_openthread_task_queue_post(srp_deadline_on_ot_task, (void *)(uintptr_t)gen) != ESP_OK) {
+        esp_timer_start_once(s_srp_timer, (uint64_t)CAP_POST_RETRY_MS * 1000);
+    }
+    br_core_ot_session_end();
+}
+
 /** esp_timer task, every second while a scan runs. */
 static void watchdog_cb(void *arg)
 {
@@ -427,10 +462,53 @@ static void snapshot_network(otInstance *ins, mesh_scan_network_t *net)
     }
 }
 
-static void snapshot_srp_host(const otSrpServerHost *host, mesh_scan_srp_host_t *out)
+/** Fill one service of a local host: port, TXT (cut at 512 bytes) and subtype labels go through the result's pool. */
+static void snapshot_service(mesh_scan_result_t *r, const otSrpServerService *svc, uint16_t source,
+                             __typeof__(((mesh_scan_srp_host_t *)0)->services[0]) *s)
+{
+    uint16_t txt_len = 0;
+    const uint8_t *txt = otSrpServerServiceGetTxtData(svc, &txt_len);
+    const uint16_t kept = txt ? mesh_scan_txt_cut(txt, txt_len, MESH_SCAN_TXT_MAX) : 0;
+
+    strlcpy(s->instance, otSrpServerServiceGetInstanceLabel(svc), sizeof(s->instance));
+    // "_matter._tcp.default.service.arpa." -> "_matter._tcp"
+    copy_labels(s->type, sizeof(s->type), otSrpServerServiceGetServiceName(svc), 2);
+    s->port = otSrpServerServiceGetPort(svc);
+    s->source = source;
+    s->txt_truncated = kept < txt_len;
+    if (kept > 0 && mesh_scan_pool_put(r, txt, kept, &s->txt_off)) {
+        s->has_txt = true;
+        s->txt_len = kept;
+    } else if (kept > 0) {
+        s->txt_truncated = true; // pool full
+    } else if (txt) {
+        s->has_txt = true; // present and empty (or nothing fitting the cap: truncated above)
+    }
+
+    // Subtype labels, NUL-separated: "_i4f2._sub._matter._tcp.default.service.arpa." -> "_i4f2"
+    const uint16_t n_sub = otSrpServerServiceGetNumberOfSubTypes(svc);
+    uint16_t start = r->pool_used;
+
+    for (uint16_t i = 0; i < n_sub && s->n_sub < MESH_SCAN_MAX_SUBTYPES; i++) {
+        char label[MESH_SCAN_NAME_LEN];
+
+        if (otSrpServerParseSubTypeServiceName(otSrpServerServiceGetSubTypeServiceNameAt(svc, i), label,
+                                               sizeof(label)) != OT_ERROR_NONE ||
+                !mesh_scan_pool_put(r, (const uint8_t *)label, (uint16_t)strlen(label) + 1, &start)) {
+            continue;
+        }
+        if (s->n_sub++ == 0) {
+            s->sub_off = start;
+        }
+    }
+}
+
+static void snapshot_srp_host(mesh_scan_result_t *r, const otSrpServerHost *host, mesh_scan_srp_host_t *out,
+                              uint16_t source)
 {
     uint8_t n_addrs = 0;
     const otIp6Address *addrs = otSrpServerHostGetAddresses(host, &n_addrs);
+    otSrpServerLeaseInfo lease;
 
     memset(out, 0, sizeof(*out));
     copy_labels(out->name, sizeof(out->name), otSrpServerHostGetFullName(host), 1); // without .default.service.arpa.
@@ -439,14 +517,15 @@ static void snapshot_srp_host(const otSrpServerHost *host, mesh_scan_srp_host_t 
     }
     for (const otSrpServerService *svc = otSrpServerHostGetNextService(host, NULL);
             svc && out->n_services < MESH_SCAN_MAX_SRP_SERVICES; svc = otSrpServerHostGetNextService(host, svc)) {
-        if (otSrpServerServiceIsDeleted(svc)) {
-            continue;
+        if (!otSrpServerServiceIsDeleted(svc)) {
+            snapshot_service(r, svc, source, &out->services[out->n_services++]);
         }
-        __typeof__(out->services[0]) *s = &out->services[out->n_services++];
-        strlcpy(s->instance, otSrpServerServiceGetInstanceLabel(svc), sizeof(s->instance));
-        // "_matter._tcp.default.service.arpa." -> "_matter._tcp"
-        copy_labels(s->type, sizeof(s->type), otSrpServerServiceGetServiceName(svc), 2);
     }
+    otSrpServerHostGetLeaseInfo(host, &lease);
+    out->source = source;
+    out->local = true;
+    out->lease_s = lease.mRemainingLease / 1000;
+    out->key_lease_s = lease.mRemainingKeyLease / 1000;
 }
 
 // Radios this board uses toward each router it has a link to. Local state only: no mesh traffic.
@@ -483,10 +562,11 @@ static void op_snapshot(mesh_scan_result_t *r)
     snapshot_network(ins, &r->network);
     snapshot_transport(ins, r);
     r->n_srp = 0;
+    r->pool_used = 0;
     for (const otSrpServerHost *host = otSrpServerGetNextHost(ins, NULL);
             host && r->n_srp < MESH_SCAN_MAX_SRP_HOSTS; host = otSrpServerGetNextHost(ins, host)) {
         if (!otSrpServerHostIsDeleted(host)) {
-            snapshot_srp_host(host, &r->srp[r->n_srp++]);
+            snapshot_srp_host(r, host, &r->srp[r->n_srp++], r->network.this_rloc16);
         }
     }
 }
@@ -520,6 +600,7 @@ static void op_disarm_cap(void)
     esp_timer_stop(s_cap_timer);
     esp_timer_stop(s_watchdog_timer);
     esp_timer_stop(s_child_timer);
+    esp_timer_stop(s_srp_timer);
 }
 
 static void *op_alloc(size_t size)
@@ -530,6 +611,284 @@ static void *op_alloc(size_t size)
 static void op_release(void *p)
 {
     heap_caps_free(p);
+}
+
+// SRP step ops and the DNS client callbacks.
+//
+// Context of a DNS query. The pointer is 32 bits on the P4, too narrow for a 32-bit generation and a 16-bit job, so
+// it carries the low 16 bits of the generation above the job. The callback widens them back against s_dns_gen, the
+// generation of the latest query sent (both under the OpenThread lock): the newest generation not after it with the
+// same low bits. A query of an older scan thus decodes to an older generation and scan.c drops it; it could pass for
+// the current scan only if 65 536 scans started while it was pending (it ends within 2 x 3 s, or a few such rounds
+// when SRV_TXT_OPTIMIZE falls back to separate queries), which cannot happen. OpenThread has no way to cancel a DNS
+// query, so the callbacks of a cut-short or abandoned query still come and rely on this.
+_Static_assert(sizeof(uintptr_t) >= sizeof(uint32_t), "DNS query context");
+
+#define DNS_PORT 53
+#define DNS_DOMAIN "default.service.arpa."
+#define DNS_ADDR_LOOKUPS (2 * MESH_SCAN_MAX_SRP_ADDRS) // address indexes read per record, duplicates included
+
+static uint32_t s_dns_gen; // OpenThread lock
+
+/** Buffers of the record being decoded (OpenThread task only; the scan copies the record before returning). */
+static struct {
+    mesh_scan_srp_record_t rec;
+    otDnsServiceInfo info;
+    uint8_t txt[MESH_SCAN_TXT_MAX];
+    char host[OT_DNS_MAX_NAME_SIZE];    // full host name: the address lookups need it
+    char name[OT_DNS_MAX_NAME_SIZE];    // full service name of the answer
+} s_dns;
+
+static void *dns_ctx(uint32_t gen, uint16_t job)
+{
+    return (void *)(uintptr_t)(((gen & 0xffffu) << 16) | job);
+}
+
+static void dns_ctx_decode(void *ctx, uint32_t *gen, uint16_t *job)
+{
+    const uint32_t v = (uint32_t)(uintptr_t)ctx;
+    uint32_t g = (s_dns_gen & ~0xffffu) | (v >> 16);
+
+    if (g > s_dns_gen) {
+        g -= 0x10000u; // an older generation (wraps past zero to one no scan has)
+    }
+    *gen = g;
+    *job = (uint16_t)(v & 0xffffu);
+}
+
+static bool own_address(otInstance *ins, const uint8_t addr[16])
+{
+    for (const otNetifAddress *a = otIp6GetUnicastAddresses(ins); a; a = a->mNext) {
+        if (!memcmp(a->mAddress.mFields.m8, addr, OT_IP6_ADDRESS_SIZE)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static uint8_t op_srp_servers(mesh_scan_srp_server_t out[MESH_SCAN_MAX_SRP_SERVERS], mesh_scan_network_t *net,
+                              uint8_t ext_pan_id[8], uint8_t own_ext[8])
+{
+    otInstance *ins = instance();
+    otNetworkDataIterator it = OT_NETWORK_DATA_ITERATOR_INIT;
+    otServiceConfig config;
+    uint8_t n = 0;
+
+    snapshot_network(ins, net);
+    memcpy(ext_pan_id, otThreadGetExtendedPanId(ins)->m8, OT_EXT_PAN_ID_SIZE);
+    memcpy(own_ext, otLinkGetExtendedAddress(ins)->m8, OT_EXT_ADDRESS_SIZE);
+
+    while (n < MESH_SCAN_MAX_SRP_SERVERS && otNetDataGetNextService(ins, &it, &config) == OT_ERROR_NONE) {
+        mesh_scan_srp_server_t srv = { 0 };
+        if (!mesh_scan_srp_server_parse(config.mEnterpriseNumber, config.mServiceData, config.mServiceDataLength,
+                                        config.mServerConfig.mServerData, config.mServerConfig.mServerDataLength,
+                                        config.mServerConfig.mRloc16, &srv)) {
+            continue;
+        }
+        // The service-data form lists one service with a server entry per publisher: one server per address + port.
+        // The RLOC16 kept is the first publisher's.
+        bool seen = false;
+        for (uint8_t i = 0; i < n && !seen; i++) {
+            seen = out[i].port == srv.port && !memcmp(out[i].addr, srv.addr, sizeof(srv.addr));
+        }
+        if (seen) {
+            continue;
+        }
+        srv.this_board = own_address(ins, srv.addr);
+        out[n++] = srv;
+    }
+    return n;
+}
+
+static void dns_config(const mesh_scan_srp_server_t *srv, otDnsQueryConfig *config)
+{
+    *config = *otDnsClientGetDefaultConfig(instance()); // recursion, NAT64 and transport stay at the defaults
+    memcpy(config->mServerSockAddr.mAddress.mFields.m8, srv->addr, OT_IP6_ADDRESS_SIZE);
+    config->mServerSockAddr.mPort = DNS_PORT;
+    config->mResponseTimeout = MESH_SCAN_DNS_TIMEOUT_MS;
+    config->mMaxTxAttempts = MESH_SCAN_DNS_ATTEMPTS;
+    config->mServiceMode = OT_DNS_SERVICE_MODE_SRV_TXT_OPTIMIZE;
+}
+
+/** "<type>.default.service.arpa."; false when it does not fit. */
+static bool service_name(char *dst, size_t cap, const char *type)
+{
+    const int len = snprintf(dst, cap, "%s." DNS_DOMAIN, type);
+    return len > 0 && (size_t)len < cap;
+}
+
+/** Fresh service info over the decode buffers (OpenThread fills it in place); without TXT, no TXT is read. */
+static otDnsServiceInfo *dns_info_reset(bool with_txt)
+{
+    memset(&s_dns.info, 0, sizeof(s_dns.info));
+    s_dns.info.mHostNameBuffer = s_dns.host;
+    s_dns.info.mHostNameBufferSize = sizeof(s_dns.host);
+    s_dns.info.mTxtData = with_txt ? s_dns.txt : NULL;
+    s_dns.info.mTxtDataSize = with_txt ? sizeof(s_dns.txt) : 0;
+    s_dns.host[0] = '\0';
+    return &s_dns.info;
+}
+
+/**
+ * Read the service info of an answer into s_dns.info: OT_ERROR_NONE when the SRV was read. OpenThread fails the whole
+ * read with PARSE when only the TXT is malformed (TxtRecord::ReadTxtData), so on PARSE it reads again without TXT
+ * (OpenThread then skips the TXT record): the instance keeps its SRV and addresses and counts as having no TXT.
+ */
+static otError dns_read_info(const otDnsBrowseResponse *browse, const otDnsServiceResponse *service, const char *label)
+{
+    otError err = OT_ERROR_PARSE;
+
+    for (int with_txt = 1; with_txt >= 0 && err == OT_ERROR_PARSE; with_txt--) {
+        otDnsServiceInfo *info = dns_info_reset(with_txt);
+        err = browse ? otDnsBrowseResponseGetServiceInfo(browse, label, info)
+              : otDnsServiceResponseGetServiceInfo(service, info);
+    }
+    return err;
+}
+
+static void rec_add_addr(mesh_scan_srp_record_t *rec, const otIp6Address *a)
+{
+    static const otIp6Address unspecified;
+
+    if (rec->n_addrs >= MESH_SCAN_MAX_SRP_ADDRS || !memcmp(a, &unspecified, sizeof(*a))) {
+        return;
+    }
+    for (uint8_t i = 0; i < rec->n_addrs; i++) {
+        if (!memcmp(rec->addrs[i], a->mFields.m8, sizeof(rec->addrs[0]))) {
+            return;
+        }
+    }
+    memcpy(rec->addrs[rec->n_addrs++], a->mFields.m8, sizeof(rec->addrs[0]));
+}
+
+/**
+ * Port, host, TTL and TXT of a record from service info OpenThread found an SRV for. OpenThread marks a missing TXT
+ * with a zero TXT TTL (a TXT record sent with TTL 0 reads as missing too); a TXT over 512 bytes arrives cut at the
+ * buffer and is cut back to whole strings here.
+ */
+static void rec_from_info(mesh_scan_srp_record_t *rec, const otDnsServiceInfo *info)
+{
+    copy_labels(rec->host, sizeof(rec->host), info->mHostNameBuffer, 1); // without .default.service.arpa.
+    rec->port = info->mPort;
+    rec->ttl_s = info->mTtl;
+    rec->has_txt = info->mTxtDataTtl != 0;
+    if (rec->has_txt) {
+        const uint16_t size = info->mTxtDataSize <= sizeof(s_dns.txt) ? info->mTxtDataSize : sizeof(s_dns.txt);
+        rec->txt = s_dns.txt;
+        rec->txt_len = mesh_scan_txt_cut(s_dns.txt, size, MESH_SCAN_TXT_MAX);
+        rec->txt_truncated = info->mTxtDataTruncated || rec->txt_len < size;
+    }
+    rec_add_addr(rec, &info->mHostAddress);
+}
+
+static void rec_finish(mesh_scan_srp_record_t *rec, bool srv_found)
+{
+    rec->described = srv_found && rec->has_txt && rec->n_addrs > 0;
+}
+
+/** Browse answer (OpenThread task, OpenThread lock held): every instance, then the end of the query. */
+static void on_dns_browse(otError error, const otDnsBrowseResponse *resp, void *ctx)
+{
+    uint32_t gen;
+    uint16_t job;
+    mesh_scan_srp_record_t *rec = &s_dns.rec;
+
+    dns_ctx_decode(ctx, &gen, &job);
+    if (error == OT_ERROR_NONE) {
+        char type[MESH_SCAN_NAME_LEN] = "";
+        if (otDnsBrowseResponseGetServiceName(resp, s_dns.name, sizeof(s_dns.name)) == OT_ERROR_NONE) {
+            copy_labels(type, sizeof(type), s_dns.name, 2); // "_matter._tcp.default.service.arpa." -> "_matter._tcp"
+        }
+        for (uint16_t i = 0;; i++) {
+            memset(rec, 0, sizeof(*rec));
+            otError err = otDnsBrowseResponseGetServiceInstance(resp, i, rec->instance, sizeof(rec->instance));
+            if (err == OT_ERROR_NO_BUFS) {
+                continue; // a label over 63 bytes: not a valid one, skip it
+            }
+            if (err != OT_ERROR_NONE) {
+                break; // NOT_FOUND: no more instances; PARSE: give up on the rest
+            }
+            strlcpy(rec->type, type, sizeof(rec->type));
+            // NOT_FOUND (no SRV), NO_BUFS or PARSE: an undescribed record, which the scan resolves.
+            const bool srv_found = dns_read_info(resp, NULL, rec->instance) == OT_ERROR_NONE;
+            if (srv_found) {
+                rec_from_info(rec, &s_dns.info);
+                otIp6Address a;
+                for (uint16_t k = 0; k < DNS_ADDR_LOOKUPS && rec->n_addrs < MESH_SCAN_MAX_SRP_ADDRS &&
+                        otDnsBrowseResponseGetHostAddress(resp, s_dns.host, k, &a, NULL) == OT_ERROR_NONE; k++) {
+                    rec_add_addr(rec, &a);
+                }
+            }
+            rec_finish(rec, srv_found);
+            mesh_scan_on_srp_record(gen, job, rec);
+        }
+    }
+    mesh_scan_on_srp_query_done(gen, job, error);
+}
+
+/**
+ * Service resolve answer (OpenThread task, OpenThread lock held): the instance if its SRV came, then the end. The
+ * addresses come from the SRV answer's additional data or, when it had none, from the AAAA query OpenThread sent after
+ * it (otDnsClientResolveServiceAndHostAddress); otDnsServiceResponseGetHostAddress reads both.
+ */
+static void on_dns_resolve(otError error, const otDnsServiceResponse *resp, void *ctx)
+{
+    uint32_t gen;
+    uint16_t job;
+    mesh_scan_srp_record_t *rec = &s_dns.rec;
+
+    dns_ctx_decode(ctx, &gen, &job);
+    memset(rec, 0, sizeof(*rec));
+    if (error == OT_ERROR_NONE &&
+            otDnsServiceResponseGetServiceName(resp, rec->instance, sizeof(rec->instance), s_dns.name,
+                                               sizeof(s_dns.name)) == OT_ERROR_NONE &&
+            dns_read_info(NULL, resp, NULL) == OT_ERROR_NONE) {
+        copy_labels(rec->type, sizeof(rec->type), s_dns.name, 2);
+        rec_from_info(rec, &s_dns.info);
+        otIp6Address a;
+        for (uint16_t k = 0; k < DNS_ADDR_LOOKUPS && rec->n_addrs < MESH_SCAN_MAX_SRP_ADDRS &&
+                otDnsServiceResponseGetHostAddress(resp, s_dns.host, k, &a, NULL) == OT_ERROR_NONE; k++) {
+            rec_add_addr(rec, &a);
+        }
+        rec_finish(rec, true);
+        mesh_scan_on_srp_record(gen, job, rec);
+    }
+    mesh_scan_on_srp_query_done(gen, job, error);
+}
+
+static int op_dns_browse(const mesh_scan_srp_server_t *srv, const char *type, uint32_t gen, uint16_t job)
+{
+    char name[OT_DNS_MAX_NAME_SIZE];
+    otDnsQueryConfig config;
+
+    if (!service_name(name, sizeof(name), type)) {
+        return OT_ERROR_INVALID_ARGS;
+    }
+    dns_config(srv, &config);
+    s_dns_gen = gen;
+    return otDnsClientBrowse(instance(), name, on_dns_browse, dns_ctx(gen, job), &config);
+}
+
+static int op_dns_resolve(const mesh_scan_srp_server_t *srv, const char *instance_label, const char *type,
+                          uint32_t gen, uint16_t job)
+{
+    char name[OT_DNS_MAX_NAME_SIZE];
+    otDnsQueryConfig config;
+
+    if (!service_name(name, sizeof(name), type)) {
+        return OT_ERROR_INVALID_ARGS;
+    }
+    dns_config(srv, &config);
+    s_dns_gen = gen;
+    // With a follow-up AAAA query when the SRV answer carries no address (needs an SRV-querying service mode, as set).
+    return otDnsClientResolveServiceAndHostAddress(instance(), instance_label, name, on_dns_resolve, dns_ctx(gen, job),
+                                                   &config);
+}
+
+static void op_arm_srp_deadline(uint32_t ms, uint32_t gen)
+{
+    atomic_store(&s_srp_armed_gen, gen);
+    one_shot_start(s_srp_timer, (uint64_t)ms * 1000);
 }
 
 static const mesh_scan_ops_t real_ops = {
@@ -547,6 +906,10 @@ static const mesh_scan_ops_t real_ops = {
     .disarm_cap = op_disarm_cap,
     .alloc = op_alloc,
     .release = op_release,
+    .srp_servers = op_srp_servers,
+    .dns_browse = op_dns_browse,
+    .dns_resolve = op_dns_resolve,
+    .arm_srp_deadline = op_arm_srp_deadline,
 };
 
 // Public entry points
@@ -573,10 +936,16 @@ esp_err_t mesh_scan_init(void)
         .dispatch_method = ESP_TIMER_TASK,
         .name = "mesh_scan_child",
     };
+    const esp_timer_create_args_t srp_args = {
+        .callback = srp_timer_cb,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "mesh_scan_srp",
+    };
     esp_err_t ret = ESP_OK;
     ESP_GOTO_ON_ERROR(esp_timer_create(&cap_args, &s_cap_timer), fail, TAG, "cap timer");
     ESP_GOTO_ON_ERROR(esp_timer_create(&watchdog_args, &s_watchdog_timer), fail, TAG, "mode watchdog");
     ESP_GOTO_ON_ERROR(esp_timer_create(&child_args, &s_child_timer), fail, TAG, "child deadline");
+    ESP_GOTO_ON_ERROR(esp_timer_create(&srp_args, &s_srp_timer), fail, TAG, "SRP deadline");
 
     mesh_scan_set_ops(&real_ops);
     s_initialised = true;
@@ -590,6 +959,10 @@ fail:
     if (s_watchdog_timer) {
         esp_timer_delete(s_watchdog_timer);
         s_watchdog_timer = NULL;
+    }
+    if (s_child_timer) {
+        esp_timer_delete(s_child_timer);
+        s_child_timer = NULL;
     }
     heap_caps_free(s_children);
     s_children = NULL;

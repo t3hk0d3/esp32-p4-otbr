@@ -2,9 +2,11 @@
 #include <string.h>
 
 #include "sample_result.h"
+#include "srp.h"
 
 static mesh_scan_result_t s_result;
 static mesh_scan_child_t s_children[4][4];
+static uint8_t s_pool[MESH_SCAN_POOL_SIZE];
 
 static void ip6(mesh_scan_ip6_t out, const char *text)
 {
@@ -72,6 +74,7 @@ mesh_scan_result_t *sample_result(void)
 {
     memset(&s_result, 0, sizeof(s_result));
     memset(s_children, 0, sizeof(s_children));
+    s_result.pool = s_pool;
 
     mesh_scan_network_t *n = &s_result.network;
 
@@ -138,13 +141,26 @@ mesh_scan_result_t *sample_result(void)
     r17->children_detail = false;
     child(r17, 0x4401, 0x4000000000000001ull, true, "2001:db8:4a2:1::4401");
 
+    // Hosts: kitchen-plug from this board (lease fields), the tricky one and ha-sensor from other servers (ttl_s).
+    const uint8_t txt[] = { 3, 'a', '=', '1' }; // base64 "A2E9MQ=="
     mesh_scan_srp_host_t *h = &s_result.srp[0];
 
     strcpy(h->name, "kitchen-plug");
     ip6(h->addrs[0], "2001:db8:4a2:1:2be4:6c19:a0f7:3381");
     h->n_addrs = 1;
+    h->source = 0x8800;
+    h->local = true;
+    h->lease_s = 7200;
+    h->key_lease_s = 1209600;
     strcpy(h->services[0].instance, "kitchen-plug");
     strcpy(h->services[0].type, "_matter._tcp");
+    h->services[0].port = 5540;
+    h->services[0].source = 0x8800;
+    h->services[0].has_txt = true;
+    h->services[0].txt_len = sizeof(txt);
+    mesh_scan_pool_put(&s_result, txt, sizeof(txt), &h->services[0].txt_off);
+    mesh_scan_pool_put(&s_result, (const uint8_t *)"_i4f2\0_S3\0", 10, &h->services[0].sub_off);
+    h->services[0].n_sub = 2;
     h->n_services = 1;
 
     h = &s_result.srp[1];
@@ -153,7 +169,43 @@ mesh_scan_result_t *sample_result(void)
     ip6(h->addrs[1], "::");
     h->n_addrs = 2;
     h->n_services = 0;
-    s_result.n_srp = 2;
+    h->source = 0x2400;
+    h->ttl_s = 1800;
+
+    h = &s_result.srp[2];
+    strcpy(h->name, "ha-sensor");
+    ip6(h->addrs[0], "2001:db8:4a2:1::77");
+    h->n_addrs = 1;
+    h->source = 0xc800;
+    h->ttl_s = 600;
+    strcpy(h->services[0].instance, "ha-sensor");
+    strcpy(h->services[0].type, "_http._tcp");
+    h->services[0].port = 80;
+    h->services[0].source = 0xc800;
+    h->services[0].txt_truncated = true; // no TXT at all, yet flagged: rendered as given
+    h->n_services = 1;
+    s_result.n_srp = 3;
+
+    mesh_scan_srp_server_t *sv = &s_result.srp_servers[0];
+
+    sv->rloc16 = 0x8800;
+    ip6(sv->addr, "fdde:ad00:beef:0:0:ff:fe00:8800");
+    sv->port = 53554;
+    sv->this_board = true;
+    sv->state = MESH_SCAN_SRP_ANSWERED;
+    sv->hosts = 1;
+    sv = &s_result.srp_servers[1];
+    sv->rloc16 = 0x2400;
+    ip6(sv->addr, "fd7a:91c3:22e0:1::53");
+    sv->port = 53;
+    sv->state = MESH_SCAN_SRP_NO_ANSWER;
+    sv = &s_result.srp_servers[2];
+    sv->rloc16 = 0xc800;
+    ip6(sv->addr, "2001:db8:4a2:1::53");
+    sv->port = 5353;
+    sv->state = MESH_SCAN_SRP_CUT_SHORT;
+    sv->hosts = 2;
+    s_result.n_srp_servers = 3;
 
     s_result.partial = true; // router 25 did not answer, router 17 has no detail
     return &s_result;

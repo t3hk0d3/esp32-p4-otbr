@@ -1,5 +1,6 @@
 #include "fake_ops.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -70,9 +71,22 @@ static uint8_t fake_router_table(uint16_t rloc16_out[MESH_SCAN_MAX_ROUTERS], uin
     return g_fake.table_n;
 }
 
-/** Fills what ot_ops.c's snapshot fills: the network fields, the SLAAC on-mesh prefixes and the SRP hosts. */
+/** The mesh-local prefix fd.. and the OMR prefix fe.., as ot_ops.c reads them from the network data. */
+static void fake_prefixes(mesh_scan_network_t *net)
+{
+    memset(net->ml_prefix, 0xfd, sizeof(net->ml_prefix));
+    memset(net->omr[0], 0xfe, sizeof(net->omr[0]));
+    net->n_omr = 1;
+}
+
+/**
+ * Fills what ot_ops.c's snapshot fills: the network fields, the SLAAC on-mesh prefixes and the SRP hosts ("lamp" with
+ * one _matter._tcp service "lamp-svc", then "local-<i>" without services), all local to this board (RLOC16 0x8800).
+ */
 static void fake_snapshot(mesh_scan_result_t *r)
 {
+    const uint8_t n = g_fake.snapshot_hosts ? g_fake.snapshot_hosts : 1;
+
     g_fake.ops_calls++;
     g_fake.snapshot_calls++;
     strcpy(r->network.name, "OpenThread-test");
@@ -80,13 +94,24 @@ static void fake_snapshot(mesh_scan_result_t *r)
     r->network.partition_id = 0x12345678;
     r->network.leader_router_id = 9;
     r->network.this_rloc16 = 0x8800;
-    memset(r->network.ml_prefix, 0xfd, sizeof(r->network.ml_prefix));
-    memset(r->network.omr[0], 0xfe, sizeof(r->network.omr[0]));
-    r->network.n_omr = 1;
-    strcpy(r->srp[0].name, "lamp");
-    r->srp[0].n_addrs = 1;
-    r->srp[0].addrs[0][0] = 0xfd;
-    r->n_srp = 1;
+    fake_prefixes(&r->network);
+    for (uint8_t i = 0; i < n; i++) {
+        mesh_scan_srp_host_t *h = &r->srp[i];
+        snprintf(h->name, sizeof(h->name), i ? "local-%u" : "lamp", (unsigned)i);
+        h->n_addrs = 1;
+        h->addrs[0][0] = 0xfd;
+        h->source = 0x8800;
+        h->local = true;
+        h->lease_s = 3600;
+        h->key_lease_s = 86400;
+    }
+    strcpy(r->srp[0].services[0].instance, "lamp-svc");
+    strcpy(r->srp[0].services[0].type, "_matter._tcp");
+    r->srp[0].services[0].port = 5540;
+    r->srp[0].services[0].source = 0x8800;
+    r->srp[0].n_services = 1;
+    r->n_srp = n;
+    r->pool_used = g_fake.snapshot_pool_used;
 }
 
 static bool fake_br_running(void)
@@ -133,6 +158,56 @@ static void fake_release(void *p)
     free(p);
 }
 
+static uint8_t fake_srp_servers(mesh_scan_srp_server_t out[MESH_SCAN_MAX_SRP_SERVERS], mesh_scan_network_t *net,
+                                uint8_t ext_pan_id[8], uint8_t own_ext[8])
+{
+    g_fake.ops_calls++;
+    g_fake.srp_servers_calls++;
+    memcpy(out, g_fake.srp, g_fake.srp_n * sizeof(out[0]));
+    fake_prefixes(net);
+    memcpy(ext_pan_id, g_fake.ext_pan_id, 8);
+    memcpy(own_ext, g_fake.own_ext, 8);
+    return g_fake.srp_n;
+}
+
+static int fake_dns_call(bool resolve, const mesh_scan_srp_server_t *srv, const char *instance, const char *type,
+                         uint32_t gen, uint16_t job)
+{
+    const int i = g_fake.dns_calls++;
+
+    g_fake.ops_calls++;
+    if (i >= FAKE_MAX_QUERIES) {
+        return MESH_SCAN_OT_ERROR_NONE;
+    }
+    fake_dns_call_t *c = &g_fake.dns[i];
+    c->resolve = resolve;
+    c->server = srv->rloc16;
+    snprintf(c->type, sizeof(c->type), "%s", type);
+    snprintf(c->instance, sizeof(c->instance), "%s", instance ? instance : "");
+    c->gen = gen;
+    c->job = job;
+    return g_fake.dns_rets[i];
+}
+
+static int fake_dns_browse(const mesh_scan_srp_server_t *srv, const char *type, uint32_t gen, uint16_t job)
+{
+    return fake_dns_call(false, srv, NULL, type, gen, job);
+}
+
+static int fake_dns_resolve(const mesh_scan_srp_server_t *srv, const char *instance, const char *type, uint32_t gen,
+                            uint16_t job)
+{
+    return fake_dns_call(true, srv, instance, type, gen, job);
+}
+
+static void fake_arm_srp_deadline(uint32_t ms, uint32_t gen)
+{
+    g_fake.ops_calls++;
+    g_fake.srp_deadline_calls++;
+    g_fake.srp_deadline_ms = ms;
+    g_fake.srp_deadline_gen = gen;
+}
+
 static const mesh_scan_ops_t FAKE_OPS = {
     .discover = fake_discover,
     .query_child_table = fake_query_child_table,
@@ -148,6 +223,10 @@ static const mesh_scan_ops_t FAKE_OPS = {
     .disarm_cap = fake_disarm_cap,
     .alloc = fake_alloc,
     .release = fake_release,
+    .srp_servers = fake_srp_servers,
+    .dns_browse = fake_dns_browse,
+    .dns_resolve = fake_dns_resolve,
+    .arm_srp_deadline = fake_arm_srp_deadline,
 };
 
 void fake_ops_install(void)

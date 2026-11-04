@@ -18,8 +18,19 @@ extern "C" {
 #define MESH_SCAN_MAX_SRP_HOSTS 64
 #define MESH_SCAN_MAX_SRP_ADDRS 8
 #define MESH_SCAN_MAX_SRP_SERVICES 8
+#define MESH_SCAN_MAX_SRP_SERVERS 8
+#define MESH_SCAN_MAX_SUBTYPES 6        /**< per service */
+#define MESH_SCAN_TXT_MAX 512           /**< TXT bytes kept per service */
+#define MESH_SCAN_POOL_SIZE (24 * 1024) /**< TXT and subtype labels of one result */
 #define MESH_SCAN_NAME_LEN 64
 #define MESH_SCAN_MAX_OMR 4
+#define MESH_SCAN_SRP_QUERIES 4        /**< DNS queries in flight at most */
+#define MESH_SCAN_SRP_SERVER_QUERIES 2 /**< ... to one server, when more than one remote server is asked */
+#define MESH_SCAN_SRP_RESOLVES 48      /**< service resolves per scan */
+#define MESH_SCAN_SRP_NAME_RESOLVES 16 /**< ... of them kept for _esphomelib._tcp and _hap._udp */
+#define MESH_SCAN_SRP_BUDGET_MS 15000  /**< SRP step budget from scan start, inside the cap */
+#define MESH_SCAN_DNS_TIMEOUT_MS 3000  /**< DNS response timeout per attempt */
+#define MESH_SCAN_DNS_ATTEMPTS 2
 
 /** An IPv6 address or prefix, network byte order. */
 typedef uint8_t mesh_scan_ip6_t[16];
@@ -70,6 +81,22 @@ typedef struct {
     uint16_t n_children;
 } mesh_scan_router_t;
 
+typedef enum {
+    MESH_SCAN_SRP_ANSWERED,
+    MESH_SCAN_SRP_NO_ANSWER,
+    MESH_SCAN_SRP_CUT_SHORT,
+} mesh_scan_srp_state_t;
+
+/** A DNS/SRP unicast server found in the network data. */
+typedef struct {
+    uint16_t rloc16;
+    mesh_scan_ip6_t addr;
+    uint16_t port;
+    bool this_board;
+    mesh_scan_srp_state_t state;
+    uint8_t hosts;
+} mesh_scan_srp_server_t;
+
 typedef struct {
     char name[MESH_SCAN_NAME_LEN];
     mesh_scan_ip6_t addrs[MESH_SCAN_MAX_SRP_ADDRS];
@@ -77,8 +104,21 @@ typedef struct {
     struct {
         char instance[MESH_SCAN_NAME_LEN];
         char type[MESH_SCAN_NAME_LEN];
+        uint16_t port;
+        uint16_t source;      /**< RLOC16 of the server this record came from */
+        uint16_t txt_off;     /**< TXT bytes in the result's pool */
+        uint16_t txt_len;
+        bool has_txt;         /**< false: no TXT known (txt_len is 0) */
+        bool txt_truncated;   /**< cut at the TXT cap or left out because the pool was full */
+        uint16_t sub_off;     /**< subtype labels in the pool, each followed by a NUL */
+        uint8_t n_sub;
     } services[MESH_SCAN_MAX_SRP_SERVICES];
     uint8_t n_services;
+    uint16_t source;          /**< RLOC16 of the server the host fields came from */
+    bool local;               /**< from this board's SRP server: lease_s and key_lease_s are valid, ttl_s is not */
+    uint32_t lease_s;         /**< remaining lease, local only */
+    uint32_t key_lease_s;     /**< remaining key lease, local only */
+    uint32_t ttl_s;           /**< remote only */
 } mesh_scan_srp_host_t;
 
 typedef struct {
@@ -93,8 +133,9 @@ typedef struct {
 } mesh_scan_network_t;
 
 /**
- * About 100 KB (the SRP host array alone is 64 x ~1.2 KB): allocated by scan.c through `ops.alloc` (PSRAM on target),
- * never on a stack. Up to two can exist at once: a new scan allocates its result while a render still holds the old one.
+ * About 106 KB (the SRP hosts 64 x ~1.3 KB = 84 KB, the routers 22 KB): allocated by scan.c through `ops.alloc`
+ * (PSRAM on target), never on a stack. Up to two can exist at once: a new scan allocates its result while a render
+ * still holds the old one.
  */
 #define MESH_SCAN_PREF_NONE (-1) /**< the neighbour does not use that radio */
 
@@ -113,6 +154,10 @@ typedef struct {
     mesh_scan_transport_t this_links[MESH_SCAN_MAX_ROUTERS]; /**< by router ID, filled by the snapshot */
     mesh_scan_srp_host_t srp[MESH_SCAN_MAX_SRP_HOSTS];
     uint8_t n_srp;
+    mesh_scan_srp_server_t srp_servers[MESH_SCAN_MAX_SRP_SERVERS];
+    uint8_t n_srp_servers;
+    uint8_t *pool;      /**< MESH_SCAN_POOL_SIZE bytes, a second ops.alloc block owned by the result */
+    uint16_t pool_used;
     bool partial;
 } mesh_scan_result_t;
 

@@ -161,6 +161,7 @@ This shape is the contract between the firmware and the page:
 }
 ```
 
+- SRP service details (`srp_hosts` extended, `srp_servers`) are specified in `2026-11-04-srp-details-design.md`.
 - Each router reports one direction of each link. The page pairs them up: the LQ out of A towards B is B's `lq_in` for
   A.
 - The fields from `otMeshDiagQueryChildTable` (`timeout_s` through `csl`, and `ext_address`) are left out when

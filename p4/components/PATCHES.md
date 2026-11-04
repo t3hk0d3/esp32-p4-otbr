@@ -199,6 +199,26 @@ reason, spec reference.
    pill) when it is the POST's own reply with `age_s` of at most 5 s, or when polling ended a scan this page followed;
    any other `done` shows as a saved result (amber). Host tests:
    `tools/tests/test_topology_page.py`.
+   Follow-up (2026-11-04, service details, docs/superpowers/specs/2026-11-04-srp-details-design.md): `TopologyLogic`
+   decodes the scan's SRP records: `txtEntries` (base64 TXT RDATA to `{key, value, bytes}`, key-only entries with a
+   null value, binary values as bytes, `hexText`), `describe` (ESPHome, Matter operational and commissionable,
+   HomeKit, border router meshcop/TREL), `srpHostsFor` replacing `srpHostFor` (address, host name = extended address,
+   meshcop/TREL `xa` = extended address; every match, this board's records first). `displayName`: nickname, this
+   board, ESPHome `friendly_name`, HomeKit and meshcop instance names, the SRP host name, "Matter device 0xNNNN",
+   "Unknown 0xNNNN"; the table search also matches the friendly name and every matched host name.
+   This board is named by its hostname (`hostname_live`, else `hostname`) from `GET /device/names` (device_api), read
+   once at page start (`boardName`); "This border router" when that read fails.
+   Follow-up (2026-11-04, Topology page UI): the page shows the records. A kind line under each device name
+   (`kindLine`), a hint "Service records from N SRP servers: …" and an amber note for a server whose `srp_servers` state
+   is `no_answer` or `cut_short` (new `t-srp-hint`/`t-srp-warn` in `topology.html`); the dialog gains Device, Project,
+   Node name, Fabrics, Retry timing, SRP server, TREL, Registered with (lease from `lease_s`, or the server's name and
+   RLOC16 with `ttl_s`), services with ports, an ESPHome `_http._tcp` Open link to the first OMR address (`target=_blank`,
+   `rel=noopener`; none without an OMR address), a pairing-mode note for Matter, and a "Show raw records (N)" toggle
+   (`t-d-raw`, `t-d-note`; TXT values as hex when binary). All text still goes in through `textContent`. The hosts are
+   decoded once per loaded result (`srpIndex`), `displayName` reads every service of every matched host (ESPHome
+   `friendly_name`, then HomeKit, then meshcop instance), the generic "Matter device 0xNNNN" counts as unnamed
+   (`isUnnamed`), and HomeKit `paired` is null without `sf`. A result saved by older firmware (no `srp_servers`, no
+   `txt`) renders as before. New `t-` classes at the end of `static/style.css`.
 17. Applied. `esp_ot_br_server`: every Network Diagnostic Get goes through the new `netdiag_mux` component (spec
    2026-11-02 section 3.5). OpenThread's netdiag client keeps one callback slot and every `otThreadSendDiagnosticGet`
    replaces it, so `/topology`, the REST diagnostics and discovery, and the `mesh_scan` child step took each other's

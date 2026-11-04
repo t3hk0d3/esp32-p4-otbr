@@ -9,6 +9,11 @@ release's `versions.txt`.
 
 ### Added
 
+- The Topology page names devices registered with any border router's SRP server, not only this board's, and shows
+  ESPHome, Matter and HomeKit details and border router records. The scan asks the other SRP servers over DNS-SD
+  (`srp_servers`, `srp_hosts` in `GET /device/topology`; see `docs/api.md`). Checked on ha-thread-bbc1 (2026-11-04):
+  records from the Home Assistant OTBR named an ESPHome device and two Matter devices; scans took about 6 s. HomeKit
+  records were not seen on that network.
 - Thread console: the board's OpenThread CLI over a WebSocket (`/device/console/ws`), on a new **Console** page under
   Management (desktop and phone) and from a shell with `websocat`. Off by default (`GET`/`PUT /device/console`); one
   session at a time, the board stays a border router, risky commands ask first on the page. OpenThread's CLI now

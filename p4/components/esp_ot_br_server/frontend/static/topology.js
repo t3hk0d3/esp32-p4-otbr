@@ -306,47 +306,454 @@ function lqColor(q) {
   return q >= 3 ? '#1e7e34' : q === 2 ? '#a35f00' : q === 1 ? '#c62828' : '#5f5f5f';
 }
 
+/* ---- service records (raw TXT from the scan, base64) ---- */
+
+var B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/** The bytes of a base64 string, or null when it is not valid base64. */
+function b64Bytes(text) {
+  if (typeof text !== 'string' || text.length % 4 !== 0 || !/^[A-Za-z0-9+\/]*={0,2}$/.test(text))
+    return null;
+  var out = [];
+  for (var i = 0; i < text.length; i += 4) {
+    var n = 0, pad = 0;
+    for (var j = 0; j < 4; j++) {
+      var c = text.charAt(i + j);
+      if (c === '=')
+        pad++;
+      n = n * 64 + (c === '=' ? 0 : B64.indexOf(c));
+    }
+    out.push((n >> 16) & 255);
+    if (pad < 2)
+      out.push((n >> 8) & 255);
+    if (pad < 1)
+      out.push(n & 255);
+  }
+  return out;
+}
+
+/** Bytes as lowercase hex ("7e287c8b8b140ee6"). */
+function hexText(bytes) {
+  return (bytes || []).map(function(b) { return (b < 16 ? '0' : '') + b.toString(16); }).join('');
+}
+
+/** UTF-8 bytes as a string, or null when they are not valid UTF-8 or hold control characters. */
+function utf8Text(bytes) {
+  var text;
+  try {
+    text = decodeURIComponent(bytes.map(function(b) { return '%' + (b < 16 ? '0' : '') + b.toString(16); }).join(''));
+  } catch (e) {
+    return null;
+  }
+  return /[\u0000-\u001f\u007f]/.test(text) ? null : text;
+}
+
+/**
+ * The entries of TXT RDATA (length-prefixed "key=value" strings, base64) in order: {key, value, bytes}. A key-only
+ * entry has value and bytes null; a value is a string when it is printable UTF-8, else the bytes. Strings without a
+ * key are skipped; a length running past the end ends the list. Empty or invalid base64: [].
+ */
+function txtEntries(base64) {
+  var raw = b64Bytes(base64) || [];
+  var out = [];
+  var i = 0;
+  while (i < raw.length) {
+    var len = raw[i];
+    if (i + 1 + len > raw.length)
+      break;
+    var s = raw.slice(i + 1, i + 1 + len);
+    i += 1 + len;
+    var eq = s.indexOf(61); /* '=' */
+    var key = utf8Text(eq < 0 ? s : s.slice(0, eq));
+    if (!key)
+      continue;
+    if (eq < 0) {
+      out.push({key : key, value : null, bytes : null});
+      continue;
+    }
+    var bytes = s.slice(eq + 1);
+    var text = utf8Text(bytes);
+    out.push({key : key, value : text === null ? bytes : text, bytes : bytes});
+  }
+  return out;
+}
+
+/** HAP accessory categories (ci). */
+var HAP_CATEGORY = [
+  null, 'Other', 'Bridge', 'Fan', 'Garage Door Opener', 'Lightbulb', 'Door Lock', 'Outlet', 'Switch', 'Thermostat',
+  'Sensor', 'Security System', 'Door', 'Window', 'Window Covering', 'Programmable Switch', 'Range Extender',
+  'IP Camera', 'Video Doorbell', 'Air Purifier', 'Heater', 'Air Conditioner', 'Humidifier', 'Dehumidifier', 'Apple TV',
+  'HomePod', 'Speaker', 'AirPort', 'Sprinkler', 'Faucet', 'Shower Head', 'Television', 'Target Controller',
+  'Wi-Fi Router', 'Audio Receiver', 'TV Set Top Box', 'TV Streaming Stick'
+];
+var BR_TYPES = {'_meshcop._udp' : true, '_trel._udp' : true};
+
+/** The string value of `key` among `entries`, or null (absent, key-only or binary). */
+function txtText(entries, key) {
+  for (var i = 0; i < entries.length; i++) {
+    if (entries[i].key === key)
+      return typeof entries[i].value === 'string' ? entries[i].value : null;
+  }
+  return null;
+}
+
+function txtInt(entries, key) {
+  var v = txtText(entries, key);
+  return v !== null && /^\d+$/.test(v) ? parseInt(v, 10) : null;
+}
+
+/** The services of a host with their decoded TXT: {instance, type, port, source, txtTruncated, entries}. */
+function hostServices(host) {
+  return ((host && host.services) || []).map(function(s) {
+    return {
+      instance : s.instance,
+      type : s.type,
+      port : typeof s.port === 'number' ? s.port : null,
+      source : typeof s.source === 'number' ? s.source : null,
+      txtTruncated : s.txt_truncated === true,
+      entries : txtEntries(s.txt)
+    };
+  });
+}
+
+function ofType(services, type) {
+  return services.filter(function(s) { return s.type === type; });
+}
+
+/** The extended address in a meshcop/TREL service's xa entry (lowercase hex), or null. */
+function xaOf(service) {
+  for (var i = 0; i < service.entries.length; i++) {
+    var e = service.entries[i];
+    if (e.key === 'xa' && e.bytes && e.bytes.length === 8)
+      return hexText(e.bytes);
+  }
+  return null;
+}
+
+function describeEsphome(api, services) {
+  var e = api.entries;
+  var web = ofType(services, '_http._tcp')[0];
+  return {
+    kind : 'ESPHome',
+    name : txtText(e, 'friendly_name'),
+    version : txtText(e, 'version'),
+    board : txtText(e, 'board'),
+    platform : txtText(e, 'platform'),
+    project : txtText(e, 'project_name'),
+    projectVersion : txtText(e, 'project_version'),
+    encrypted : txtText(e, 'api_encryption') !== null,
+    apiPort : api.port,
+    webPort : web ? web.port : null
+  };
+}
+
+/** Operational instances "<compressed fabric id>-<node id>" give the fabrics; timings come from the first that has them. */
+function describeMatter(operational, commissionable) {
+  var out = {kind : 'Matter', fabrics : [], sii : null, sai : null, sat : null, icd : null, tcp : null,
+             commissionable : null};
+  operational.concat(commissionable).forEach(function(s) {
+    var m = /^([0-9A-Fa-f]{16})-([0-9A-Fa-f]{16})$/.exec(s.instance || '');
+    if (m && s.type === '_matter._tcp')
+      out.fabrics.push({fabric : m[1], node : m[2]});
+    [ [ 'sii', 'SII' ], [ 'sai', 'SAI' ], [ 'sat', 'SAT' ], [ 'icd', 'ICD' ], [ 'tcp', 'T' ] ].forEach(function(f) {
+      if (out[f[0]] === null)
+        out[f[0]] = txtInt(s.entries, f[1]);
+    });
+  });
+  if (commissionable.length) {
+    var e = commissionable[0].entries;
+    var vp = /^(\d+)(?:\+(\d+))?$/.exec(txtText(e, 'VP') || '');
+    out.commissionable = {
+      vendorId : vp ? parseInt(vp[1], 10) : null,
+      productId : vp && vp[2] ? parseInt(vp[2], 10) : null,
+      deviceType : txtInt(e, 'DT'),
+      deviceName : txtText(e, 'DN')
+    };
+  }
+  return out;
+}
+
+function describeHomekit(hap) {
+  var ci = txtInt(hap.entries, 'ci');
+  var sf = txtInt(hap.entries, 'sf');
+  return {
+    kind : 'HomeKit',
+    name : hap.instance,
+    model : txtText(hap.entries, 'md'),
+    category : ci !== null && ci < HAP_CATEGORY.length ? HAP_CATEGORY[ci] : null,
+    paired : sf === null ? null : (sf & 1) === 0
+  };
+}
+
+function describeBorderRouter(br, services) {
+  var meshcop = ofType(services, '_meshcop._udp')[0] || br;
+  return {
+    kind : 'Border router',
+    name : meshcop.type === '_meshcop._udp' ? meshcop.instance : null,
+    vendor : txtText(meshcop.entries, 'vn'),
+    model : txtText(meshcop.entries, 'mn'),
+    threadVersion : txtText(meshcop.entries, 'tv'),
+    ext : xaOf(meshcop) || xaOf(br)
+  };
+}
+
+/**
+ * A summary of an SRP host from its service records: {kind, ...fields, services}. Kinds, first found wins: "ESPHome"
+ * (_esphomelib._tcp), "Matter" (_matter._tcp or _matterc._udp), "HomeKit" (_hap._udp), "Border router"
+ * (_meshcop._udp or _trel._udp); otherwise kind null. `services` always lists every service with its TXT entries.
+ */
+function describe(host) {
+  var services = hostServices(host);
+  var esphome = ofType(services, '_esphomelib._tcp');
+  var matter = ofType(services, '_matter._tcp'), matterc = ofType(services, '_matterc._udp');
+  var hap = ofType(services, '_hap._udp');
+  var br = services.filter(function(s) { return BR_TYPES[s.type] === true; });
+  var out = esphome.length                     ? describeEsphome(esphome[0], services)
+            : matter.length || matterc.length  ? describeMatter(matter, matterc)
+            : hap.length                       ? describeHomekit(hap[0])
+            : br.length                        ? describeBorderRouter(br[0], services)
+                                               : {kind : null};
+  out.services = services;
+  return out;
+}
+
+function countOf(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+/** A duration in ms as "800 ms" or "2 s" (up to one decimal). */
+function msText(ms) {
+  return ms < 1000 ? ms + ' ms' : String(Math.round(ms / 100) / 10) + ' s';
+}
+
+/** The kind line under a device name, from describe(): "ESPHome 2026.7.4 · esp32-c6-devkitc-1"; "" without a kind. */
+function kindLine(sum) {
+  var parts = [];
+  if (sum.kind === 'ESPHome') {
+    parts.push(sum.version ? 'ESPHome ' + sum.version : 'ESPHome');
+    if (sum.board)
+      parts.push(sum.board);
+  } else if (sum.kind === 'Matter') {
+    parts.push('Matter');
+    if (sum.fabrics.length)
+      parts.push(countOf(sum.fabrics.length, 'fabric'));
+    else if (sum.commissionable)
+      parts.push('pairing mode');
+  } else if (sum.kind === 'HomeKit') {
+    parts.push('HomeKit');
+    if (sum.category)
+      parts.push(sum.category);
+    if (sum.paired !== null && sum.paired !== undefined)
+      parts.push(sum.paired ? 'paired' : 'not paired');
+  } else if (sum.kind === 'Border router') {
+    parts.push('Border router');
+    if (sum.vendor)
+      parts.push(sum.vendor);
+    if (sum.threadVersion)
+      parts.push('Thread ' + sum.threadVersion);
+  }
+  return parts.join(' · ');
+}
+
+/** The "Device" fact of the dialog, from describe(); "" when there is nothing to say. */
+function deviceText(sum) {
+  if (sum.kind === 'ESPHome') {
+    var on = sum.board ? ' on ' + sum.board + (sum.platform ? ' (' + sum.platform + ')' : '') : '';
+    return 'ESPHome' + (sum.version ? ' ' + sum.version : '') + on;
+  }
+  if (sum.kind === 'Matter') {
+    var c = sum.commissionable;
+    if (sum.fabrics.length)
+      return 'Matter, paired with ' + countOf(sum.fabrics.length, 'controller');
+    return c ? 'Matter, in pairing mode' : 'Matter';
+  }
+  if (sum.kind === 'HomeKit') {
+    var bits = [ 'HomeKit' + (sum.category ? ' ' + sum.category : '') ];
+    if (sum.model)
+      bits.push(sum.model);
+    if (sum.paired !== null && sum.paired !== undefined)
+      bits.push(sum.paired ? 'paired' : 'not paired');
+    return bits.join(', ');
+  }
+  if (sum.kind === 'Border router') {
+    var out = [];
+    if (sum.vendor)
+      out.push(sum.vendor);
+    if (sum.model)
+      out.push(sum.model);
+    if (sum.threadVersion)
+      out.push('Thread ' + sum.threadVersion);
+    return out.join(' · ');
+  }
+  return '';
+}
+
+/** Matter's retry timing: "800 ms idle, 2 s active, active for 4 s after traffic"; "" when none of it is known. */
+function timingText(sum) {
+  var parts = [];
+  if (sum.sii !== null && sum.sii !== undefined)
+    parts.push(msText(sum.sii) + ' idle');
+  if (sum.sai !== null && sum.sai !== undefined)
+    parts.push(msText(sum.sai) + ' active');
+  if (sum.sat !== null && sum.sat !== undefined)
+    parts.push('active for ' + msText(sum.sat) + ' after traffic');
+  return parts.join(', ');
+}
+
+/** The first of `addresses` under one of the network's OMR prefixes (the text as given), or null. */
+function omrAddress(addresses, network) {
+  var omr = (network && network.omr_prefixes) || [];
+  var prefixes = omr.map(parsePrefix).filter(function(p) { return p !== null; });
+  var list = addresses || [];
+  for (var i = 0; i < list.length; i++) {
+    var g = parseV6(list[i]);
+    if (g !== null && prefixes.some(function(p) { return underPrefix(g, p); }))
+      return list[i];
+  }
+  return null;
+}
+
 /* ---- names ---- */
 
 function has(obj, key) { return Object.prototype.hasOwnProperty.call(obj, key); }
 
-/** The first SRP host that shares an address with the device, or null. */
-function srpHostFor(device, srpHosts) {
+function sameExt(a, b) { return !!a && !!b && String(a).toLowerCase() === String(b).toLowerCase(); }
+
+/**
+ * The scan's SRP hosts decoded once: {isSrpIndex, list: [{host, sum, xa}]} with `sum` = describe(host) and `xa` the
+ * extended addresses in its meshcop/TREL records. Pass the index (not the raw list) to the functions below to avoid
+ * decoding the TXT data on every call; a raw list or an index is accepted everywhere.
+ */
+function srpIndex(srpHosts) {
+  if (srpHosts && srpHosts.isSrpIndex === true)
+    return srpHosts;
+  var list = (srpHosts || []).map(function(h) {
+    var sum = describe(h);
+    var xa = [];
+    sum.services.forEach(function(s) {
+      if (BR_TYPES[s.type] === true)
+        xa.push(xaOf(s));
+    });
+    return {host : h, sum : sum, xa : xa};
+  });
+  return {isSrpIndex : true, list : list};
+}
+
+/** True when the SRP host belongs to the device: a shared address, a host name equal to its ext address, or xa. */
+function hostMatches(device, entry, mine) {
+  var host = entry.host;
+  var addrs = host.addresses || [];
+  for (var i = 0; i < addrs.length; i++) {
+    if (mine[String(addrs[i]).toLowerCase()] === true)
+      return true;
+  }
+  if (sameExt(host.name, device.ext))
+    return true;
+  return entry.xa.some(function(x) { return sameExt(x, device.ext); });
+}
+
+/** Every index entry {host, sum, xa} that belongs to the device, records from this board's server (with a lease) first. */
+function srpEntriesFor(device, srpHosts) {
   var mine = {};
   (device.addrs || []).forEach(function(a) { mine[String(a).toLowerCase()] = true; });
-  var hosts = srpHosts || [];
-  for (var i = 0; i < hosts.length; i++) {
-    var addrs = hosts[i].addresses || [];
-    for (var j = 0; j < addrs.length; j++) {
-      if (mine[String(addrs[j]).toLowerCase()] === true)
-        return hosts[i];
+  var found = srpIndex(srpHosts).list.filter(function(e) { return hostMatches(device, e, mine); });
+  var local = found.filter(function(e) { return typeof e.host.lease_s === 'number'; });
+  return local.concat(found.filter(function(e) { return typeof e.host.lease_s !== 'number'; }));
+}
+
+/**
+ * True when the host is only a border router's LAN advertisement (meshcop/TREL records from a discovery proxy), not an
+ * SRP registration: not from this board's server, with services, all of them _meshcop._udp or _trel._udp.
+ */
+function lanAdvertised(host) {
+  var services = host.services || [];
+  return typeof host.lease_s !== 'number' && services.length > 0 &&
+         services.every(function(s) { return BR_TYPES[s.type] === true; });
+}
+
+/** Every SRP host that belongs to the device: a shared address, a host name equal to its ext address, or xa. */
+function srpHostsFor(device, srpHosts) {
+  return srpEntriesFor(device, srpHosts).map(function(e) { return e.host; });
+}
+
+/** The first non-empty `pick(service)` over the services of `type` in the entries' summaries, or null. */
+function serviceValue(entries, type, pick) {
+  for (var i = 0; i < entries.length; i++) {
+    var services = ofType(entries[i].sum.services, type);
+    for (var j = 0; j < services.length; j++) {
+      var v = pick(services[j]);
+      if (v)
+        return v;
     }
   }
   return null;
 }
 
-/** Nickname, else SRP host name, else "This border router" for this board and "Unknown 0xNNNN" for the others. */
-function displayName(device, names, srpHosts) {
-  if (device.ext && names && has(names, device.ext) && names[device.ext])
-    return names[device.ext];
-  var host = srpHostFor(device, srpHosts);
-  if (host && host.name)
-    return host.name;
-  return device.thisBoard ? BOARD_LABEL : UNKNOWN_PREFIX + hex4(device.rloc16);
+function friendlyName(entries) {
+  return serviceValue(entries, '_esphomelib._tcp', function(s) { return txtText(s.entries, 'friendly_name'); });
+}
+
+function nickname(device, names) {
+  return device.ext && names && has(names, device.ext) && names[device.ext] ? names[device.ext] : null;
+}
+
+/**
+ * {text, generic}: the device's name and whether it is only the fallback ("Matter device 0xNNNN", "Unknown 0xNNNN").
+ * `boardName` (optional) names this board instead of "This border router".
+ */
+function nameInfo(device, names, srpHosts, boardName) {
+  var nick = nickname(device, names);
+  if (nick)
+    return {text : nick, generic : false};
+  if (device.thisBoard)
+    return {text : boardName || BOARD_LABEL, generic : false};
+  var entries = srpEntriesFor(device, srpHosts);
+  var name = friendlyName(entries) || serviceValue(entries, '_hap._udp', function(s) { return s.instance; }) ||
+             serviceValue(entries, '_meshcop._udp', function(s) { return s.instance; });
+  if (!name) {
+    for (var i = 0; i < entries.length && !name; i++) {
+      if (!sameExt(entries[i].host.name, device.ext) && entries[i].host.name)
+        name = entries[i].host.name;
+    }
+  }
+  if (name)
+    return {text : name, generic : false};
+  if (entries.some(function(e) { return e.sum.kind === 'Matter'; }))
+    return {text : MATTER_PREFIX + hex4(device.rloc16), generic : true};
+  return {text : UNKNOWN_PREFIX + hex4(device.rloc16), generic : true};
+}
+
+/**
+ * Nickname; this board: its hostname, else "This border router"; ESPHome friendly_name; HomeKit instance name; meshcop instance name
+ * (each looked up over every service of every matched host); SRP host name, or "Matter device 0xNNNN" when the only
+ * names are the ext address and a matched host is a Matter device; else "Unknown 0xNNNN".
+ */
+function displayName(device, names, srpHosts, boardName) { return nameInfo(device, names, srpHosts, boardName).text; }
+
+/** True when the device shows only a generic name and has no nickname (this board never counts). */
+function isUnnamed(device, names, srpHosts, boardName) { return nameInfo(device, names, srpHosts, boardName).generic; }
+
+/** This board's name from a GET /device/names body: the hostname in use, else the configured one, else null. */
+function boardName(body) {
+  var n = body && (body.hostname_live || body.hostname);
+  return typeof n === 'string' && n.trim() !== '' ? n.trim() : null;
 }
 
 /* ---- table rows ---- */
 
-function matches(device, query, names, srpHosts) {
+function matches(device, query, names, srpHosts, boardName) {
   var q = query.toLowerCase();
-  var host = srpHostFor(device, srpHosts);
-  var fields = [ displayName(device, names, srpHosts), '0x' + hex4(device.rloc16), device.ext || '', host ? host.name : '' ]
-                   .concat(device.addrs || []);
+  var entries = srpEntriesFor(device, srpHosts);
+  var fields = [ displayName(device, names, srpHosts, boardName), '0x' + hex4(device.rloc16), device.ext || '' ];
+  entries.forEach(function(e) { fields.push(e.host.name || ''); });
+  var friendly = friendlyName(entries);
+  if (friendly)
+    fields.push(friendly);
+  fields = fields.concat(device.addrs || []);
   return fields.some(function(f) { return String(f).toLowerCase().indexOf(q) >= 0; });
 }
 
 /** Table order: this board (when a router) and its children, then routers by id with their children. */
-function rows(devs, filter, query, names, srpHosts) {
+function rows(devs, filter, query, names, srpHosts, boardName) {
+  srpHosts = srpIndex(srpHosts);
   var board = devs.filter(function(d) { return d.thisBoard && d.parentId === null; });
   var routers = devs.filter(function(d) { return d.parentId === null && !d.thisBoard; });
   var ordered = [];
@@ -365,7 +772,7 @@ function rows(devs, filter, query, names, srpHosts) {
       return false;
     if (filter === 'sleepy' && !d.sleepy)
       return false;
-    return q === '' || matches(d, q, names, srpHosts);
+    return q === '' || matches(d, q, names, srpHosts, boardName);
   });
 }
 
@@ -373,6 +780,7 @@ function rows(devs, filter, query, names, srpHosts) {
 
 var BOARD_LABEL = 'This border router';
 var UNKNOWN_PREFIX = 'Unknown 0x';
+var MATTER_PREFIX = 'Matter device 0x';
 var LABEL_CHARS = 18;                         /* map labels longer than this are cut with an ellipsis */
 var CHAR_W_ROUTER = 7, CHAR_W_CHILD = 6.5;    /* estimated px per character at 12 px and 11 px */
 var LABEL_GAP = 4, LABEL_H = 14, BOX_GAP = 6;
@@ -840,7 +1248,19 @@ return {
   badgeBox : badgeBox,
   trelBadgeSpot : trelBadgeSpot,
   displayName : displayName,
-  srpHostFor : srpHostFor,
+  srpHostsFor : srpHostsFor,
+  lanAdvertised : lanAdvertised,
+  srpEntriesFor : srpEntriesFor,
+  srpIndex : srpIndex,
+  isUnnamed : isUnnamed,
+  kindLine : kindLine,
+  deviceText : deviceText,
+  timingText : timingText,
+  omrAddress : omrAddress,
+  countOf : countOf,
+  txtEntries : txtEntries,
+  hexText : hexText,
+  describe : describe,
   rows : rows,
   layout : layout,
   crosses : crosses,
@@ -855,6 +1275,7 @@ return {
   pingSummary : pingSummary,
   clockText : clockText,
   agoText : agoText,
+  boardName : boardName,
   BOARD_LABEL : BOARD_LABEL
 };
 })();
@@ -901,12 +1322,25 @@ var FAILED_TEXT = {
   no_memory : 'The board ran out of memory for the scan'
 };
 var ADDR_TAG = {global : 'Global', ula : 'ULA', mleid : 'Mesh-local', rloc : 'RLOC', linklocal : 'Link-local', other : 'Other'};
+var SERVICE_LABEL = {
+  '_esphomelib._tcp' : 'ESPHome API',
+  '_http._tcp' : 'Web server',
+  '_matter._tcp' : 'Matter',
+  '_matterc._udp' : 'Matter commissioning',
+  '_hap._udp' : 'HomeKit',
+  '_meshcop._udp' : 'Thread border agent',
+  '_trel._udp' : 'Thread radio link (TREL)'
+};
+var SERVER_STATE = {answered : 'answered', no_answer : "didn't answer", cut_short : 'answer cut short'};
+var PAIRING_NOTE = 'Vendor, product and device type are not in these records: Matter publishes them only while the' +
+                   ' device is in pairing mode.';
 var THREAD_VERSION = {2 : '1.1', 3 : '1.2', 4 : '1.3', 5 : '1.4'};
 var FILTERS = [ [ 'all', 'All' ], [ 'routers', 'Routers' ], [ 'end', 'End devices' ], [ 'sleepy', 'Sleepy' ] ];
 
 var storage = null;
 var storageOk = false;
 var names = {};
+var hostName = null;     /* this board's hostname from /device/names; null until read */
 var last = null;         /* the "last result": {savedAt, result} */
 var model = null;        /* the result on screen: {result, net, srp, devs, byId, links, lay} */
 var filter = 'all';
@@ -922,6 +1356,7 @@ var scanStarted = 0;
 var dimmables = [];      /* map elements: {el, lit(focusId, near)} */
 var rings = {};          /* device id -> its selection ring on the map */
 var rowEls = {};         /* device id -> its table row */
+var rawOpen = false;     /* the dialog shows the raw TXT records */
 
 /* ---- small helpers ---- */
 
@@ -948,11 +1383,11 @@ function svg(tag, attrs, parent) {
   return e;
 }
 
-function nameOf(d) { return L.displayName(d, names, model.srp); }
+function nameOf(d) { return L.displayName(d, names, model.srp, hostName); }
 
-function mapName(d) { return d.thisBoard ? L.BOARD_LABEL : nameOf(d); }
+function mapName(d) { return d.thisBoard ? hostName || L.BOARD_LABEL : nameOf(d); }
 
-function unnamed(d) { return !d.thisBoard && !(d.ext && names[d.ext]) && !L.srpHostFor(d, model.srp); }
+function unnamed(d) { return L.isUnnamed(d, names, model.srp, hostName); }
 
 /* Table, dialog and map type: another border router reads "Border router" whatever its router kind. */
 function typeText(d) { return d.otherBr ? TYPE_TEXT.br : TYPE_TEXT[d.kind]; }
@@ -1136,7 +1571,8 @@ function showResult(rec, live) {
     live : live,
     result : rec.result,
     net : rec.result.network || {},
-    srp : rec.result.srp_hosts || [],
+    srp : L.srpIndex(rec.result.srp_hosts || []), /* decoded once, for every name, kind line and search */
+    servers : Array.isArray(rec.result.srp_servers) ? rec.result.srp_servers : [],
     devs : devs,
     byId : byId,
     links : links,
@@ -1167,6 +1603,7 @@ function renderAll() {
   renderMap();
   renderChips();
   renderRows();
+  renderSrpNotes();
   if (dialogOpen)
     renderDialog();
   applyFocus();
@@ -1405,13 +1842,96 @@ function applyFocus() {
   Object.keys(rowEls).forEach(function(id) { rowEls[id].classList.toggle('t-row-sel', id === selected); });
 }
 
+/* ---- service records ---- */
+
+function deviceByRloc(rloc16) {
+  for (var i = 0; i < model.devs.length; i++) {
+    if (model.devs[i].rloc16 === rloc16)
+      return model.devs[i];
+  }
+  return null;
+}
+
+function upper(text) { return text.charAt(0).toUpperCase() + text.slice(1); }
+
+/** A router named for a sentence: "this board", its display name, or "router 0xNNNN" when it has no real name. */
+function routerName(rloc16, thisBoard) {
+  var d = deviceByRloc(rloc16);
+  if (thisBoard === true || (d && d.thisBoard))
+    return 'this board';
+  return d && !unnamed(d) ? nameOf(d) : 'router ' + rlocText(rloc16);
+}
+
+function serverName(server) { return routerName(server.rloc16, server.this_board); }
+
+function serverOf(rloc16) {
+  for (var i = 0; i < model.servers.length; i++) {
+    if (model.servers[i].rloc16 === rloc16)
+      return model.servers[i];
+  }
+  return null;
+}
+
+function joinList(items) {
+  if (items.length < 2)
+    return items.join('');
+  return items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1];
+}
+
+function renderSrpNotes() {
+  var servers = model.servers;
+  var parts = servers.map(function(s) { return serverName(s) + ' (' + plural(s.hosts || 0, 'device') + ')'; });
+  setText('t-srp-hint', servers.length ? 'Service records from ' + plural(servers.length, 'SRP server') + ': ' + joinList(parts) + '.' : '');
+  show('t-srp-hint', servers.length > 0);
+  var warns = [];
+  servers.forEach(function(s) {
+    if (s.state === 'no_answer')
+      warns.push(upper(serverName(s)) + "'s SRP server didn't answer, so the devices registered there show without names.");
+    else if (s.state === 'cut_short')
+      warns.push(upper(serverName(s)) + "'s SRP server's answer was cut short, so some devices registered there may be missing.");
+  });
+  setText('t-srp-warn', warns.join(' '));
+  show('t-srp-warn', warns.length > 0);
+}
+
+/** True when the host's services carry TXT data (a result saved by older firmware has none: nothing to describe). */
+function hasRecords(host) {
+  return (host.services || []).some(function(s) { return typeof s.txt === 'string'; });
+}
+
+/** The first description of the device's records that has a kind, or null. */
+function summaryOf(d) {
+  var entries = L.srpEntriesFor(d, model.srp);
+  for (var i = 0; i < entries.length; i++) {
+    if (entries[i].sum.kind && hasRecords(entries[i].host))
+      return entries[i].sum;
+  }
+  return null;
+}
+
+/** The device's services across its matched hosts, deduplicated: {service, host, sum, raw}. */
+function serviceItems(d) {
+  var seen = {};
+  var out = [];
+  L.srpEntriesFor(d, model.srp).forEach(function(e) {
+    e.sum.services.forEach(function(s, i) {
+      var key = (s.instance || '') + '|' + s.type;
+      if (seen[key] === true)
+        return;
+      seen[key] = true;
+      out.push({service : s, host : e.host, sum : e.sum, raw : typeof e.host.services[i].txt === 'string'});
+    });
+  });
+  return out;
+}
+
 /* ---- table ---- */
 
 function renderChips() {
   var box = $('t-chips');
   clear(box);
   FILTERS.forEach(function(f) {
-    var n = L.rows(model.devs, f[0], '', names, model.srp).length;
+    var n = L.rows(model.devs, f[0], '', names, model.srp, hostName).length;
     var chip = button(null, 't-chip', function() {
       filter = f[0];
       renderChips();
@@ -1483,6 +2003,10 @@ function rowFor(d) {
   var badge = badgeText(d);
   if (badge)
     dev.appendChild(el('span', badge, 'chip chip-warn t-badge'));
+  var sum = summaryOf(d);
+  var kindText = sum ? L.kindLine(sum) : '';
+  if (kindText)
+    dev.appendChild(el('div', kindText, 't-kind'));
   dev.appendChild(el('div', rlocText(d.rloc16) + ' · ' + (d.ext || '–'), 't-mono t-sub'));
   tr.appendChild(dev);
   tr.appendChild(el('td', typeText(d)));
@@ -1502,7 +2026,7 @@ function renderRows() {
   var query = String($('t-search').value || '').trim();
   clear(body);
   rowEls = {};
-  var list = L.rows(model.devs, filter, query, names, model.srp);
+  var list = L.rows(model.devs, filter, query, names, model.srp, hostName);
   list.forEach(function(d) { body.appendChild(rowFor(d)); });
   setText('t-empty', query ? "No device matches '" + query + "'" : 'No devices of this kind.');
   show('t-empty', list.length === 0);
@@ -1517,6 +2041,7 @@ function openDevice(id) {
   if (selected !== id || !dialogOpen) {
     selected = id;
     showInternal = false;
+    rawOpen = false;
     renaming = false;
     clearPing();
   }
@@ -1564,17 +2089,131 @@ function fact(dl, label, value, cls) {
   dl.appendChild(dd);
 }
 
+function mono(text) { return el('span', text, 't-mono'); }
+
+function registeredWith(host) {
+  if (typeof host.lease_s === 'number')
+    return 'This board · lease ends in ' + C.durationText(host.lease_s);
+  if (typeof host.source !== 'number')
+    return null;
+  var valid = typeof host.ttl_s === 'number' ? ' · record valid ' + C.durationText(host.ttl_s) : '';
+  var dev = deviceByRloc(host.source);
+  var server = serverOf(host.source);
+  if (dev && dev.thisBoard || server && server.this_board === true)
+    return 'This board' + valid;
+  if (!dev)
+    return upper(routerName(host.source, false)) + valid;
+  var box = el('span');
+  box.appendChild(linkButton(dev));
+  box.appendChild(el('span', '(' + rlocText(host.source) + ')' + valid, 't-after'));
+  return box;
+}
+
+/** The "Services" fact: one line per service type with the ports; ESPHome's web server gets an Open link. */
+function servicesFact(items) {
+  var box = el('div');
+  var order = [];
+  var groups = {};
+  items.forEach(function(it) {
+    if (!groups[it.service.type]) {
+      groups[it.service.type] = [];
+      order.push(it.service.type);
+    }
+    groups[it.service.type].push(it);
+  });
+  order.forEach(function(type) {
+    var list = groups[type];
+    var first = list[0];
+    var line = el('div', SERVICE_LABEL[type] || first.service.instance || type, 't-svc');
+    line.appendChild(el('span', type, 't-mono t-after'));
+    var ports = [];
+    list.forEach(function(it) {
+      if (it.service.port !== null && ports.indexOf(it.service.port) < 0)
+        ports.push(it.service.port);
+    });
+    var extra = [];
+    if (ports.length)
+      extra.push((ports.length === 1 ? 'port ' : 'ports ') + ports.join(', '));
+    if (list.length > 1)
+      extra.push(list.length + ' instances');
+    if (type === '_esphomelib._tcp' && first.sum.encrypted === true)
+      extra.push('encrypted');
+    if (extra.length)
+      line.appendChild(el('span', extra.join(' · '), 't-after'));
+    if (type === '_http._tcp' && first.sum.kind === 'ESPHome' && first.service.port !== null) {
+      var addr = L.omrAddress(first.host.addresses, model.net);
+      if (addr !== null) {
+        var a = el('a', 'Open', 't-after');
+        a.setAttribute('href', 'http://[' + addr + ']:' + first.service.port + '/');
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener');
+        line.appendChild(a);
+      }
+    }
+    box.appendChild(line);
+  });
+  return box;
+}
+
+function renderServiceFacts(dl, d) {
+  var entries = L.srpEntriesFor(d, model.srp);
+  var sum = summaryOf(d);
+  var text = sum ? L.deviceText(sum) : '';
+  if (text)
+    fact(dl, 'Device', text);
+  if (sum && sum.kind === 'ESPHome') {
+    if (sum.project)
+      fact(dl, 'Project', sum.project + (sum.projectVersion ? ' ' + sum.projectVersion : ''));
+    var api = sum.services.filter(function(s) { return s.type === '_esphomelib._tcp'; })[0];
+    if (api && api.instance)
+      fact(dl, 'Node name', api.instance, 't-mono');
+  }
+  if (sum && sum.kind === 'Matter') {
+    if (sum.fabrics.length) {
+      var fabrics = el('div');
+      sum.fabrics.forEach(function(f) {
+        var line = el('div', null, 't-svc');
+        line.appendChild(mono(f.fabric));
+        line.appendChild(el('span', 'node', 't-after'));
+        line.appendChild(el('span', f.node, 't-mono t-after'));
+        fabrics.appendChild(line);
+      });
+      fact(dl, 'Fabrics', fabrics);
+    }
+    if (L.timingText(sum))
+      fact(dl, 'Retry timing', L.timingText(sum));
+  }
+  var server = serverOf(d.rloc16);
+  if (server)
+    fact(dl, 'SRP server',
+         'Yes, ' + plural(server.hosts || 0, 'device') + ' registered · ' + (SERVER_STATE[server.state] || server.state));
+  var items = serviceItems(d);
+  if (items.some(function(it) { return it.service.type === '_trel._udp'; }))
+    fact(dl, 'TREL', 'Advertised on its LAN');
+  /* A border router can match its LAN advertisement (meshcop host from a discovery proxy) and its SRP host: prefer the
+     SRP host; with only the advertisement, say so instead of presenting it as a registration. */
+  var registered = entries.filter(function(e) { return !L.lanAdvertised(e.host); });
+  var host = registered.length ? registered[0].host : null;
+  if (host)
+    fact(dl, 'SRP host', host.name + '.default.service.arpa', 't-mono');
+  else if (entries.length)
+    fact(dl, 'SRP host', '– (advertised on the LAN as ' + entries[0].host.name + ')');
+  else
+    fact(dl, 'SRP host', 'Not registered');
+  var reg = host ? registeredWith(host) : null;
+  if (reg !== null)
+    fact(dl, 'Registered with', reg);
+  if (items.length)
+    fact(dl, 'Services', servicesFact(items));
+}
+
 function renderFacts(d) {
   var box = $('t-d-facts');
   clear(box);
   var dl = el('dl', null, 'facts');
   fact(dl, 'RLOC16', rlocText(d.rloc16), 't-mono');
   fact(dl, 'Ext. address', d.ext || '–', 't-mono');
-  var host = L.srpHostFor(d, model.srp);
-  fact(dl, 'SRP host', host ? host.name + '.default.service.arpa' : 'Not registered', host ? 't-mono' : '');
-  if (host && host.services && host.services.length) {
-    fact(dl, 'Services', host.services.map(function(s) { return s.instance + ' (' + s.type + ')'; }).join(', '));
-  }
+  renderServiceFacts(dl, d);
   fact(dl, 'Radio', radioText(d));
   fact(dl, 'Thread version', versionText(d.version));
   box.appendChild(dl);
@@ -1663,6 +2302,53 @@ function renderAddresses(d) {
   setText('t-d-more', showInternal ? LESS_TEXT : MORE_TEXT);
 }
 
+function txtTable(item) {
+  var s = item.service;
+  var table = el('table', null, 't-txt');
+  var cap = el('caption');
+  cap.appendChild(mono((s.instance || '') + '.' + s.type));
+  var info = [];
+  if (s.port !== null)
+    info.push('port ' + s.port);
+  if (s.source !== null)
+    info.push('from ' + routerName(s.source, false));
+  if (s.txtTruncated)
+    info.push('cut short');
+  cap.appendChild(el('span', info.length ? '· ' + info.join(' · ') : null, 't-after'));
+  table.appendChild(cap);
+  if (!s.entries.length) {
+    var none = el('tr');
+    var cell = el('td', 'No TXT entries', 't-muted');
+    cell.setAttribute('colspan', '2');
+    none.appendChild(cell);
+    table.appendChild(none);
+    return table;
+  }
+  s.entries.forEach(function(e) {
+    var tr = el('tr');
+    tr.appendChild(el('td', e.key));
+    var value = e.value === null ? 'no value' : typeof e.value === 'string' ? e.value : L.hexText(e.value);
+    tr.appendChild(el('td', value, e.value === null ? 't-muted' : null));
+    table.appendChild(tr);
+  });
+  return table;
+}
+
+function renderRaw(d) {
+  var box = $('t-d-raw');
+  clear(box);
+  var items = serviceItems(d).filter(function(it) { return it.raw; });
+  show('t-d-raw', items.length > 0);
+  if (!items.length)
+    return;
+  box.appendChild(button(rawOpen ? 'Hide raw records' : 'Show raw records (' + items.length + ')', 't-link', function() {
+    rawOpen = !rawOpen;
+    renderRaw(model.byId[selected]);
+  }));
+  if (rawOpen)
+    items.forEach(function(it) { box.appendChild(txtTable(it)); });
+}
+
 function renderDialog() {
   var d = model.byId[selected];
   setText('t-d-name', nameOf(d));
@@ -1675,8 +2361,14 @@ function renderDialog() {
   chips.appendChild(el('span', typeText(d), 'chip t-chip-type'));
   if (badgeText(d))
     chips.appendChild(el('span', badgeText(d), 'chip chip-warn'));
+  var sum = summaryOf(d);
+  if (sum)
+    chips.appendChild(el('span', sum.kind, 'chip t-chip-kind'));
   renderFacts(d);
   renderRouterColumn(d);
+  renderRaw(d);
+  setText('t-d-note', PAIRING_NOTE);
+  show('t-d-note', !!sum && sum.kind === 'Matter' && sum.commissionable === null);
   renderAddresses(d);
 }
 
@@ -1781,6 +2473,11 @@ function init() {
   names = L.loadNames(storage);
   var saved = L.savedResult(storage);
   wire();
+  kit.request('GET', '/device/names', {timeoutMs : 5000}).then(function(r) {
+    hostName = r.status === 200 ? L.boardName(r.body) : null;
+    if (hostName !== null && model !== null)
+      renderAll();
+  }, function() {});
   /* One GET: it never starts mesh traffic. A running scan is joined, never restarted. */
   kit.request('GET', '/device/topology', {timeoutMs : 5000}).then(function(r) {
     var board = r.status === 200 ? r.body : null;
