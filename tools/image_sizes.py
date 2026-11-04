@@ -31,8 +31,11 @@ IMAGES = [
     ("C6 installer", "c6_installer", "c6_installer.bin", None),
 ]
 # SPIFFS images fill the whole partition and spread their pages over it: the size that counts is the pages in use
-# (not erased, all 0xFF). The page size is ESP-IDF's default CONFIG_SPIFFS_PAGE_SIZE.
+# (not erased, all 0xFF) in the blocks that hold data. A block's first page is its object lookup page, which spiffsgen
+# (--use-magic) writes into every block, empty or not: a block whose other pages are all erased counts as free.
+# Block and page size are ESP-IDF's defaults (SPI flash sector, CONFIG_SPIFFS_PAGE_SIZE).
 SPIFFS = {"web_0.bin"}
+SPIFFS_BLOCK = 4096
 SPIFFS_PAGE = 256
 
 MARKER = "<!-- image-sizes -->"
@@ -64,9 +67,15 @@ def image_size(path):
     if path.name not in SPIFFS:
         return len(data)
     erased = b"\xff" * SPIFFS_PAGE
-    return SPIFFS_PAGE * sum(
-        data[i : i + SPIFFS_PAGE] != erased for i in range(0, len(data), SPIFFS_PAGE)
-    )
+    used = 0
+    for block in range(0, len(data), SPIFFS_BLOCK):
+        pages = [
+            data[i : i + SPIFFS_PAGE]
+            for i in range(block, min(block + SPIFFS_BLOCK, len(data)), SPIFFS_PAGE)
+        ]
+        if any(page != erased for page in pages[1:]):
+            used += sum(page != erased for page in pages)
+    return SPIFFS_PAGE * used
 
 
 def collect(root):
@@ -145,7 +154,7 @@ def report(head, base=None, base_label=None):
         lines.append("No base build to compare against.")
     lines.append("")
     lines.append(
-        "Web UI: the SPIFFS pages in use. C6 installer: booted from the ESP-Hosted"
+        "Web UI: the SPIFFS pages in use, empty blocks not counted. C6 installer: booted from the ESP-Hosted"
         " firmware's own slot, no limit here."
     )
     return "\n".join(lines) + "\n"

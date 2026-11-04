@@ -280,20 +280,38 @@ function count(n) {
 }
 
 /*
+ * One row of the TREL peer table. `preference` is null for a peer that is not a Thread neighbour (every peer of another
+ * network): no preference parts, shown "-". A `same_network` that is not a boolean is unknown: "-", neutral chip.
+ */
+function trelPeerView(p) {
+  var known = typeof p.same_network === 'boolean';
+  return {
+    ext_address : p.ext_address,
+    address : p.address,
+    panId : p.ext_pan_id || '-',
+    network : !known ? '-' : p.same_network ? 'this' : 'other',
+    networkClass : !known ? 'chip' : p.same_network ? 'chip chip-ok' : 'chip chip-bad',
+    prefParts : C.preferenceParts(p.preference)
+  };
+}
+
+/*
  * What the TREL card shows for the "trel" object of GET /device/status (null in a build without TREL: no card) and the
- * running mode: {available, chip, chipClass, where, peers, tx, rx, failures, peerList, hint}.
+ * running mode: {available, chip, chipClass, where, peers, peersOther, tx, rx, failures, peerList, hint}.
  */
 function trelView(trel, mode) {
   if (!trel)
     return {available : false};
+  var other = typeof trel.peers_other === 'number' ? trel.peers_other : 0;
   var v = {
     available : true,
     where : mode === 'split' ? 'On Thread backbone' : 'On Ethernet port',
     peers : count(trel.peers),
+    peersOther : other > 0 ? '+ ' + count(other) + (other === 1 ? ' peer of another network' : ' peers of other networks') : '',
     tx : count(trel.tx_packets),
     rx : count(trel.rx_packets),
     failures : count(trel.tx_failures),
-    peerList : trel.peer_list || []
+    peerList : (trel.peer_list || []).map(trelPeerView)
   };
   if (!trel.enabled) {
     v.chip = 'Off';
@@ -373,6 +391,7 @@ return {
   reachText : reachText,
   taggedVlans : taggedVlans,
   trelOnly : trelOnly,
+  trelPeerView : trelPeerView,
   trelView : trelView
 };
 })();
@@ -520,6 +539,8 @@ function renderTrel() {
   pressed('trel-off', draft ? !draft.trel : !trel.enabled);
   $('trel-on').disabled = $('trel-off').disabled = trelSending || kit.isBusy();
   setText('trel-peers', v.peers);
+  setText('trel-peers-other', v.peersOther);
+  show('trel-peers-other', !!v.peersOther);
   setText('trel-tx', v.tx);
   setText('trel-rx', v.rx);
   setText('trel-fail', v.failures);
@@ -531,11 +552,22 @@ function renderTrel() {
     v.peerList.forEach(function(p) {
       var tr = el('tr');
       tr.appendChild(el('td', p.ext_address, 'mono'));
+      var network = el('td', p.panId + ' ', 'mono');
+      network.appendChild(el('span', p.network, p.networkClass));
+      tr.appendChild(network);
+      tr.appendChild(preferenceCell(p));
       tr.appendChild(el('td', p.address, 'mono'));
       body.appendChild(tr);
     });
   }
   setText('trel-hint', v.hint);
+}
+
+/* "15.4 78% · TREL 100%", the TREL figure red when it is below 15.4's; "-" for a peer that is not a neighbour. */
+function preferenceCell(p) {
+  var td = el('td', p.prefParts.length ? '' : '-');
+  p.prefParts.forEach(function(part) { td.appendChild(el('span', part.text, part.low ? 'pref-low' : '')); });
+  return td;
 }
 
 function refreshTrel() {

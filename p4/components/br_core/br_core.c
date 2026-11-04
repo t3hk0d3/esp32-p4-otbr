@@ -33,6 +33,7 @@
 #include "openthread/ip6.h"
 #include "openthread/link.h"
 #include "openthread/link_raw.h"
+#include "openthread/multi_radio.h"
 #include "openthread/platform/radio.h"
 #include "openthread/thread.h"
 #include "openthread/thread_ftd.h"
@@ -841,6 +842,61 @@ bool br_core_trel_wanted(void)
     return atomic_load(&s_trel_wanted);
 }
 
+#if CONFIG_OPENTHREAD_RADIO_TREL
+// Serialised by the OpenThread lock, which every caller holds: one sort buffer (about 1.5 KB) for all of them.
+static br_core_trel_sort_t s_trel_sort;
+#endif
+
+void br_core_trel_read_locked(otInstance *instance, br_core_trel_state_t *out, br_core_trel_list_t *list)
+{
+#if CONFIG_OPENTHREAD_RADIO_TREL
+    const otTrelCounters *counters = otTrelGetCounters(instance);
+    otTrelPeerIterator iterator;
+    const otTrelPeer *peer;
+
+    out->state_valid = true;
+    out->active = otTrelIsEnabled(instance) && otThreadGetDeviceRole(instance) != OT_DEVICE_ROLE_DISABLED;
+    if (counters) {
+        out->tx_packets = counters->mTxPackets;
+        out->tx_bytes = counters->mTxBytes;
+        out->tx_failures = counters->mTxFailure;
+        out->rx_packets = counters->mRxPackets;
+        out->rx_bytes = counters->mRxBytes;
+    }
+    br_core_trel_sort_init(&s_trel_sort, otThreadGetExtendedPanId(instance)->m8, otDatasetIsCommissioned(instance),
+                           list == NULL);
+    otTrelInitPeerIterator(instance, &iterator);
+    while ((peer = otTrelGetNextPeer(instance, &iterator)) != NULL) {
+        char sock_address[OT_IP6_SOCK_ADDR_STRING_SIZE] = "";
+        br_core_trel_raw_peer_t raw = {.sock_address = sock_address};
+
+        memcpy(raw.ext_address, peer->mExtAddress.m8, sizeof(raw.ext_address));
+        memcpy(raw.ext_pan_id, peer->mExtPanId.m8, sizeof(raw.ext_pan_id));
+        if (br_core_trel_sort_keeps(&s_trel_sort, raw.ext_pan_id)) { // a peer only counted needs neither
+            otMultiRadioNeighborInfo info;
+            br_core_trel_radios_t radios = {
+                .found = otMultiRadioGetNeighborInfo(instance, &peer->mExtAddress, &info) == OT_ERROR_NONE,
+            };
+
+            if (radios.found) {
+                radios.has_154 = info.mSupportsIeee802154;
+                radios.pref_154 = info.mIeee802154Info.mPreference;
+                radios.has_trel = info.mSupportsTrelUdp6;
+                radios.pref_trel = info.mTrelUdp6Info.mPreference;
+            }
+            otIp6SockAddrToString(&peer->mSockAddr, sock_address, sizeof(sock_address));
+            br_core_trel_raw_set_radios(&raw, &radios);
+        }
+        br_core_trel_sort_add(&s_trel_sort, &raw);
+    }
+    br_core_trel_sort_finish(&s_trel_sort, out, list);
+#else
+    (void)instance;
+    (void)out;
+    (void)list;
+#endif
+}
+
 void br_core_get_trel(br_core_trel_t *out)
 {
     memset(out, 0, sizeof(*out));
@@ -859,30 +915,7 @@ void br_core_get_trel(br_core_trel_t *out)
         br_core_ot_session_end();
         return;
     }
-    otInstance *instance = esp_openthread_get_instance();
-    const otTrelCounters *counters = otTrelGetCounters(instance);
-    otTrelPeerIterator iterator;
-    const otTrelPeer *peer;
-
-    out->state_valid = true;
-    out->active = otTrelIsEnabled(instance) && otThreadGetDeviceRole(instance) != OT_DEVICE_ROLE_DISABLED;
-    out->peers = otTrelGetNumberOfPeers(instance);
-    if (counters) {
-        out->tx_packets = counters->mTxPackets;
-        out->tx_bytes = counters->mTxBytes;
-        out->tx_failures = counters->mTxFailure;
-        out->rx_packets = counters->mRxPackets;
-        out->rx_bytes = counters->mRxBytes;
-    }
-    otTrelInitPeerIterator(instance, &iterator);
-    while (out->peer_count < BR_CORE_TREL_PEERS_MAX && (peer = otTrelGetNextPeer(instance, &iterator)) != NULL) {
-        br_core_trel_peer_t *entry = &out->peer_list[out->peer_count++];
-
-        for (size_t i = 0; i < sizeof(peer->mExtAddress.m8); i++) {
-            snprintf(&entry->ext_address[2 * i], 3, "%02x", peer->mExtAddress.m8[i]);
-        }
-        otIp6SockAddrToString(&peer->mSockAddr, entry->sock_address, sizeof(entry->sock_address));
-    }
+    br_core_trel_read_locked(esp_openthread_get_instance(), &out->state, &out->list);
     esp_openthread_lock_release();
     br_core_ot_session_end();
 #endif

@@ -19,6 +19,13 @@ def table(*parts):
     return data + b"\xff" * (0xC00 - len(data))
 
 
+def spiffs_image():
+    def block(*pages):
+        return b"".join(p.ljust(256, b"\xff") for p in pages).ljust(4096, b"\xff")
+
+    return block(b"lookup", b"", b"data", b"more") + block(b"lookup magic") + block()
+
+
 def write_build(root, project, images, parts, boot_offset="0x2000"):
     build = root / project / "build"
     (build / "partition_table").mkdir(parents=True)
@@ -51,7 +58,7 @@ def test_collect_reads_sizes_and_limits(tmp_path):
         "p4",
         {
             "p4.bin": b"a" * 3000,
-            "web_0.bin": b"w" * 100 + b"\xff" * (156 + 3 * 256) + b"m" + b"\xff" * 255,
+            "web_0.bin": spiffs_image(),
             "bootloader/bootloader.bin": b"b" * 500,
         },
         [("ota_0", 8 << 20), ("web_0", 2 << 20)],
@@ -69,7 +76,8 @@ def test_collect_reads_sizes_and_limits(tmp_path):
 
     assert images["P4 app"]["size"] == 3000
     assert images["P4 app"]["limit"] == 8 << 20
-    assert images["P4 web UI"]["size"] == 512  # two 256-byte pages in use
+    # block 0: lookup page and two data pages; block 1: only its lookup page (free); block 2: erased
+    assert images["P4 web UI"]["size"] == 3 * 256
     assert images["P4 web UI"]["limit"] == 2 << 20
     assert images["P4 bootloader"]["limit"] == 0x6000
     assert images["C6 updater (base)"]["limit"] == 0x80000  # the test slot, not ota_0

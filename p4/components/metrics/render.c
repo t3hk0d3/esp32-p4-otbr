@@ -391,7 +391,9 @@ static void render_trel(metrics_writer_t *w, const metrics_thread_t *t)
 {
     single(w, "br_trel_enabled", "gauge", "TREL is switched on (1) or off (0).", t->trel.enabled);
     single(w, "br_trel_active", "gauge", "OpenThread runs TREL: switched on and Thread up.", t->trel.active);
-    single(w, "br_trel_peers", "gauge", "TREL peers found on the backbone link.", t->trel.peers);
+    single(w, "br_trel_peers", "gauge", "TREL peers of this Thread network on the backbone link.", t->trel.peers);
+    single(w, "br_trel_peers_other", "gauge", "TREL peers of other Thread networks on the backbone link.",
+           t->trel.peers_other);
     family(w, "br_trel_packets_total", "counter", "TREL packets.");
     labelled_u64(w, "br_trel_packets_total", "direction", "tx", t->trel.tx_packets);
     labelled_u64(w, "br_trel_packets_total", "direction", "rx", t->trel.rx_packets);

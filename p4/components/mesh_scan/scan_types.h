@@ -96,9 +96,21 @@ typedef struct {
  * About 100 KB (the SRP host array alone is 64 x ~1.2 KB): allocated by scan.c through `ops.alloc` (PSRAM on target),
  * never on a stack. Up to two can exist at once: a new scan allocates its result while a render still holds the old one.
  */
+#define MESH_SCAN_PREF_NONE (-1) /**< the neighbour does not use that radio */
+
+/** How this board reaches one router neighbour (OpenThread multi-radio: 15.4 and TREL). */
+typedef struct {
+    bool valid;        /**< this board has a link to that router and OpenThread knows its radios */
+    uint8_t lq_in;     /**< this board's incoming link quality from that router, as its own router table has it */
+    int16_t pref_154;  /**< OpenThread's 15.4 preference 0..255, MESH_SCAN_PREF_NONE when not used */
+    int16_t pref_trel; /**< OpenThread's TREL preference 0..255, MESH_SCAN_PREF_NONE when not used */
+} mesh_scan_transport_t;
+
 typedef struct {
     mesh_scan_network_t network;
     mesh_scan_router_t routers[MESH_SCAN_MAX_ROUTERS]; /**< by router ID; absent entries have present == false */
+    bool has_transport; /**< the firmware has TREL: this board's links carry this_links */
+    mesh_scan_transport_t this_links[MESH_SCAN_MAX_ROUTERS]; /**< by router ID, filled by the snapshot */
     mesh_scan_srp_host_t srp[MESH_SCAN_MAX_SRP_HOSTS];
     uint8_t n_srp;
     bool partial;

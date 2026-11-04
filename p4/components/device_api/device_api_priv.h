@@ -130,9 +130,15 @@ const char *device_api_op_busy_detail(device_api_op_t op);
 #define DEVICE_API_ADDR_LEN 48
 
 #define DEVICE_API_TREL_PEERS_MAX 8
+#define DEVICE_API_TREL_PREF_NONE (-1) /**< the neighbour does not use that radio: written as null */
 
 typedef struct {
     char ext_address[17];
+    char ext_pan_id[17];
+    bool same_network;
+    bool neighbor;     /**< false: "preference" is null */
+    int16_t pref_154;  /**< 0..255 or DEVICE_API_TREL_PREF_NONE */
+    int16_t pref_trel; /**< 0..255 or DEVICE_API_TREL_PREF_NONE */
     char address[48]; /**< "[ipv6]:port" */
 } device_api_trel_peer_t;
 
@@ -140,9 +146,10 @@ typedef struct {
 typedef struct {
     bool built;       /**< false: "trel" is null */
     bool enabled;
-    bool state_valid; /**< false: active, peers and the counters are null, peer_list is empty */
+    bool state_valid; /**< false: active, peers, peers_other and the counters are null, peer_list is empty */
     bool active;
-    uint32_t peers;
+    uint32_t peers;       /**< of the board's Thread network */
+    uint32_t peers_other; /**< of other Thread networks */
     uint64_t tx_packets, tx_failures, rx_packets;
     size_t peer_count;
     device_api_trel_peer_t peer_list[DEVICE_API_TREL_PEERS_MAX];
