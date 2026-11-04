@@ -263,6 +263,10 @@ STORE = """(() => { const m = {}; return {m, getItem: (k) => (k in m ? m[k] : nu
   setItem: (k, v) => { m[k] = String(v); }, removeItem: (k) => { delete m[k]; }}; })()"""
 BROKEN = "{getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); }}"
 
+STACK_SL = "SL-OPENTHREAD/2.4.2.0_GitHub-7074a43e4; EFR32; Oct 30 2024 14:04"
+STACK_ESP = "openthread-esp32/fff9895c-b678a4f; esp32c6;  2026-11-03 21:47:25"
+STACK_POSIX = "OPENTHREAD/cb18e0f; POSIX; Oct  6 2026 20:28:48"
+
 
 @needs_node
 class TestTopologyLogic:
@@ -1293,6 +1297,131 @@ class TestTopologyLogic:
         )
         assert got == [None, "HomeKit"]
 
+    # device info (stackInfo, infoName, appUrl, nameInfo, kindLine, matches)
+
+    def test_stackinfo_names_the_vendor_chip_sdk_and_version_of_a_known_stack(self):
+        # On the three recorded stack strings: vendor, chip, sdk and version (null when the string has none).
+        got = plain(
+            "[STACKS.sl, STACKS.esp, STACKS.posix].map((s) => L.stackInfo(s))".replace(
+                "STACKS.sl", repr(STACK_SL)
+            )
+            .replace("STACKS.esp", repr(STACK_ESP))
+            .replace("STACKS.posix", repr(STACK_POSIX))
+        )
+        assert got == [
+            {
+                "vendor": "Silicon Labs",
+                "chip": "EFR32",
+                "sdk": "SL-OpenThread",
+                "version": "2.4.2.0",
+            },
+            {
+                "vendor": "Espressif",
+                "chip": "esp32c6",
+                "sdk": "OpenThread",
+                "version": None,
+            },
+            {
+                "vendor": "OpenThread",
+                "chip": "POSIX",
+                "sdk": "OpenThread",
+                "version": None,
+            },
+        ]
+
+    def test_stackinfo_of_an_unknown_empty_or_absent_string_is_null(self):
+        got = plain(
+            "['Vendor/1.0; x; y', '', null, undefined, 5].map((s) => L.stackInfo(s) === null)"
+        )
+        assert got == [True] * 5
+
+    def test_infoname_joins_vendor_and_model(self):
+        got = plain(
+            "[{vendor_name: 'Home Assistant', vendor_model: 'OpenThread Border Router'},"
+            " {vendor_name: 'RD:Acme', vendor_model: 'Lamp'},"
+            " {vendor_name: 'Acme'}, {vendor_name: 'RD:', vendor_model: 'Lamp'}, {vendor_model: 'Lamp'}, null,"
+            " {state: 'no_answer'}].map((i) => L.infoName(i))"
+        )
+        assert got == [
+            "Home Assistant OpenThread Border Router",
+            "Acme Lamp",
+            None,
+            None,
+            None,
+            None,
+            None,
+        ]
+
+    def test_nameinfo_uses_the_info_name_but_keeps_the_boards_hostname(self):
+        got = plain(
+            "(() => {"
+            "const d = (info, board) => ({id: 'r1', kind: 'router', rloc16: 0x1000, ext: null, thisBoard: board, info});"
+            "const info = {state: 'answered', vendor_name: 'Home Assistant', vendor_model: 'OTBR'};"
+            "return [L.displayName(d(info, false), {}, [], null), L.displayName(d(null, false), {}, [], null),"
+            " L.isUnnamed(d(info, false), {}, [], null), L.displayName(d(info, true), {}, [], 'myhost')]; })()"
+        )
+        assert got == ["Home Assistant OTBR", "Unknown 0x1000", False, "myhost"]
+
+    def test_nameinfo_prefers_an_srp_name_over_the_info_name(self):
+        got = srp(
+            "(() => { const d = DEVS.find((x) => !x.thisBoard && !L.isUnnamed(x, {}, HOSTS, null));"
+            " const w = {...d, info: {state: 'answered', vendor_name: 'Acme', vendor_model: 'Lamp'}};"
+            " return [L.displayName(w, {}, HOSTS, null) === L.displayName(d, {}, HOSTS, null),"
+            " L.displayName(w, {}, HOSTS, null)]; })()"
+        )
+        assert got[0] is True
+        assert got[1] != "Acme Lamp"
+
+    def test_nameinfo_info_name_beats_matter_device_fallback(self):
+        got = srp(
+            "(() => { const m = DEVS.find((d) => L.displayName(d, {}, HOSTS, null).startsWith('Matter device'));"
+            " const w = {...m, info: {state: 'answered', vendor_name: 'Acme', vendor_model: 'Lamp'}};"
+            " return [L.displayName(w, {}, HOSTS, null), L.isUnnamed(w, {}, HOSTS, null), L.isUnnamed(m, {}, HOSTS, null)]; })()"
+        )
+        assert got == ["Acme Lamp", False, True]
+
+    def test_kindline_falls_back_to_the_stack_summary_without_an_srp_kind(self):
+        got = plain(
+            "(() => { const dev = (s) => ({info: {state: 'answered', thread_stack_version: s}});"
+            f"return [L.kindLine(null, dev({STACK_SL!r})), L.kindLine({{kind: null}}, dev({STACK_ESP!r})),"
+            " L.kindLine({kind: 'Matter', fabrics: [1], commissionable: false}, dev("
+            f"{STACK_SL!r})), L.kindLine(null, dev('x')), L.kindLine(null, {{}}), L.kindLine(null)]; }})()"
+        )
+        assert got == ["Silicon Labs EFR32", "Espressif esp32c6", "Matter · 1 fabric", "", "", ""]
+
+    def test_matches_finds_a_device_by_vendor_name_model_or_stack_string(self):
+        got = plain(
+            "(() => { const d = {id: 'r1', rloc16: 0x1000, ext: null, addrs: [], parentId: null, info: {state: 'answered',"
+            " vendor_name: 'Acme', vendor_model: 'Lamp', thread_stack_version: 'SL-OPENTHREAD/2.4; EFR32; x'}};"
+            "return ['acme', 'lamp', 'efr32', 'nope'].map((q) => L.rows([d], 'all', q, {}, [], null).length); })()"
+        )
+        assert got == [1, 1, 1, 0]
+
+    def test_appurl_accepts_only_http_and_https(self):
+        got = plain(
+            "['https://example.com/a', 'HTTP://example.com', 'javascript:alert(1)', 'data:text/html,x',"
+            " 'example.com', '', null, ' https://x.y'].map((u) => L.appUrl(u))"
+        )
+        assert got == [
+            "https://example.com/a",
+            "HTTP://example.com",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ]
+
+    def test_devices_carry_info_through_and_default_it_to_null(self):
+        got = js(
+            "(() => { const X = {...R, routers: routers()}; X.routers[0].info = {state: 'answered', eui64: 'ab'};"
+            " X.routers[0].children[0].info = {state: 'no_answer'};"
+            " const d = L.devices(X); const e = L.devices(R);"
+            " return [d[0].info, d[1].info, e[0].info]; })()"
+        )
+        assert got == [{"state": "answered", "eui64": "ab"}, {"state": "no_answer"}, None]
+
     # omrAddress
 
     def test_omraddress_is_the_first_address_under_an_omr_prefix(self):
@@ -2045,6 +2174,150 @@ class TestTopologyPage:
             True,
             "25%",
         ]
+
+    # device info
+
+    def test_loading_view_says_it_is_asking_devices_for_details(self):
+        r = run(
+            "const I = (total, answered, sleepy, wait) => ({state: 'running', progress: {routers: 4, queried: 4,"
+            " children: {total: 3, queried: 3}, info: {total, answered, sleepy_waiting: sleepy, wait_s: wait}}});"
+            "S.gets = [I(6, 2, 1, 120), I(6, 4, 2, 200), I(6, 5, 1, 30), I(6, 4, 2, 0), I(0, 0, 0, 0)]; await start();"
+            " const a = [txt('t-progress'), t.el('t-progress-bar').style.width];"
+            " for (let i = 0; i < 4; i++) { await t.advance(1000); a.push(txt('t-progress')); } return a;"
+        )
+        assert r == [
+            "Asking devices for details: 2 of 6",
+            "33%",
+            "Waiting for 2 sleepy devices (they answer when they next wake, up to 4 min)",
+            "Waiting for 1 sleepy device (they answer when they next wake, up to 1 min)",
+            "Waiting for 2 sleepy devices (they answer when they next wake)",
+            "Asking devices for their addresses: 3 of 3",
+        ]
+
+    def test_loading_view_without_info_keeps_todays_texts(self):
+        r = run(
+            "S.gets = [RUNNING(5, 5, 1, 4), RUNNING(2, 5)]; await start(); const a = [txt('t-progress')];"
+            " await t.advance(1000); a.push(txt('t-progress')); return a;"
+        )
+        assert r == [
+            "Asking devices for their addresses: 1 of 4",
+            "Asking each router about its children: 2 of 5",
+        ]
+
+    INFO_RESULT = r"""
+const IR = structuredClone(SV);
+IR.routers[0].info = {state: 'answered', eui64: '8c73dafffe952cfb', vendor_name: 'Home Assistant',
+  vendor_model: 'OpenThread Border Router', thread_stack_version: %r, vendor_app_url: 'https://example.com/ha'};
+IR.routers[1].info = {state: 'answered', thread_stack_version: %r};
+IR.routers[2].info = {state: 'answered', vendor_name: 'RD:', thread_stack_version: %r,
+  vendor_app_url: 'javascript:alert(1)'};
+IR.routers[3].info = {state: 'answered', vendor_name: '<b>x</b>', vendor_model: '<i>y</i>'};
+IR.routers[2].children = [{rloc16: 0x6401, ext_address: 'acebe6fffe0bffa4', mode: {rx_on_when_idle: false},
+  lq_in: 3, addresses: [], info: {state: 'no_answer'}},
+  {rloc16: 0x6402, ext_address: 'acebe6fffe0bffa5', mode: {rx_on_when_idle: true}, lq_in: 3, addresses: [],
+   info: {state: 'no_answer'}},
+  {rloc16: 0x6403, ext_address: 'acebe6fffe0bffa6', mode: {rx_on_when_idle: true}, lq_in: 3, addresses: [],
+   info: {state: 'cut_short'}},
+  {rloc16: 0x6404, ext_address: 'acebe6fffe0bffa7', mode: {rx_on_when_idle: true}, lq_in: 3, addresses: [],
+   info: {state: 'not_asked'}}];
+""" % (STACK_POSIX, STACK_SL, STACK_ESP)
+
+    def test_dialog_shows_hardware_stack_software_and_eui64(self):
+        r = sv(
+            self.INFO_RESULT
+            + "IR.routers[0].info.vendor_sw_version = '20261104-bb169ca';"
+            " await openSV('r4', IR); return ['Hardware', 'Stack', 'Software', 'EUI-64'].map(fact);"
+        )
+        assert r == [
+            "Home Assistant OpenThread Border Router",
+            STACK_POSIX,
+            "20261104-bb169ca",
+            "8c73dafffe952cfb",
+        ]
+
+    def test_dialog_summarises_the_stack_when_there_are_no_vendor_strings(self):
+        r = sv(
+            self.INFO_RESULT
+            + "await openSV('r12', IR); return ['Hardware', 'Stack', 'Software', 'EUI-64', 'App URL'].map(fact);"
+        )
+        assert r == [
+            "Silicon Labs EFR32 · SL-OpenThread 2.4.2.0",
+            STACK_SL,
+            None,
+            None,
+            None,
+        ]
+
+    def test_dialog_summary_omits_missing_parts(self):
+        r = sv(
+            self.INFO_RESULT
+            + "await openSV('r25', IR); return fact('Hardware');"
+        )
+        assert r == "Espressif esp32c6"
+
+    def test_dialog_links_an_http_app_url(self):
+        r = sv(
+            self.INFO_RESULT
+            + "await openSV('r4', IR); const a = t.el('t-d-facts').findAll((e) => e.tag === 'a');"
+            " return [fact('App URL'), a.map((e) => [e.textContent, e.attrs.href, e.attrs.rel])];"
+        )
+        assert r[0] == "https://example.com/ha"
+        assert r[1] == [["https://example.com/ha", "https://example.com/ha", "noopener"]]
+
+    def test_dialog_shows_a_javascript_app_url_as_plain_text_without_a_link(self):
+        r = sv(
+            self.INFO_RESULT
+            + "await openSV('r25', IR); return [fact('App URL'),"
+            " t.el('t-d-facts').findAll((e) => e.tag === 'a' && /^javascript/i.test(e.attrs.href || '')).length];"
+        )
+        assert r == ["javascript:alert(1)", 0]
+
+    def test_dialog_shows_markup_in_vendor_strings_as_text(self):
+        r = sv(
+            self.INFO_RESULT
+            + "await openSV('r26', IR); return [fact('Hardware'),"
+            " t.el('t-d-facts').findAll((e) => e.tag === 'b' || e.tag === 'i').length, txt('t-d-name')];"
+        )
+        assert r[0] == "<b>x</b> <i>y</i>"
+        assert r[1] == 0
+
+    def test_dialog_of_a_sleepy_child_that_did_not_answer_says_so(self):
+        r = sv(self.INFO_RESULT + "await openSV('c25601', IR); return fact('Device info');")
+        assert r == "no answer (sleepy device)"
+
+    def test_dialog_of_an_awake_device_that_did_not_answer_says_so(self):
+        r = sv(self.INFO_RESULT + "await openSV('c25602', IR); return fact('Device info');")
+        assert r == "no answer"
+
+    def test_dialog_of_a_device_cut_short_by_the_time_limit_says_so(self):
+        r = sv(self.INFO_RESULT + "await openSV('c25603', IR); return fact('Device info');")
+        assert r == "not asked (scan time limit)"
+
+    def test_dialog_of_a_device_that_was_not_asked_shows_no_info_facts(self):
+        r = sv(
+            self.INFO_RESULT
+            + "await openSV('c25604', IR);"
+            " return ['Device info', 'Hardware', 'Stack', 'Software', 'EUI-64', 'App URL'].map(fact);"
+        )
+        assert r == [None] * 6
+
+    def test_dialog_of_a_result_without_info_has_no_info_facts(self):
+        r = sv(
+            "await openSV('r4');"
+            " return ['Device info', 'Hardware', 'Stack', 'Software', 'EUI-64', 'App URL'].map(fact);"
+        )
+        assert r == [None] * 6
+
+    def test_table_names_a_device_by_its_info_and_shows_the_stack_kind(self):
+        r = sv(
+            self.INFO_RESULT
+            + "IR.routers[2].children[1].info = {state: 'answered', thread_stack_version: %r};"
+            " await showSV(IR); return [row('r4').children[0].allText(), kind('c25602'), kind('r12')];"
+            % STACK_SL
+        )
+        assert "Home Assistant OpenThread Border Router" in r[0]
+        assert r[1] == ["Silicon Labs EFR32"]
+        assert r[2] == ["Matter \u00b7 2 fabrics"]  # an SRP kind wins over the stack
 
     # storage unavailable
 

@@ -219,6 +219,15 @@ reason, spec reference.
    `friendly_name`, then HomeKit, then meshcop instance), the generic "Matter device 0xNNNN" counts as unnamed
    (`isUnnamed`), and HomeKit `paired` is null without `sf`. A result saved by older firmware (no `srp_servers`, no
    `txt`) renders as before. New `t-` classes at the end of `static/style.css`.
+   Follow-up (2026-11-04, device info): the page shows each device's `info` from the scan (spec 2026-11-04). `TopologyLogic`
+   gains `stackInfo` (known Thread stack strings: Silicon Labs, Espressif, OpenThread POSIX), `infoName` (vendor + model;
+   the "RD:" prefix stripped; null without a model) and `appUrl` (http/https only). `displayName` uses the info name
+   after the SRP names and before "Matter device 0xNNNN"; `kindLine(sum, device)` falls back to the stack summary;
+   the table search matches vendor name, model and stack string. The dialog gains Hardware, Stack, Software, EUI-64,
+   App URL (a link only for http/https, else text) and "Device info" (no answer, sleepy or not; not asked under the scan
+   time limit). The loading view says "Asking devices for details: A of T" and, once only sleepy devices are left,
+   "Waiting for N sleepy devices (…, up to M min)" from `progress.info`. Results and progress without `info` render as
+   before. No new `t-` classes.
 17. Applied. `esp_ot_br_server`: every Network Diagnostic Get goes through the new `netdiag_mux` component (spec
    2026-11-02 section 3.5). OpenThread's netdiag client keeps one callback slot and every `otThreadSendDiagnosticGet`
    replaces it, so `/topology`, the REST diagnostics and discovery, and the `mesh_scan` child step took each other's
