@@ -16,7 +16,13 @@ FLASH_ARGS = """--flash-mode dio --flash-freq 40m --flash-size 32MB
 0x100000 p4.bin
 0x1100000 web_0.bin
 """
-IMAGES = ["bootloader.bin", "partition-table.bin", "ota_data_initial.bin", "p4.bin", "web_0.bin"]
+IMAGES = [
+    "bootloader.bin",
+    "partition-table.bin",
+    "ota_data_initial.bin",
+    "p4.bin",
+    "web_0.bin",
+]
 
 
 @pytest.fixture(scope="module")
@@ -52,12 +58,19 @@ def test_cli_writes_manifest(tmp_path):
     for image in IMAGES:
         (tmp_path / image).write_bytes(b"\xff")
     subprocess.run([sys.executable, str(TOOL), str(tmp_path), "v1"], check=True)
-    assert [p["path"] for p in json.loads((tmp_path / "manifest.json").read_text())["builds"][0]["parts"]] == IMAGES
+    assert [
+        p["path"]
+        for p in json.loads((tmp_path / "manifest.json").read_text())["builds"][0][
+            "parts"
+        ]
+    ] == IMAGES
 
 
 def test_cli_refuses_missing_image(tmp_path):
     (tmp_path / "flash_args").write_text(FLASH_ARGS)
-    result = subprocess.run([sys.executable, str(TOOL), str(tmp_path), "v1"], capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, str(TOOL), str(tmp_path), "v1"], capture_output=True, text=True
+    )
     assert result.returncode == 1
     assert "missing bootloader.bin" in result.stderr
     assert not (tmp_path / "manifest.json").exists()
