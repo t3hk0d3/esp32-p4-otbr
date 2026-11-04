@@ -1,0 +1,65 @@
+<!--
+  SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Thread Border Router - Console</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="/favicon.ico">
+</head>
+<body class="device-page con-page">
+<nav class="nav" id="nav"></nav>
+<div class="container">
+    <div class="page-head">
+        <div>
+            <h1 class="page-title">Thread Console</h1>
+            <p class="page-desc">OpenThread CLI on the running stack. The board stays a border router while you use it.</p>
+        </div>
+    </div>
+
+    <div class="card section hidden" id="con-off">
+        <p>The console is off. While it is on, anyone who can open this page can run OpenThread commands on the board.</p>
+        <button class="btn btn-primary" id="con-enable" type="button">Turn the console on</button>
+    </div>
+
+    <section class="card section con-card" aria-labelledby="con-title">
+        <div class="con-head">
+            <h2 class="con-title" id="con-title">Console</h2>
+            <span class="con-pill con-idle" id="con-pill" role="status" aria-live="polite">Disconnected</span>
+            <button class="btn con-toggle" id="con-toggle" type="button">Connect</button>
+            <span class="con-where" id="con-where"></span>
+            <span class="con-spacer"></span>
+            <button class="btn" id="con-clear" type="button">Clear</button>
+            <button class="btn" id="con-copy" type="button">Copy all</button>
+        </div>
+        <div class="con-out" id="con-out" role="log" aria-live="polite" aria-label="Console output"></div>
+        <div class="con-chips" id="con-chips" aria-label="Quick commands"></div>
+        <div class="con-input">
+            <label for="con-cmd">&gt;</label>
+            <input id="con-cmd" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="send"
+                   placeholder="OpenThread command, e.g. state">
+            <button class="btn btn-primary" id="con-run" type="button">Run</button>
+        </div>
+        <p class="form-hint">Commands that can take the network down (<code>factoryreset</code>, <code>dataset …</code>,
+            <code>thread stop</code>, <code>ifconfig down</code>, <code>reset</code>) ask before they run. From a shell:
+            <code>websocat ws://&lt;board&gt;/device/console/ws</code></p>
+    </section>
+
+    <dialog class="con-dialog" id="con-dialog" aria-labelledby="con-dlg-title">
+        <h3 id="con-dlg-title">Run <code id="con-dlg-cmd"></code>?</h3>
+        <p id="con-dlg-why"></p>
+        <div class="con-dlg-actions">
+            <button class="btn" id="con-dlg-cancel" type="button">Cancel</button>
+            <button class="btn btn-danger" id="con-dlg-run" type="button">Run it</button>
+        </div>
+    </dialog>
+</div>
+<script src="/static/api.js"></script>
+<script src="/static/device_common.js"></script>
+<script src="/static/console.js"></script>
+</body>
+</html>

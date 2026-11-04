@@ -11,7 +11,7 @@ const FRONTEND = path.join(__dirname, '..', '..', 'p4', 'components', 'esp_ot_br
 const Common = require(path.join(FRONTEND, 'static', 'device_common.js'));
 const SCRIPTS = {index: 'status', ethernet: 'ethernet', routing: 'routing', firmware: 'firmware', capture: 'capture',
                  diagnostics: 'diagnostics', names: 'names', leader: 'leader',
-                 topology: 'topology'};
+                 topology: 'topology', console: 'console'};
 /* Scripts that live on another script's page: the names section is part of the Ethernet page, the Leader card of Network. */
 const HTML = {names: 'ethernet', leader: 'network'};
 
@@ -191,6 +191,21 @@ function makeEnv(page, routes) {
   const navigations = [];
   const storage = fakeStorage();
   const clipboard = fakeClipboard();
+  const sockets = [];
+  /* WebSocket stand-in: records sent frames; a test opens it, delivers frames and drops it. */
+  class FakeSocket {
+    constructor(url) { this.url = url; this.sent = []; this.readyState = 0; this.closedWith = null; sockets.push(this); }
+    send(text) { this.sent.push(text); }
+    close(code) { this.closedWith = code || 1000; this.drop(this.closedWith); }
+    open() { this.readyState = 1; if (this.onopen) this.onopen({}); }
+    recv(data) { if (this.onmessage) this.onmessage({data}); }
+    drop(code) {
+      if (this.readyState === 3)
+        return;
+      this.readyState = 3;
+      if (this.onclose) this.onclose({code: code || 1006});
+    }
+  }
   const env = {
     document: doc,
     location: {host: 'board.lan'},
@@ -223,7 +238,8 @@ function makeEnv(page, routes) {
     AbortController: function() { this.signal = {}; this.abort = function() {}; },
     IntersectionObserver: null,
     localStorage: storage,
-    navigator: {clipboard}
+    navigator: {clipboard},
+    WebSocket: FakeSocket
   };
   let page_ = null, kit = null, Logic = null;
   const handle = {};
@@ -253,7 +269,7 @@ function makeEnv(page, routes) {
     now = end;
     await flush();
   };
-  return Object.assign(handle, {env, page: page_, kit, Logic, Common, doc, calls, flush, advance, storage, clipboard,
+  return Object.assign(handle, {env, page: page_, kit, Logic, Common, doc, calls, flush, advance, storage, clipboard, sockets,
                                 el: (id) => doc.getElementById(id), reloads: () => reloads, maxInFlight: () => maxInFlight,
                                 confirms: () => confirms, navigations: () => navigations});
 }
