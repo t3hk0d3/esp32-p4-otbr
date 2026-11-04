@@ -15,7 +15,7 @@ extern "C" {
 
 /**
  * Remote hosts of one scan, unique by host name (case-insensitive). Service `txt_off` values point into `pool`, not the
- * result's pool. About 115 KB: allocated by scan.c through ops.alloc, only when the network data lists a remote server.
+ * result's pool. About 108 KB: allocated by scan.c through ops.alloc, only when the network data lists a remote server.
  */
 typedef struct {
     mesh_scan_srp_host_t hosts[MESH_SCAN_MAX_SRP_HOSTS];

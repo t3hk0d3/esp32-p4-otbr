@@ -43,14 +43,14 @@ with its own 15 s budget inside the 60 s cap.
   `_hap._udp`, `_http._tcp`, `_meshcop._udp` and `_trel._udp`. An instance the browse answer did not describe (SRV,
   TXT and an address) is resolved for port, host address and TXT (with a follow-up AAAA query when the SRV answer has
   no address), unless the browse answer gave addresses and none passes the filter below; ESPHome and HomeKit resolves
-  go first. At most 4 queries are in flight, 2 per server when several are asked; a server whose query times out
+  go first. At most 4 queries are in flight, 2 per server while several are asked; a server whose query times out
   before it answered anything is not asked again. A record whose TXT cannot be parsed is kept without TXT.
 - Filter: a host is kept when it has an address under an OMR prefix or the mesh-local prefix. A border router record
   (`_meshcop._udp`, `_trel._udp`) is kept when its extended PAN ID (`xp`) is this network's and it has an extended
   address (`xa`) other than this board's.
 - De-duplication: by host name; a host seen on several servers is listed once.
 - Limits: 64 hosts, 8 services per host, 512 TXT bytes per service (`txt_truncated` is set when cut), 6 subtypes per
-  service, 48 resolves per scan, 15 s.
+  service, 48 resolves per scan (16 of them kept for `_esphomelib._tcp` and `_hap._udp`), 15 s.
 - A server that does not answer never sets `partial`. `srp_servers[].state` is `answered` (at least one query was
   answered, an empty answer counts, and all its queries ended), `no_answer` (no query it was asked got an answer:
   they all timed out or failed, or it was given up after a timeout), or `cut_short` (the budget or the cap ended the

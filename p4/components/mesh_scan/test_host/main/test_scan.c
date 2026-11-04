@@ -1727,13 +1727,13 @@ TEST_CASE("Resolves queued for several types: _esphomelib._tcp and _hap._udp one
     TEST_ASSERT_LESS_THAN(resolve_of("E"), resolve_of("H"));
 }
 
-TEST_CASE("49th resolve wanted: not queued; the browse data is kept if it passes the filter, else dropped",
-          "[mesh_scan]")
+TEST_CASE("49th resolve wanted (a name-bearing type): not queued; the browse data is kept if it passes the filter, else "
+          "dropped", "[mesh_scan]")
 {
     char name[16];
 
     srp_start(1);
-    const int b = browse_of(REMOTE_A, "_matter._tcp");
+    const int b = browse_of(REMOTE_A, "_hap._udp");
     for (int i = 0; i < MESH_SCAN_SRP_RESOLVES + 2; i++) {
         snprintf(name, sizeof(name), "dev-%d", i);
         // the 49th passes the filter, the 50th does not
@@ -1753,6 +1753,31 @@ TEST_CASE("49th resolve wanted: not queued; the browse data is kept if it passes
     TEST_ASSERT_NOT_NULL(srp_host(res, "dev-48"));
     TEST_ASSERT_NULL(srp_host(res, "dev-49"));
     TEST_ASSERT_NULL(srp_host(res, "dev-0")); // resolved, and its resolve gave no record
+}
+
+TEST_CASE("48 undescribed Matter instances answered first: 32 of them resolved, an undescribed ESPHome instance still "
+          "gets a resolve", "[mesh_scan]")
+{
+    char name[16];
+
+    srp_start(1);
+    const int bm = find_call(REMOTE_A, "_matter._tcp", false);
+    for (int i = 0; i < MESH_SCAN_SRP_RESOLVES; i++) {
+        snprintf(name, sizeof(name), "m-%d", i);
+        const mesh_scan_srp_record_t rec = bare_rec(name);
+        srp_answer(bm, &rec);
+    }
+    const mesh_scan_srp_record_t e = bare_rec("E");
+    srp_answer(find_call(REMOTE_A, "_esphomelib._tcp", false), &e);
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+
+    int matter = 0;
+    for (int i = 0; i < g_fake.dns_calls; i++) {
+        matter += g_fake.dns[i].resolve && !strcmp(g_fake.dns[i].type, "_matter._tcp");
+    }
+    TEST_ASSERT_EQUAL(16, MESH_SCAN_SRP_NAME_RESOLVES);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_RESOLVES - MESH_SCAN_SRP_NAME_RESOLVES, matter);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, resolve_of("E"));
 }
 
 TEST_CASE("Address only on the LAN: dropped", "[mesh_scan]")
@@ -2011,6 +2036,15 @@ TEST_CASE("Two remote servers, one silent: no server has more than 2 queries in 
     }
     TEST_ASSERT_EQUAL(2, in_flight_of(REMOTE_A));
     TEST_ASSERT_EQUAL(SRP_TYPES, calls_to(REMOTE_B));
+}
+
+TEST_CASE("Two remote servers, one given up: the live one may use all 4 slots", "[mesh_scan]")
+{
+    srp_start(2);
+    srp_done(open_call_of(REMOTE_A), MESH_SCAN_OT_ERROR_RESPONSE_TIMEOUT); // REMOTE_A given up
+    TEST_ASSERT_EQUAL(3, in_flight_of(REMOTE_B));                          // REMOTE_A still holds one slot
+    srp_done(open_call_of(REMOTE_A), MESH_SCAN_OT_ERROR_RESPONSE_TIMEOUT);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_QUERIES, in_flight_of(REMOTE_B));
 }
 
 TEST_CASE("One remote server: up to 4 queries in flight to it", "[mesh_scan]")

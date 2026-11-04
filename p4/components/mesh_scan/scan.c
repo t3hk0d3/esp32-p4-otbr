@@ -60,7 +60,6 @@ typedef struct {
     uint16_t n_jobs;
     uint16_t queued;              /**< jobs in state JOB_QUEUED */
     uint8_t in_flight;
-    uint8_t server_cap;           /**< queries in flight per server at most */
     uint8_t resolves;             /**< resolves queued so far */
     uint8_t server_in_flight[MESH_SCAN_MAX_SRP_SERVERS];
     bool answered[MESH_SCAN_MAX_SRP_SERVERS]; /**< a query to that server got an answer */
@@ -411,10 +410,10 @@ static void next_router(int from)
 }
 
 // SRP step: from the start, in parallel with the mesh phases, browse SRP_TYPES on every remote SRP server, at most
-// MESH_SCAN_SRP_QUERIES queries at a time (MESH_SCAN_SRP_SERVER_QUERIES per server when several are asked), and resolve
-// the instances a browse answer does not describe (at most MESH_SCAN_SRP_RESOLVES). A server whose query times out
-// before it ever answered is given up: its queued jobs are dropped. Ends when every query is over or
-// MESH_SCAN_SRP_BUDGET_MS after the start, whichever is first.
+// MESH_SCAN_SRP_QUERIES queries at a time (MESH_SCAN_SRP_SERVER_QUERIES per server while several are live), and resolve
+// the instances a browse answer does not describe (at most MESH_SCAN_SRP_RESOLVES, MESH_SCAN_SRP_NAME_RESOLVES of them
+// kept for the name-bearing types). A server whose query times out before it ever answered is given up: its queued
+// jobs are dropped. Ends when every query is over or MESH_SCAN_SRP_BUDGET_MS after the start, whichever is first.
 
 /**
  * Final server states: no_answer when nothing it was asked got an answer, or it was given up; cut_short when the cut
@@ -463,24 +462,42 @@ static void srp_ended(void)
     }
 }
 
-/** Issue order: browses, then resolves of the types that carry a device name (ESPHome, HomeKit), then the rest. */
+/** True for the types whose records carry a device name: ESPHome and HomeKit. */
+static bool name_type(uint8_t type)
+{
+    return strcmp(SRP_TYPES[type], "_esphomelib._tcp") == 0 || strcmp(SRP_TYPES[type], "_hap._udp") == 0;
+}
+
+/** Issue order: browses, then resolves of the name-bearing types, then the rest. */
 static uint8_t job_rank(const srp_job_t *job)
 {
     if (!job->resolve) {
         return 0;
     }
-    const char *type = SRP_TYPES[job->type];
-    return strcmp(type, "_esphomelib._tcp") == 0 || strcmp(type, "_hap._udp") == 0 ? 1 : 2;
+    return name_type(job->type) ? 1 : 2;
+}
+
+/** Queries in flight per server at most: MESH_SCAN_SRP_SERVER_QUERIES while more than one remote server is live. */
+static uint8_t srp_server_cap(const srp_step_t *st)
+{
+    const mesh_scan_result_t *r = &s.block->result;
+    uint8_t live = 0;
+
+    for (uint8_t i = 0; i < r->n_srp_servers; i++) {
+        live += !r->srp_servers[i].this_board && !st->dead[i];
+    }
+    return live > 1 ? MESH_SCAN_SRP_SERVER_QUERIES : MESH_SCAN_SRP_QUERIES;
 }
 
 /** The queued job to issue next: lowest rank, then queue order, on a server below its cap. -1 when there is none. */
 static int srp_next_job(const srp_step_t *st)
 {
+    const uint8_t cap = srp_server_cap(st);
     int best = -1;
 
     for (uint16_t i = 0; i < st->n_jobs; i++) {
         const srp_job_t *job = &st->jobs[i];
-        if (job->state == JOB_QUEUED && st->server_in_flight[job->server] < st->server_cap &&
+        if (job->state == JOB_QUEUED && st->server_in_flight[job->server] < cap &&
                 (best < 0 || job_rank(job) < job_rank(&st->jobs[best]))) {
             best = i;
         }
@@ -545,7 +562,6 @@ static void srp_start(void)
     memcpy(s.srp->stage.ext_pan_id, ext_pan_id, sizeof(ext_pan_id));
     memcpy(s.srp->stage.own_ext, own_ext, sizeof(own_ext));
     // Round-robin over the servers, and with several a per-server cap, so a silent one holds at most two slots.
-    s.srp->server_cap = remote > 1 ? MESH_SCAN_SRP_SERVER_QUERIES : MESH_SCAN_SRP_QUERIES;
     for (uint8_t t = 0; t < N_SRP_TYPES; t++) {
         for (uint8_t i = 0; i < r->n_srp_servers; i++) {
             if (!r->srp_servers[i].this_board) {
@@ -1098,8 +1114,12 @@ void mesh_scan_on_srp_record(uint32_t gen, uint16_t id, const mesh_scan_srp_reco
         goto out; // given up at the deadline, already done, or never issued
     }
     srp_step_t *st = s.srp;
-    if (!job->resolve && !rec->described && rec->instance[0] && st->resolves < MESH_SCAN_SRP_RESOLVES &&
-            !st->dead[job->server] && !lan_only(SRP_TYPES[job->type], rec)) {
+    // The name-bearing types may use every resolve; the others leave MESH_SCAN_SRP_NAME_RESOLVES for them, since the
+    // count is spent at queue time and Matter browses answer first.
+    const uint8_t room = name_type(job->type) ? MESH_SCAN_SRP_RESOLVES
+                         : MESH_SCAN_SRP_RESOLVES - MESH_SCAN_SRP_NAME_RESOLVES;
+    if (!job->resolve && !rec->described && rec->instance[0] && st->resolves < room && !st->dead[job->server] &&
+            !lan_only(SRP_TYPES[job->type], rec)) {
         srp_job_t *next = &st->jobs[st->n_jobs++]; // room: MAX_SRP_JOBS counts every browse and resolve
         *next = (srp_job_t) {
             .resolve = true, .server = job->server, .type = job->type, .state = JOB_QUEUED

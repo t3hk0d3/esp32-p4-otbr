@@ -27,6 +27,7 @@ extern "C" {
 #define MESH_SCAN_SRP_QUERIES 4        /**< DNS queries in flight at most */
 #define MESH_SCAN_SRP_SERVER_QUERIES 2 /**< ... to one server, when more than one remote server is asked */
 #define MESH_SCAN_SRP_RESOLVES 48      /**< service resolves per scan */
+#define MESH_SCAN_SRP_NAME_RESOLVES 16 /**< ... of them kept for _esphomelib._tcp and _hap._udp */
 #define MESH_SCAN_SRP_BUDGET_MS 15000  /**< SRP step budget from scan start, inside the cap */
 #define MESH_SCAN_DNS_TIMEOUT_MS 3000  /**< DNS response timeout per attempt */
 #define MESH_SCAN_DNS_ATTEMPTS 2
