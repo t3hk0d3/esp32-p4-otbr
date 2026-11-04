@@ -44,7 +44,8 @@ make test            # all host-side tests: test-host, test-tools, test-vendored
 make lint            # formatting and lint (pre-commit)
 ```
 
-- `make test-host`: the component host tests on the ESP-IDF linux target.
+- `make test-host`: the component host tests on the ESP-IDF linux target. Projects build and run `HOST_TEST_JOBS` at
+  a time (default 4); a failing project's output is printed at the end, after all projects have run.
 - `make test-tools`: tests of the tools and of the device page scripts (needs `node`).
 - `make test-vendored`: the upstream esp_ot_br_server REST tests (needs `clang++` and a `make build` for the managed
   components).
