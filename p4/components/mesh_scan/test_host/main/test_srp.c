@@ -10,7 +10,8 @@
 
 // fd8f:11c6:352:a6a9:e1c7:e431:8422:bff7 as seen on the network
 static const uint8_t SERVER_ADDR[16] = {0xfd, 0x8f, 0x11, 0xc6, 0x03, 0x52, 0xa6, 0xa9,
-                                        0xe1, 0xc7, 0xe4, 0x31, 0x84, 0x22, 0xbf, 0xf7};
+                                        0xe1, 0xc7, 0xe4, 0x31, 0x84, 0x22, 0xbf, 0xf7
+                                       };
 static const uint8_t PORT_BE[2] = {0xd1, 0x32}; // 53554
 
 static const uint8_t OMR[8] = {0xfd, 0x87, 0x9b, 0x49, 0x82, 0x64, 0x00, 0x01};
@@ -146,7 +147,9 @@ TEST_CASE("An address under an OMR prefix: mesh_scan_srp_addr_kept returns true"
     mesh_scan_prefix_t omr[1];
 
     memcpy(omr[0], OMR, 8);
-    ip6_with_prefix(addrs[0], (const uint8_t[8]){0xfd, 0xaa, 0, 0x20, 0, 0, 0, 0}, 0x69);
+    ip6_with_prefix(addrs[0], (const uint8_t[8]) {
+        0xfd, 0xaa, 0, 0x20, 0, 0, 0, 0
+    }, 0x69);
     ip6_with_prefix(addrs[1], OMR, 0x42);
 
     TEST_ASSERT_TRUE(mesh_scan_srp_addr_kept(addrs, 2, omr, 1, ML));
@@ -169,8 +172,12 @@ TEST_CASE("Only LAN addresses: mesh_scan_srp_addr_kept returns false", "[mesh_sc
     mesh_scan_prefix_t omr[1];
 
     memcpy(omr[0], OMR, 8);
-    ip6_with_prefix(addrs[0], (const uint8_t[8]){0xfd, 0xaa, 0, 0x20, 0, 0, 0, 0}, 0x69);
-    ip6_with_prefix(addrs[1], (const uint8_t[8]){0x2a, 0x06, 0, 0, 0, 0, 0, 0}, 0x01);
+    ip6_with_prefix(addrs[0], (const uint8_t[8]) {
+        0xfd, 0xaa, 0, 0x20, 0, 0, 0, 0
+    }, 0x69);
+    ip6_with_prefix(addrs[1], (const uint8_t[8]) {
+        0x2a, 0x06, 0, 0, 0, 0, 0, 0
+    }, 0x01);
 
     TEST_ASSERT_FALSE(mesh_scan_srp_addr_kept(addrs, 2, omr, 1, ML));
 }
