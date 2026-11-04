@@ -30,5 +30,13 @@ if(NOT c6_version_old STREQUAL c6_updater_version)  # leave the file alone when 
 endif()
 
 # The RCP firmware is not part of the P4 image (R14): it is pushed to the C6 on request. The web UI -> web_0.
-spiffs_create_partition_image(web_0 "${CMAKE_CURRENT_LIST_DIR}/components/esp_ot_br_server/frontend"
-                              FLASH_IN_PROJECT)
+# The frontend is staged gzipped (tools/pack_web.py); the web server sends the .gz files with Content-Encoding: gzip.
+set(web_src "${CMAKE_CURRENT_LIST_DIR}/components/esp_ot_br_server/frontend")
+set(web_stage "${CMAKE_BINARY_DIR}/web_ui")
+idf_build_get_property(python PYTHON)
+add_custom_target(web_ui
+    COMMAND ${python} "${CMAKE_CURRENT_LIST_DIR}/../tools/pack_web.py" "${web_src}" "${web_stage}"
+    COMMENT "Packing the web UI"
+    VERBATIM)
+spiffs_create_partition_image(web_0 "${web_stage}" FLASH_IN_PROJECT)
+add_dependencies(spiffs_web_0_bin web_ui)
