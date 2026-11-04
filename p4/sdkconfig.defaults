@@ -105,3 +105,9 @@ CONFIG_OPENTHREAD_CLI_OTA=n
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
 CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
+
+# Thread console (spec 2026-11-04-thread-console): GET /device/console/ws. The pre-handshake callback runs the
+# per-interface policy before the upgrade; the post-handshake callback attaches the socket to the console.
+CONFIG_HTTPD_WS_SUPPORT=y
+CONFIG_HTTPD_WS_PRE_HANDSHAKE_CB_SUPPORT=y
+CONFIG_HTTPD_WS_POST_HANDSHAKE_CB_SUPPORT=y

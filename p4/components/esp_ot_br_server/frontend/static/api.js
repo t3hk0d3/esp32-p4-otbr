@@ -125,7 +125,8 @@ var pages = [
       {href : '/network.html', label : 'Network'},
       {href : '/commission.html', label : 'Commissioner'},
       {href : '/addresses.html', label : 'Addresses'},
-      {href : '/tools.html', label : 'Tools'}
+      {href : '/tools.html', label : 'Tools'},
+      {href : '/console.html', label : 'Console'}
     ]
   },
   {href : '/topology.html', label : 'Topology'},

@@ -9,6 +9,10 @@ release's `versions.txt`.
 
 ### Added
 
+- Thread console: the board's OpenThread CLI over a WebSocket (`/device/console/ws`), on a new **Console** page under
+  Management (desktop and phone) and from a shell with `websocat`. Off by default (`GET`/`PUT /device/console`); one
+  session at a time, the board stays a border router, risky commands ask first on the page. OpenThread's CLI now
+  runs in release images too (it was set up only in test builds). See `docs/api.md`, "Thread console".
 - Documentation site on GitHub Pages (<https://t3hk0d3.github.io/esp32-p4-otbr/>), built from `docs/` and `README.md`
   with Material for MkDocs: a landing page, the docs, and a browser flasher page (ESP Web Tools) that writes the P4
   firmware of the latest release over USB from Chrome or Edge. `make docs`, `make docs-serve`, `make docs-firmware`; see

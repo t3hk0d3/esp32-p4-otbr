@@ -25,6 +25,11 @@ see `.pre-commit-config.yaml`).
 - Propagate with `ESP_RETURN_ON_ERROR` / `ESP_GOTO_ON_ERROR`.
 - `ESP_ERROR_CHECK` only for unrecoverable init in `app_main`.
 
+## Tasks and locks
+
+- Code that runs on the OpenThread task (callbacks, CLI output) or the esp_timer task never calls lwIP, directly or
+  through `httpd_queue_work`: lwIP's thread waits for the OpenThread lock to send to Thread. Notify a task instead.
+
 ## Config
 
 - Fixed hardware facts (pins, clock rates, flash layout) are constants in headers, not Kconfig.

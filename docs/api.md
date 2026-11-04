@@ -27,6 +27,9 @@ below, any of them can answer 500 `internal` or `no_memory`.
 | `GET /device/topology` | the scan state, progress and the last result (no mesh traffic); in a build with TREL, a link of this board's router carries `transport` when OpenThread knows that neighbour's radios: `{"ieee802154": 0..255\|null, "trel": 0..255\|null}` (OpenThread's preference per radio, `null` for a radio it does not use); no `transport` on this board's link means its radios are unknown, and other routers' links never have it | |
 | `GET /device/routing` | routing settings and status, see [Routing](#routing) | 503 `not_started` |
 | `PUT /device/routing` | store the routing settings and apply them live (no reboot) | 400 `invalid_request` (`detail` names the field), `length_required`; 413 `payload_too_large` (over 2048 bytes); 500 `storage_failed` (nothing changed), `internal` (the body could not be checked, `detail` is the error; nothing changed), `no_memory` (the settings were stored and applied, the answer could not be built); 503 `not_started` |
+| `GET /device/console` | Thread console setting and session: `{"enabled": bool, "session": null \| {"peer": "<address>", "since_s": <s>}}`, see [Thread console](#thread-console) | |
+| `PUT /device/console` | body `{"enabled": bool}`; stored, off by default; turning it off closes the session (4003); replies like GET | 400 `invalid_request` (`enabled` missing or not a boolean), `length_required`; 413 `payload_too_large`; 500 `storage_failed`; 503 `not_started` (the console did not start at boot) |
+| `GET /device/console/ws` | WebSocket: the board's OpenThread CLI, see [Thread console](#thread-console) | 403 on an interface that does not serve the device API |
 | `POST /device/reboot` | reboot | 409 `busy` while an update or push runs (other reboots, such as the network trial revert, `net reset` and `DELETE /node`, wait until it ends) |
 | `GET /metrics` | device health and Thread figures in the Prometheus text format, see [metrics](metrics.md) | 500 `no_memory` |
 
@@ -114,6 +117,36 @@ Status:
 `peers_established` and `peers_configured` are `null` unless the method is `bgp`. The `pd` object stays as it is; with
 any method but `pd` its `state` is `disabled`.
 
+### Thread console
+
+The board's own OpenThread CLI over a WebSocket, for debugging a mesh without a second Thread device. The board stays a
+border router while it is used. It is off by default: turn it on with `PUT /device/console` or on the
+**Management → Console** page. One session at a time; a new one takes over.
+
+- Send one command per text frame (a leading `ot ` is dropped, the line may be up to 383 bytes). The CLI's output comes
+  back as text frames, ending with `Done` or `Error <n>: <text>`. Async commands such as `ping` and `dns browse` print
+  their result later, before their `Done`.
+- Board notices are separate frames starting with `# `: `# Connected to <host> (OpenThread <version>, <role> <0xRLOC16>)`,
+  `# Thread is not running (mode <MODE>)` (lines run only in `BR_RUNNING`), `# Busy: "<line>" is still running` (only
+  `factoryreset` gets through while a command runs), `# Line too long (max <n> bytes)`, `# Output dropped (<n> bytes)`
+  (more than 8 KB waiting), `# Closed: a new console session opened from <address>`,
+  `# Closed: the console was turned off`.
+- Close codes: 4001 taken over, 4003 the console is off (also right after the upgrade), 4009 output not read for 15 s,
+  1001 `no answer` (the board pings every 10 s; 30 s without a pong), 1007 a line with a NUL byte, 1009 a frame over
+  1 KB.
+- Every command is logged at INFO by its first word and length only, as the rest can carry keys
+  (`console <peer>: dataset (52 bytes)`). The page asks before `factoryreset`, `reset`, `thread stop`, `ifconfig down`
+  and `dataset` changes; a raw WebSocket client does not.
+- Test builds: the USB console's `ot` command uses the same CLI. It answers `console in use from <address>` while a
+  session is attached, refuses lines outside `BR_RUNNING` like the WebSocket, and gives up waiting for the prompt
+  after 10 s.
+
+```
+websocat ws://<board>/device/console/ws
+```
+
+<img src="images/console.png" width="640" alt="Thread Console page: connected, with the output of state and router table">
+
 ## Thread REST API
 
 Upstream esp-thread-br, ot-br-posix 0.6.0 compatible: `/node`, `/node/state`, `/node/dataset/active|pending`,
@@ -131,7 +164,7 @@ connects to `http://<board>`: `tools/otbr_compat.py` checks the `python-otbr-api
 ## Web UI
 
 `http://<board>/` serves the upstream pages (Dashboard, Network to form or join, Commissioner, Addresses, Tools, Topology,
-About). The Topology page runs a mesh scan (`/device/topology`) and shows a map of the routers and their links, a device table with search and filters, and a device dialog with its addresses and a ping; the last result is kept in the browser. The Dashboard (`/`) is the status page: mode, versions, radio, Ethernet, prefix delegation, load, and while the
+About) and the Thread Console (`/console.html`, under Management). The Topology page runs a mesh scan (`/device/topology`) and shows a map of the routers and their links, a device table with search and filters, and a device dialog with its addresses and a ping; the last result is kept in the browser. The Dashboard (`/`) is the status page: mode, versions, radio, Ethernet, prefix delegation, load, and while the
 border router runs the Thread network, identifiers and Thread addresses. Its Home Assistant tile shows the URL to enter
 in the integration (the Thread backbone address in split mode) and the mDNS name. The "Device" menu holds `/ethernet.html` (single or split setup,
 VLANs and addresses, with a review step before the reboot), `/routing.html` (route method, OMR prefix, BGP peers and
