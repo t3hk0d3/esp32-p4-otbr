@@ -103,10 +103,12 @@ bool mesh_scan_br_record_kept(const char *type, const uint8_t *txt, uint16_t len
 
 bool mesh_scan_pool_put(mesh_scan_result_t *r, const uint8_t *data, uint16_t len, uint16_t *off)
 {
-    if (len > MESH_SCAN_POOL_SIZE - r->pool_used) {
+    if (r->pool == NULL || len > MESH_SCAN_POOL_SIZE - r->pool_used) {
         return false;
     }
-    memcpy(r->pool + r->pool_used, data, len);
+    if (len > 0) {
+        memcpy(r->pool + r->pool_used, data, len);
+    }
     *off = r->pool_used;
     r->pool_used += len;
     return true;

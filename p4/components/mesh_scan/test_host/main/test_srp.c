@@ -10,7 +10,7 @@
 
 // fd8f:11c6:352:a6a9:e1c7:e431:8422:bff7 as seen on the network
 static const uint8_t SERVER_ADDR[16] = {0xfd, 0x8f, 0x11, 0xc6, 0x03, 0x52, 0xa6, 0xa9,
-                                        0xe1, 0xc7, 0xe4, 0x31, 0x84, 0x22, 0x2b, 0xff};
+                                        0xe1, 0xc7, 0xe4, 0x31, 0x84, 0x22, 0xbf, 0xf7};
 static const uint8_t PORT_BE[2] = {0xd1, 0x32}; // 53554
 
 static const uint8_t OMR[8] = {0xfd, 0x87, 0x9b, 0x49, 0x82, 0x64, 0x00, 0x01};
@@ -309,6 +309,24 @@ TEST_CASE("No xp: mesh_scan_br_record_kept returns false", "[mesh_scan]")
     TEST_ASSERT_FALSE(mesh_scan_br_record_kept("_meshcop._udp", txt, len, XP, OWN_EXT));
 }
 
+TEST_CASE("xp = this network, no xa: mesh_scan_br_record_kept returns false", "[mesh_scan]")
+{
+    uint8_t txt[128];
+    uint16_t len = meshcop_txt(txt, XP, NULL);
+
+    TEST_ASSERT_FALSE(mesh_scan_br_record_kept("_meshcop._udp", txt, len, XP, OWN_EXT));
+}
+
+TEST_CASE("xp = this network, xa of wrong length: mesh_scan_br_record_kept returns false", "[mesh_scan]")
+{
+    uint8_t txt[128];
+    uint16_t len = meshcop_txt(txt, XP, NULL);
+
+    len = txt_add(txt, len, "xa=\x01\x02\x03", 6);
+
+    TEST_ASSERT_FALSE(mesh_scan_br_record_kept("_meshcop._udp", txt, len, XP, OWN_EXT));
+}
+
 TEST_CASE("Any other type: mesh_scan_br_record_kept returns false", "[mesh_scan]")
 {
     uint8_t txt[128];
@@ -356,4 +374,17 @@ TEST_CASE("Would overflow 24 KiB: mesh_scan_pool_put returns false and leaves th
     TEST_ASSERT_EQUAL_UINT16(0x1234, off);
     TEST_ASSERT_TRUE(mesh_scan_pool_put(&r, data, 4, &off)); // exactly full still fits
     TEST_ASSERT_EQUAL_UINT16(MESH_SCAN_POOL_SIZE, r.pool_used);
+}
+
+TEST_CASE("No pool allocated: mesh_scan_pool_put returns false", "[mesh_scan]")
+{
+    static mesh_scan_result_t r;
+    uint16_t off = 0x1234;
+    const uint8_t a[1] = {1};
+
+    memset(&r, 0, sizeof(r));
+
+    TEST_ASSERT_FALSE(mesh_scan_pool_put(&r, a, sizeof(a), &off));
+    TEST_ASSERT_EQUAL_UINT16(0, r.pool_used);
+    TEST_ASSERT_EQUAL_UINT16(0x1234, off);
 }

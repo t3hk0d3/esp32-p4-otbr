@@ -52,7 +52,7 @@ Out of scope:
 | Timing | per query 3 s response timeout, 2 attempts; at most 4 queries in flight, enforced by the scan. The step runs **in parallel** with discover and the child phases from scan start; it needs only the network data, so it never loses time to a slow child phase. Running it first would make `POST /device/topology` answer before discover starts and lose today's synchronous 409 `busy`. It has its own 15 s budget inside the existing 60 s cap, and `finish` waits for both; at the budget, queries still in flight are given up (my call) |
 | Server outcome | `srp_servers[].state`: `answered` (at least one query answered), `no_answer` (every query timed out or failed), `cut_short` (the budget or the cap ended it with queries in flight). None of them sets `partial`, which keeps its meaning (routers and children) |
 | Which remote hosts are kept | hosts with at least one address under an OMR prefix of the network data or the mesh-local prefix. Others (LAN results from a discovery proxy) are dropped on the board, with one exception below |
-| Border router records (`_meshcop._udp`, `_trel._udp`) | these come from a discovery proxy with LAN addresses, so the address rule would drop them. They are kept when their TXT `xp` (extended PAN ID, 8 bytes) equals this network's extended PAN ID; that needs only the active dataset, so the check works during the SRP step, before discover. The page matches them to a router by TXT `xa` = the router's extended address. Records of this board itself (`xa` = its own extended address) are dropped |
+| Border router records (`_meshcop._udp`, `_trel._udp`) | these come from a discovery proxy with LAN addresses, so the address rule would drop them. They are kept when their TXT `xp` (extended PAN ID, 8 bytes) equals this network's extended PAN ID; that needs only the active dataset, so the check works from scan start. The page matches them to a router by TXT `xa` = the router's extended address. Records of this board itself (`xa` = its own extended address) are dropped |
 | Duplicates | one entry per host name (case-insensitive). The host's fields (`source`, lease or TTL, addresses) come from this board's record, else the first server that answered. Services from all sources merge by instance and type; each service has its own `source` (my call) |
 | Raw TXT | the TXT RDATA exactly as received (length-prefixed strings), base64 in JSON. The page decodes it |
 | TXT limits | at most 512 bytes per service (longer: cut at a string boundary, `txt_truncated: true`). TXT and subtype labels of a scan live in one 24 KiB pool, a separate `ops.alloc` block owned by the result; the host struct keeps an offset and length per service instead of inline arrays. When the pool is full, later services have no `txt` and `txt_truncated: true` (my call; PSRAM growth is small next to the ~100 KB result) |
@@ -97,8 +97,8 @@ Additions only; existing fields keep their meaning.
 ## 5. Architecture
 
 - `mesh_scan`:
-  - A parallel SRP step (not a phase in the sequence), started with the scan and waited for by `finish`, driven by new ops (browse, resolve, list servers) so the host
-    tests run it without OpenThread, like the other phases.
+  - A parallel SRP step (not a phase in the sequence), started with the scan and waited for by `finish`, driven by new
+    ops (browse, resolve, list servers) so the host tests run it without OpenThread, like the other phases.
   - `ot_ops.c` reads the server list, starts the DNS client queries with the server's address, and copies the answers
     (instance, host, port, addresses, TTL, raw TXT) into the scan through new callbacks. The local snapshot also copies
     port, TXT, subtypes and lease info.

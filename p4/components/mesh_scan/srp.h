@@ -24,7 +24,10 @@ bool mesh_scan_srp_server_parse(uint32_t enterprise, const uint8_t *svc, uint8_t
 bool mesh_scan_srp_addr_kept(const mesh_scan_ip6_t *addrs, uint8_t n, const mesh_scan_prefix_t *omr, uint8_t n_omr,
                              const uint8_t ml_prefix[8]);
 
-/** Find a key in raw TXT RDATA. `val` is NULL and `val_len` 0 for a key-only entry. Stops at a malformed length. */
+/**
+ * Find a key in raw TXT RDATA. `val` is NULL and `val_len` 0 for a key-only entry. Stops at a malformed length. Keys
+ * match case-sensitively (OTBR publishes lower-case keys).
+ */
 bool mesh_scan_txt_find(const uint8_t *txt, uint16_t len, const char *key, const uint8_t **val, uint8_t *val_len);
 
 /** The longest prefix of whole TXT strings that fits `max` bytes. */
