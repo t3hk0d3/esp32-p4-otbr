@@ -214,7 +214,7 @@ static void on_child_addrs(otError error, uint16_t child_rloc16, otMeshDiagIp6Ad
     }
 }
 
-/** Copy a TLV string into an info field; empty stays absent (the field is zeroed first). */
+/** Copy a TLV string into an info field, cut to fit; an empty string is an absent field. */
 static void info_text(char *dst, size_t size, const char *src)
 {
     snprintf(dst, size, "%s", src);
@@ -416,7 +416,10 @@ static int op_query_child_addrs(uint16_t rloc16)
 
 static int op_query_info(uint16_t rloc16, bool want_addrs, uint32_t gen)
 {
+    // TLV 8 first: OpenThread answers in request order and stops at a TLV it can't parse, so a bad vendor TLV can't
+    // lose the addresses. Without them the Get is sent from tlvs + 1.
     uint8_t tlvs[] = {
+        OT_NETWORK_DIAGNOSTIC_TLV_IP6_ADDR_LIST,
         OT_NETWORK_DIAGNOSTIC_TLV_EUI64,
         OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_NAME,
         OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_MODEL,
@@ -424,7 +427,6 @@ static int op_query_info(uint16_t rloc16, bool want_addrs, uint32_t gen)
         OT_NETWORK_DIAGNOSTIC_TLV_THREAD_STACK_VERSION,
         OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_APP_URL,
         OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_OUI,
-        OT_NETWORK_DIAGNOSTIC_TLV_IP6_ADDR_LIST, // last: only asked when the caller wants the addresses
     };
     otIp6Address dest = { 0 };
 
@@ -435,7 +437,8 @@ static int op_query_info(uint16_t rloc16, bool want_addrs, uint32_t gen)
     dest.mFields.m8[14] = (uint8_t)(rloc16 >> 8);
     dest.mFields.m8[15] = (uint8_t)rloc16;
     // Unfiltered: on_info matches the peer to the child itself.
-    return netdiag_mux_send_get(&dest, tlvs, want_addrs ? sizeof(tlvs) : sizeof(tlvs) - 1, on_info, (void *)(uintptr_t)gen, false);
+    return netdiag_mux_send_get(&dest, want_addrs ? tlvs : tlvs + 1, want_addrs ? sizeof(tlvs) : sizeof(tlvs) - 1,
+                                on_info, (void *)(uintptr_t)gen, false);
 }
 
 static void op_arm_child_deadline(uint32_t ms, uint32_t gen)
@@ -610,7 +613,7 @@ static void snapshot_transport(otInstance *ins, mesh_scan_result_t *r)
 /** This board's own device info, from the local values (it doesn't ask itself). */
 static void snapshot_own_info(otInstance *ins, mesh_scan_info_t *out)
 {
-    otExtAddress eui64;
+    otExtAddress eui64 = { 0 };
     otThreadVendorOui oui;
 
     memset(out, 0, sizeof(*out));
