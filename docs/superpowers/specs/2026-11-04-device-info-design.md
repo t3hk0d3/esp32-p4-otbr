@@ -71,7 +71,7 @@ What follows from this:
 | Progress | while running, `progress` gains `info: {total, answered, sleepy_waiting, wait_s}`. `wait_s` is the seconds until the latest sleepy deadline, bounded by the sleepy cap; 0 when no sleepy device waits. The page's status line says e.g. "Waiting for 3 sleepy devices (they answer when they next wake, up to 4 min)", with the minutes from `wait_s` rounded up (left out when `wait_s` is 0 or absent). Cancel works as today |
 | Mesh diagnostics while waiting | during the info phase the scan holds no `otMeshDiag` operation, so REST `/topology` and diagnostics work. (The 409 `busy` comes from OpenThread's single `otMeshDiag` slot, which is free once the child tables are done; the info phase uses only Network Diagnostic Gets through `netdiag_mux`.) `POST /device/topology` joins the running scan (202), as today |
 | Fields kept | as OpenThread parses them: strings up to 32/32/16/64/96 bytes, OUI as a 24-bit value (other OUI lengths dropped), EUI-64 as 8 bytes. Empty strings are treated as absent |
-| Storage | inline fixed-size fields per router and per child: about 245 bytes each, about 47 KB more per result in PSRAM for 63 routers and 128 children (my call: simpler than the TXT pool, and the result already lives in PSRAM) |
+| Storage | inline fixed-size fields per router and per child: about 265 bytes each, about 50 KB more per result in PSRAM for 63 routers and 128 children (my call: simpler than the TXT pool, and the result already lives in PSRAM) |
 | Text safety | strings are written to JSON escaped. Bytes that aren't valid UTF-8 become U+FFFD (my call). The page shows them only through `textContent` |
 | This board's own strings | name, model and app URL are build-time defines in `p4/main/esp_ot_custom_config.h`; `OPENTHREAD_CONFIG_NET_DIAG_VENDOR_INFO_SET_API_ENABLE 1` is defined explicitly. Vendor name = the board name `ESP32-P4-WIFI6-POE-ETH` (user, 2026-11-04); model `OpenThread Border Router` (my call, as the HA OTBR); app URL `https://github.com/t3hk0d3/esp32-p4-otbr` (my call). The SW version is set at run time: `br_core` calls `otThreadSetVendorSwVersion` after `esp_openthread_init` with `YYYYMMDD-<7 hex>` (16 characters, the limit; `-dirty` dropped), derived from `esp_app_get_description()->version` (`PROJECT_VER` is 24+ characters). It is not a build-time define: that would change with every commit and rebuild every component. The "RD:" prefix: see 6 |
 | Page: summary | a pure `stackInfo(stackVersion)` turns a known stack string into `{vendor, chip, sdk, version}`. Known patterns: `SL-OPENTHREAD/<v>; <chip>;` → Silicon Labs; `openthread-esp32/<hash>; <chip>;` → Espressif; `OPENTHREAD/<hash>; POSIX;` → OpenThread POSIX (a border router host); others → raw string only |
@@ -88,7 +88,8 @@ Additions only; existing fields keep their meaning. While running, `progress.inf
 
 - Each router and each child gains `info`:
   - `state`: `answered`, `no_answer` (asked, the deadline passed or the send failed), `cut_short` (still queued when
-    the cap hit), `not_asked` (a router that didn't answer discover).
+    the cap hit), `not_asked` (never asked: a router that didn't answer discover, or any device when the 60 s cap hit before the info
+    step; controller ruling).
   - Present only when answered and non-empty: `eui64` (16 hex digits), `vendor_name`, `vendor_model`,
     `vendor_sw_version`, `thread_stack_version`, `vendor_app_url`, `vendor_oui` (6 hex digits).
 - This board's router entry always has `state: answered` with its local values.
@@ -154,6 +155,9 @@ both queues empty, nothing in flight: mesh phases over (finish, or wait for the 
   - `otThreadGetParentInfo` needs the child role (unused here).
   - The test build's OT CLI loses its test-harness commands. The plan greps `p4/pytest` for `ot <cmd>` uses of the
     gated CLI commands; if any is used, the flag stays on and the name is `RD:ESP32-P4-WIFI6-POE-ETH`.
+- **Sleepy answers may never arrive.** If a sleepy child polls less often than OpenThread's CoAP retransmission
+  window (about 93 s), the request can time out in the parent's queue before the child polls. The device then shows
+  `no_answer` although the wait allowed longer. To be checked on hardware.
 - **Traffic.** One extra request per router and per child, each a few hundred bytes; on a 30-device mesh that is about
   30 messages over a few seconds. Mesh diagnostics already send more than that.
 - **Scan time.** It grows by the awake devices divided by 4 times their round trip (well under a second each here),
