@@ -659,6 +659,16 @@ function srpEntriesFor(device, srpHosts) {
   return local.concat(found.filter(function(e) { return typeof e.host.lease_s !== 'number'; }));
 }
 
+/**
+ * True when the host is only a border router's LAN advertisement (meshcop/TREL records from a discovery proxy), not an
+ * SRP registration: not from this board's server, with services, all of them _meshcop._udp or _trel._udp.
+ */
+function lanAdvertised(host) {
+  var services = host.services || [];
+  return typeof host.lease_s !== 'number' && services.length > 0 &&
+         services.every(function(s) { return BR_TYPES[s.type] === true; });
+}
+
 /** Every SRP host that belongs to the device: a shared address, a host name equal to its ext address, or xa. */
 function srpHostsFor(device, srpHosts) {
   return srpEntriesFor(device, srpHosts).map(function(e) { return e.host; });
@@ -703,7 +713,7 @@ function nameInfo(device, names, srpHosts) {
   }
   if (name)
     return {text : name, generic : false};
-  if (entries.length)
+  if (entries.some(function(e) { return e.sum.kind === 'Matter'; }))
     return {text : MATTER_PREFIX + hex4(device.rloc16), generic : true};
   return {text : UNKNOWN_PREFIX + hex4(device.rloc16), generic : true};
 }
@@ -711,7 +721,7 @@ function nameInfo(device, names, srpHosts) {
 /**
  * Nickname; this board: "This border router"; ESPHome friendly_name; HomeKit instance name; meshcop instance name
  * (each looked up over every service of every matched host); SRP host name, or "Matter device 0xNNNN" when the only
- * names are the ext address; else "Unknown 0xNNNN".
+ * names are the ext address and a matched host is a Matter device; else "Unknown 0xNNNN".
  */
 function displayName(device, names, srpHosts) { return nameInfo(device, names, srpHosts).text; }
 
@@ -1230,6 +1240,7 @@ return {
   trelBadgeSpot : trelBadgeSpot,
   displayName : displayName,
   srpHostsFor : srpHostsFor,
+  lanAdvertised : lanAdvertised,
   srpEntriesFor : srpEntriesFor,
   srpIndex : srpIndex,
   isUnnamed : isUnnamed,
@@ -1928,7 +1939,6 @@ function serviceItems(d) {
 
 /* ---- table ---- */
 
-
 function renderChips() {
   var box = $('t-chips');
   clear(box);
@@ -2192,8 +2202,16 @@ function renderServiceFacts(dl, d) {
   var items = serviceItems(d);
   if (items.some(function(it) { return it.service.type === '_trel._udp'; }))
     fact(dl, 'TREL', 'Advertised on its LAN');
-  var host = entries.length ? entries[0].host : null;
-  fact(dl, 'SRP host', host ? host.name + '.default.service.arpa' : 'Not registered', host ? 't-mono' : '');
+  /* A border router can match its LAN advertisement (meshcop host from a discovery proxy) and its SRP host: prefer the
+     SRP host; with only the advertisement, say so instead of presenting it as a registration. */
+  var registered = entries.filter(function(e) { return !L.lanAdvertised(e.host); });
+  var host = registered.length ? registered[0].host : null;
+  if (host)
+    fact(dl, 'SRP host', host.name + '.default.service.arpa', 't-mono');
+  else if (entries.length)
+    fact(dl, 'SRP host', '– (advertised on the LAN as ' + entries[0].host.name + ')');
+  else
+    fact(dl, 'SRP host', 'Not registered');
   var reg = host ? registeredWith(host) : null;
   if (reg !== null)
     fact(dl, 'Registered with', reg);

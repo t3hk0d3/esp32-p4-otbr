@@ -1146,6 +1146,16 @@ class TestTopologyLogic:
         # On only a host named after the ext address: "Matter device 0xNNNN".
         assert srp("L.displayName(dv('r2'), {}, HOSTS)") == "Matter device 0x3000"
 
+    def test_displayname_of_a_host_named_after_the_ext_address_without_matter_records_is_unknown(
+        self,
+    ):
+        # On only a host named after the ext address whose records are not Matter (none, or _http._tcp): "Unknown 0xNNNN".
+        got = srp(
+            "[[], [svc('x', '_http._tcp', 80, 1, '')]].map((services) => L.displayName(dv('r2'), {},"
+            " [{name: 'FEF6E5E01729FF7F', addresses: [], services}]))"
+        )
+        assert got == ["Unknown 0x3000", "Unknown 0x3000"]
+
     def test_displayname_falls_back_to_the_srp_host_name(self):
         # On a host with no record that names the device: the host name.
         assert srp("L.displayName(dv('r7'), {}, HOSTS)") == "printer"
@@ -2209,6 +2219,31 @@ class TestTopologyPage:
             "Yes, 0 devices registered · didn't answer",
             None,
         ]
+
+    def test_dialog_of_the_other_border_router_prefers_its_srp_host_over_its_meshcop_host(
+        self,
+    ):
+        # On a border router matching its meshcop host first and its own SRP host (from another server) second: SRP host
+        # and Registered with from the SRP host.
+        r = sv(
+            "const own = (({lease_s, key_lease_s, ...h}) => ({...h, source: 4096, ttl_s: 60}))("
+            "HOSTS.find((h) => h.name === 'homeassistant-otbr'));"
+            " const hosts = HOSTS.filter((h) => h !== HOSTS.find((x) => x.name === 'homeassistant-otbr')).concat([own]);"
+            " await openSV('r4', {...SV, srp_hosts: hosts}); return [fact('SRP host'), fact('Registered with')];"
+        )
+        assert r[0] == "homeassistant-otbr.default.service.arpa"
+        assert r[1].endswith("· record valid 1 min")
+
+    def test_dialog_of_the_other_border_router_with_only_its_meshcop_host_says_advertised_on_the_lan(
+        self,
+    ):
+        # On a border router whose only matched host is its meshcop host: "– (advertised on the LAN as <host>)", no
+        # Registered with.
+        r = sv(
+            "await openSV('r4', {...SV, srp_hosts: HOSTS.filter((h) => h.name !== 'homeassistant-otbr')});"
+            " return [fact('SRP host'), fact('Registered with')];"
+        )
+        assert r == ["– (advertised on the LAN as homeassistant)", None]
 
     # service records: raw records
 
