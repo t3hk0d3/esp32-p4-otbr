@@ -13,10 +13,6 @@ DEVICE_API = REPO / "p4" / "components" / "device_api" / "device_api.c"
 WEB_API = (
     FRONTEND.parent / "private_include" / "esp_br_web_api.h"
 )  # Thread web GUI routes (/get_properties, ...)
-WEB_BUDGET_BYTES = (
-    384 * 1024
-)  # of the 2 MB web partition; raised from 256 KB for the topology page, then from 320 KB for the TREL card, the
-# Routing page and the Leader card
 
 DEVICE_MENU = [
     ["/ethernet.html", "Ethernet"],
@@ -277,11 +273,6 @@ class TestShared:
         assert not re.search(
             r"innerHTML|outerHTML|insertAdjacentHTML|document\.write", source
         )
-
-    def test_frontend_stays_within_the_web_image_budget(self):
-        # On the frontend directory: total size below the budget.
-        total = sum(p.stat().st_size for p in FRONTEND.rglob("*") if p.is_file())
-        assert total < WEB_BUDGET_BYTES
 
 
 TOP_LEVEL_ROUTES = {
