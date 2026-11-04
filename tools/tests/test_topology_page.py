@@ -1387,7 +1387,14 @@ class TestTopologyLogic:
             " L.kindLine({kind: 'Matter', fabrics: [1], commissionable: false}, dev("
             f"{STACK_SL!r})), L.kindLine(null, dev('x')), L.kindLine(null, {{}}), L.kindLine(null)]; }})()"
         )
-        assert got == ["Silicon Labs EFR32", "Espressif esp32c6", "Matter · 1 fabric", "", "", ""]
+        assert got == [
+            "Silicon Labs EFR32",
+            "Espressif esp32c6",
+            "Matter · 1 fabric",
+            "",
+            "",
+            "",
+        ]
 
     def test_matches_finds_a_device_by_vendor_name_model_or_stack_string(self):
         got = plain(
@@ -1420,7 +1427,11 @@ class TestTopologyLogic:
             " const d = L.devices(X); const e = L.devices(R);"
             " return [d[0].info, d[1].info, e[0].info]; })()"
         )
-        assert got == [{"state": "answered", "eui64": "ab"}, {"state": "no_answer"}, None]
+        assert got == [
+            {"state": "answered", "eui64": "ab"},
+            {"state": "no_answer"},
+            None,
+        ]
 
     # omrAddress
 
@@ -2294,10 +2305,7 @@ IR.routers[2].children = [{rloc16: 0x6401, ext_address: 'acebe6fffe0bffa4', mode
         ]
 
     def test_dialog_summary_omits_missing_parts(self):
-        r = sv(
-            self.INFO_RESULT
-            + "await openSV('r25', IR); return fact('Hardware');"
-        )
+        r = sv(self.INFO_RESULT + "await openSV('r25', IR); return fact('Hardware');")
         assert r == "Espressif esp32c6"
 
     def test_dialog_links_an_http_app_url(self):
@@ -2307,41 +2315,46 @@ IR.routers[2].children = [{rloc16: 0x6401, ext_address: 'acebe6fffe0bffa4', mode
             " return [fact('App URL'), a.map((e) => [e.textContent, e.attrs.href, e.attrs.rel])];"
         )
         assert r[0] == "https://example.com/ha"
-        assert r[1] == [["https://example.com/ha", "https://example.com/ha", "noopener"]]
+        assert r[1] == [
+            ["https://example.com/ha", "https://example.com/ha", "noopener"]
+        ]
 
     def test_dialog_shows_a_javascript_app_url_as_plain_text_without_a_link(self):
         r = sv(
-            self.INFO_RESULT
-            + "await openSV('r25', IR); return [fact('App URL'),"
+            self.INFO_RESULT + "await openSV('r25', IR); return [fact('App URL'),"
             " t.el('t-d-facts').findAll((e) => e.tag === 'a' && /^javascript/i.test(e.attrs.href || '')).length];"
         )
         assert r == ["javascript:alert(1)", 0]
 
     def test_dialog_shows_markup_in_vendor_strings_as_text(self):
         r = sv(
-            self.INFO_RESULT
-            + "await openSV('r26', IR); return [fact('Hardware'),"
+            self.INFO_RESULT + "await openSV('r26', IR); return [fact('Hardware'),"
             " t.el('t-d-facts').findAll((e) => e.tag === 'b' || e.tag === 'i').length, txt('t-d-name')];"
         )
         assert r[0] == "<b>x</b> <i>y</i>"
         assert r[1] == 0
 
     def test_dialog_of_a_sleepy_child_that_did_not_answer_says_so(self):
-        r = sv(self.INFO_RESULT + "await openSV('c25601', IR); return fact('Device info');")
+        r = sv(
+            self.INFO_RESULT + "await openSV('c25601', IR); return fact('Device info');"
+        )
         assert r == "no answer (sleepy device)"
 
     def test_dialog_of_an_awake_device_that_did_not_answer_says_so(self):
-        r = sv(self.INFO_RESULT + "await openSV('c25602', IR); return fact('Device info');")
+        r = sv(
+            self.INFO_RESULT + "await openSV('c25602', IR); return fact('Device info');"
+        )
         assert r == "no answer"
 
     def test_dialog_of_a_device_cut_short_by_the_time_limit_says_so(self):
-        r = sv(self.INFO_RESULT + "await openSV('c25603', IR); return fact('Device info');")
+        r = sv(
+            self.INFO_RESULT + "await openSV('c25603', IR); return fact('Device info');"
+        )
         assert r == "not asked (scan time limit)"
 
     def test_dialog_of_a_device_that_was_not_asked_shows_no_info_facts(self):
         r = sv(
-            self.INFO_RESULT
-            + "await openSV('c25604', IR);"
+            self.INFO_RESULT + "await openSV('c25604', IR);"
             " return ['Device info', 'Hardware', 'Stack', 'Software', 'EUI-64', 'App URL'].map(fact);"
         )
         assert r == [None] * 6
@@ -2732,6 +2745,7 @@ IR.routers[2].children = [{rloc16: 0x6401, ext_address: 'acebe6fffe0bffa4', mode
         assert r[:7] == [0, False, False, False, False, False, False]
         assert "SRP host kitchen-plug.default.service.arpa" in r[7]
         assert "kitchen-plug" in r[7] and "_matter._tcp" in r[7]
+
 
 @needs_node
 class TestTrelTransport:
