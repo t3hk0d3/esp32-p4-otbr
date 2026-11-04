@@ -49,7 +49,7 @@ Out of scope:
 | Service types browsed on other servers | fixed list: `_matter._tcp`, `_matterc._udp`, `_esphomelib._tcp`, `_hap._udp`, `_http._tcp`, `_meshcop._udp`, `_trel._udp` (enumerating types with `_services._dns-sd._udp` got no answer from either server) |
 | Which server is this board's | the entry whose address is one of this board's own Thread addresses (not by RLOC16) (my call) |
 | Query method | OpenThread DNS client (already built: `CONFIG_OPENTHREAD_DNS_CLIENT=y`, service discovery on by default): `otDnsClientBrowse`, then `otDnsClientResolveService` for each instance the browse answer did not describe. "Described" means the answer carried SRV, TXT and at least one AAAA for that instance; anything less gets a resolve (my call). The query config names the server address and port 53 |
-| Timing | per query 3 s response timeout, 2 attempts; at most 4 queries in flight, enforced by the scan. The step runs **first**, before discover: it needs only the network data, and it then never loses its time to a slow child phase. It has its own 15 s budget inside the existing 60 s cap; at the budget, queries still in flight are given up (my call) |
+| Timing | per query 3 s response timeout, 2 attempts; at most 4 queries in flight, enforced by the scan. The step runs **in parallel** with discover and the child phases from scan start; it needs only the network data, so it never loses time to a slow child phase. Running it first would make `POST /device/topology` answer before discover starts and lose today's synchronous 409 `busy`. It has its own 15 s budget inside the existing 60 s cap, and `finish` waits for both; at the budget, queries still in flight are given up (my call) |
 | Server outcome | `srp_servers[].state`: `answered` (at least one query answered), `no_answer` (every query timed out or failed), `cut_short` (the budget or the cap ended it with queries in flight). None of them sets `partial`, which keeps its meaning (routers and children) |
 | Which remote hosts are kept | hosts with at least one address under an OMR prefix of the network data or the mesh-local prefix. Others (LAN results from a discovery proxy) are dropped on the board, with one exception below |
 | Border router records (`_meshcop._udp`, `_trel._udp`) | these come from a discovery proxy with LAN addresses, so the address rule would drop them. They are kept when their TXT `xp` (extended PAN ID, 8 bytes) equals this network's extended PAN ID; that needs only the active dataset, so the check works during the SRP step, before discover. The page matches them to a router by TXT `xa` = the router's extended address. Records of this board itself (`xa` = its own extended address) are dropped |
@@ -97,7 +97,7 @@ Additions only; existing fields keep their meaning.
 ## 5. Architecture
 
 - `mesh_scan`:
-  - New phase `PHASE_SRP` before `PHASE_DISCOVER`, driven by new ops (browse, resolve, list servers) so the host
+  - A parallel SRP step (not a phase in the sequence), started with the scan and waited for by `finish`, driven by new ops (browse, resolve, list servers) so the host
     tests run it without OpenThread, like the other phases.
   - `ot_ops.c` reads the server list, starts the DNS client queries with the server's address, and copies the answers
     (instance, host, port, addresses, TTL, raw TXT) into the scan through new callbacks. The local snapshot also copies

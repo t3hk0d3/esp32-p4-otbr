@@ -18,6 +18,10 @@ extern "C" {
 #define MESH_SCAN_MAX_SRP_HOSTS 64
 #define MESH_SCAN_MAX_SRP_ADDRS 8
 #define MESH_SCAN_MAX_SRP_SERVICES 8
+#define MESH_SCAN_MAX_SRP_SERVERS 8
+#define MESH_SCAN_MAX_SUBTYPES 6        /**< per service */
+#define MESH_SCAN_TXT_MAX 512           /**< TXT bytes kept per service */
+#define MESH_SCAN_POOL_SIZE (24 * 1024) /**< TXT and subtype labels of one result */
 #define MESH_SCAN_NAME_LEN 64
 #define MESH_SCAN_MAX_OMR 4
 
@@ -70,6 +74,22 @@ typedef struct {
     uint16_t n_children;
 } mesh_scan_router_t;
 
+typedef enum {
+    MESH_SCAN_SRP_ANSWERED,
+    MESH_SCAN_SRP_NO_ANSWER,
+    MESH_SCAN_SRP_CUT_SHORT,
+} mesh_scan_srp_state_t;
+
+/** A DNS/SRP unicast server found in the network data. */
+typedef struct {
+    uint16_t rloc16;
+    mesh_scan_ip6_t addr;
+    uint16_t port;
+    bool this_board;
+    mesh_scan_srp_state_t state;
+    uint8_t hosts;
+} mesh_scan_srp_server_t;
+
 typedef struct {
     char name[MESH_SCAN_NAME_LEN];
     mesh_scan_ip6_t addrs[MESH_SCAN_MAX_SRP_ADDRS];
@@ -113,6 +133,8 @@ typedef struct {
     mesh_scan_transport_t this_links[MESH_SCAN_MAX_ROUTERS]; /**< by router ID, filled by the snapshot */
     mesh_scan_srp_host_t srp[MESH_SCAN_MAX_SRP_HOSTS];
     uint8_t n_srp;
+    uint8_t *pool;      /**< MESH_SCAN_POOL_SIZE bytes, a second ops.alloc block owned by the result */
+    uint16_t pool_used;
     bool partial;
 } mesh_scan_result_t;
 
