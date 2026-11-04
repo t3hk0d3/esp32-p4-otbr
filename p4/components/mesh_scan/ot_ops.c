@@ -686,6 +686,7 @@ static uint8_t op_srp_servers(mesh_scan_srp_server_t out[MESH_SCAN_MAX_SRP_SERVE
             continue;
         }
         // The service-data form lists one service with a server entry per publisher: one server per address + port.
+        // The RLOC16 kept is the first publisher's.
         bool seen = false;
         for (uint8_t i = 0; i < n && !seen; i++) {
             seen = out[i].port == srv.port && !memcmp(out[i].addr, srv.addr, sizeof(srv.addr));
@@ -716,16 +717,33 @@ static bool service_name(char *dst, size_t cap, const char *type)
     return len > 0 && (size_t)len < cap;
 }
 
-/** Fresh service info over the decode buffers (OpenThread fills it in place). */
-static otDnsServiceInfo *dns_info_reset(void)
+/** Fresh service info over the decode buffers (OpenThread fills it in place); without TXT, no TXT is read. */
+static otDnsServiceInfo *dns_info_reset(bool with_txt)
 {
     memset(&s_dns.info, 0, sizeof(s_dns.info));
     s_dns.info.mHostNameBuffer = s_dns.host;
     s_dns.info.mHostNameBufferSize = sizeof(s_dns.host);
-    s_dns.info.mTxtData = s_dns.txt;
-    s_dns.info.mTxtDataSize = sizeof(s_dns.txt);
+    s_dns.info.mTxtData = with_txt ? s_dns.txt : NULL;
+    s_dns.info.mTxtDataSize = with_txt ? sizeof(s_dns.txt) : 0;
     s_dns.host[0] = '\0';
     return &s_dns.info;
+}
+
+/**
+ * Read the service info of an answer into s_dns.info: OT_ERROR_NONE when the SRV was read. OpenThread fails the whole
+ * read with PARSE when only the TXT is malformed (TxtRecord::ReadTxtData), so on PARSE it reads again without TXT
+ * (OpenThread then skips the TXT record): the instance keeps its SRV and addresses and counts as having no TXT.
+ */
+static otError dns_read_info(const otDnsBrowseResponse *browse, const otDnsServiceResponse *service, const char *label)
+{
+    otError err = OT_ERROR_PARSE;
+
+    for (int with_txt = 1; with_txt >= 0 && err == OT_ERROR_PARSE; with_txt--) {
+        otDnsServiceInfo *info = dns_info_reset(with_txt);
+        err = browse ? otDnsBrowseResponseGetServiceInfo(browse, label, info)
+              : otDnsServiceResponseGetServiceInfo(service, info);
+    }
+    return err;
 }
 
 static void rec_add_addr(mesh_scan_srp_record_t *rec, const otIp6Address *a)
@@ -791,11 +809,10 @@ static void on_dns_browse(otError error, const otDnsBrowseResponse *resp, void *
                 break; // NOT_FOUND: no more instances; PARSE: give up on the rest
             }
             strlcpy(rec->type, type, sizeof(rec->type));
-            otDnsServiceInfo *info = dns_info_reset();
             // NOT_FOUND (no SRV), NO_BUFS or PARSE: an undescribed record, which the scan resolves.
-            const bool srv_found = otDnsBrowseResponseGetServiceInfo(resp, rec->instance, info) == OT_ERROR_NONE;
+            const bool srv_found = dns_read_info(resp, NULL, rec->instance) == OT_ERROR_NONE;
             if (srv_found) {
-                rec_from_info(rec, info);
+                rec_from_info(rec, &s_dns.info);
                 otIp6Address a;
                 for (uint16_t k = 0; k < DNS_ADDR_LOOKUPS && rec->n_addrs < MESH_SCAN_MAX_SRP_ADDRS &&
                         otDnsBrowseResponseGetHostAddress(resp, s_dns.host, k, &a, NULL) == OT_ERROR_NONE; k++) {
@@ -809,7 +826,11 @@ static void on_dns_browse(otError error, const otDnsBrowseResponse *resp, void *
     mesh_scan_on_srp_query_done(gen, job, error);
 }
 
-/** Service resolve answer (OpenThread task, OpenThread lock held): the instance if its SRV came, then the end. */
+/**
+ * Service resolve answer (OpenThread task, OpenThread lock held): the instance if its SRV came, then the end. The
+ * addresses come from the SRV answer's additional data or, when it had none, from the AAAA query OpenThread sent after
+ * it (otDnsClientResolveServiceAndHostAddress); otDnsServiceResponseGetHostAddress reads both.
+ */
 static void on_dns_resolve(otError error, const otDnsServiceResponse *resp, void *ctx)
 {
     uint32_t gen;
@@ -821,7 +842,7 @@ static void on_dns_resolve(otError error, const otDnsServiceResponse *resp, void
     if (error == OT_ERROR_NONE &&
             otDnsServiceResponseGetServiceName(resp, rec->instance, sizeof(rec->instance), s_dns.name,
                                                sizeof(s_dns.name)) == OT_ERROR_NONE &&
-            otDnsServiceResponseGetServiceInfo(resp, dns_info_reset()) == OT_ERROR_NONE) {
+            dns_read_info(NULL, resp, NULL) == OT_ERROR_NONE) {
         copy_labels(rec->type, sizeof(rec->type), s_dns.name, 2);
         rec_from_info(rec, &s_dns.info);
         otIp6Address a;
@@ -859,7 +880,9 @@ static int op_dns_resolve(const mesh_scan_srp_server_t *srv, const char *instanc
     }
     dns_config(srv, &config);
     s_dns_gen = gen;
-    return otDnsClientResolveService(instance(), instance_label, name, on_dns_resolve, dns_ctx(gen, job), &config);
+    // With a follow-up AAAA query when the SRV answer carries no address (needs an SRV-querying service mode, as set).
+    return otDnsClientResolveServiceAndHostAddress(instance(), instance_label, name, on_dns_resolve, dns_ctx(gen, job),
+                                                   &config);
 }
 
 static void op_arm_srp_deadline(uint32_t ms, uint32_t gen)
