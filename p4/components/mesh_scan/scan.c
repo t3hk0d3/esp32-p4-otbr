@@ -274,7 +274,7 @@ static void mesh_phases_over(void)
     }
 }
 
-// Info phase: every responding router but this board and every child is asked for its device info, rx-on children
+// Info phase: every responding router and every child but this board is asked for its device info, rx-on children
 // without addresses for their addresses too (spec 3.4). Two queues: awake (routers and rx-on children), at most
 // MESH_SCAN_CHILD_QUERIES in flight with a deadline of MESH_SCAN_CHILD_DEADLINE_MS each; sleepy (rx-off children), at
 // most MESH_SCAN_SLEEPY_QUERIES in flight, each until the child's own timeout, bounded by MESH_SCAN_SLEEPY_CAP_MS from
@@ -489,6 +489,7 @@ static void fill_slots(void)
 static void start_info_phase(void)
 {
     mesh_scan_result_t *r = &s.block->result;
+    const uint16_t own = s.ops.own_rloc16(); // this board as a child: the snapshot reads its entry
 
     s.phase = PHASE_INFO;
     s.current = NO_ROUTER;
@@ -501,7 +502,10 @@ static void start_info_phase(void)
         s.info_total += asks_router(&r->routers[id]);
         for (uint16_t i = 0; i < r->routers[id].n_children; i++) {
             mesh_scan_child_t *c = &r->routers[id].children[i];
-            c->ask_pending = true;
+            c->ask_pending = c->rloc16 != own;
+            if (!c->ask_pending) {
+                continue;
+            }
             s.info_total++;
             if (!c->rx_on_when_idle) {
                 s.sleepy_left++;
@@ -1246,7 +1250,7 @@ static ask_slot_t *slot_of(uint16_t rloc16)
 }
 
 void mesh_scan_on_info(uint32_t gen, uint16_t peer_rloc16, const mesh_scan_info_t *info, const uint8_t (*addrs)[16],
-                       uint8_t n)
+                       uint8_t n, bool other_tlvs)
 {
     lock();
     if (gen != s.gen || !callback_enter(PHASE_INFO)) {
@@ -1257,13 +1261,15 @@ void mesh_scan_on_info(uint32_t gen, uint16_t peer_rloc16, const mesh_scan_info_
         goto out; // no query to that peer in flight: given up already, never asked, or another sender's answer
     }
     mesh_scan_child_t *c = slot->child;
-    if (c && slot->want_addrs && n == 0) {
-        // Our Get asks a child for TLV 8 and a child always has its ML-EID: an answer without addresses is a stray
-        // one to another sender's Get (the REST API's share the netdiag callback). The query stays in flight.
+    // Not ours: a TLV our Get never asks for, addresses we did not ask for, or none when we did (a child always has its
+    // ML-EID) is an answer to another sender's Get (the REST API's share the netdiag callback). The query stays in
+    // flight. So does one at or past its deadline: the deadline timer, due any moment, gives up on it.
+    if (other_tlvs || (n > 0 && !slot->want_addrs) || (c && slot->want_addrs && n == 0) ||
+            s.ops.now_ms() >= slot->due_ms) {
         goto out;
     }
     *slot->info = *info; // the state is set by close_slot
-    for (uint8_t i = 0; c && slot->want_addrs && i < n && c->n_addrs < MESH_SCAN_MAX_CHILD_ADDRS; i++) {
+    for (uint8_t i = 0; c && i < n && c->n_addrs < MESH_SCAN_MAX_CHILD_ADDRS; i++) {
         memcpy(c->addrs[c->n_addrs++], addrs[i], sizeof(c->addrs[0]));
     }
     close_slot(slot, true);

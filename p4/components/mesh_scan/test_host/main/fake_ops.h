@@ -41,6 +41,7 @@ typedef struct {
     int dns_rets[FAKE_MAX_QUERIES]; /**< return code of each dns_browse/dns_resolve call, in call order */
     uint8_t snapshot_hosts;         /**< local SRP hosts in the snapshot: "lamp" then "local-<i>", 0 means 1 */
     uint16_t snapshot_pool_used;    /**< pool bytes the snapshot uses up */
+    uint16_t own_rloc16;            /**< this board's RLOC16; 0 (a router's) matches no child */
 
     // Recorded calls.
     int discover_calls;
@@ -70,7 +71,7 @@ typedef struct {
     uint32_t srp_deadline_gen;
     int allocs;
     int releases;
-    int ops_calls; /**< every op except br_running */
+    int ops_calls; /**< every op except br_running and own_rloc16 (reads, no effect) */
 } fake_ops_t;
 
 extern fake_ops_t g_fake;

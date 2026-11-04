@@ -13,9 +13,10 @@
 // API (esp_br_web_api.c) no longer takes our answers or replaces our callback; on_info gets every answer
 // (filter_peer false) with the context of the scan's LATEST send, not of the query being answered. An answer is
 // matched to its device by the peer address (the device's RLOC), and the scan's gen/phase check is a second guard. An
-// answer to another sender's query describes its peer correctly, so using it is harmless; only one without addresses
-// to a child asked for them is dropped, since it can't be ours. Errors never reach us: a scan-owned deadline per query
-// gives up on devices that don't answer.
+// answer that can't be ours is dropped by scan.c: one with a TLV our Get never asks for (on_info flags it), with
+// addresses we did not ask for, or without them when we did. Another sender's answer that passes describes its peer
+// correctly, so using it is harmless. Errors never reach us: a scan-owned deadline per query gives up on devices that
+// don't answer.
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -214,6 +215,27 @@ static void on_child_addrs(otError error, uint16_t child_rloc16, otMeshDiagIp6Ad
     }
 }
 
+/**
+ * The TLVs of an info query. TLV 8 first: OpenThread answers in request order and stops at a TLV it can't parse, so a
+ * bad vendor TLV can't lose the addresses. Without them the Get is sent from INFO_TLVS + 1.
+ */
+static const uint8_t INFO_TLVS[] = {
+    OT_NETWORK_DIAGNOSTIC_TLV_IP6_ADDR_LIST,
+    OT_NETWORK_DIAGNOSTIC_TLV_EUI64,
+    OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_NAME,
+    OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_MODEL,
+    OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_SW_VERSION,
+    OT_NETWORK_DIAGNOSTIC_TLV_THREAD_STACK_VERSION,
+    OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_APP_URL,
+    OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_OUI,
+};
+
+/** A TLV an info query asks for (else the answer is to another sender's Get). */
+static bool info_tlv(uint8_t type)
+{
+    return memchr(INFO_TLVS, type, sizeof(INFO_TLVS)) != NULL;
+}
+
 /** Copy a TLV string into an info field, cut to fit; an empty string is an absent field. */
 static void info_text(char *dst, size_t size, const char *src)
 {
@@ -236,6 +258,7 @@ static void on_info(otError error, otMessage *msg, const otMessageInfo *info, vo
     static mesh_scan_info_t found; // ditto
     uint8_t addrs[MESH_SCAN_MAX_CHILD_ADDRS][16];
     uint8_t n = 0;
+    bool other_tlvs = false;
     uint16_t rloc16;
 
     if (error != OT_ERROR_NONE || !msg || !info ||
@@ -247,6 +270,7 @@ static void on_info(otError error, otMessage *msg, const otMessageInfo *info, vo
     found.state = MESH_SCAN_INFO_ANSWERED;
     otNetworkDiagIterator it = OT_NETWORK_DIAGNOSTIC_ITERATOR_INIT;
     while (otThreadGetNextDiagnosticTlv(msg, &it, &tlv) == OT_ERROR_NONE) {
+        other_tlvs |= !info_tlv(tlv.mType);
         switch (tlv.mType) {
         case OT_NETWORK_DIAGNOSTIC_TLV_IP6_ADDR_LIST:
             for (uint8_t i = 0; i < tlv.mData.mIp6AddrList.mCount && n < MESH_SCAN_MAX_CHILD_ADDRS; i++) {
@@ -279,7 +303,7 @@ static void on_info(otError error, otMessage *msg, const otMessageInfo *info, vo
             break;
         }
     }
-    mesh_scan_on_info((uint32_t)(uintptr_t)ctx, rloc16, &found, (const uint8_t (*)[16])addrs, n);
+    mesh_scan_on_info((uint32_t)(uintptr_t)ctx, rloc16, &found, (const uint8_t (*)[16])addrs, n, other_tlvs);
 }
 
 // Cap timer
@@ -416,18 +440,6 @@ static int op_query_child_addrs(uint16_t rloc16)
 
 static int op_query_info(uint16_t rloc16, bool want_addrs, uint32_t gen)
 {
-    // TLV 8 first: OpenThread answers in request order and stops at a TLV it can't parse, so a bad vendor TLV can't
-    // lose the addresses. Without them the Get is sent from tlvs + 1.
-    uint8_t tlvs[] = {
-        OT_NETWORK_DIAGNOSTIC_TLV_IP6_ADDR_LIST,
-        OT_NETWORK_DIAGNOSTIC_TLV_EUI64,
-        OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_NAME,
-        OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_MODEL,
-        OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_SW_VERSION,
-        OT_NETWORK_DIAGNOSTIC_TLV_THREAD_STACK_VERSION,
-        OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_APP_URL,
-        OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_OUI,
-    };
     otIp6Address dest = { 0 };
 
     // The child's RLOC: mesh-local prefix + 0:ff:fe00:<rloc16>.
@@ -437,8 +449,9 @@ static int op_query_info(uint16_t rloc16, bool want_addrs, uint32_t gen)
     dest.mFields.m8[14] = (uint8_t)(rloc16 >> 8);
     dest.mFields.m8[15] = (uint8_t)rloc16;
     // Unfiltered: on_info matches the peer to the child itself.
-    return netdiag_mux_send_get(&dest, want_addrs ? tlvs : tlvs + 1, want_addrs ? sizeof(tlvs) : sizeof(tlvs) - 1,
-                                on_info, (void *)(uintptr_t)gen, false);
+    return netdiag_mux_send_get(&dest, want_addrs ? INFO_TLVS : INFO_TLVS + 1,
+                                want_addrs ? sizeof(INFO_TLVS) : sizeof(INFO_TLVS) - 1, on_info, (void *)(uintptr_t)gen,
+                                false);
 }
 
 static void op_arm_child_deadline(uint32_t ms, uint32_t gen)
@@ -630,13 +643,26 @@ static void snapshot_own_info(otInstance *ins, mesh_scan_info_t *out)
     info_oui(out, &oui);
 }
 
+static uint16_t op_own_rloc16(void)
+{
+    return otThreadGetRloc16(instance());
+}
+
 static void op_snapshot(mesh_scan_result_t *r)
 {
     otInstance *ins = instance();
+    const uint16_t own = otThreadGetRloc16(ins);
 
+    // This board's own entry: its router, or its child entry while it is a child.
     for (int id = 0; id < MESH_SCAN_MAX_ROUTERS; id++) {
-        if (r->routers[id].present && r->routers[id].this_device) {
-            snapshot_own_info(ins, &r->routers[id].info);
+        mesh_scan_router_t *router = &r->routers[id];
+        if (router->present && router->this_device) {
+            snapshot_own_info(ins, &router->info);
+        }
+        for (uint16_t i = 0; i < router->n_children; i++) {
+            if (router->children[i].rloc16 == own) {
+                snapshot_own_info(ins, &router->children[i].info);
+            }
         }
     }
     snapshot_network(ins, &r->network);
@@ -980,6 +1006,7 @@ static const mesh_scan_ops_t real_ops = {
     .cancel = op_cancel,
     .router_table = op_router_table,
     .snapshot = op_snapshot,
+    .own_rloc16 = op_own_rloc16,
     .br_running = op_br_running,
     .now_ms = op_now_ms,
     .arm_cap = op_arm_cap,

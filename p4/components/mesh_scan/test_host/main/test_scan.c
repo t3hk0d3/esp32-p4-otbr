@@ -108,7 +108,7 @@ static void answer_info(uint16_t rloc16, const mesh_scan_info_t *info, uint8_t n
         addrs[i][14] = (uint8_t)rloc16;
         addrs[i][15] = i;
     }
-    mesh_scan_on_info(g_fake.armed_gen, rloc16, info, (const uint8_t (*)[16])addrs, n);
+    mesh_scan_on_info(g_fake.armed_gen, rloc16, info, (const uint8_t (*)[16])addrs, n, false);
 }
 
 /** The current scan's child `rloc16` answers with no info TLV and `n` addresses. */
@@ -126,7 +126,7 @@ static void answer_all(void)
     const uint8_t addr[1][16] = { { 0xfd } };
 
     for (int i = 0; i < g_fake.info_calls && i < FAKE_MAX_QUERIES; i++) {
-        mesh_scan_on_info(g_fake.info_gen[i], g_fake.info_rloc16[i], &NO_TLVS, addr, g_fake.info_want_addrs[i]);
+        mesh_scan_on_info(g_fake.info_gen[i], g_fake.info_rloc16[i], &NO_TLVS, addr, g_fake.info_want_addrs[i], false);
     }
 }
 
@@ -1411,13 +1411,83 @@ TEST_CASE("Reply from an in-flight child with addresses (TLV 8): addresses appen
     TEST_ASSERT_EQUAL(MESH_SCAN_INFO_ANSWERED, c->info.state);
 }
 
-TEST_CASE("Reply with addresses from a child asked without TLV 8: its addresses stay as the child table had them",
-          "[mesh_scan]")
+TEST_CASE("Reply with addresses from a device asked without TLV 8 (another sender's Get): ignored, the query stays "
+          "in flight", "[mesh_scan]")
 {
     info_scan();
     answer_child(C_ADDRS, 3);
+    answer_child(RLOC16(R_A), 2);
+    TEST_ASSERT_EQUAL(0, view().info_answered);
+
+    // their own answers, without addresses, still close them
+    answer_child(C_ADDRS, 0);
+    answer_child(RLOC16(R_A), 0);
+    TEST_ASSERT_EQUAL(2, view().info_answered);
     answer_all();
     TEST_ASSERT_EQUAL(1, child_of(done_result(), C_ADDRS)->n_addrs);
+}
+
+TEST_CASE("Reply carrying a TLV the info query never asks for (another sender's Get): ignored, the query stays in "
+          "flight", "[mesh_scan]")
+{
+    const mesh_scan_info_t info = full_info("rest");
+    const uint8_t addr[1][16] = { { 0xfd } };
+
+    info_scan();
+    mesh_scan_on_info(g_fake.armed_gen, RLOC16(R_A), &info, addr, 0, true);
+    mesh_scan_on_info(g_fake.armed_gen, C_ADDRLESS, &info, addr, 1, true);
+    mesh_scan_view_t v = view();
+    TEST_ASSERT_EQUAL(0, v.info_answered);
+    TEST_ASSERT_EQUAL(0, v.children_queried);
+
+    // their own answers still close them
+    answer_child(RLOC16(R_A), 0);
+    answer_child(C_ADDRLESS, 1);
+    TEST_ASSERT_EQUAL(2, view().info_answered);
+    answer_all();
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_EQUAL(MESH_SCAN_INFO_ANSWERED, res->routers[R_A].info.state);
+    TEST_ASSERT_EQUAL_STRING("", res->routers[R_A].info.vendor_name);
+    TEST_ASSERT_EQUAL(1, child_of(res, C_ADDRLESS)->n_addrs);
+}
+
+TEST_CASE("Reply at or after its query's deadline, before the deadline timer ran: ignored; the timer gives up on it",
+          "[mesh_scan]")
+{
+    const mesh_scan_info_t info = full_info("late");
+
+    info_scan(); // the awake queries sent at 1000 ms, due at 6000 ms
+    g_fake.now_ms = 1000 + MESH_SCAN_CHILD_DEADLINE_MS;
+    answer_info(RLOC16(R_A), &info, 0);
+    TEST_ASSERT_EQUAL(0, view().info_answered);
+    TEST_ASSERT_EQUAL(4, view().awake_left);
+
+    mesh_scan_on_child_deadline(g_fake.armed_gen);
+    answer_all();
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_EQUAL(MESH_SCAN_INFO_NO_ANSWER, res->routers[R_A].info.state);
+    TEST_ASSERT_EQUAL_STRING("", res->routers[R_A].info.vendor_name);
+}
+
+TEST_CASE("This board as a child: its child entry is neither asked nor counted; its info is the snapshot's local one",
+          "[mesh_scan]")
+{
+    start();
+    g_fake.own_rloc16 = C_ADDRS;
+    info_routers();
+    TEST_ASSERT_EQUAL(-1, info_call_of(C_ADDRS));
+    TEST_ASSERT_EQUAL(5, view().info_total);
+    answer_all();
+    const mesh_scan_child_t *c = child_of(done_result(), C_ADDRS);
+    TEST_ASSERT_EQUAL(MESH_SCAN_INFO_ANSWERED, c->info.state);
+    TEST_ASSERT_EQUAL_STRING(FAKE_VENDOR_NAME, c->info.vendor_name);
+
+    // and when a cap ends the info phase
+    start();
+    g_fake.own_rloc16 = C_ADDRS;
+    info_routers();
+    mesh_scan_on_cap();
+    TEST_ASSERT_EQUAL(MESH_SCAN_INFO_ANSWERED, child_of(done_result(), C_ADDRS)->info.state);
 }
 
 TEST_CASE("Reply with no TLVs from a router or a child asked without addresses: info answered, every field absent",
@@ -1563,7 +1633,7 @@ TEST_CASE("Reply or deadline of an older generation (Review focus 1): ignored, t
     mesh_scan_on_discover_done(MESH_SCAN_OT_ERROR_NONE);
     answer_router();
     TEST_ASSERT_NOT_EQUAL(old, g_fake.armed_gen);
-    mesh_scan_on_info(old, RLOC16(3) + 1, &info, addr, 1);
+    mesh_scan_on_info(old, RLOC16(3) + 1, &info, addr, 1, false);
     g_fake.now_ms += MESH_SCAN_CHILD_DEADLINE_MS;
     mesh_scan_on_child_deadline(old);
     mesh_scan_view_t v = view();
@@ -1756,37 +1826,39 @@ TEST_CASE("A sleepy query given up: progress.info done counts it, awake_left sta
 
 // sleepy re-sends: OpenThread drops a pending confirmable Get after its max transmit wait (62-93 s)
 
-TEST_CASE("A sleepy query with a 240 s deadline: sent again at 90 s and 180 s after the first send, the same "
-          "want_addrs and gen, then no_answer at its deadline", "[mesh_scan]")
+TEST_CASE("A sleepy query with a 240 s deadline: sent again at 60 s, 120 s and 180 s after the first send, the "
+          "same want_addrs and gen, then no_answer at its deadline", "[mesh_scan]")
 {
     info_scan(); // sent at 1000 ms: C_SLEEPY due at 31000 ms, C_SLEEPY_0 at 241000 ms
     answer_awake();
     expire(30000); // 31000 ms: C_SLEEPY given up
-    TEST_ASSERT_EQUAL(60000, g_fake.deadline_ms); // C_SLEEPY_0's re-send at 91000 ms
+    TEST_ASSERT_EQUAL(30000, g_fake.deadline_ms); // C_SLEEPY_0's re-send at 61000 ms
     const int calls = g_fake.info_calls;
 
-    g_fake.now_ms = 91000;
+    g_fake.now_ms = 61000;
     mesh_scan_on_child_deadline(g_fake.armed_gen);
     TEST_ASSERT_EQUAL(calls + 1, g_fake.info_calls);
     TEST_ASSERT_EQUAL_HEX16(C_SLEEPY_0, g_fake.info_rloc16[calls]);
     TEST_ASSERT_FALSE(g_fake.info_want_addrs[calls]);
     TEST_ASSERT_EQUAL(g_fake.armed_gen, g_fake.info_gen[calls]);
-    TEST_ASSERT_EQUAL(MESH_SCAN_SLEEPY_RESEND_MS, g_fake.deadline_ms); // the next re-send, at 181000 ms
-    TEST_ASSERT_EQUAL(150, view().sleepy_wait_s); // the deadline stays at 241000 ms
+    TEST_ASSERT_EQUAL(MESH_SCAN_SLEEPY_RESEND_MS, g_fake.deadline_ms); // the next re-send, at 121000 ms
+    TEST_ASSERT_EQUAL(180, view().sleepy_wait_s); // the deadline stays at 241000 ms
 
+    g_fake.now_ms = 121000;
+    mesh_scan_on_child_deadline(g_fake.armed_gen);
     g_fake.now_ms = 181000;
     mesh_scan_on_child_deadline(g_fake.armed_gen);
-    TEST_ASSERT_EQUAL(calls + 2, g_fake.info_calls);
-    TEST_ASSERT_EQUAL_HEX16(C_SLEEPY_0, g_fake.info_rloc16[calls + 1]);
-    TEST_ASSERT_EQUAL(60000, g_fake.deadline_ms); // 271000 ms would be past the deadline: armed for the deadline
+    TEST_ASSERT_EQUAL(calls + 3, g_fake.info_calls);
+    TEST_ASSERT_EQUAL_HEX16(C_SLEEPY_0, g_fake.info_rloc16[calls + 2]);
+    TEST_ASSERT_EQUAL(60000, g_fake.deadline_ms); // 241000 ms is the deadline itself: no re-send at it
 
     g_fake.now_ms = 241000;
     mesh_scan_on_child_deadline(g_fake.armed_gen);
-    TEST_ASSERT_EQUAL(calls + 2, g_fake.info_calls);
+    TEST_ASSERT_EQUAL(calls + 3, g_fake.info_calls);
     TEST_ASSERT_EQUAL(MESH_SCAN_INFO_NO_ANSWER, child_of(done_result(), C_SLEEPY_0)->info.state);
 }
 
-TEST_CASE("A sleepy query whose deadline is under 90 s away: never sent again", "[mesh_scan]")
+TEST_CASE("A sleepy query whose deadline is under 60 s away: never sent again", "[mesh_scan]")
 {
     info_scan();
     answer_awake();
@@ -1797,7 +1869,7 @@ TEST_CASE("A sleepy query whose deadline is under 90 s away: never sent again", 
     TEST_ASSERT_EQUAL(MESH_SCAN_INFO_NO_ANSWER, child_of(done_result(), C_SLEEPY)->info.state);
 }
 
-TEST_CASE("A sleepy query with its deadline at the sleepy cap: re-sent every 90 s before the cap, none at or after it",
+TEST_CASE("A sleepy query with its deadline at the sleepy cap: re-sent every 60 s before the cap, none at or after it",
           "[mesh_scan]")
 {
     const uint16_t child = RLOC16(3) + 1;
@@ -1813,16 +1885,16 @@ TEST_CASE("A sleepy query with its deadline at the sleepy cap: re-sent every 90 
     answer_child(RLOC16(3), 0);
     TEST_ASSERT_EQUAL(MESH_SCAN_SLEEPY_RESEND_MS, g_fake.deadline_ms);
 
-    for (int64_t at = 101000; at <= 281000; at += MESH_SCAN_SLEEPY_RESEND_MS) {
+    for (int64_t at = 71000; at <= 251000; at += MESH_SCAN_SLEEPY_RESEND_MS) {
         g_fake.now_ms = at;
         mesh_scan_on_child_deadline(g_fake.armed_gen);
     }
-    TEST_ASSERT_EQUAL(4, info_calls_to(child)); // 11000, 101000, 191000 and 281000 ms
-    TEST_ASSERT_EQUAL(20000, g_fake.deadline_ms); // 371000 ms is past the cap: armed for the deadline at the cap
+    TEST_ASSERT_EQUAL(5, info_calls_to(child)); // 11000, 71000, 131000, 191000 and 251000 ms
+    TEST_ASSERT_EQUAL(50000, g_fake.deadline_ms); // 311000 ms is past the cap: armed for the deadline at the cap
 
     g_fake.now_ms = 1000 + MESH_SCAN_SLEEPY_CAP_MS;
     mesh_scan_on_child_deadline(g_fake.armed_gen);
-    TEST_ASSERT_EQUAL(4, info_calls_to(child));
+    TEST_ASSERT_EQUAL(5, info_calls_to(child));
     TEST_ASSERT_EQUAL(MESH_SCAN_INFO_NO_ANSWER, child_of(done_result(), child)->info.state);
 }
 
@@ -1886,7 +1958,7 @@ TEST_CASE("The info deadline timer: armed for the earliest of awake deadlines, s
     answer_awake();
     TEST_ASSERT_EQUAL(30000, g_fake.deadline_ms); // C_SLEEPY's deadline, before C_SLEEPY_0's re-send
     expire(30000);
-    TEST_ASSERT_EQUAL(60000, g_fake.deadline_ms); // C_SLEEPY_0's re-send at 91000 ms, before its 241000 ms deadline
+    TEST_ASSERT_EQUAL(30000, g_fake.deadline_ms); // C_SLEEPY_0's re-send at 61000 ms, before its 241000 ms deadline
 }
 
 TEST_CASE("A departed child (Review Focus 2): its query is given up at the deadline and the scan finishes",

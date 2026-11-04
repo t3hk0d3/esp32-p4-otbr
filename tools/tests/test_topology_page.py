@@ -1404,6 +1404,15 @@ class TestTopologyLogic:
         )
         assert got == [1, 1, 1, 0]
 
+    def test_matches_ignores_the_reference_device_prefix_of_a_vendor_name(self):
+        got = plain(
+            "(() => { const dev = (name) => ({id: 'r1', rloc16: 0x1000, ext: null, addrs: [], parentId: null,"
+            " info: {state: 'answered', vendor_name: name}});"
+            "return [['RD:', 'rd'], ['RD:', 'rd:'], ['RD:Acme', 'acme'], ['RD:Acme', 'rd:']]"
+            ".map(([n, q]) => L.rows([dev(n)], 'all', q, {}, [], null).length); })()"
+        )
+        assert got == [0, 0, 1, 0]
+
     def test_appurl_accepts_only_http_and_https(self):
         got = plain(
             "['https://example.com/a', 'HTTP://example.com', 'javascript:alert(1)', 'data:text/html,x',"
@@ -2303,6 +2312,13 @@ IR.routers[2].children = [{rloc16: 0x6401, ext_address: 'acebe6fffe0bffa4', mode
             None,
             None,
         ]
+
+    def test_dialog_keeps_a_lone_vendor_name_beside_the_stack_summary(self):
+        r = sv(
+            self.INFO_RESULT
+            + "IR.routers[1].info.vendor_name = 'Eve Systems'; await openSV('r12', IR); return fact('Hardware');"
+        )
+        assert r == "Eve Systems · Silicon Labs EFR32 · SL-OpenThread 2.4.2.0"
 
     def test_dialog_summary_omits_missing_parts(self):
         r = sv(self.INFO_RESULT + "await openSV('r25', IR); return fact('Hardware');")

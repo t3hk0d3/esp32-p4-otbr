@@ -193,6 +193,24 @@ class TestTopologyScan:
             assert len(routers) == 1
             assert any(in_prefix(a, omr) for a in routers[0]["addresses"])
 
+    def test_peer_answered_the_info_query(self, scan):
+        # On the rig after a finished scan: the peer, as a child or a router, answered its device info query. Its
+        # vendor strings are not checked: the rig's ot_cli peer does not promise any.
+        result = scan["result"]
+        if scan["peer_state"] == "child":
+            entries = [
+                child
+                for router in result["routers"]
+                for child in router.get("children", [])
+            ]
+        else:
+            entries = result["routers"]
+        peer = [
+            e for e in entries if e.get("ext_address", "").lower() == scan["peer_ext"]
+        ]
+        assert len(peer) == 1
+        assert peer[0]["info"]["state"] == "answered", peer[0]["info"]
+
     @pytest.mark.usefixtures("thread_peer_address")
     def test_post_during_a_running_scan_returns_202(self, base_url):
         # On POST while a scan runs: returns 202 and joins the running scan (no second scan, no error).

@@ -23,7 +23,8 @@ extern "C" {
 #define MESH_SCAN_SLEEPY_QUERIES 16         /**< info queries to sleepy children in flight at most */
 #define MESH_SCAN_SLEEPY_CAP_MS 300000      /**< from scan start: the wait for sleepy answers ends here */
 #define MESH_SCAN_SLEEPY_DEFAULT_MS 240000  /**< deadline of a sleepy query when the child table has no timeout */
-#define MESH_SCAN_SLEEPY_RESEND_MS 90000    /**< a sleepy query is sent again this long after its last send */
+#define MESH_SCAN_SLEEPY_RESEND_MS 60000    /**< a sleepy query is sent again this long after its last send: under
+                                              OpenThread's shortest max transmit wait (62 s), so one is always live */
 
 // OpenThread error codes, as plain ints so the host tests need no OpenThread headers (static-asserted in ot_ops.c).
 #define MESH_SCAN_OT_ERROR_NONE 0
@@ -67,10 +68,13 @@ struct mesh_scan_ops {
     /** The local router table: fills both arrays, returns the count. */
     uint8_t (*router_table)(uint16_t rloc16_out[MESH_SCAN_MAX_ROUTERS], uint8_t ids_out[MESH_SCAN_MAX_ROUTERS]);
     /**
-     * Fills network, OMR, this board's SRP hosts (TXT into the empty pool) and the `info` of the router entry with
-     * `this_device` set (answered, local values); remote hosts are merged after it.
+     * Fills network, OMR, this board's SRP hosts (TXT into the empty pool) and the `info` of this board's own entry,
+     * the router with `this_device` set or the child with own_rloc16() (answered, local values); remote hosts are merged
+     * after it.
      */
     void (*snapshot)(mesh_scan_result_t *r);
+    /** This board's RLOC16: when it is a child, its own child entry is read by the snapshot, never asked. */
+    uint16_t (*own_rloc16)(void);
     bool (*br_running)(void);                      /**< the mode is BR_RUNNING */
     int64_t (*now_ms)(void);
     /**
@@ -137,11 +141,12 @@ void mesh_scan_on_child_addrs(uint16_t child_rloc16, const uint8_t (*addrs)[16],
 void mesh_scan_on_child_addrs_done(int ot_error);
 /**
  * An answer to an info query of the scan of generation `gen`, from the device with RLOC16 `peer_rloc16`: the parsed
- * TLVs in `info` (its state is ignored; empty strings are absent) and `n` addresses of an IPv6 Address List TLV.
- * Dropped unless that device's query is in flight in this scan.
+ * TLVs in `info` (its state is ignored; empty strings are absent) and `n` addresses of an IPv6 Address List TLV;
+ * `other_tlvs`: it carried a TLV the info query never asks for. Dropped unless that device's query is in flight in this
+ * scan and the answer can be its own: before its deadline, no other TLVs, addresses only when asked for (and then some).
  */
 void mesh_scan_on_info(uint32_t gen, uint16_t peer_rloc16, const mesh_scan_info_t *info, const uint8_t (*addrs)[16],
-                       uint8_t n);
+                       uint8_t n, bool other_tlvs);
 /** The info deadline armed for the scan of generation `gen` expired: gives up on the overdue queries. */
 void mesh_scan_on_child_deadline(uint32_t gen);
 /**

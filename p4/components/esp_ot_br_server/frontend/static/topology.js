@@ -798,7 +798,7 @@ function matches(device, query, names, srpHosts, boardName) {
     fields.push(friendly);
   fields = fields.concat(device.addrs || []);
   if (device.info)
-    fields.push(device.info.vendor_name || '', device.info.vendor_model || '', device.info.thread_stack_version || '');
+    fields.push(vendorOf(device.info), infoText(device.info.vendor_model), infoText(device.info.thread_stack_version));
   return fields.some(function(f) { return String(f).toLowerCase().indexOf(q) >= 0; });
 }
 
@@ -1306,6 +1306,8 @@ return {
   isUnnamed : isUnnamed,
   kindLine : kindLine,
   stackInfo : stackInfo,
+  infoText : infoText,
+  vendorOf : vendorOf,
   infoName : infoName,
   appUrl : appUrl,
   deviceText : deviceText,
@@ -2285,8 +2287,6 @@ function stackSummary(st) {
   return parts.join(' · ');
 }
 
-function infoStr(v) { return typeof v === 'string' ? v.trim() : ''; }
-
 /* The facts from the scan's device info (none for a result saved without it, or a device that was not asked). */
 function renderInfoFacts(dl, d) {
   var info = d.info;
@@ -2303,22 +2303,24 @@ function renderInfoFacts(dl, d) {
   if (info.state !== 'answered')
     return;
   var st = L.stackInfo(info.thread_stack_version);
-  var hardware = L.infoName(info) || (st ? stackSummary(st) : null);
+  /* Vendor and model together name the device; a lone one goes before the stack summary, so neither is lost. */
+  var hardware = L.infoName(info);
   if (hardware === null) {
-    var lone = [ infoStr(info.vendor_name).replace(/^RD:/, '').trim(), infoStr(info.vendor_model) ].filter(function(x) {
-      return x !== '';
-    });
-    hardware = lone.length ? lone.join(' ') : null;
+    var parts = [ L.vendorOf(info), L.infoText(info.vendor_model) ].filter(function(x) { return x !== ''; });
+    if (parts.length)
+      hardware = parts.join(' ') + (st ? ' · ' + stackSummary(st) : '');
+    else if (st)
+      hardware = stackSummary(st);
   }
   if (hardware !== null)
     fact(dl, 'Hardware', hardware);
-  if (infoStr(info.thread_stack_version) !== '')
+  if (L.infoText(info.thread_stack_version) !== '')
     fact(dl, 'Stack', info.thread_stack_version);
-  if (infoStr(info.vendor_sw_version) !== '')
+  if (L.infoText(info.vendor_sw_version) !== '')
     fact(dl, 'Software', info.vendor_sw_version);
-  if (infoStr(info.eui64) !== '')
+  if (L.infoText(info.eui64) !== '')
     fact(dl, 'EUI-64', info.eui64, 't-mono');
-  if (infoStr(info.vendor_app_url) !== '') {
+  if (L.infoText(info.vendor_app_url) !== '') {
     var url = L.appUrl(info.vendor_app_url);
     if (url === null) {
       fact(dl, 'App URL', info.vendor_app_url);

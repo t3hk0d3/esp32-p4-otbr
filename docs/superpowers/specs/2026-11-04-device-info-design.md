@@ -63,7 +63,7 @@ What follows from this:
 | TLVs asked | EUI-64 (23), vendor name (25), model (26), SW version (27), Thread stack version (28), app URL (35), vendor OUI (44). Children without addresses also get IPv6 address list (8) in the same request, which replaces today's address-only child request (my call: one request per child, not two) |
 | Request | `netdiag_mux_send_get` to the device's RLOC (mesh-local prefix + `0:ff:fe00:<rloc16>`), unfiltered, as `op_query_child_diag` does today. The answer is matched to the device by the peer's RLOC16 |
 | When | a phase after the child tables, replacing today's child address step (`PHASE_CHILD_DIAG`). It covers routers and children (my call: the queue needs the child tables, and one phase keeps the order simple) |
-| Concurrency | two queues. **Awake** (routers and rx-on children): 4 in flight, 5 s deadline each, as today's child step. **Sleepy** (rx-off children): the scan **waits for them** (user, 2026-11-04). All sleepy children are asked at once, up to 16 in flight (my call: each request waits in its parent's indirect queue and costs no airtime until the child polls). Each one waits until the child's own timeout from the child table (a child must poll within it), bounded by the sleepy cap below. A Get is a confirmable CoAP request that OpenThread drops after its max transmit wait (62-93 s), so a sleepy query is re-sent every `MESH_SCAN_SLEEPY_RESEND_MS` = 90 s after its last send while that is before its deadline and the sleepy cap; it keeps its first deadline, and a failed re-send leaves it waiting until then. One timer serves both queues, armed for the earliest deadline or re-send. The sleepy queue doesn't block the awake one. The phase ends when both are empty and nothing is in flight |
+| Concurrency | two queues. **Awake** (routers and rx-on children): 4 in flight, 5 s deadline each, as today's child step. **Sleepy** (rx-off children): the scan **waits for them** (user, 2026-11-04). All sleepy children are asked at once, up to 16 in flight (my call: each request waits in its parent's indirect queue and costs no airtime until the child polls). Each one waits until the child's own timeout from the child table (a child must poll within it), bounded by the sleepy cap below. A Get is a confirmable CoAP request that OpenThread drops after its max transmit wait (62-93 s), so a sleepy query is re-sent every `MESH_SCAN_SLEEPY_RESEND_MS` = 60 s after its last send (under the shortest max transmit wait, so a live request is always queued for the child; 90 s left a gap, review of PR #34) while that is before its deadline and the sleepy cap; it keeps its first deadline, and a failed re-send leaves it waiting until then. One timer serves both queues, armed for the earliest deadline or re-send. The sleepy queue doesn't block the awake one. The phase ends when both are empty and nothing is in flight |
 | Which children | every child, with or without addresses. `rx_on_when_idle` from the child table picks the queue. A child that already has addresses gets the request without TLV 8 |
 | Order | awake queue: first the rx-on children without addresses (in router ID and child order, as today's step), then routers by router ID, then the other rx-on children (my call: under the cap, addresses come before vendor strings, as today). Sleepy queue: router ID and child order |
 | Answered | any reply from the device counts as `answered`, even one with none of the asked TLVs (fields then absent). `no_answer` means only a deadline or a failed send |
@@ -157,11 +157,15 @@ both queues empty, nothing in flight: mesh phases over (finish, or wait for the 
     gated CLI commands; if any is used, the flag stays on and the name is `RD:ESP32-P4-WIFI6-POE-ETH`.
 - **Sleepy answers and the CoAP window.** Confirmed from OpenThread's source: a unicast Network Diagnostic Get is a
   confirmable CoAP request (`net_diag.cpp`), and the CoAP layer drops the pending request after its max transmit wait
-  (62-93 s), so a later answer never reaches the callback. Handled by re-sending every 90 s until the query's deadline
+  (62-93 s), so a later answer never reaches the callback. Handled by re-sending every 60 s until the query's deadline
   (section 3, Concurrency). A child that polls less often than its own timeout still shows `no_answer`.
-- **Stray answers.** netdiag_mux hands every answer to every listener, so a REST diagnostic Get to the same RLOC at
-  the same moment can be taken as the scan's answer for a router (for a child, an answer without addresses to a Get
-  that asked for them is ignored).
+- **Stray answers.** netdiag_mux hands every answer to every listener. The scan ignores an answer that can't be its
+  own: one carrying a TLV the info query never asks for, addresses it did not ask for, or no addresses when it did.
+  A REST Get for a subset of the info TLVs to the same RLOC at the same moment can still be taken as the scan's
+  answer; it describes that device correctly. An answer at or after its query's deadline is ignored too.
+- **Re-sends and duplicates.** Each Get to a sleepy child is a confirmable CoAP request whose retransmissions also
+  wait in the parent's indirect queue, and the child answers every copy it gets (9 on the board for one 120 s-poll
+  child). OpenThread's API sends no other kind of Get, so this is accepted.
 - **Traffic.** One extra request per router and per child, each a few hundred bytes; on a 30-device mesh that is about
   30 messages over a few seconds. Mesh diagnostics already send more than that.
 - **Scan time.** It grows by the awake devices divided by 4 times their round trip (well under a second each here),

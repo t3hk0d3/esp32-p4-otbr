@@ -112,12 +112,15 @@ While the scan runs, `progress.info` counts the answers.
   latest sleepy deadline (0 when none waits), awake devices (routers and rx-on children) queued or in flight, and
   devices answered or given up (`done` counts `no_answer` too). Once `awake_left` is 0 only sleepy devices are left.
 - A sleepy child answers only after its next poll. The scan waits for sleepy children up to 300 s from the scan start,
-  each for the child's own timeout from the child table (240 s when unknown), and asks again every 90 s while it
-  waits (OpenThread drops an unanswered request after 62-93 s). Every other step stays bounded by the 60 s cap. At
+  each for the child's own timeout from the child table (240 s when unknown), and asks again every 60 s while it
+  waits (OpenThread drops an unanswered request after 62-93 s, so one request is always pending). Every other step stays bounded by the 60 s cap. At
   the sleepy cap the scan finishes with what it has. Missing info never sets `partial`.
 - During the info step the scan holds no mesh diagnostics operation, so the REST `/topology` and diagnostics endpoints
-  work; `POST /device/topology` joins the running scan. Known limit: a REST diagnostic Get to a router's RLOC at the
-  same moment can be taken as the scan's answer for that router (both answers reach the scan).
+  work; `POST /device/topology` joins the running scan. Both answers reach the scan, which ignores one that can't be
+  its own: with a TLV the scan does not ask for, or with addresses it did not ask for (or none when it did). A REST
+  Get for a subset of the scan's TLVs at the same moment can still be taken as its answer; it describes that device
+  correctly.
+- When this board is a child, its own child entry is read locally, like its router entry.
 
 ```json
 "info": {"state": "answered", "eui64": "8c73dafffe952cfb", "vendor_name": "Home Assistant",
