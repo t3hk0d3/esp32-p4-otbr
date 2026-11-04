@@ -11,7 +11,9 @@ release's `versions.txt`.
 
 - The Topology page names devices registered with any border router's SRP server, not only this board's, and shows
   ESPHome, Matter and HomeKit details and border router records. The scan asks the other SRP servers over DNS-SD
-  (`srp_servers`, `srp_hosts` in `GET /device/topology`; see `docs/api.md`). Not yet verified on the board.
+  (`srp_servers`, `srp_hosts` in `GET /device/topology`; see `docs/api.md`). Checked on ha-thread-bbc1 (2026-11-04):
+  records from the Home Assistant OTBR named an ESPHome device and two Matter devices; scans took about 6 s. HomeKit
+  records were not seen on that network.
 - Documentation site on GitHub Pages (<https://t3hk0d3.github.io/esp32-p4-otbr/>), built from `docs/` and `README.md`
   with Material for MkDocs: a landing page, the docs, and a browser flasher page (ESP Web Tools) that writes the P4
   firmware of the latest release over USB from Chrome or Edge. `make docs`, `make docs-serve`, `make docs-firmware`; see
