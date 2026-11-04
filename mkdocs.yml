@@ -1,0 +1,69 @@
+# Documentation site (GitHub Pages), built from docs/ and README.md: `make docs` builds it into site/, `make docs-serve`
+# previews it. .github/workflows/docs.yml publishes it with the web flasher of the latest release.
+site_name: ESP32-P4 OpenThread Border Router
+site_description: Thread border router firmware for the Waveshare ESP32-P4-WIFI6-POE-ETH
+site_url: https://t3hk0d3.github.io/esp32-p4-otbr/
+repo_url: https://github.com/t3hk0d3/esp32-p4-otbr
+repo_name: t3hk0d3/esp32-p4-otbr
+edit_uri: edit/master/docs/
+copyright: Copyright (C) 2026 Igor Yamolov. AGPL-3.0-or-later.
+
+docs_dir: docs
+exclude_docs: |
+  superpowers/
+  phase0/
+  hardware/
+  overrides/
+
+hooks:
+  - tools/docs_hooks.py
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - Overview: overview.md
+  - Flash in the browser: flash.md
+  - Setting up:
+      - First install: first-install.md
+      - Building and flashing: building.md
+  - Running it:
+      - Updates: updates.md
+      - Home Assistant: home-assistant.md
+      - HTTP API and web UI: api.md
+      - Networking: networking.md
+      - Sniffer: sniffer.md
+      - Maintenance jumper: maintenance-jumper.md
+      - Diagnostics: diagnostics.md
+      - Prometheus metrics: metrics.md
+      - Troubleshooting: troubleshooting.md
+  - Working on it:
+      - Development: development.md

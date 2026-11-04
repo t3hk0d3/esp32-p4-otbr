@@ -9,3 +9,4 @@ docs/hardware/*.pdf
 __pycache__/
 .venv/
 p4/pytest/.routing-restore.json
+site/

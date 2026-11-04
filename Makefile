@@ -19,12 +19,14 @@ TIMEOUT ?= 900
 SIZES ?= build/sizes.json
 SIZES_BASE ?=
 SIZES_BASE_LABEL ?=
+MKDOCS ?= uvx --with mkdocs-material mkdocs
+SITE ?= site
 
 IDF := $(if $(shell command -v idf.py),,. "$(IDF_EXPORT)" >/dev/null &&)
 board_url = $(if $(BOARD),http://$(BOARD),$(error set BOARD=<board address>, e.g. make $@ BOARD=192.168.1.50))
 
 .PHONY: help build build-test reconfigure clean flash monitor erase c6-flash-base bundle package sizes sizes-report ota radio recover \
-	status test test-host test-vendored test-tools test-target lan-ping-up lan-ping-down lint routing-vectors
+	status docs docs-serve docs-firmware test test-host test-vendored test-tools test-target lan-ping-up lan-ping-down lint routing-vectors
 
 help: ## List the targets
 	@awk -F':.*## ' '/^[a-z0-9-]+:.*## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -97,6 +99,20 @@ status: ## Show /device/status (BOARD)
 	@echo
 
 # --- tests ---
+
+# --- documentation site ---
+
+docs: ## Build the documentation site into SITE (default site/); MKDOCS=<mkdocs command>
+	$(MKDOCS) build --strict --site-dir $(SITE)
+
+docs-serve: ## Preview the documentation site at http://127.0.0.1:8000 (the browser flasher has no firmware there)
+	$(MKDOCS) serve
+
+docs-firmware: ## Put the latest release's P4 images and the browser flasher manifest into SITE/firmware (needs gh)
+	mkdir -p $(SITE)/firmware
+	gh release download --repo t3hk0d3/esp32-p4-otbr --pattern p4-flash.zip --dir $(SITE)/firmware --clobber
+	cd $(SITE)/firmware && unzip -o -q p4-flash.zip && rm -f p4-flash.zip
+	tools/flash_manifest.py $(SITE)/firmware "$$(gh release view --repo t3hk0d3/esp32-p4-otbr --json tagName --jq .tagName)"
 
 test: test-host test-tools test-vendored ## All host-side tests (no board)
 
