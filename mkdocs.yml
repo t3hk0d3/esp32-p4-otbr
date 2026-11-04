@@ -13,12 +13,14 @@ exclude_docs: |
   superpowers/
   phase0/
   hardware/
+  overrides/
 
 hooks:
   - tools/docs_hooks.py
 
 theme:
   name: material
+  custom_dir: docs/overrides
   features:
     - navigation.sections
     - navigation.top
@@ -48,6 +50,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Overview: overview.md
   - Flash in the browser: flash.md
   - Setting up:
       - First install: first-install.md

@@ -161,8 +161,9 @@ The firmware versions stay `<build timestamp>-<git hash>`; the tag only names th
 
 ## Documentation site
 
-`mkdocs.yml` builds `docs/` with Material for MkDocs into a GitHub Pages site; `README.md` is its home page and
-`docs/superpowers/` and `docs/phase0/` stay out. `tools/docs_hooks.py` keeps the links written for GitHub working: links
+`mkdocs.yml` builds `docs/` with Material for MkDocs into a GitHub Pages site. Its home page is the landing page
+`docs/overrides/home.html` (styles in `docs/assets/home.css`, web UI screenshots in `docs/images/home/`), `README.md`
+becomes the Overview page, and `docs/superpowers/` and `docs/phase0/` stay out. `tools/docs_hooks.py` keeps the links written for GitHub working: links
 to pages and images stay relative, links to anything else in the repository become GitHub URLs. A new page goes into the
 `nav` of `mkdocs.yml` as well as `docs/README.md`. `make docs` builds it with `--strict` (a broken link fails), `make
 docs-serve` previews it.
