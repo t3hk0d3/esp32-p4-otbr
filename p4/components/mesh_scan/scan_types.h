@@ -97,8 +97,21 @@ typedef struct {
     struct {
         char instance[MESH_SCAN_NAME_LEN];
         char type[MESH_SCAN_NAME_LEN];
+        uint16_t port;
+        uint16_t source;      /**< RLOC16 of the server this record came from */
+        uint16_t txt_off;     /**< TXT bytes in the result's pool */
+        uint16_t txt_len;
+        bool has_txt;         /**< false: no TXT known (txt_len is 0) */
+        bool txt_truncated;   /**< cut at the TXT cap or left out because the pool was full */
+        uint16_t sub_off;     /**< subtype labels in the pool, each followed by a NUL */
+        uint8_t n_sub;
     } services[MESH_SCAN_MAX_SRP_SERVICES];
     uint8_t n_services;
+    uint16_t source;          /**< RLOC16 of the server the host fields came from */
+    bool local;               /**< from this board's SRP server: lease_s and key_lease_s are valid, ttl_s is not */
+    uint32_t lease_s;         /**< remaining lease, local only */
+    uint32_t key_lease_s;     /**< remaining key lease, local only */
+    uint32_t ttl_s;           /**< remote only */
 } mesh_scan_srp_host_t;
 
 typedef struct {
@@ -133,6 +146,8 @@ typedef struct {
     mesh_scan_transport_t this_links[MESH_SCAN_MAX_ROUTERS]; /**< by router ID, filled by the snapshot */
     mesh_scan_srp_host_t srp[MESH_SCAN_MAX_SRP_HOSTS];
     uint8_t n_srp;
+    mesh_scan_srp_server_t srp_servers[MESH_SCAN_MAX_SRP_SERVERS];
+    uint8_t n_srp_servers;
     uint8_t *pool;      /**< MESH_SCAN_POOL_SIZE bytes, a second ops.alloc block owned by the result */
     uint16_t pool_used;
     bool partial;

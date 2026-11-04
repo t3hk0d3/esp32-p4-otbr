@@ -158,7 +158,7 @@ TEST_CASE("When idle, done or failed and the mode is BR_RUNNING: frees the previ
     // idle
     fake_ops_install();
     mesh_scan_core_start();
-    TEST_ASSERT_EQUAL(1, g_fake.allocs);
+    TEST_ASSERT_EQUAL(2, g_fake.allocs); // the result and its pool
     TEST_ASSERT_EQUAL(1, g_fake.discover_calls);
     TEST_ASSERT_EQUAL(1, g_fake.arm_calls);
     TEST_ASSERT_EQUAL(MESH_SCAN_CAP_MS, g_fake.armed_ms);
@@ -169,10 +169,10 @@ TEST_CASE("When idle, done or failed and the mode is BR_RUNNING: frees the previ
     mesh_scan_on_discover_done(MESH_SCAN_OT_ERROR_NONE);
     answer_router();
     done_result();
-    TEST_ASSERT_EQUAL(2, g_fake.allocs);
-    mesh_scan_core_start();
-    TEST_ASSERT_EQUAL(2, g_fake.releases);
     TEST_ASSERT_EQUAL(3, g_fake.allocs);
+    mesh_scan_core_start();
+    TEST_ASSERT_EQUAL(3, g_fake.releases);
+    TEST_ASSERT_EQUAL(5, g_fake.allocs);
     TEST_ASSERT_EQUAL(2, g_fake.discover_calls);
     TEST_ASSERT_EQUAL(MESH_SCAN_RUNNING, view().state);
 
@@ -180,8 +180,8 @@ TEST_CASE("When idle, done or failed and the mode is BR_RUNNING: frees the previ
     mesh_scan_core_cancel();
     TEST_ASSERT_EQUAL(MESH_SCAN_FAILED, view().state);
     mesh_scan_core_start();
-    TEST_ASSERT_EQUAL(3, g_fake.releases);
-    TEST_ASSERT_EQUAL(4, g_fake.allocs);
+    TEST_ASSERT_EQUAL(5, g_fake.releases);
+    TEST_ASSERT_EQUAL(7, g_fake.allocs);
     TEST_ASSERT_EQUAL(3, g_fake.discover_calls);
     TEST_ASSERT_EQUAL(MESH_SCAN_RUNNING, view().state);
 }
@@ -207,7 +207,7 @@ TEST_CASE("When a scan is running: returns ESP_ERR_INVALID_STATE and leaves the 
     const mesh_scan_view_t after = view();
     TEST_ASSERT_EQUAL(MESH_SCAN_RUNNING, after.state);
     TEST_ASSERT_EQUAL(before.routers, after.routers);
-    TEST_ASSERT_EQUAL(1, g_fake.allocs);
+    TEST_ASSERT_EQUAL(2, g_fake.allocs);
     TEST_ASSERT_EQUAL(0, g_fake.releases);
     TEST_ASSERT_EQUAL(1, g_fake.discover_calls);
     TEST_ASSERT_EQUAL(0, g_fake.cancel_calls);
@@ -249,6 +249,32 @@ TEST_CASE("When the result cannot be allocated: state becomes failed with error 
     mesh_scan_core_start();
     assert_failed(MESH_SCAN_ERR_NO_MEMORY);
     TEST_ASSERT_EQUAL(0, g_fake.discover_calls);
+}
+
+TEST_CASE("When the pool cannot be allocated: state becomes failed with error no_memory", "[mesh_scan]")
+{
+    fake_ops_install();
+    g_fake.fail_alloc_at = 2;
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, mesh_scan_core_start());
+    assert_failed(MESH_SCAN_ERR_NO_MEMORY);
+    TEST_ASSERT_EQUAL(0, g_fake.discover_calls);
+}
+
+TEST_CASE("When the pool cannot be allocated: releases the result block", "[mesh_scan]")
+{
+    fake_ops_install();
+    g_fake.fail_alloc_at = 2;
+    mesh_scan_core_start();
+    TEST_ASSERT_EQUAL(2, g_fake.allocs);
+    TEST_ASSERT_EQUAL(1, g_fake.releases);
+}
+
+TEST_CASE("On a scan whose result is released: the pool block goes with it (allocs == releases)", "[mesh_scan]")
+{
+    start();
+    TEST_ASSERT_EQUAL(2, g_fake.allocs);
+    mesh_scan_core_fail_stopped();
+    TEST_ASSERT_EQUAL(g_fake.allocs, g_fake.releases);
 }
 
 TEST_CASE("When the result cannot be allocated: returns ESP_ERR_NO_MEM", "[mesh_scan]")
@@ -936,7 +962,7 @@ TEST_CASE("On a render taken during done: keeps its result alive across a new st
     TEST_ASSERT_EQUAL(ESP_OK, mesh_scan_render(render_sink, &s));
     TEST_ASSERT_EQUAL(ESP_OK, s.start_inside);
     TEST_ASSERT_EQUAL(0, s.releases_inside);
-    TEST_ASSERT_EQUAL(2, g_fake.releases);
+    TEST_ASSERT_EQUAL(3, g_fake.releases); // result, pool and children array
     TEST_ASSERT_EQUAL(MESH_SCAN_RUNNING, view().state);
     TEST_ASSERT_EQUAL_STRING_LEN("{\"state\":\"done\"", s.text, 15);
 }

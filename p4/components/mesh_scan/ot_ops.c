@@ -41,6 +41,7 @@
 #include "openthread/thread_ftd.h"
 #include "scan.h"
 #include "sdkconfig.h"
+#include "srp.h"
 
 static const char *TAG = "mesh_scan";
 
@@ -427,10 +428,53 @@ static void snapshot_network(otInstance *ins, mesh_scan_network_t *net)
     }
 }
 
-static void snapshot_srp_host(const otSrpServerHost *host, mesh_scan_srp_host_t *out)
+/** Fill one service of a local host: port, TXT (cut at 512 bytes) and subtype labels go through the result's pool. */
+static void snapshot_service(mesh_scan_result_t *r, const otSrpServerService *svc, uint16_t source,
+                             __typeof__(((mesh_scan_srp_host_t *)0)->services[0]) *s)
+{
+    uint16_t txt_len = 0;
+    const uint8_t *txt = otSrpServerServiceGetTxtData(svc, &txt_len);
+    const uint16_t kept = txt ? mesh_scan_txt_cut(txt, txt_len, MESH_SCAN_TXT_MAX) : 0;
+
+    strlcpy(s->instance, otSrpServerServiceGetInstanceLabel(svc), sizeof(s->instance));
+    // "_matter._tcp.default.service.arpa." -> "_matter._tcp"
+    copy_labels(s->type, sizeof(s->type), otSrpServerServiceGetServiceName(svc), 2);
+    s->port = otSrpServerServiceGetPort(svc);
+    s->source = source;
+    s->txt_truncated = kept < txt_len;
+    if (kept > 0 && mesh_scan_pool_put(r, txt, kept, &s->txt_off)) {
+        s->has_txt = true;
+        s->txt_len = kept;
+    } else if (kept > 0) {
+        s->txt_truncated = true; // pool full
+    } else if (txt) {
+        s->has_txt = true; // present and empty (or nothing fitting the cap: truncated above)
+    }
+
+    // Subtype labels, NUL-separated: "_i4f2._sub._matter._tcp.default.service.arpa." -> "_i4f2"
+    const uint16_t n_sub = otSrpServerServiceGetNumberOfSubTypes(svc);
+    uint16_t start = r->pool_used;
+
+    for (uint16_t i = 0; i < n_sub && s->n_sub < MESH_SCAN_MAX_SUBTYPES; i++) {
+        char label[MESH_SCAN_NAME_LEN];
+
+        if (otSrpServerParseSubTypeServiceName(otSrpServerServiceGetSubTypeServiceNameAt(svc, i), label,
+                                               sizeof(label)) != OT_ERROR_NONE ||
+                !mesh_scan_pool_put(r, (const uint8_t *)label, (uint16_t)strlen(label) + 1, &start)) {
+            continue;
+        }
+        if (s->n_sub++ == 0) {
+            s->sub_off = start;
+        }
+    }
+}
+
+static void snapshot_srp_host(mesh_scan_result_t *r, const otSrpServerHost *host, mesh_scan_srp_host_t *out,
+                              uint16_t source)
 {
     uint8_t n_addrs = 0;
     const otIp6Address *addrs = otSrpServerHostGetAddresses(host, &n_addrs);
+    otSrpServerLeaseInfo lease;
 
     memset(out, 0, sizeof(*out));
     copy_labels(out->name, sizeof(out->name), otSrpServerHostGetFullName(host), 1); // without .default.service.arpa.
@@ -439,14 +483,15 @@ static void snapshot_srp_host(const otSrpServerHost *host, mesh_scan_srp_host_t 
     }
     for (const otSrpServerService *svc = otSrpServerHostGetNextService(host, NULL);
             svc && out->n_services < MESH_SCAN_MAX_SRP_SERVICES; svc = otSrpServerHostGetNextService(host, svc)) {
-        if (otSrpServerServiceIsDeleted(svc)) {
-            continue;
+        if (!otSrpServerServiceIsDeleted(svc)) {
+            snapshot_service(r, svc, source, &out->services[out->n_services++]);
         }
-        __typeof__(out->services[0]) *s = &out->services[out->n_services++];
-        strlcpy(s->instance, otSrpServerServiceGetInstanceLabel(svc), sizeof(s->instance));
-        // "_matter._tcp.default.service.arpa." -> "_matter._tcp"
-        copy_labels(s->type, sizeof(s->type), otSrpServerServiceGetServiceName(svc), 2);
     }
+    otSrpServerHostGetLeaseInfo(host, &lease);
+    out->source = source;
+    out->local = true;
+    out->lease_s = lease.mRemainingLease / 1000;
+    out->key_lease_s = lease.mRemainingKeyLease / 1000;
 }
 
 // Radios this board uses toward each router it has a link to. Local state only: no mesh traffic.
@@ -483,10 +528,11 @@ static void op_snapshot(mesh_scan_result_t *r)
     snapshot_network(ins, &r->network);
     snapshot_transport(ins, r);
     r->n_srp = 0;
+    r->pool_used = 0;
     for (const otSrpServerHost *host = otSrpServerGetNextHost(ins, NULL);
             host && r->n_srp < MESH_SCAN_MAX_SRP_HOSTS; host = otSrpServerGetNextHost(ins, host)) {
         if (!otSrpServerHostIsDeleted(host)) {
-            snapshot_srp_host(host, &r->srp[r->n_srp++]);
+            snapshot_srp_host(r, host, &r->srp[r->n_srp++], r->network.this_rloc16);
         }
     }
 }

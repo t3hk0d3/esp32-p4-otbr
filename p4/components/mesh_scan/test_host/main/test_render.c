@@ -6,6 +6,7 @@
 #include "unity.h"
 #include "unity_test_runner.h"
 #include "render.h"
+#include "srp.h"
 #include "sample_result.h"
 
 #define CHUNK_MAX 2048
@@ -127,7 +128,7 @@ TEST_CASE("On done: writes age_s and the full result in the spec 3.3 field names
                     "\"addresses\":[\"2001:db8:4a2:1:2be4:6c19:a0f7:3381\"]}");
     assert_contains(out, "],\"srp_hosts\":[{\"name\":\"kitchen-plug\","
                     "\"addresses\":[\"2001:db8:4a2:1:2be4:6c19:a0f7:3381\"],"
-                    "\"services\":[{\"instance\":\"kitchen-plug\",\"type\":\"_matter._tcp\"}]},");
+                    "\"services\":[{\"instance\":\"kitchen-plug\",\"type\":\"_matter._tcp\",");
     // Routers come in router ID order: 3, 9, 17, 25, 34, 50.
     const char *ids[] = { "\"router_id\":3,\"ext", "\"router_id\":9,\"ext", "\"router_id\":17,\"ext", "{\"router_id\":25,\"rloc16\"",
                           "\"router_id\":34,\"ext", "\"router_id\":50,\"ext"
@@ -508,4 +509,171 @@ void app_main(void)
     unity_run_all_tests();
     int failures = (int)UNITY_END();
     exit(failures == 0 ? 0 : 1);
+}
+
+// SRP servers, hosts and services
+
+static const char *const LOCAL_HOST =
+    "{\"name\":\"kitchen-plug\",\"addresses\":[\"2001:db8:4a2:1:2be4:6c19:a0f7:3381\"],"
+    "\"services\":[{\"instance\":\"kitchen-plug\",\"type\":\"_matter._tcp\",\"port\":5540,\"source\":34816,"
+    "\"subtypes\":[\"_i4f2\",\"_S3\"],\"txt\":\"A2E9MQ==\",\"txt_truncated\":false}],"
+    "\"source\":34816,\"lease_s\":7200,\"key_lease_s\":1209600}";
+
+TEST_CASE("On srp_servers: each server has rloc16, address, port, this_board, state string and hosts, after srp_hosts",
+          "[mesh_scan]")
+{
+    const mesh_scan_view_t view = done_view(sample_result());
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_json(out);
+    assert_contains(out, "\"srp_servers\":["
+                    "{\"rloc16\":34816,\"address\":\"fdde:ad00:beef::ff:fe00:8800\",\"port\":53554,\"this_board\":true,"
+                    "\"state\":\"answered\",\"hosts\":1},"
+                    "{\"rloc16\":9216,\"address\":\"fd7a:91c3:22e0:1::53\",\"port\":53,\"this_board\":false,"
+                    "\"state\":\"no_answer\",\"hosts\":0},"
+                    "{\"rloc16\":51200,\"address\":\"2001:db8:4a2:1::53\",\"port\":5353,\"this_board\":false,"
+                    "\"state\":\"cut_short\",\"hosts\":2}]}}");
+    TEST_ASSERT_TRUE(strstr(out, "\"srp_hosts\":[") < strstr(out, "\"srp_servers\":["));
+    sink_free(&s);
+}
+
+TEST_CASE("On a host from this board: writes source, lease_s and key_lease_s after services, no ttl_s", "[mesh_scan]")
+{
+    const mesh_scan_view_t view = done_view(sample_result());
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, LOCAL_HOST);
+    sink_free(&s);
+}
+
+TEST_CASE("On a host from another server: writes source and ttl_s after services, no lease fields", "[mesh_scan]")
+{
+    const mesh_scan_view_t view = done_view(sample_result());
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "\"services\":[],\"source\":9216,\"ttl_s\":1800}");
+    assert_contains(out, "\"txt_truncated\":true}],\"source\":51200,\"ttl_s\":600}");
+    const char *remote = strstr(out, "\"name\":\"ha-sensor\"");
+    TEST_ASSERT_NOT_NULL(remote);
+    TEST_ASSERT_NULL(strstr(remote, "lease_s"));
+    sink_free(&s);
+}
+
+TEST_CASE("On a service: writes port, source, subtypes array, txt base64 and txt_truncated after type", "[mesh_scan]")
+{
+    const mesh_scan_view_t view = done_view(sample_result());
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "\"type\":\"_matter._tcp\",\"port\":5540,\"source\":34816,\"subtypes\":[\"_i4f2\",\"_S3\"],"
+                    "\"txt\":\"A2E9MQ==\",\"txt_truncated\":false}");
+    sink_free(&s);
+}
+
+TEST_CASE("On a service without TXT: writes \"txt\":\"\" and an empty subtypes array", "[mesh_scan]")
+{
+    const mesh_scan_view_t view = done_view(sample_result());
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "\"type\":\"_http._tcp\",\"port\":80,\"source\":51200,\"subtypes\":[],\"txt\":\"\","
+                    "\"txt_truncated\":true}");
+    sink_free(&s);
+}
+
+TEST_CASE("On a service with has_txt and zero length: writes \"txt\":\"\"", "[mesh_scan]")
+{
+    mesh_scan_result_t *result = sample_result();
+    const mesh_scan_view_t view = done_view(result);
+    sink_t s;
+
+    result->srp[0].services[0].txt_len = 0;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "\"subtypes\":[\"_i4f2\",\"_S3\"],\"txt\":\"\",\"txt_truncated\":false}");
+    sink_free(&s);
+}
+
+/** Render the first service of host 0 with these TXT bytes in the pool and return its "txt" value in `out`. */
+static void txt_of(const uint8_t *bytes, uint16_t len, char *out, size_t out_size)
+{
+    mesh_scan_result_t *result = sample_result();
+    const mesh_scan_view_t view = done_view(result);
+    sink_t s;
+
+    memcpy(result->pool + result->srp[0].services[0].txt_off, bytes, len);
+    result->srp[0].services[0].txt_len = len;
+    const char *body = render(&view, &s);
+    const char *at = strstr(body, "\"txt\":\"");
+
+    TEST_ASSERT_NOT_NULL(at);
+    at += strlen("\"txt\":\"");
+    const char *end = strchr(at, '"');
+
+    TEST_ASSERT_NOT_NULL(end);
+    TEST_ASSERT_LESS_THAN(out_size, (size_t)(end - at));
+    memcpy(out, at, (size_t)(end - at));
+    out[end - at] = '\0';
+    sink_free(&s);
+}
+
+TEST_CASE("On a TXT of 1, 2 and 3 trailing bytes: writes standard base64 with == / = / no padding", "[mesh_scan]")
+{
+    const uint8_t bytes[] = { 0xff, 0xfe, 0xfd, 0xfc, 0xfb };
+    char out[32];
+
+    txt_of(bytes, 1, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("/w==", out);
+    txt_of(bytes, 2, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("//4=", out);
+    txt_of(bytes, 3, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("//79", out);
+    txt_of(bytes, 4, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("//79/A==", out);
+    txt_of(bytes, 5, out, sizeof(out));
+    TEST_ASSERT_EQUAL_STRING("//79/Ps=", out);
+}
+
+TEST_CASE("On a TXT long enough to cross chunks: writes it whole as valid JSON", "[mesh_scan]")
+{
+    mesh_scan_result_t *result = sample_result();
+    const mesh_scan_view_t view = done_view(result);
+    sink_t s;
+
+    for (int i = 0; i < MESH_SCAN_TXT_MAX; i++) {
+        result->pool[result->srp[0].services[0].txt_off + i] = (uint8_t)i;
+    }
+    result->srp[0].services[0].txt_len = MESH_SCAN_TXT_MAX;
+    result->srp[0].services[0].n_sub = 0; // the labels sit behind the sample's TXT in the pool: overwritten here
+    result->pool_used = MESH_SCAN_TXT_MAX;
+    const char *out = render(&view, &s);
+
+    assert_json(out);
+    assert_contains(out, "\"txt\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v");
+    assert_contains(out, "9fb3+Pn6+/z9/v8=\",\"txt_truncated\"");
+    sink_free(&s);
+}
+
+TEST_CASE("On a result without SRP data: writes \"srp_servers\":[] and the new host fields empty", "[mesh_scan]")
+{
+    static mesh_scan_result_t result; // ~100 KB: not on the test stack
+    sink_t s;
+
+    memset(&result, 0, sizeof(result));
+    strcpy(result.srp[0].name, "x");
+    strcpy(result.srp[0].services[0].instance, "i");
+    strcpy(result.srp[0].services[0].type, "t");
+    result.srp[0].n_services = 1;
+    result.n_srp = 1;
+    const mesh_scan_view_t view = done_view(&result);
+    const char *out = render(&view, &s);
+
+    assert_json(out);
+    assert_contains(out, "\"srp_hosts\":[{\"name\":\"x\",\"addresses\":[],\"services\":[{\"instance\":\"i\","
+                    "\"type\":\"t\",\"port\":0,\"source\":0,\"subtypes\":[],\"txt\":\"\",\"txt_truncated\":false}],"
+                    "\"source\":0,\"ttl_s\":0}],\"srp_servers\":[]}}");
+    sink_free(&s);
 }

@@ -27,7 +27,7 @@ typedef struct {
 
 /**
  * One scan's result. The scan holds one reference while it is current; each render in flight holds another. The
- * block and its children arrays are released with the last reference.
+ * block, its pool and its children arrays are released with the last reference.
  */
 typedef struct {
     uint32_t refs;
@@ -67,6 +67,9 @@ static void block_put(block_t *b)
         if (b->result.routers[id].children) {
             s.ops.release(b->result.routers[id].children);
         }
+    }
+    if (b->result.pool) {
+        s.ops.release(b->result.pool);
     }
     s.ops.release(b);
 }
@@ -402,6 +405,16 @@ esp_err_t mesh_scan_core_start(void)
         goto out;
     }
     s.block->refs = 1;
+    s.block->result.pool = s.ops.alloc(MESH_SCAN_POOL_SIZE);
+    if (!s.block->result.pool) {
+        drop_result();
+        s.state = MESH_SCAN_FAILED;
+        s.error = MESH_SCAN_ERR_NO_MEMORY;
+        s.end_ms = s.ops.now_ms();
+        ESP_LOGW(TAG, "no memory for the pool (%u bytes)", (unsigned)MESH_SCAN_POOL_SIZE);
+        ret = ESP_ERR_NO_MEM;
+        goto out;
+    }
     s.state = MESH_SCAN_RUNNING;
     s.error = MESH_SCAN_ERR_NONE;
     s.phase = PHASE_DISCOVER;

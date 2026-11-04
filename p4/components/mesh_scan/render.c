@@ -393,7 +393,79 @@ static void write_network(writer_t *w, const mesh_scan_network_t *n)
     raw(w, "]}");
 }
 
-static void write_srp_host(writer_t *w, const mesh_scan_srp_host_t *h)
+/** `data` as a JSON string in standard base64 with padding. */
+static void base64_string(writer_t *w, const uint8_t *data, size_t len)
+{
+    static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    raw(w, "\"");
+    for (size_t i = 0; i < len; i += 3) {
+        const size_t left = len - i;
+        const uint32_t bits = (uint32_t)data[i] << 16 | (left > 1 ? (uint32_t)data[i + 1] << 8 : 0) |
+                              (left > 2 ? data[i + 2] : 0);
+        const char quad[4] = {
+            alphabet[bits >> 18 & 63],
+            alphabet[bits >> 12 & 63],
+            left > 1 ? alphabet[bits >> 6 & 63] : '=',
+            left > 2 ? alphabet[bits & 63] : '=',
+        };
+
+        put(w, quad, sizeof(quad));
+    }
+    raw(w, "\"");
+}
+
+static const char *srp_state_name(mesh_scan_srp_state_t state)
+{
+    switch (state) {
+    case MESH_SCAN_SRP_ANSWERED:
+        return "answered";
+    case MESH_SCAN_SRP_CUT_SHORT:
+        return "cut_short";
+    case MESH_SCAN_SRP_NO_ANSWER:
+    default:
+        return "no_answer";
+    }
+}
+
+static void write_srp_service(writer_t *w, const mesh_scan_result_t *r, const mesh_scan_srp_host_t *h, size_t index)
+{
+    const __typeof__(h->services[0]) *s = &h->services[index];
+    // Offsets come from the collector; a bad one renders as no data instead of reading outside the pool.
+    const bool txt_ok = s->has_txt && s->txt_len > 0 && r->pool && s->txt_off + (size_t)s->txt_len <= r->pool_used;
+    const uint8_t *labels = r->pool ? r->pool + s->sub_off : NULL;
+    size_t left = r->pool && s->sub_off <= r->pool_used ? r->pool_used - s->sub_off : 0;
+
+    raw(w, "{\"instance\":");
+    str(w, s->instance);
+    raw(w, ",\"type\":");
+    str(w, s->type);
+    key_u64(w, ",\"port\":", s->port);
+    key_u64(w, ",\"source\":", s->source);
+    raw(w, ",\"subtypes\":[");
+    for (size_t i = 0; i < s->n_sub && left > 0; i++) {
+        const size_t n = strnlen((const char *)labels, left);
+
+        if (n == left) {
+            break; // no NUL inside the used pool: not a label
+        }
+        comma(w, i);
+        str(w, (const char *)labels);
+        labels += n + 1;
+        left -= n + 1;
+    }
+    raw(w, "],\"txt\":");
+    if (txt_ok) {
+        base64_string(w, r->pool + s->txt_off, s->txt_len);
+    } else {
+        raw(w, "\"\"");
+    }
+    raw(w, ",\"txt_truncated\":");
+    boolean(w, s->txt_truncated);
+    raw(w, "}");
+}
+
+static void write_srp_host(writer_t *w, const mesh_scan_result_t *r, const mesh_scan_srp_host_t *h)
 {
     raw(w, "{\"name\":");
     str(w, h->name);
@@ -402,13 +474,30 @@ static void write_srp_host(writer_t *w, const mesh_scan_srp_host_t *h)
     raw(w, ",\"services\":[");
     for (size_t i = 0; i < h->n_services; i++) {
         comma(w, i);
-        raw(w, "{\"instance\":");
-        str(w, h->services[i].instance);
-        raw(w, ",\"type\":");
-        str(w, h->services[i].type);
-        raw(w, "}");
+        write_srp_service(w, r, h, i);
     }
-    raw(w, "]}");
+    key_u64(w, "],\"source\":", h->source);
+    if (h->local) {
+        key_u64(w, ",\"lease_s\":", h->lease_s);
+        key_u64(w, ",\"key_lease_s\":", h->key_lease_s);
+    } else {
+        key_u64(w, ",\"ttl_s\":", h->ttl_s);
+    }
+    raw(w, "}");
+}
+
+static void write_srp_server(writer_t *w, const mesh_scan_srp_server_t *s)
+{
+    key_u64(w, "{\"rloc16\":", s->rloc16);
+    raw(w, ",\"address\":");
+    ip6_string(w, s->addr);
+    key_u64(w, ",\"port\":", s->port);
+    raw(w, ",\"this_board\":");
+    boolean(w, s->this_board);
+    raw(w, ",\"state\":\"");
+    raw(w, srp_state_name(s->state));
+    key_u64(w, "\",\"hosts\":", s->hosts);
+    raw(w, "}");
 }
 
 static void write_result(writer_t *w, const mesh_scan_result_t *r)
@@ -429,7 +518,12 @@ static void write_result(writer_t *w, const mesh_scan_result_t *r)
     raw(w, "],\"srp_hosts\":[");
     for (size_t i = 0; i < r->n_srp; i++) {
         comma(w, i);
-        write_srp_host(w, &r->srp[i]);
+        write_srp_host(w, r, &r->srp[i]);
+    }
+    raw(w, "],\"srp_servers\":[");
+    for (size_t i = 0; i < r->n_srp_servers; i++) {
+        comma(w, i);
+        write_srp_server(w, &r->srp_servers[i]);
     }
     raw(w, "]}");
 }
