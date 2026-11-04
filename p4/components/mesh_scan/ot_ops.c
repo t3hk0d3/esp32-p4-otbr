@@ -53,6 +53,7 @@ _Static_assert(MESH_SCAN_OT_ERROR_NONE == OT_ERROR_NONE, "OT error code");
 _Static_assert(MESH_SCAN_OT_ERROR_NO_BUFS == OT_ERROR_NO_BUFS, "OT error code");
 _Static_assert(MESH_SCAN_OT_ERROR_BUSY == OT_ERROR_BUSY, "OT error code");
 _Static_assert(MESH_SCAN_OT_ERROR_INVALID_STATE == OT_ERROR_INVALID_STATE, "OT error code");
+_Static_assert(MESH_SCAN_OT_ERROR_NOT_FOUND == OT_ERROR_NOT_FOUND, "OT error code");
 _Static_assert(MESH_SCAN_OT_ERROR_RESPONSE_TIMEOUT == OT_ERROR_RESPONSE_TIMEOUT, "OT error code");
 _Static_assert(MESH_SCAN_MAX_ROUTERS == OT_NETWORK_MAX_ROUTER_ID + 1, "router IDs");
 _Static_assert(sizeof(((mesh_scan_router_t *)0)->lq_in) == sizeof(((otMeshDiagRouterInfo *)0)->mLinkQualities),
@@ -578,6 +579,44 @@ static void op_release(void *p)
     heap_caps_free(p);
 }
 
+// SRP step ops: stubs until the DNS client glue lands (Task 4). No server listed: the step has nothing to do.
+
+static uint8_t op_srp_servers(mesh_scan_srp_server_t out[MESH_SCAN_MAX_SRP_SERVERS], mesh_scan_network_t *net,
+                              uint8_t ext_pan_id[8], uint8_t own_ext[8])
+{
+    (void)out;
+    (void)net;
+    (void)ext_pan_id;
+    (void)own_ext;
+    return 0;
+}
+
+static int op_dns_browse(const mesh_scan_srp_server_t *srv, const char *type, uint32_t gen, uint16_t job)
+{
+    (void)srv;
+    (void)type;
+    (void)gen;
+    (void)job;
+    return OT_ERROR_NOT_IMPLEMENTED;
+}
+
+static int op_dns_resolve(const mesh_scan_srp_server_t *srv, const char *instance, const char *type, uint32_t gen,
+                          uint16_t job)
+{
+    (void)srv;
+    (void)instance;
+    (void)type;
+    (void)gen;
+    (void)job;
+    return OT_ERROR_NOT_IMPLEMENTED;
+}
+
+static void op_arm_srp_deadline(uint32_t ms, uint32_t gen)
+{
+    (void)ms;
+    (void)gen;
+}
+
 static const mesh_scan_ops_t real_ops = {
     .discover = op_discover,
     .query_child_table = op_query_child_table,
@@ -593,6 +632,10 @@ static const mesh_scan_ops_t real_ops = {
     .disarm_cap = op_disarm_cap,
     .alloc = op_alloc,
     .release = op_release,
+    .srp_servers = op_srp_servers,
+    .dns_browse = op_dns_browse,
+    .dns_resolve = op_dns_resolve,
+    .arm_srp_deadline = op_arm_srp_deadline,
 };
 
 // Public entry points

@@ -24,6 +24,11 @@ extern "C" {
 #define MESH_SCAN_POOL_SIZE (24 * 1024) /**< TXT and subtype labels of one result */
 #define MESH_SCAN_NAME_LEN 64
 #define MESH_SCAN_MAX_OMR 4
+#define MESH_SCAN_SRP_QUERIES 4        /**< DNS queries in flight at most */
+#define MESH_SCAN_SRP_RESOLVES 48      /**< service resolves per scan */
+#define MESH_SCAN_SRP_BUDGET_MS 15000  /**< SRP step budget from scan start, inside the cap */
+#define MESH_SCAN_DNS_TIMEOUT_MS 3000  /**< DNS response timeout per attempt */
+#define MESH_SCAN_DNS_ATTEMPTS 2
 
 /** An IPv6 address or prefix, network byte order. */
 typedef uint8_t mesh_scan_ip6_t[16];

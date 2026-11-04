@@ -1308,3 +1308,784 @@ TEST_CASE("On a non-RLOC peer address or another prefix: returns false", "[mesh_
     TEST_ASSERT_FALSE(mesh_scan_rloc16_from_peer(link_local, prefix, &rloc16));
     TEST_ASSERT_EQUAL_HEX16(0x1234, rloc16);
 }
+
+// SRP step (Review focus 1, 2, 4)
+
+#define THIS_BOARD 0x8800
+#define REMOTE_A RLOC16(9)
+#define REMOTE_B RLOC16(12)
+#define SRP_TYPES 7
+
+#define ADDR_OMR 0xfe /**< first byte of an address under the fake OMR prefix */
+#define ADDR_ML 0xfd  /**< ... under the fake mesh-local prefix */
+#define ADDR_LAN 0x20 /**< ... on the LAN only */
+
+static const uint8_t EXT_PAN_ID[8] = { 0xde, 0xad, 0xbe, 0xef, 1, 2, 3, 4 };
+static const uint8_t OWN_EXT[8] = { 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11 };
+static const uint8_t TXT[] = "\x05" "a=xyz" "\x03" "b=1";
+
+static bool s_closed[FAKE_MAX_QUERIES]; /**< DNS calls the test has ended */
+static uint8_t s_txt[1024];
+
+static void srp_server(uint16_t rloc16, bool this_board)
+{
+    mesh_scan_srp_server_t *srv = &g_fake.srp[g_fake.srp_n++];
+
+    memset(srv, 0, sizeof(*srv));
+    srv->rloc16 = rloc16;
+    srv->addr[0] = ADDR_ML;
+    srv->addr[14] = (uint8_t)(rloc16 >> 8);
+    srv->addr[15] = (uint8_t)rloc16;
+    srv->port = 53;
+    srv->this_board = this_board;
+}
+
+/** Install the fake with this board's server and `n_remote` remote ones (REMOTE_A, REMOTE_B), no scan started. */
+static void srp_setup(int n_remote)
+{
+    fake_ops_install();
+    memset(s_closed, 0, sizeof(s_closed));
+    srp_server(THIS_BOARD, true);
+    if (n_remote > 0) {
+        srp_server(REMOTE_A, false);
+    }
+    if (n_remote > 1) {
+        srp_server(REMOTE_B, false);
+    }
+    memcpy(g_fake.ext_pan_id, EXT_PAN_ID, 8);
+    memcpy(g_fake.own_ext, OWN_EXT, 8);
+}
+
+static void srp_start(int n_remote)
+{
+    srp_setup(n_remote);
+    TEST_ASSERT_EQUAL(ESP_OK, mesh_scan_core_start());
+}
+
+/** End the mesh phases: discover finds no router, so no child step either. */
+static void mesh_over(void)
+{
+    mesh_scan_on_discover_done(MESH_SCAN_OT_ERROR_NONE);
+}
+
+/** A described record of `instance` on `host` with one address in the /64 of `head` bytes, TTL 120, port 5540, TXT. */
+static mesh_scan_srp_record_t srp_rec(const char *instance, const char *host, uint8_t head)
+{
+    mesh_scan_srp_record_t rec = { .port = 5540, .n_addrs = 1, .ttl_s = 120, .txt = TXT, .txt_len = sizeof(TXT) - 1,
+                                   .has_txt = true, .described = true
+                                 };
+
+    strcpy(rec.instance, instance);
+    strcpy(rec.host, host);
+    memset(rec.addrs[0], head, 8); // the whole /64
+    rec.addrs[0][15] = 1;
+    return rec;
+}
+
+static void srp_answer(int call, const mesh_scan_srp_record_t *rec)
+{
+    mesh_scan_on_srp_record(g_fake.dns[call].gen, g_fake.dns[call].job, rec);
+}
+
+static void srp_done(int call, int ot_error)
+{
+    s_closed[call] = true;
+    mesh_scan_on_srp_query_done(g_fake.dns[call].gen, g_fake.dns[call].job, ot_error);
+}
+
+static int find_call(uint16_t server, const char *type, bool resolve)
+{
+    for (int i = 0; i < g_fake.dns_calls; i++) {
+        if (g_fake.dns[i].server == server && g_fake.dns[i].resolve == resolve && !strcmp(g_fake.dns[i].type, type)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/** The browse of `type` on `server`, ending earlier queries with NONE until it is issued. */
+static int browse_of(uint16_t server, const char *type)
+{
+    for (;;) {
+        int i = find_call(server, type, false);
+        if (i >= 0) {
+            return i;
+        }
+        int open = -1;
+        for (int j = 0; j < g_fake.dns_calls && open < 0; j++) {
+            open = s_closed[j] ? -1 : j;
+        }
+        TEST_ASSERT_TRUE_MESSAGE(open >= 0, "browse never issued");
+        srp_done(open, MESH_SCAN_OT_ERROR_NONE);
+    }
+}
+
+/** End every query, issued now or later, with `a_error` for REMOTE_A and NONE for the others. */
+static void srp_drain(int a_error)
+{
+    for (int i = 0; i < g_fake.dns_calls; i++) {
+        if (!s_closed[i]) {
+            srp_done(i, g_fake.dns[i].server == REMOTE_A ? a_error : MESH_SCAN_OT_ERROR_NONE);
+        }
+    }
+}
+
+static int in_flight(void)
+{
+    int n = 0;
+
+    for (int i = 0; i < g_fake.dns_calls; i++) {
+        n += !s_closed[i];
+    }
+    return n;
+}
+
+static const mesh_scan_srp_host_t *srp_host(const mesh_scan_result_t *res, const char *name)
+{
+    for (uint8_t i = 0; i < res->n_srp; i++) {
+        if (!strcmp(res->srp[i].name, name)) {
+            return &res->srp[i];
+        }
+    }
+    return NULL;
+}
+
+static const mesh_scan_srp_server_t *srp_server_of(const mesh_scan_result_t *res, uint16_t rloc16)
+{
+    for (uint8_t i = 0; i < res->n_srp_servers; i++) {
+        if (res->srp_servers[i].rloc16 == rloc16) {
+            return &res->srp_servers[i];
+        }
+    }
+    TEST_FAIL_MESSAGE("no such server");
+    return NULL;
+}
+
+/** Answer REMOTE_A's _matter._tcp browse with `rec`, end every query, end the mesh phases: the scan is done. */
+static const mesh_scan_result_t *srp_finish_with(const mesh_scan_srp_record_t *rec)
+{
+    srp_answer(browse_of(REMOTE_A, "_matter._tcp"), rec);
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+    mesh_over();
+    return done_result();
+}
+
+// start
+
+TEST_CASE("Two servers in the network data, one is this board: browses only the remote one, 7 jobs, at most 4 in "
+          "flight", "[mesh_scan]")
+{
+    static const char *const types[SRP_TYPES] = { "_matter._tcp", "_matterc._udp", "_esphomelib._tcp", "_hap._udp",
+                                                  "_http._tcp", "_meshcop._udp", "_trel._udp"
+                                                };
+
+    srp_start(1);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_QUERIES, g_fake.dns_calls);
+    for (int i = 0; i < SRP_TYPES; i++) {
+        TEST_ASSERT_LESS_OR_EQUAL(MESH_SCAN_SRP_QUERIES, in_flight());
+        srp_done(i, MESH_SCAN_OT_ERROR_NONE);
+    }
+    TEST_ASSERT_EQUAL(SRP_TYPES, g_fake.dns_calls);
+    for (int i = 0; i < SRP_TYPES; i++) {
+        TEST_ASSERT_FALSE(g_fake.dns[i].resolve);
+        TEST_ASSERT_EQUAL_HEX16(REMOTE_A, g_fake.dns[i].server);
+        TEST_ASSERT_EQUAL_STRING(types[i], g_fake.dns[i].type);
+        TEST_ASSERT_EQUAL(g_fake.armed_gen, g_fake.dns[i].gen);
+    }
+}
+
+TEST_CASE("Two servers in the network data, one is this board: arms the SRP deadline with 15000 ms and the current "
+          "generation", "[mesh_scan]")
+{
+    srp_start(1);
+    TEST_ASSERT_EQUAL(1, g_fake.srp_deadline_calls);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_BUDGET_MS, g_fake.srp_deadline_ms);
+    TEST_ASSERT_EQUAL(15000, MESH_SCAN_SRP_BUDGET_MS);
+    TEST_ASSERT_EQUAL(g_fake.armed_gen, g_fake.srp_deadline_gen);
+}
+
+TEST_CASE("Two servers in the network data, one is this board: discover still starts at once; returns ESP_OK",
+          "[mesh_scan]")
+{
+    srp_setup(1);
+    TEST_ASSERT_EQUAL(ESP_OK, mesh_scan_core_start());
+    TEST_ASSERT_EQUAL(1, g_fake.discover_calls);
+    TEST_ASSERT_EQUAL(MESH_SCAN_RUNNING, view().state);
+}
+
+TEST_CASE("No remote server: no DNS query, SRP step counts as done", "[mesh_scan]")
+{
+    srp_start(0);
+    TEST_ASSERT_EQUAL(1, g_fake.srp_servers_calls);
+    TEST_ASSERT_EQUAL(0, g_fake.dns_calls);
+    TEST_ASSERT_EQUAL(0, g_fake.srp_deadline_calls);
+    TEST_ASSERT_EQUAL(2, g_fake.allocs); // no stage
+    mesh_over();
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_EQUAL(1, res->n_srp_servers);
+    TEST_ASSERT_TRUE(res->srp_servers[0].this_board);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_ANSWERED, res->srp_servers[0].state);
+}
+
+TEST_CASE("ops.dns_browse fails for one job: that job counts as done, the rest go on", "[mesh_scan]")
+{
+    srp_setup(1);
+    g_fake.dns_rets[1] = MESH_SCAN_OT_ERROR_NO_BUFS;
+    mesh_scan_core_start();
+    s_closed[1] = true; // never started
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_QUERIES + 1, g_fake.dns_calls);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_QUERIES, in_flight());
+    mesh_over();
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+    TEST_ASSERT_EQUAL(SRP_TYPES, g_fake.dns_calls);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_ANSWERED, srp_server_of(done_result(), REMOTE_A)->state);
+}
+
+TEST_CASE("When the SRP stage cannot be allocated: no DNS query, remote servers no_answer, the scan finishes",
+          "[mesh_scan]")
+{
+    srp_setup(1);
+    g_fake.fail_alloc_at = 3; // result, pool, stage
+    TEST_ASSERT_EQUAL(ESP_OK, mesh_scan_core_start());
+    TEST_ASSERT_EQUAL(0, g_fake.dns_calls);
+    mesh_over();
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_NO_ANSWER, srp_server_of(done_result(), REMOTE_A)->state);
+}
+
+// on_srp_record
+
+TEST_CASE("Browse answer described (SRV, TXT, address) and address kept: staged as a remote host with source = server "
+          "rloc16, ttl_s, port, TXT in the pool", "[mesh_scan]")
+{
+    srp_start(1);
+    const mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    const mesh_scan_result_t *res = srp_finish_with(&rec);
+    const mesh_scan_srp_host_t *h = srp_host(res, "plug-1");
+
+    TEST_ASSERT_NOT_NULL(h);
+    TEST_ASSERT_FALSE(h->local);
+    TEST_ASSERT_EQUAL_HEX16(REMOTE_A, h->source);
+    TEST_ASSERT_EQUAL(120, h->ttl_s);
+    TEST_ASSERT_EQUAL(1, h->n_addrs);
+    TEST_ASSERT_EQUAL_HEX8(ADDR_OMR, h->addrs[0][0]);
+    TEST_ASSERT_EQUAL(1, h->n_services);
+    TEST_ASSERT_EQUAL_STRING("Plug 1", h->services[0].instance);
+    TEST_ASSERT_EQUAL_STRING("_matter._tcp", h->services[0].type);
+    TEST_ASSERT_EQUAL(5540, h->services[0].port);
+    TEST_ASSERT_EQUAL_HEX16(REMOTE_A, h->services[0].source);
+    TEST_ASSERT_TRUE(h->services[0].has_txt);
+    TEST_ASSERT_FALSE(h->services[0].txt_truncated);
+    TEST_ASSERT_EQUAL(sizeof(TXT) - 1, h->services[0].txt_len);
+    TEST_ASSERT_EQUAL_MEMORY(TXT, res->pool + h->services[0].txt_off, sizeof(TXT) - 1);
+}
+
+TEST_CASE("Browse answer not described: a resolve is queued for that instance and type", "[mesh_scan]")
+{
+    srp_start(1);
+    mesh_scan_srp_record_t rec = srp_rec("Plug 1", "", ADDR_OMR);
+    rec.described = false;
+    rec.n_addrs = 0;
+    srp_answer(browse_of(REMOTE_A, "_hap._udp"), &rec);
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+
+    const int r = find_call(REMOTE_A, "_hap._udp", true);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, r);
+    TEST_ASSERT_EQUAL_STRING("Plug 1", g_fake.dns[r].instance);
+    TEST_ASSERT_EQUAL(SRP_TYPES + 1, g_fake.dns_calls);
+}
+
+TEST_CASE("Browse answer not described: the resolve's answer is staged", "[mesh_scan]")
+{
+    srp_start(1);
+    mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    rec.described = false;
+    srp_answer(browse_of(REMOTE_A, "_hap._udp"), &rec);
+    TEST_ASSERT_LESS_THAN(0, find_call(REMOTE_A, "_hap._udp", true)); // queued behind the browses
+    for (int i = 0; find_call(REMOTE_A, "_hap._udp", true) < 0 && i < g_fake.dns_calls; i++) {
+        if (!s_closed[i]) {
+            srp_done(i, MESH_SCAN_OT_ERROR_NONE);
+        }
+    }
+    const int r = find_call(REMOTE_A, "_hap._udp", true);
+    rec.described = true;
+    srp_answer(r, &rec);
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+    mesh_over();
+    const mesh_scan_srp_host_t *h = srp_host(done_result(), "plug-1");
+    TEST_ASSERT_NOT_NULL(h);
+    TEST_ASSERT_EQUAL(1, h->n_services); // the browse data itself was not staged
+    TEST_ASSERT_EQUAL_STRING("_hap._udp", h->services[0].type);
+}
+
+TEST_CASE("49th resolve wanted: not queued; the browse data is kept if it passes the filter, else dropped",
+          "[mesh_scan]")
+{
+    char name[16];
+
+    srp_start(1);
+    const int b = browse_of(REMOTE_A, "_matter._tcp");
+    for (int i = 0; i < MESH_SCAN_SRP_RESOLVES + 2; i++) {
+        snprintf(name, sizeof(name), "dev-%d", i);
+        // the 49th passes the filter, the 50th does not
+        mesh_scan_srp_record_t rec = srp_rec(name, name, i == MESH_SCAN_SRP_RESOLVES + 1 ? ADDR_LAN : ADDR_OMR);
+        rec.described = false;
+        srp_answer(b, &rec);
+    }
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+    mesh_over();
+    int resolves = 0;
+    for (int i = 0; i < g_fake.dns_calls; i++) {
+        resolves += g_fake.dns[i].resolve;
+    }
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_RESOLVES, resolves);
+    TEST_ASSERT_EQUAL(48, MESH_SCAN_SRP_RESOLVES);
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_NOT_NULL(srp_host(res, "dev-48"));
+    TEST_ASSERT_NULL(srp_host(res, "dev-49"));
+    TEST_ASSERT_NULL(srp_host(res, "dev-0")); // resolved, and its resolve gave no record
+}
+
+TEST_CASE("Address only on the LAN: dropped", "[mesh_scan]")
+{
+    srp_start(1);
+    const mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_LAN);
+    const mesh_scan_result_t *res = srp_finish_with(&rec);
+
+    TEST_ASSERT_NULL(srp_host(res, "plug-1"));
+    TEST_ASSERT_EQUAL(1, res->n_srp);
+    TEST_ASSERT_EQUAL(0, srp_server_of(res, REMOTE_A)->hosts);
+}
+
+TEST_CASE("Address under the mesh-local prefix: kept", "[mesh_scan]")
+{
+    srp_start(1);
+    const mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_ML);
+    TEST_ASSERT_NOT_NULL(srp_host(srp_finish_with(&rec), "plug-1"));
+}
+
+/** A meshcop TXT with `xp` = `xp` and `xa` = `xa`. */
+static mesh_scan_srp_record_t meshcop_rec(const uint8_t xp[8], const uint8_t xa[8])
+{
+    mesh_scan_srp_record_t rec = srp_rec("HA OTBR", "ha-otbr", ADDR_LAN);
+
+    s_txt[0] = 11;
+    memcpy(s_txt + 1, "xp=", 3);
+    memcpy(s_txt + 4, xp, 8);
+    s_txt[12] = 11;
+    memcpy(s_txt + 13, "xa=", 3);
+    memcpy(s_txt + 16, xa, 8);
+    rec.txt = s_txt;
+    rec.txt_len = 24;
+    return rec;
+}
+
+TEST_CASE("meshcop record with this network's xp from a LAN address: kept", "[mesh_scan]")
+{
+    static const uint8_t other_ext[8] = { 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22 };
+    static const uint8_t other_pan[8] = { 9, 9, 9, 9, 9, 9, 9, 9 };
+
+    srp_start(1);
+    mesh_scan_srp_record_t ours = meshcop_rec(EXT_PAN_ID, other_ext);
+    srp_answer(browse_of(REMOTE_A, "_meshcop._udp"), &ours);
+    mesh_scan_srp_record_t foreign = meshcop_rec(other_pan, other_ext);
+    strcpy(foreign.host, "neighbour-otbr");
+    srp_answer(browse_of(REMOTE_A, "_meshcop._udp"), &foreign);
+    mesh_scan_srp_record_t self = meshcop_rec(EXT_PAN_ID, OWN_EXT);
+    strcpy(self.host, "this-otbr");
+    srp_answer(browse_of(REMOTE_A, "_meshcop._udp"), &self);
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+    mesh_over();
+
+    const mesh_scan_result_t *res = done_result();
+    const mesh_scan_srp_host_t *h = srp_host(res, "ha-otbr");
+    TEST_ASSERT_NOT_NULL(h);
+    TEST_ASSERT_EQUAL_STRING("_meshcop._udp", h->services[0].type);
+    TEST_ASSERT_NULL(srp_host(res, "neighbour-otbr"));
+    TEST_ASSERT_NULL(srp_host(res, "this-otbr"));
+}
+
+TEST_CASE("Same host name already staged from another server: one host, services merged, host fields of the first "
+          "kept", "[mesh_scan]")
+{
+    srp_start(2);
+    mesh_scan_srp_record_t a = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    srp_answer(browse_of(REMOTE_A, "_matter._tcp"), &a);
+    mesh_scan_srp_record_t b = srp_rec("Plug 1", "PLUG-1", ADDR_ML); // same service again
+    b.ttl_s = 999;
+    srp_answer(browse_of(REMOTE_B, "_matter._tcp"), &b);
+    mesh_scan_srp_record_t c = srp_rec("plug-esp", "Plug-1", ADDR_ML);
+    srp_answer(browse_of(REMOTE_B, "_esphomelib._tcp"), &c);
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+    mesh_over();
+
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_EQUAL(2, res->n_srp); // lamp and plug-1
+    const mesh_scan_srp_host_t *h = srp_host(res, "plug-1");
+    TEST_ASSERT_NOT_NULL(h);
+    TEST_ASSERT_EQUAL_HEX16(REMOTE_A, h->source);
+    TEST_ASSERT_EQUAL(120, h->ttl_s);
+    TEST_ASSERT_EQUAL_HEX8(ADDR_OMR, h->addrs[0][0]);
+    TEST_ASSERT_EQUAL(2, h->n_services);
+    TEST_ASSERT_EQUAL_STRING("_matter._tcp", h->services[0].type);
+    TEST_ASSERT_EQUAL_HEX16(REMOTE_A, h->services[0].source);
+    TEST_ASSERT_EQUAL_STRING("_esphomelib._tcp", h->services[1].type);
+    TEST_ASSERT_EQUAL_HEX16(REMOTE_B, h->services[1].source);
+}
+
+TEST_CASE("TXT of 700 bytes: stored cut to whole strings within 512, txt_truncated true", "[mesh_scan]")
+{
+    for (int i = 0; i < 10; i++) { // ten strings of 1 + 69 bytes
+        s_txt[i * 70] = 69;
+        memset(s_txt + i * 70 + 1, 'a' + i, 69);
+    }
+    srp_start(1);
+    mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    rec.txt = s_txt;
+    rec.txt_len = 700;
+    const mesh_scan_result_t *res = srp_finish_with(&rec);
+    const mesh_scan_srp_host_t *h = srp_host(res, "plug-1");
+
+    TEST_ASSERT_TRUE(h->services[0].has_txt);
+    TEST_ASSERT_TRUE(h->services[0].txt_truncated);
+    TEST_ASSERT_EQUAL(490, h->services[0].txt_len);
+    TEST_ASSERT_EQUAL_MEMORY(s_txt, res->pool + h->services[0].txt_off, 490);
+}
+
+TEST_CASE("TXT cut by ot_ops: txt_truncated true", "[mesh_scan]")
+{
+    srp_start(1);
+    mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    rec.txt_truncated = true;
+    const mesh_scan_srp_host_t *h = srp_host(srp_finish_with(&rec), "plug-1");
+
+    TEST_ASSERT_TRUE(h->services[0].txt_truncated);
+    TEST_ASSERT_EQUAL(sizeof(TXT) - 1, h->services[0].txt_len);
+}
+
+TEST_CASE("Pool full: service kept without TXT, txt_truncated true", "[mesh_scan]")
+{
+    srp_start(1);
+    g_fake.snapshot_pool_used = MESH_SCAN_POOL_SIZE - 2; // this board's records used it up
+    const mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    const mesh_scan_result_t *res = srp_finish_with(&rec);
+    const mesh_scan_srp_host_t *h = srp_host(res, "plug-1");
+
+    TEST_ASSERT_EQUAL(1, h->n_services);
+    TEST_ASSERT_FALSE(h->services[0].has_txt);
+    TEST_ASSERT_EQUAL(0, h->services[0].txt_len);
+    TEST_ASSERT_TRUE(h->services[0].txt_truncated);
+    TEST_ASSERT_EQUAL(MESH_SCAN_POOL_SIZE - 2, res->pool_used);
+}
+
+TEST_CASE("Stale generation or a job not in flight: ignored, nothing written", "[mesh_scan]")
+{
+    srp_start(1);
+    const int b = browse_of(REMOTE_A, "_matter._tcp");
+    const mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    const int calls = g_fake.dns_calls;
+
+    mesh_scan_on_srp_record(g_fake.dns[b].gen - 1, g_fake.dns[b].job, &rec); // older generation
+    mesh_scan_on_srp_record(g_fake.dns[b].gen, 6, &rec);                    // queued, not issued yet
+    mesh_scan_on_srp_record(g_fake.dns[b].gen, 500, &rec);                  // no such job
+    mesh_scan_on_srp_query_done(g_fake.dns[b].gen - 1, g_fake.dns[b].job, MESH_SCAN_OT_ERROR_NONE);
+    mesh_scan_on_srp_query_done(g_fake.dns[b].gen, 6, MESH_SCAN_OT_ERROR_NONE);
+    TEST_ASSERT_EQUAL(calls, g_fake.dns_calls); // no slot freed
+    srp_done(b, MESH_SCAN_OT_ERROR_NONE);
+    srp_answer(b, &rec);                         // after its done
+    mesh_scan_on_srp_query_done(g_fake.dns[b].gen, g_fake.dns[b].job, MESH_SCAN_OT_ERROR_NONE); // twice
+    TEST_ASSERT_EQUAL(calls + 1, g_fake.dns_calls);
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+    mesh_over();
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_NULL(srp_host(res, "plug-1"));
+    TEST_ASSERT_EQUAL(0, srp_server_of(res, REMOTE_A)->hosts);
+}
+
+TEST_CASE("Late DNS callbacks of an older scan (Review focus 4): dropped, the newer scan and its result untouched",
+          "[mesh_scan]")
+{
+    srp_start(1);
+    const fake_dns_call_t old = g_fake.dns[0];
+    const int old_calls = g_fake.dns_calls;
+    mesh_scan_core_cancel(); // the old stage and result are released
+    TEST_ASSERT_EQUAL(g_fake.allocs, g_fake.releases);
+
+    TEST_ASSERT_EQUAL(ESP_OK, mesh_scan_core_start());
+    const int calls = g_fake.dns_calls;
+    const mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    mesh_scan_on_srp_record(old.gen, old.job, &rec); // job 0 is in flight in the new scan too
+    mesh_scan_on_srp_query_done(old.gen, old.job, MESH_SCAN_OT_ERROR_NONE);
+    mesh_scan_on_srp_deadline(old.gen);
+    TEST_ASSERT_EQUAL(calls, g_fake.dns_calls);
+    TEST_ASSERT_EQUAL(MESH_SCAN_RUNNING, view().state);
+
+    memset(s_closed, 0, sizeof(s_closed));
+    for (int i = 0; i < old_calls; i++) {
+        s_closed[i] = true; // the old scan's
+    }
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+    mesh_over();
+    TEST_ASSERT_NULL(srp_host(done_result(), "plug-1"));
+}
+
+// on_srp_query_done
+
+TEST_CASE("On a query done with NONE: server state answered; next queued job issued", "[mesh_scan]")
+{
+    srp_start(1);
+    srp_done(0, MESH_SCAN_OT_ERROR_NONE);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_QUERIES + 1, g_fake.dns_calls);
+    TEST_ASSERT_EQUAL_STRING("_http._tcp", g_fake.dns[MESH_SCAN_SRP_QUERIES].type);
+    for (int i = 1; i < g_fake.dns_calls; i++) {
+        if (!s_closed[i]) {
+            srp_done(i, MESH_SCAN_OT_ERROR_RESPONSE_TIMEOUT); // one answer is enough
+        }
+    }
+    mesh_over();
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_ANSWERED, srp_server_of(done_result(), REMOTE_A)->state);
+}
+
+TEST_CASE("On a query done with NOT_FOUND (empty answer): server state answered", "[mesh_scan]")
+{
+    srp_start(1);
+    srp_drain(MESH_SCAN_OT_ERROR_NOT_FOUND);
+    mesh_over();
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_ANSWERED, srp_server_of(done_result(), REMOTE_A)->state);
+}
+
+TEST_CASE("Every query of a server timed out (Review focus 1): server state no_answer at the end, the other server's "
+          "records intact", "[mesh_scan]")
+{
+    srp_start(2);
+    const mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    srp_answer(browse_of(REMOTE_B, "_matter._tcp"), &rec);
+    mesh_over();
+    srp_drain(MESH_SCAN_OT_ERROR_RESPONSE_TIMEOUT);
+
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_EQUAL(2 * SRP_TYPES, g_fake.dns_calls);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_NO_ANSWER, srp_server_of(res, REMOTE_A)->state);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_ANSWERED, srp_server_of(res, REMOTE_B)->state);
+    TEST_ASSERT_EQUAL(1, srp_server_of(res, REMOTE_B)->hosts);
+    TEST_ASSERT_EQUAL_HEX16(REMOTE_B, srp_host(res, "plug-1")->source);
+    TEST_ASSERT_FALSE(res->partial);
+}
+
+TEST_CASE("Two remote servers: their browses alternate, so a silent one cannot hold back the other", "[mesh_scan]")
+{
+    srp_start(2);
+    TEST_ASSERT_EQUAL_HEX16(REMOTE_A, g_fake.dns[0].server);
+    TEST_ASSERT_EQUAL_HEX16(REMOTE_B, g_fake.dns[1].server);
+    TEST_ASSERT_EQUAL_HEX16(REMOTE_A, g_fake.dns[2].server);
+    TEST_ASSERT_EQUAL_HEX16(REMOTE_B, g_fake.dns[3].server);
+}
+
+TEST_CASE("Last job of the step done while child phases still run: scan stays running", "[mesh_scan]")
+{
+    srp_start(1);
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+    TEST_ASSERT_EQUAL(MESH_SCAN_RUNNING, view().state);
+    TEST_ASSERT_EQUAL(0, g_fake.snapshot_calls);
+    mesh_over();
+    done_result();
+}
+
+TEST_CASE("Last job done after the mesh phases are over: scan finishes (state done)", "[mesh_scan]")
+{
+    srp_start(1);
+    mesh_over();
+    TEST_ASSERT_EQUAL(MESH_SCAN_RUNNING, view().state);
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+    done_result();
+    TEST_ASSERT_EQUAL(1, g_fake.snapshot_calls);
+}
+
+// on_srp_deadline
+
+TEST_CASE("On the SRP deadline with queries in flight: their servers cut_short; queued jobs dropped; later callbacks "
+          "ignored", "[mesh_scan]")
+{
+    srp_start(1);
+    mesh_over();
+    srp_done(0, MESH_SCAN_OT_ERROR_NONE); // answered once
+    const int calls = g_fake.dns_calls;
+    mesh_scan_on_srp_deadline(g_fake.srp_deadline_gen);
+
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_CUT_SHORT, srp_server_of(res, REMOTE_A)->state);
+    TEST_ASSERT_EQUAL(calls, g_fake.dns_calls);
+    const mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    srp_answer(1, &rec); // in flight at the deadline
+    srp_done(1, MESH_SCAN_OT_ERROR_NONE);
+    TEST_ASSERT_EQUAL(calls, g_fake.dns_calls);
+    TEST_ASSERT_NULL(srp_host(done_result(), "plug-1"));
+}
+
+TEST_CASE("On the SRP deadline, a server that never answered: no_answer", "[mesh_scan]")
+{
+    srp_start(1);
+    mesh_over();
+    mesh_scan_on_srp_deadline(g_fake.srp_deadline_gen);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_NO_ANSWER, srp_server_of(done_result(), REMOTE_A)->state);
+}
+
+TEST_CASE("On the SRP deadline with the mesh phases still running: scan keeps running until they end",
+          "[mesh_scan]")
+{
+    srp_start(1);
+    const mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    srp_answer(0, &rec);
+    mesh_scan_on_srp_deadline(g_fake.srp_deadline_gen);
+    TEST_ASSERT_EQUAL(MESH_SCAN_RUNNING, view().state);
+    mesh_over();
+    TEST_ASSERT_NOT_NULL(srp_host(done_result(), "plug-1")); // what was staged before the deadline
+}
+
+// finish
+
+TEST_CASE("Mesh phases over, SRP step not over: waits (state running)", "[mesh_scan]")
+{
+    srp_start(1);
+    mesh_over();
+    TEST_ASSERT_EQUAL(MESH_SCAN_RUNNING, view().state);
+    TEST_ASSERT_EQUAL(0, g_fake.snapshot_calls);
+    TEST_ASSERT_EQUAL(0, g_fake.disarm_calls);
+}
+
+TEST_CASE("Cap hit during the SRP step: finishes with what is staged; servers with queries in flight cut_short; "
+          "partial unchanged by SRP", "[mesh_scan]")
+{
+    srp_start(1);
+    mesh_over();
+    const int b = browse_of(REMOTE_A, "_matter._tcp");
+    const mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    srp_answer(b, &rec);
+    srp_done(b, MESH_SCAN_OT_ERROR_NONE);
+    mesh_scan_on_cap();
+
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_NOT_NULL(srp_host(res, "plug-1"));
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_CUT_SHORT, srp_server_of(res, REMOTE_A)->state);
+    TEST_ASSERT_FALSE(res->partial);
+    TEST_ASSERT_EQUAL(1, g_fake.releases); // only the stage is gone
+
+    // Review focus 4: a late answer after the cap
+    const mesh_scan_srp_record_t late = srp_rec("Plug 2", "plug-2", ADDR_OMR);
+    srp_answer(1, &late);
+    srp_done(1, MESH_SCAN_OT_ERROR_NONE);
+    mesh_scan_on_srp_deadline(g_fake.srp_deadline_gen);
+    TEST_ASSERT_NULL(srp_host(done_result(), "plug-2"));
+}
+
+TEST_CASE("Cap hit during discover with the SRP step running: partial as before", "[mesh_scan]")
+{
+    srp_start(1);
+    mesh_scan_on_router(router(3, 0));
+    mesh_scan_on_cap();
+    TEST_ASSERT_TRUE(done_result()->partial);
+}
+
+TEST_CASE("Local snapshot holds the same host as a remote one (Review focus 2): one host, source = this board, "
+          "lease_s/key_lease_s set, ttl_s absent, services merged", "[mesh_scan]")
+{
+    srp_start(1);
+    mesh_scan_srp_record_t same = srp_rec("lamp-svc", "LAMP", ADDR_OMR); // proxied copy of the local service
+    srp_answer(browse_of(REMOTE_A, "_matter._tcp"), &same);
+    mesh_scan_srp_record_t other = srp_rec("Lamp", "lamp", ADDR_OMR);
+    srp_answer(browse_of(REMOTE_A, "_hap._udp"), &other);
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+    mesh_over();
+
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_EQUAL(1, res->n_srp);
+    const mesh_scan_srp_host_t *h = &res->srp[0];
+    TEST_ASSERT_EQUAL_STRING("lamp", h->name);
+    TEST_ASSERT_TRUE(h->local);
+    TEST_ASSERT_EQUAL_HEX16(THIS_BOARD, h->source);
+    TEST_ASSERT_EQUAL(3600, h->lease_s);
+    TEST_ASSERT_EQUAL(86400, h->key_lease_s);
+    TEST_ASSERT_EQUAL(0, h->ttl_s);
+    TEST_ASSERT_EQUAL(ADDR_ML, h->addrs[0][0]); // this board's addresses
+    TEST_ASSERT_EQUAL(2, h->n_services);        // no duplicate row for lamp-svc
+    TEST_ASSERT_EQUAL_STRING("lamp-svc", h->services[0].instance);
+    TEST_ASSERT_EQUAL_HEX16(THIS_BOARD, h->services[0].source);
+    TEST_ASSERT_EQUAL_STRING("Lamp", h->services[1].instance);
+    TEST_ASSERT_EQUAL_STRING("_hap._udp", h->services[1].type);
+    TEST_ASSERT_EQUAL_HEX16(REMOTE_A, h->services[1].source);
+    TEST_ASSERT_EQUAL(1, srp_server_of(res, REMOTE_A)->hosts);
+}
+
+TEST_CASE("64 hosts already: further remote hosts dropped", "[mesh_scan]")
+{
+    srp_start(1);
+    g_fake.snapshot_hosts = MESH_SCAN_MAX_SRP_HOSTS;
+    const mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    const mesh_scan_result_t *res = srp_finish_with(&rec);
+
+    TEST_ASSERT_EQUAL(MESH_SCAN_MAX_SRP_HOSTS, res->n_srp);
+    TEST_ASSERT_NULL(srp_host(res, "plug-1"));
+}
+
+TEST_CASE("srp_servers: one entry per network data server, hosts = kept hosts from it", "[mesh_scan]")
+{
+    srp_start(2);
+    mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    srp_answer(browse_of(REMOTE_A, "_matter._tcp"), &rec);
+    rec = srp_rec("Plug 2", "plug-2", ADDR_OMR);
+    srp_answer(browse_of(REMOTE_A, "_matter._tcp"), &rec);
+    rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    srp_answer(browse_of(REMOTE_B, "_matter._tcp"), &rec); // before de-duplication
+    rec = srp_rec("Plug 1 HAP", "plug-1", ADDR_OMR);
+    srp_answer(browse_of(REMOTE_A, "_hap._udp"), &rec); // same host again: counted once
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+    mesh_over();
+
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_EQUAL(3, res->n_srp_servers);
+    const mesh_scan_srp_server_t *self = srp_server_of(res, THIS_BOARD);
+    TEST_ASSERT_TRUE(self->this_board);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_ANSWERED, self->state);
+    TEST_ASSERT_EQUAL(1, self->hosts); // lamp
+    TEST_ASSERT_EQUAL(53, self->port);
+    TEST_ASSERT_EQUAL_HEX8(ADDR_ML, self->addr[0]);
+    TEST_ASSERT_FALSE(srp_server_of(res, REMOTE_A)->this_board);
+    TEST_ASSERT_EQUAL(2, srp_server_of(res, REMOTE_A)->hosts);
+    TEST_ASSERT_EQUAL(1, srp_server_of(res, REMOTE_B)->hosts);
+}
+
+// SRP callbacks and the mode
+
+TEST_CASE("When the mode is no longer BR_RUNNING: an SRP callback fails the scan with error stopped", "[mesh_scan]")
+{
+    const mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+
+    for (int i = 0; i < 3; i++) {
+        srp_start(1);
+        g_fake.br_running = false;
+        if (i == 0) {
+            srp_answer(0, &rec);
+        } else if (i == 1) {
+            srp_done(0, MESH_SCAN_OT_ERROR_NONE);
+        } else {
+            mesh_scan_on_srp_deadline(g_fake.srp_deadline_gen);
+        }
+        assert_failed(MESH_SCAN_ERR_STOPPED);
+        TEST_ASSERT_EQUAL(0, g_fake.cancel_calls);
+        TEST_ASSERT_EQUAL(g_fake.allocs, g_fake.releases); // stage released with the result
+    }
+}
+
+// result release
+
+TEST_CASE("On a scan with an SRP step whose result is released: the pool and stage blocks go with it (allocs == "
+          "releases)", "[mesh_scan]")
+{
+    srp_start(1);
+    TEST_ASSERT_EQUAL(3, g_fake.allocs); // result, pool, stage
+    const mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    srp_finish_with(&rec);
+    TEST_ASSERT_EQUAL(1, g_fake.releases); // the stage, at finish
+    mesh_scan_core_start();                // releases the done result and its pool
+    mesh_scan_core_cancel();               // and this one with its stage
+    TEST_ASSERT_EQUAL(g_fake.allocs, g_fake.releases);
+}

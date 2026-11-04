@@ -10,6 +10,16 @@
 
 #define FAKE_MAX_QUERIES 256
 
+/** One dns_browse or dns_resolve call. */
+typedef struct {
+    bool resolve;
+    uint16_t server; /**< RLOC16 of the server asked */
+    char type[MESH_SCAN_NAME_LEN];
+    char instance[MESH_SCAN_NAME_LEN]; /**< resolve only */
+    uint32_t gen;
+    uint16_t job;
+} fake_dns_call_t;
+
 typedef struct {
     // Scripted inputs.
     bool br_running;
@@ -22,6 +32,13 @@ typedef struct {
     uint8_t table_ids[MESH_SCAN_MAX_ROUTERS];
     int64_t now_ms;
     int fail_alloc_at; /**< allocation number (1-based, counted from the reset) that returns NULL, 0 = never */
+    uint8_t srp_n;     /**< the network data's SRP servers */
+    mesh_scan_srp_server_t srp[MESH_SCAN_MAX_SRP_SERVERS];
+    uint8_t ext_pan_id[8];
+    uint8_t own_ext[8];
+    int dns_rets[FAKE_MAX_QUERIES]; /**< return code of each dns_browse/dns_resolve call, in call order */
+    uint8_t snapshot_hosts;         /**< local SRP hosts in the snapshot: "lamp" then "local-<i>", 0 means 1 */
+    uint16_t snapshot_pool_used;    /**< pool bytes the snapshot uses up */
 
     // Recorded calls.
     int discover_calls;
@@ -42,6 +59,12 @@ typedef struct {
     uint32_t armed_ms;
     uint32_t armed_gen;
     int disarm_calls;
+    int srp_servers_calls;
+    int dns_calls;
+    fake_dns_call_t dns[FAKE_MAX_QUERIES];
+    int srp_deadline_calls;
+    uint32_t srp_deadline_ms;
+    uint32_t srp_deadline_gen;
     int allocs;
     int releases;
     int ops_calls; /**< every op except br_running */
