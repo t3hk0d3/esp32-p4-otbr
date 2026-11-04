@@ -9,6 +9,10 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 jobs="${HOST_TEST_JOBS:-4}"
+if [[ ! "$jobs" =~ ^[1-9][0-9]*$ ]]; then
+    echo "HOST_TEST_JOBS must be a positive integer, got '$jobs'" >&2
+    exit 2
+fi
 logs="$(mktemp -d)"
 trap 'rm -rf "$logs"' EXIT
 
@@ -22,19 +26,32 @@ needs_set_target() {
     return 1
 }
 
+# A project with a dependencies.lock but no managed_components/ yet downloads its components while it configures.
+# The component manager's cache is shared and not safe for parallel downloads (a half-written copy is reported as
+# corrupted), so such projects take one lock for their configure and build.
+downloads_components() {
+    [[ -f "$1/dependencies.lock" && ! -d "$1/managed_components" ]]
+}
+
 # Called as `run_project ... || status=$?`, where set -e does not apply, so every step returns on failure itself.
 run_project() {
     local dir="$1" elf
+    if downloads_components "$dir"; then
+        exec 9>"$logs/components.lock"
+        flock 9
+    fi
     if needs_set_target "$dir"; then
         idf.py -C "$dir" --preview set-target linux || return
     fi
     idf.py -C "$dir" build || return
-    elf="$(find "$dir/build" -maxdepth 1 -name '*.elf' | head -n 1)"
-    if [[ -z "$elf" ]]; then
+    exec 9>&-
+    # The ELF of the current project() name: a renamed project leaves its old ELF in build/.
+    elf="$(sed -n 's/.*"app_elf": *"\([^"]*\)".*/\1/p' "$dir/build/project_description.json")"
+    if [[ -z "$elf" || ! -f "$dir/build/$elf" ]]; then
         echo "no .elf produced in $dir/build" >&2
         return 1
     fi
-    "$elf"
+    "$dir/build/$elf"
 }
 
 projects=()
