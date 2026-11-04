@@ -95,7 +95,8 @@ TEST_CASE("On running before discover ends: writes progress {\"routers\":0,\"que
 
     TEST_ASSERT_EQUAL_STRING("{\"state\":\"running\",\"progress\":{\"routers\":0,\"queried\":0,"
                              "\"children\":{\"total\":0,\"queried\":0},"
-                             "\"info\":{\"total\":0,\"answered\":0,\"sleepy_waiting\":0,\"wait_s\":0}}}",
+                             "\"info\":{\"total\":0,\"answered\":0,\"sleepy_waiting\":0,\"wait_s\":0,"
+                             "\"awake_left\":0,\"done\":0}}}",
                              render(&view, &s));
     sink_free(&s);
 }
@@ -108,7 +109,8 @@ TEST_CASE("On running during queries: writes progress with routers = discovered 
 
     TEST_ASSERT_EQUAL_STRING("{\"state\":\"running\",\"progress\":{\"routers\":5,\"queried\":3,"
                              "\"children\":{\"total\":0,\"queried\":0},"
-                             "\"info\":{\"total\":0,\"answered\":0,\"sleepy_waiting\":0,\"wait_s\":0}}}",
+                             "\"info\":{\"total\":0,\"answered\":0,\"sleepy_waiting\":0,\"wait_s\":0,"
+                             "\"awake_left\":0,\"done\":0}}}",
                              render(&view, &s));
     sink_free(&s);
 }
@@ -264,7 +266,8 @@ TEST_CASE("On done: writes a stub router as router_id, rloc16, responded:false a
     sink_t s;
     const char *out = render(&view, &s);
 
-    assert_contains(out, "},{\"router_id\":25,\"rloc16\":25600,\"responded\":false,\"info\":{\"state\":\"not_asked\"}},{");
+    assert_contains(out, "},{\"router_id\":25,\"rloc16\":25600,\"responded\":false,"
+                    "\"info\":{\"state\":\"not_asked\"}},{");
     sink_free(&s);
 }
 
@@ -293,7 +296,8 @@ TEST_CASE("On done: omits the child-table fields of a child the child table did 
     const char *out = render(&view, &s);
 
     assert_contains(out, "{\"rloc16\":3074,\"mode\":{\"rx_on_when_idle\":false,\"full_thread_device\":false,"
-                    "\"full_network_data\":false},\"lq_in\":3,\"addresses\":[\"2001:db8:4a2:1::c02\"],\"info\":{\"state\":\"not_asked\"}}");
+                    "\"full_network_data\":false},\"lq_in\":3,\"addresses\":[\"2001:db8:4a2:1::c02\"],"
+                    "\"info\":{\"state\":\"not_asked\"}}");
     assert_contains(out, "{\"rloc16\":3073,\"ext_address\":\"3000000000000001\",");
     sink_free(&s);
 }
@@ -398,23 +402,26 @@ TEST_CASE("On running in the child address step: writes progress {\"routers\",\"
 
     TEST_ASSERT_EQUAL_STRING("{\"state\":\"running\",\"progress\":{\"routers\":5,\"queried\":5,"
                              "\"children\":{\"total\":7,\"queried\":2},"
-                             "\"info\":{\"total\":0,\"answered\":0,\"sleepy_waiting\":0,\"wait_s\":0}}}",
+                             "\"info\":{\"total\":0,\"answered\":0,\"sleepy_waiting\":0,\"wait_s\":0,"
+                             "\"awake_left\":0,\"done\":0}}}",
                              render(&view, &s));
     sink_free(&s);
 }
 
-TEST_CASE("On running in the info phase: progress gains info with total, answered, sleepy_waiting and wait_s",
-          "[mesh_scan]")
+TEST_CASE("On running in the info phase: progress gains info with total, answered, sleepy_waiting, wait_s, "
+          "awake_left and done", "[mesh_scan]")
 {
     const mesh_scan_view_t view = {
         .state = MESH_SCAN_RUNNING, .routers = 5, .queried = 5, .children_total = 7, .children_queried = 7,
-        .info_total = 12, .info_answered = 9, .sleepy_waiting = 2, .sleepy_wait_s = 231
+        .info_total = 12, .info_answered = 9, .sleepy_waiting = 2, .sleepy_wait_s = 231, .awake_left = 0,
+        .info_done = 10
     };
     sink_t s;
 
     TEST_ASSERT_EQUAL_STRING("{\"state\":\"running\",\"progress\":{\"routers\":5,\"queried\":5,"
                              "\"children\":{\"total\":7,\"queried\":7},"
-                             "\"info\":{\"total\":12,\"answered\":9,\"sleepy_waiting\":2,\"wait_s\":231}}}",
+                             "\"info\":{\"total\":12,\"answered\":9,\"sleepy_waiting\":2,\"wait_s\":231,"
+                             "\"awake_left\":0,\"done\":10}}}",
                              render(&view, &s));
     sink_free(&s);
 }
@@ -613,7 +620,8 @@ TEST_CASE("On a child with addresses_reported false: writes \"addresses_reported
     sink_t s;
     const char *out = render(&view, &s);
 
-    assert_contains(out, "\"csl\":false,\"addresses\":[],\"addresses_reported\":false,\"info\":{\"state\":\"not_asked\"}},{\"rloc16\":9219,");
+    assert_contains(out, "\"csl\":false,\"addresses\":[],\"addresses_reported\":false,"
+                    "\"info\":{\"state\":\"not_asked\"}},{\"rloc16\":9219,");
     const char *first = strstr(out, "addresses_reported");
     TEST_ASSERT_NULL(strstr(first + 1, "addresses_reported")); // the other children leave the key out
     assert_json(out);

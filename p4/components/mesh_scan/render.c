@@ -629,6 +629,8 @@ esp_err_t mesh_scan_render_view(const mesh_scan_view_t *view, mesh_scan_sink_t s
         key_u64(&w, ",\"answered\":", view->info_answered);
         key_u64(&w, ",\"sleepy_waiting\":", view->sleepy_waiting);
         key_u64(&w, ",\"wait_s\":", view->sleepy_wait_s);
+        key_u64(&w, ",\"awake_left\":", view->awake_left);
+        key_u64(&w, ",\"done\":", view->info_done);
         raw(&w, "}}}");
         break;
     case MESH_SCAN_DONE:

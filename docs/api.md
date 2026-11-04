@@ -107,14 +107,17 @@ While the scan runs, `progress.info` counts the answers.
 
 - Strings are JSON-escaped; bytes that are not valid UTF-8 become U+FFFD. A device may answer with none of the asked
   TLVs: it is `answered` and has no fields.
-- `progress.info` is `{total, answered, sleepy_waiting, wait_s}`: devices to ask, devices that replied (`answered`
-  counts replies only, not `no_answer`), sleepy devices still waiting, and the seconds until the latest sleepy
-  deadline (0 when none waits).
+- `progress.info` is `{total, answered, sleepy_waiting, wait_s, awake_left, done}`: devices to ask, devices that
+  replied (`answered` counts replies only, not `no_answer`), sleepy devices still waiting, the seconds until the
+  latest sleepy deadline (0 when none waits), awake devices (routers and rx-on children) queued or in flight, and
+  devices answered or given up (`done` counts `no_answer` too). Once `awake_left` is 0 only sleepy devices are left.
 - A sleepy child answers only after its next poll. The scan waits for sleepy children up to 300 s from the scan start,
-  each for the child's own timeout from the child table (240 s when unknown). Every other step stays bounded by the
-  60 s cap. At the sleepy cap the scan finishes with what it has. Missing info never sets `partial`.
-- During the info step the scan holds no mesh diagnostics operation, so `GET /device/topology` and diagnostics work;
-  `POST /device/topology` joins the running scan.
+  each for the child's own timeout from the child table (240 s when unknown), and asks again every 90 s while it
+  waits (OpenThread drops an unanswered request after 62-93 s). Every other step stays bounded by the 60 s cap. At
+  the sleepy cap the scan finishes with what it has. Missing info never sets `partial`.
+- During the info step the scan holds no mesh diagnostics operation, so the REST `/topology` and diagnostics endpoints
+  work; `POST /device/topology` joins the running scan. Known limit: a REST diagnostic Get to a router's RLOC at the
+  same moment can be taken as the scan's answer for that router (both answers reach the scan).
 
 ```json
 "info": {"state": "answered", "eui64": "8c73dafffe952cfb", "vendor_name": "Home Assistant",

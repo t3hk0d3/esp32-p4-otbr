@@ -125,8 +125,8 @@ function hex4(n) {
  * {id, kind (br|leader|router|stub|med|sed), rloc16, ext, routerId (the router itself, or a child's parent), parentId,
  *  thisBoard, leader, borderRouter, otherBr (a border router that is not this board; its kind stays router/leader),
  *  sleepy, responded, detail, child (the raw child object, or null), addrs, addrsReported (false only for a child that
- *  was asked for its addresses and didn't answer), version, mode, info (the scan's device info, or null)}. Routers come in router-id order, each followed by
- *  its children in RLOC16 order.
+ *  was asked for its addresses and didn't answer), version, mode, info (the scan's device info, or null)}. Routers
+ *  come in router-id order, each followed by its children in RLOC16 order.
  */
 function devices(result) {
   var out = [];
@@ -527,8 +527,8 @@ function msText(ms) {
 }
 
 /**
- * A Thread stack version string as {vendor, chip, sdk, version} for the stacks seen so far (version null when the string
- * carries none), else null.
+ * A Thread stack version string as {vendor, chip, sdk, version} for the stacks seen so far (version null when the
+ * string carries none), else null.
  */
 function stackInfo(stack) {
   if (typeof stack !== 'string')
@@ -1518,15 +1518,20 @@ function renderProgress(state) {
   var kids = p.children || {};
   var info = p.info || {};
   if (info.total > 0) {
-    var left = info.total - info.answered;
-    if (info.sleepy_waiting > 0 && info.sleepy_waiting >= left) {
+    /* awake_left and done: newer firmware. Older firmware only has answered, so guess from what is left. */
+    var newer = typeof info.awake_left === 'number' && typeof info.done === 'number';
+    var done = newer ? info.done : info.answered;
+    var waiting = newer ? info.awake_left === 0 && info.sleepy_waiting > 0 :
+                          info.sleepy_waiting > 0 && info.sleepy_waiting >= info.total - info.answered;
+    if (waiting) {
       var mins = info.wait_s > 0 ? Math.ceil(info.wait_s / 60) : 0;
       setText('t-progress', 'Waiting for ' + plural(info.sleepy_waiting, 'sleepy device') +
-                                ' (they answer when they next wake' + (mins > 0 ? ', up to ' + mins + ' min' : '') + ')');
+                                ' (they answer when they next wake' + (mins > 0 ? ', up to ' + mins + ' min' : '') +
+                                ')');
     } else {
-      setText('t-progress', 'Asking devices for details: ' + info.answered + ' of ' + info.total);
+      setText('t-progress', 'Asking devices for details: ' + done + ' of ' + info.total);
     }
-    $('t-progress-bar').style.width = Math.min(100, Math.round(100 * info.answered / info.total)) + '%';
+    $('t-progress-bar').style.width = Math.min(100, Math.round(100 * done / info.total)) + '%';
   } else if (kids.total > 0) {
     setText('t-progress', 'Asking devices for their addresses: ' + kids.queried + ' of ' + kids.total);
     $('t-progress-bar').style.width = Math.min(100, Math.round(100 * kids.queried / kids.total)) + '%';

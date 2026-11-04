@@ -225,9 +225,10 @@ reason, spec reference.
    after the SRP names and before "Matter device 0xNNNN"; `kindLine(sum, device)` falls back to the stack summary;
    the table search matches vendor name, model and stack string. The dialog gains Hardware, Stack, Software, EUI-64,
    App URL (a link only for http/https, else text) and "Device info" (no answer, sleepy or not; not asked under the scan
-   time limit). The loading view says "Asking devices for details: A of T" and, once only sleepy devices are left,
-   "Waiting for N sleepy devices (…, up to M min)" from `progress.info`. Results and progress without `info` render as
-   before. No new `t-` classes.
+   time limit). The loading view says "Asking devices for details: D of T" (D: answered or given up) and, once
+   `progress.info.awake_left` is 0 with sleepy devices waiting, "Waiting for N sleepy devices (…, up to M min)";
+   without `awake_left` and `done` (older firmware) it goes by `answered`. Results and progress without `info` render
+   as before. No new `t-` classes.
 17. Applied. `esp_ot_br_server`: every Network Diagnostic Get goes through the new `netdiag_mux` component (spec
    2026-11-02 section 3.5). OpenThread's netdiag client keeps one callback slot and every `otThreadSendDiagnosticGet`
    replaces it, so `/topology`, the REST diagnostics and discovery, and the `mesh_scan` child step took each other's

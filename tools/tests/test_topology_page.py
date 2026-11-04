@@ -2194,6 +2194,47 @@ class TestTopologyPage:
             "Asking devices for their addresses: 3 of 3",
         ]
 
+    def test_loading_view_waits_for_sleepy_devices_once_no_awake_device_is_left(self):
+        # On awake_left and done (newer firmware): the waiting text once awake_left is 0 with sleepy devices waiting,
+        # even when an awake device gave up; otherwise "Asking devices for details: D of T" with the bar on done.
+        r = run(
+            "const I = (total, answered, sleepy, wait, awake, done) => ({state: 'running', progress: {routers: 4,"
+            " queried: 4, children: {total: 3, queried: 3}, info: {total, answered, sleepy_waiting: sleepy,"
+            " wait_s: wait, awake_left: awake, done}}});"
+            "S.gets = [I(6, 2, 2, 200, 2, 3), I(6, 3, 2, 200, 0, 4), I(6, 3, 2, 0, 0, 4), I(6, 3, 0, 0, 1, 5),"
+            " I(6, 3, 0, 0, 1, 5)]; await start();"
+            " const a = [txt('t-progress'), t.el('t-progress-bar').style.width];"
+            " for (let i = 0; i < 3; i++) { await t.advance(1000); a.push(txt('t-progress'),"
+            " t.el('t-progress-bar').style.width); } return a;"
+        )
+        assert r == [
+            "Asking devices for details: 3 of 6",
+            "50%",
+            "Waiting for 2 sleepy devices (they answer when they next wake, up to 4 min)",
+            "67%",
+            "Waiting for 2 sleepy devices (they answer when they next wake)",
+            "67%",
+            "Asking devices for details: 5 of 6",
+            "83%",
+        ]
+
+    def test_loading_view_without_awake_left_keeps_the_answered_rule(self):
+        # On older firmware (no awake_left or done): the waiting text only when the sleepy devices are all that is
+        # left by the answered count, the bar on answered.
+        r = run(
+            "const I = (total, answered, sleepy, wait) => ({state: 'running', progress: {routers: 4, queried: 4,"
+            " children: {total: 3, queried: 3}, info: {total, answered, sleepy_waiting: sleepy, wait_s: wait}}});"
+            "S.gets = [I(6, 3, 2, 120), I(6, 4, 2, 120), I(6, 4, 2, 120)]; await start();"
+            " const a = [txt('t-progress'), t.el('t-progress-bar').style.width]; await t.advance(1000);"
+            " a.push(txt('t-progress'), t.el('t-progress-bar').style.width); return a;"
+        )
+        assert r == [
+            "Asking devices for details: 3 of 6",
+            "50%",
+            "Waiting for 2 sleepy devices (they answer when they next wake, up to 2 min)",
+            "67%",
+        ]
+
     def test_loading_view_without_info_keeps_todays_texts(self):
         r = run(
             "S.gets = [RUNNING(5, 5, 1, 4), RUNNING(2, 5)]; await start(); const a = [txt('t-progress')];"
@@ -2204,12 +2245,15 @@ class TestTopologyPage:
             "Asking each router about its children: 2 of 5",
         ]
 
-    INFO_RESULT = r"""
+    INFO_RESULT = (
+        f"const IR_STACKS = {{posix: {STACK_POSIX!r}, sl: {STACK_SL!r}, esp: {STACK_ESP!r}}};"
+        + r"""
 const IR = structuredClone(SV);
 IR.routers[0].info = {state: 'answered', eui64: '8c73dafffe952cfb', vendor_name: 'Home Assistant',
-  vendor_model: 'OpenThread Border Router', thread_stack_version: %r, vendor_app_url: 'https://example.com/ha'};
-IR.routers[1].info = {state: 'answered', thread_stack_version: %r};
-IR.routers[2].info = {state: 'answered', vendor_name: 'RD:', thread_stack_version: %r,
+  vendor_model: 'OpenThread Border Router', thread_stack_version: IR_STACKS.posix,
+  vendor_app_url: 'https://example.com/ha'};
+IR.routers[1].info = {state: 'answered', thread_stack_version: IR_STACKS.sl};
+IR.routers[2].info = {state: 'answered', vendor_name: 'RD:', thread_stack_version: IR_STACKS.esp,
   vendor_app_url: 'javascript:alert(1)'};
 IR.routers[3].info = {state: 'answered', vendor_name: '<b>x</b>', vendor_model: '<i>y</i>'};
 IR.routers[2].children = [{rloc16: 0x6401, ext_address: 'acebe6fffe0bffa4', mode: {rx_on_when_idle: false},
@@ -2220,7 +2264,8 @@ IR.routers[2].children = [{rloc16: 0x6401, ext_address: 'acebe6fffe0bffa4', mode
    info: {state: 'cut_short'}},
   {rloc16: 0x6404, ext_address: 'acebe6fffe0bffa7', mode: {rx_on_when_idle: true}, lq_in: 3, addresses: [],
    info: {state: 'not_asked'}}];
-""" % (STACK_POSIX, STACK_SL, STACK_ESP)
+"""
+    )
 
     def test_dialog_shows_hardware_stack_software_and_eui64(self):
         r = sv(
@@ -2311,9 +2356,8 @@ IR.routers[2].children = [{rloc16: 0x6401, ext_address: 'acebe6fffe0bffa4', mode
     def test_table_names_a_device_by_its_info_and_shows_the_stack_kind(self):
         r = sv(
             self.INFO_RESULT
-            + "IR.routers[2].children[1].info = {state: 'answered', thread_stack_version: %r};"
+            + "IR.routers[2].children[1].info = {state: 'answered', thread_stack_version: IR_STACKS.sl};"
             " await showSV(IR); return [row('r4').children[0].allText(), kind('c25602'), kind('r12')];"
-            % STACK_SL
         )
         assert "Home Assistant OpenThread Border Router" in r[0]
         assert r[1] == ["Silicon Labs EFR32"]

@@ -63,12 +63,12 @@ What follows from this:
 | TLVs asked | EUI-64 (23), vendor name (25), model (26), SW version (27), Thread stack version (28), app URL (35), vendor OUI (44). Children without addresses also get IPv6 address list (8) in the same request, which replaces today's address-only child request (my call: one request per child, not two) |
 | Request | `netdiag_mux_send_get` to the device's RLOC (mesh-local prefix + `0:ff:fe00:<rloc16>`), unfiltered, as `op_query_child_diag` does today. The answer is matched to the device by the peer's RLOC16 |
 | When | a phase after the child tables, replacing today's child address step (`PHASE_CHILD_DIAG`). It covers routers and children (my call: the queue needs the child tables, and one phase keeps the order simple) |
-| Concurrency | two queues. **Awake** (routers and rx-on children): 4 in flight, 5 s deadline each, as today's child step. **Sleepy** (rx-off children): the scan **waits for them** (user, 2026-11-04). All sleepy children are asked at once, up to 16 in flight (my call: each request waits in its parent's indirect queue and costs no airtime until the child polls). Each one waits until the child's own timeout from the child table (a child must poll within it), bounded by the sleepy cap below. The sleepy queue doesn't block the awake one. The phase ends when both are empty and nothing is in flight |
+| Concurrency | two queues. **Awake** (routers and rx-on children): 4 in flight, 5 s deadline each, as today's child step. **Sleepy** (rx-off children): the scan **waits for them** (user, 2026-11-04). All sleepy children are asked at once, up to 16 in flight (my call: each request waits in its parent's indirect queue and costs no airtime until the child polls). Each one waits until the child's own timeout from the child table (a child must poll within it), bounded by the sleepy cap below. A Get is a confirmable CoAP request that OpenThread drops after its max transmit wait (62-93 s), so a sleepy query is re-sent every `MESH_SCAN_SLEEPY_RESEND_MS` = 90 s after its last send while that is before its deadline and the sleepy cap; it keeps its first deadline, and a failed re-send leaves it waiting until then. One timer serves both queues, armed for the earliest deadline or re-send. The sleepy queue doesn't block the awake one. The phase ends when both are empty and nothing is in flight |
 | Which children | every child, with or without addresses. `rx_on_when_idle` from the child table picks the queue. A child that already has addresses gets the request without TLV 8 |
 | Order | awake queue: first the rx-on children without addresses (in router ID and child order, as today's step), then routers by router ID, then the other rx-on children (my call: under the cap, addresses come before vendor strings, as today). Sleepy queue: router ID and child order |
 | Answered | any reply from the device counts as `answered`, even one with none of the asked TLVs (fields then absent). `no_answer` means only a deadline or a failed send |
 | Cap | the existing 60 s scan cap bounds everything except the wait for sleepy answers. Once only sleepy queries are left, the scan keeps waiting up to `MESH_SCAN_SLEEPY_CAP_MS` = 300 s from scan start (my call: covers the 240 s child timeout seen here). A cap finishes the scan with what it has: devices still in flight get `info.state = "no_answer"`, devices still queued `"cut_short"`. Missing info never sets `partial`. `partial` keeps today's meaning: the cap hit while a router or child table, or an rx-on child's addresses (a child without addresses that hasn't answered yet), was still missing (my call) |
-| Progress | while running, `progress` gains `info: {total, answered, sleepy_waiting, wait_s}`. `wait_s` is the seconds until the latest sleepy deadline, bounded by the sleepy cap; 0 when no sleepy device waits. The page's status line says e.g. "Waiting for 3 sleepy devices (they answer when they next wake, up to 4 min)", with the minutes from `wait_s` rounded up (left out when `wait_s` is 0 or absent). Cancel works as today |
+| Progress | while running, `progress` gains `info: {total, answered, sleepy_waiting, wait_s, awake_left, done}`. `wait_s` is the seconds until the latest sleepy deadline, bounded by the sleepy cap; 0 when no sleepy device waits. `awake_left` is the awake devices queued or in flight, `done` the devices answered or given up (`no_answer`). The page says it waits for sleepy devices once `awake_left` is 0 and `sleepy_waiting` > 0, else "Asking devices for details: done of total" (firmware without the two fields: waiting once `sleepy_waiting` covers every unanswered device). The page's status line says e.g. "Waiting for 3 sleepy devices (they answer when they next wake, up to 4 min)", with the minutes from `wait_s` rounded up (left out when `wait_s` is 0 or absent). Cancel works as today |
 | Mesh diagnostics while waiting | during the info phase the scan holds no `otMeshDiag` operation, so REST `/topology` and diagnostics work. (The 409 `busy` comes from OpenThread's single `otMeshDiag` slot, which is free once the child tables are done; the info phase uses only Network Diagnostic Gets through `netdiag_mux`.) `POST /device/topology` joins the running scan (202), as today |
 | Fields kept | as OpenThread parses them: strings up to 32/32/16/64/96 bytes, OUI as a 24-bit value (other OUI lengths dropped), EUI-64 as 8 bytes. Empty strings are treated as absent |
 | Storage | inline fixed-size fields per router and per child: about 265 bytes each, about 50 KB more per result in PSRAM for 63 routers and 128 children (my call: simpler than the TXT pool, and the result already lives in PSRAM) |
@@ -88,8 +88,8 @@ Additions only; existing fields keep their meaning. While running, `progress.inf
 
 - Each router and each child gains `info`:
   - `state`: `answered`, `no_answer` (asked, the deadline passed or the send failed), `cut_short` (still queued when
-    the cap hit), `not_asked` (never asked: a router that didn't answer discover, or any device when the 60 s cap hit before the info
-    step; controller ruling).
+    the cap hit), `not_asked` (never asked: a router that didn't answer discover, or any device when the 60 s cap hit
+    before the info step).
   - Present only when answered and non-empty: `eui64` (16 hex digits), `vendor_name`, `vendor_model`,
     `vendor_sw_version`, `thread_stack_version`, `vendor_app_url`, `vendor_oui` (6 hex digits).
 - This board's router entry always has `state: answered` with its local values.
@@ -155,9 +155,13 @@ both queues empty, nothing in flight: mesh phases over (finish, or wait for the 
   - `otThreadGetParentInfo` needs the child role (unused here).
   - The test build's OT CLI loses its test-harness commands. The plan greps `p4/pytest` for `ot <cmd>` uses of the
     gated CLI commands; if any is used, the flag stays on and the name is `RD:ESP32-P4-WIFI6-POE-ETH`.
-- **Sleepy answers may never arrive.** If a sleepy child polls less often than OpenThread's CoAP retransmission
-  window (about 93 s), the request can time out in the parent's queue before the child polls. The device then shows
-  `no_answer` although the wait allowed longer. To be checked on hardware.
+- **Sleepy answers and the CoAP window.** Confirmed from OpenThread's source: a unicast Network Diagnostic Get is a
+  confirmable CoAP request (`net_diag.cpp`), and the CoAP layer drops the pending request after its max transmit wait
+  (62-93 s), so a later answer never reaches the callback. Handled by re-sending every 90 s until the query's deadline
+  (section 3, Concurrency). A child that polls less often than its own timeout still shows `no_answer`.
+- **Stray answers.** netdiag_mux hands every answer to every listener, so a REST diagnostic Get to the same RLOC at
+  the same moment can be taken as the scan's answer for a router (for a child, an answer without addresses to a Get
+  that asked for them is ignored).
 - **Traffic.** One extra request per router and per child, each a few hundred bytes; on a 30-device mesh that is about
   30 messages over a few seconds. Mesh diagnostics already send more than that.
 - **Scan time.** It grows by the awake devices divided by 4 times their round trip (well under a second each here),

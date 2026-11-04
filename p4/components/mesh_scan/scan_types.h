@@ -197,6 +197,8 @@ typedef struct {
     uint16_t info_answered;    /**< running: of those, answered */
     uint16_t sleepy_waiting;   /**< running: sleepy devices still waiting for an answer */
     uint16_t sleepy_wait_s;    /**< running: seconds until the latest sleepy deadline, 0 when none waits */
+    uint16_t awake_left;       /**< running: awake devices (routers, rx-on children) queued or in flight */
+    uint16_t info_done;        /**< running: devices answered or given up (no_answer) */
     uint32_t age_s;          /**< done and failed: seconds since the scan ended */
     const mesh_scan_result_t *result; /**< done only, non-NULL then */
 } mesh_scan_view_t;

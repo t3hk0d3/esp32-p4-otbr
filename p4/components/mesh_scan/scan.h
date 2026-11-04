@@ -23,6 +23,7 @@ extern "C" {
 #define MESH_SCAN_SLEEPY_QUERIES 16         /**< info queries to sleepy children in flight at most */
 #define MESH_SCAN_SLEEPY_CAP_MS 300000      /**< from scan start: the wait for sleepy answers ends here */
 #define MESH_SCAN_SLEEPY_DEFAULT_MS 240000  /**< deadline of a sleepy query when the child table has no timeout */
+#define MESH_SCAN_SLEEPY_RESEND_MS 90000    /**< a sleepy query is sent again this long after its last send */
 
 // OpenThread error codes, as plain ints so the host tests need no OpenThread headers (static-asserted in ot_ops.c).
 #define MESH_SCAN_OT_ERROR_NONE 0

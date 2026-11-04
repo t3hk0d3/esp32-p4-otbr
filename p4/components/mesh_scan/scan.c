@@ -29,6 +29,7 @@ typedef struct {
     uint16_t rloc16;
     bool want_addrs;          /**< the query asks for the IPv6 Address List too */
     int64_t due_ms;
+    int64_t resend_ms;        /**< sleepy: when the query is sent again; 0: never */
 } ask_slot_t;
 
 /** The parts of the awake queue, in the order they are asked. */
@@ -121,6 +122,7 @@ static struct {
     uint16_t children_queried; /**< of those, answered or given up */
     uint16_t info_total;       /**< devices to ask */
     uint16_t info_answered;    /**< of those, answered */
+    uint16_t info_done;        /**< of those, answered or given up */
     uint16_t sleepy_left;      /**< sleepy children queued or in flight */
     // SRP step
     srp_step_t *srp;  /**< NULL without a remote server, once released, or when it could not be allocated */
@@ -276,7 +278,9 @@ static void mesh_phases_over(void)
 // without addresses for their addresses too (spec 3.4). Two queues: awake (routers and rx-on children), at most
 // MESH_SCAN_CHILD_QUERIES in flight with a deadline of MESH_SCAN_CHILD_DEADLINE_MS each; sleepy (rx-off children), at
 // most MESH_SCAN_SLEEPY_QUERIES in flight, each until the child's own timeout, bounded by MESH_SCAN_SLEEPY_CAP_MS from
-// scan start. One deadline timer serves both, armed for the earliest slot due.
+// scan start. A Get is a confirmable CoAP request that OpenThread drops after its max transmit wait (62-93 s), so a
+// sleepy query is sent again every MESH_SCAN_SLEEPY_RESEND_MS while that is before its deadline; the deadline stays.
+// One deadline timer serves both queues, armed for the earliest deadline or re-send due.
 
 /** A router the info phase asks: it answered discover and is not this board (read locally by the snapshot). */
 static bool asks_router(const mesh_scan_router_t *router)
@@ -373,6 +377,7 @@ static void close_slot(ask_slot_t *slot, bool answered)
     if (answered) {
         s.info_answered++;
     }
+    s.info_done++;
     if (c && c->rx_on_when_idle && slot->want_addrs) {
         c->addresses_reported = answered;
         s.children_queried++;
@@ -392,6 +397,14 @@ static int64_t sleepy_due(const mesh_scan_child_t *c, int64_t now)
     return now + wait < cap ? now + wait : cap;
 }
 
+/** When the sleepy query in `slot`, sent at `sent`, is sent again: before its deadline (at most the cap); 0: never. */
+static int64_t sleepy_resend(const ask_slot_t *slot, int64_t sent)
+{
+    const int64_t at = sent + MESH_SCAN_SLEEPY_RESEND_MS;
+
+    return at < slot->due_ms && at < s.start_ms + MESH_SCAN_SLEEPY_CAP_MS ? at : 0;
+}
+
 /** Fill the free slots of one queue; false when a send failed the scan. */
 static bool fill_queue(ask_slot_t *slots, int n, bool (*next)(ask_slot_t *slot), bool sleepy)
 {
@@ -403,6 +416,7 @@ static bool fill_queue(ask_slot_t *slots, int n, bool (*next)(ask_slot_t *slot),
             if (err == MESH_SCAN_OT_ERROR_NONE) {
                 const int64_t now = s.ops.now_ms();
                 slot->due_ms = sleepy ? sleepy_due(slot->child, now) : now + MESH_SCAN_CHILD_DEADLINE_MS;
+                slot->resend_ms = sleepy ? sleepy_resend(slot, now) : 0;
             } else if (err == MESH_SCAN_OT_ERROR_INVALID_STATE) {
                 fail(MESH_SCAN_ERR_STOPPED);
                 return false;
@@ -424,21 +438,29 @@ static bool any_in_flight(const ask_slot_t *slots, int n)
     return false;
 }
 
-/** Arm the deadline for the earliest query in flight of both queues. */
+/** The earliest event of the queries in flight of one queue (a deadline or a re-send) before `due`, else `due`. */
+static int64_t earliest_due(const ask_slot_t *slots, int n, int64_t due)
+{
+    for (int i = 0; i < n; i++) {
+        if (!slots[i].info) {
+            continue;
+        }
+        if (slots[i].due_ms < due) {
+            due = slots[i].due_ms;
+        }
+        if (slots[i].resend_ms && slots[i].resend_ms < due) {
+            due = slots[i].resend_ms;
+        }
+    }
+    return due;
+}
+
+/** Arm the deadline for the earliest deadline or re-send of the queries in flight of both queues. */
 static void arm_deadline(void)
 {
-    int64_t due = INT64_MAX;
+    const int64_t due = earliest_due(s.sleepy, MESH_SCAN_SLEEPY_QUERIES,
+                                     earliest_due(s.awake, MESH_SCAN_CHILD_QUERIES, INT64_MAX));
 
-    for (int i = 0; i < MESH_SCAN_CHILD_QUERIES; i++) {
-        if (s.awake[i].info && s.awake[i].due_ms < due) {
-            due = s.awake[i].due_ms;
-        }
-    }
-    for (int i = 0; i < MESH_SCAN_SLEEPY_QUERIES; i++) {
-        if (s.sleepy[i].info && s.sleepy[i].due_ms < due) {
-            due = s.sleepy[i].due_ms;
-        }
-    }
     if (due == INT64_MAX) {
         return;
     }
@@ -866,6 +888,7 @@ esp_err_t mesh_scan_core_start(void)
     s.children_queried = 0;
     s.info_total = 0;
     s.info_answered = 0;
+    s.info_done = 0;
     s.sleepy_left = 0;
     s.sleepy_wait = false;
     s.current = NO_ROUTER;
@@ -952,6 +975,10 @@ static void view_locked(mesh_scan_view_t *out)
         out->info_answered = s.info_answered;
         out->sleepy_waiting = s.sleepy_left;
         out->sleepy_wait_s = sleepy_wait_s();
+        out->info_done = s.info_done;
+        // Awake devices are what the info phase has neither closed nor counts as sleepy.
+        const int awake_left = (int)s.info_total - s.info_done - s.sleepy_left;
+        out->awake_left = awake_left > 0 ? (uint16_t)awake_left : 0;
         break;
     case MESH_SCAN_DONE:
     case MESH_SCAN_FAILED: {
@@ -1259,6 +1286,25 @@ static bool expire_queue(ask_slot_t *slots, int n, int64_t now)
     return closed;
 }
 
+/**
+ * Send again the sleepy queries in flight whose re-send is due, and schedule the next. A failed send leaves the query
+ * waiting until its deadline, as if OpenThread had sent it.
+ */
+static void resend_sleepy(int64_t now)
+{
+    for (int i = 0; i < MESH_SCAN_SLEEPY_QUERIES; i++) {
+        ask_slot_t *slot = &s.sleepy[i];
+        if (!slot->info || !slot->resend_ms || slot->resend_ms > now) {
+            continue;
+        }
+        const int err = s.ops.query_info(slot->rloc16, slot->want_addrs, s.gen);
+        if (err != MESH_SCAN_OT_ERROR_NONE) {
+            ESP_LOGD(TAG, "re-send to 0x%04x: error %d", slot->rloc16, err);
+        }
+        slot->resend_ms = sleepy_resend(slot, now);
+    }
+}
+
 void mesh_scan_on_child_deadline(uint32_t gen)
 {
     lock();
@@ -1268,6 +1314,7 @@ void mesh_scan_on_child_deadline(uint32_t gen)
     const int64_t now = s.ops.now_ms();
     const bool awake = expire_queue(s.awake, MESH_SCAN_CHILD_QUERIES, now);
     const bool sleepy = expire_queue(s.sleepy, MESH_SCAN_SLEEPY_QUERIES, now);
+    resend_sleepy(now);
     if (awake || sleepy) {
         fill_slots();
     } else {
