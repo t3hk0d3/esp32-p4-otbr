@@ -695,13 +695,16 @@ function nickname(device, names) {
   return device.ext && names && has(names, device.ext) && names[device.ext] ? names[device.ext] : null;
 }
 
-/** {text, generic}: the device's name and whether it is only the fallback ("Matter device 0xNNNN", "Unknown 0xNNNN"). */
-function nameInfo(device, names, srpHosts) {
+/**
+ * {text, generic}: the device's name and whether it is only the fallback ("Matter device 0xNNNN", "Unknown 0xNNNN").
+ * `boardName` (optional) names this board instead of "This border router".
+ */
+function nameInfo(device, names, srpHosts, boardName) {
   var nick = nickname(device, names);
   if (nick)
     return {text : nick, generic : false};
   if (device.thisBoard)
-    return {text : BOARD_LABEL, generic : false};
+    return {text : boardName || BOARD_LABEL, generic : false};
   var entries = srpEntriesFor(device, srpHosts);
   var name = friendlyName(entries) || serviceValue(entries, '_hap._udp', function(s) { return s.instance; }) ||
              serviceValue(entries, '_meshcop._udp', function(s) { return s.instance; });
@@ -719,21 +722,27 @@ function nameInfo(device, names, srpHosts) {
 }
 
 /**
- * Nickname; this board: "This border router"; ESPHome friendly_name; HomeKit instance name; meshcop instance name
+ * Nickname; this board: its hostname, else "This border router"; ESPHome friendly_name; HomeKit instance name; meshcop instance name
  * (each looked up over every service of every matched host); SRP host name, or "Matter device 0xNNNN" when the only
  * names are the ext address and a matched host is a Matter device; else "Unknown 0xNNNN".
  */
-function displayName(device, names, srpHosts) { return nameInfo(device, names, srpHosts).text; }
+function displayName(device, names, srpHosts, boardName) { return nameInfo(device, names, srpHosts, boardName).text; }
 
 /** True when the device shows only a generic name and has no nickname (this board never counts). */
-function isUnnamed(device, names, srpHosts) { return nameInfo(device, names, srpHosts).generic; }
+function isUnnamed(device, names, srpHosts, boardName) { return nameInfo(device, names, srpHosts, boardName).generic; }
+
+/** This board's name from a GET /device/names body: the hostname in use, else the configured one, else null. */
+function boardName(body) {
+  var n = body && (body.hostname_live || body.hostname);
+  return typeof n === 'string' && n.trim() !== '' ? n.trim() : null;
+}
 
 /* ---- table rows ---- */
 
-function matches(device, query, names, srpHosts) {
+function matches(device, query, names, srpHosts, boardName) {
   var q = query.toLowerCase();
   var entries = srpEntriesFor(device, srpHosts);
-  var fields = [ displayName(device, names, srpHosts), '0x' + hex4(device.rloc16), device.ext || '' ];
+  var fields = [ displayName(device, names, srpHosts, boardName), '0x' + hex4(device.rloc16), device.ext || '' ];
   entries.forEach(function(e) { fields.push(e.host.name || ''); });
   var friendly = friendlyName(entries);
   if (friendly)
@@ -743,7 +752,7 @@ function matches(device, query, names, srpHosts) {
 }
 
 /** Table order: this board (when a router) and its children, then routers by id with their children. */
-function rows(devs, filter, query, names, srpHosts) {
+function rows(devs, filter, query, names, srpHosts, boardName) {
   srpHosts = srpIndex(srpHosts);
   var board = devs.filter(function(d) { return d.thisBoard && d.parentId === null; });
   var routers = devs.filter(function(d) { return d.parentId === null && !d.thisBoard; });
@@ -763,7 +772,7 @@ function rows(devs, filter, query, names, srpHosts) {
       return false;
     if (filter === 'sleepy' && !d.sleepy)
       return false;
-    return q === '' || matches(d, q, names, srpHosts);
+    return q === '' || matches(d, q, names, srpHosts, boardName);
   });
 }
 
@@ -1266,6 +1275,7 @@ return {
   pingSummary : pingSummary,
   clockText : clockText,
   agoText : agoText,
+  boardName : boardName,
   BOARD_LABEL : BOARD_LABEL
 };
 })();
@@ -1330,6 +1340,7 @@ var FILTERS = [ [ 'all', 'All' ], [ 'routers', 'Routers' ], [ 'end', 'End device
 var storage = null;
 var storageOk = false;
 var names = {};
+var hostName = null;     /* this board's hostname from /device/names; null until read */
 var last = null;         /* the "last result": {savedAt, result} */
 var model = null;        /* the result on screen: {result, net, srp, devs, byId, links, lay} */
 var filter = 'all';
@@ -1372,11 +1383,11 @@ function svg(tag, attrs, parent) {
   return e;
 }
 
-function nameOf(d) { return L.displayName(d, names, model.srp); }
+function nameOf(d) { return L.displayName(d, names, model.srp, hostName); }
 
-function mapName(d) { return d.thisBoard ? L.BOARD_LABEL : nameOf(d); }
+function mapName(d) { return d.thisBoard ? hostName || L.BOARD_LABEL : nameOf(d); }
 
-function unnamed(d) { return L.isUnnamed(d, names, model.srp); }
+function unnamed(d) { return L.isUnnamed(d, names, model.srp, hostName); }
 
 /* Table, dialog and map type: another border router reads "Border router" whatever its router kind. */
 function typeText(d) { return d.otherBr ? TYPE_TEXT.br : TYPE_TEXT[d.kind]; }
@@ -1943,7 +1954,7 @@ function renderChips() {
   var box = $('t-chips');
   clear(box);
   FILTERS.forEach(function(f) {
-    var n = L.rows(model.devs, f[0], '', names, model.srp).length;
+    var n = L.rows(model.devs, f[0], '', names, model.srp, hostName).length;
     var chip = button(null, 't-chip', function() {
       filter = f[0];
       renderChips();
@@ -2038,7 +2049,7 @@ function renderRows() {
   var query = String($('t-search').value || '').trim();
   clear(body);
   rowEls = {};
-  var list = L.rows(model.devs, filter, query, names, model.srp);
+  var list = L.rows(model.devs, filter, query, names, model.srp, hostName);
   list.forEach(function(d) { body.appendChild(rowFor(d)); });
   setText('t-empty', query ? "No device matches '" + query + "'" : 'No devices of this kind.');
   show('t-empty', list.length === 0);
@@ -2485,6 +2496,11 @@ function init() {
   names = L.loadNames(storage);
   var saved = L.savedResult(storage);
   wire();
+  kit.request('GET', '/device/names', {timeoutMs : 5000}).then(function(r) {
+    hostName = r.status === 200 ? L.boardName(r.body) : null;
+    if (hostName !== null && model !== null)
+      renderAll();
+  }, function() {});
   /* One GET: it never starts mesh traffic. A running scan is joined, never restarted. */
   kit.request('GET', '/device/topology', {timeoutMs : 5000}).then(function(r) {
     var board = r.status === 200 ? r.body : null;

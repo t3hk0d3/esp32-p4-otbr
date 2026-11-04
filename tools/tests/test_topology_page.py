@@ -486,6 +486,25 @@ class TestTopologyLogic:
         assert js("L.displayName(byId(D, 'r34'), {}, SRP)") == "This border router"
         assert js("L.displayName(byId(DB, 'c40962'), {}, SRP)") == "This border router"
 
+    def test_displayname_of_this_board_with_a_board_name_is_that_name(self):
+        # On this board with a board name and no nickname: the board name; a nickname still wins.
+        assert (
+            js("L.displayName(byId(D, 'r34'), {}, SRP, 'otbr-attic')") == "otbr-attic"
+        )
+        assert (
+            js(
+                "L.displayName(byId(D, 'r34'), {bb00000000008800: 'Attic BR'}, SRP, 'otbr-attic')"
+            )
+            == "Attic BR"
+        )
+
+    def test_boardname_prefers_the_live_hostname(self):
+        # On a /device/names body: hostname_live, else hostname; blank or missing: null.
+        assert js(
+            "[L.boardName({hostname: 'otbr', hostname_live: 'otbr-2'}), L.boardName({hostname: 'otbr'}),"
+            " L.boardName({hostname: ' ', hostname_live: ''}), L.boardName(null), L.boardName({hostname: 7})]"
+        ) == ["otbr-2", "otbr", None, None, None]
+
     def test_displayname_of_this_board_prefers_its_nickname(self):
         # On this board with a nickname: the nickname.
         assert (
@@ -741,6 +760,24 @@ class TestTopologyLogic:
         )
         assert r[0] == "This border router"
         assert r[0] in r[1], r
+
+    def test_board_is_named_by_its_hostname_once_names_are_read(self):
+        # On GET /device/names answering a hostname: the map label, the table row and the dialog title use it.
+        r = run(
+            "S.names = {status: 200, body: {hostname: 'otbr-attic', hostname_live: 'otbr-attic'}};"
+            " await loaded(); const a = [node('r34').attrs['aria-label'], row('r34').allText()];"
+            " await pick('r34'); a.push(txt('t-d-name')); return a;"
+        )
+        assert r[0] == "otbr-attic, Border router"
+        assert "otbr-attic" in r[1] and "This border router" not in r[1], r
+        assert r[2] == "otbr-attic"
+
+    def test_board_keeps_the_generic_label_when_names_fail(self):
+        # On GET /device/names failing: "This border router".
+        r = run(
+            "S.names = {status: 500, body: {}}; await loaded(); return node('r34').attrs['aria-label'];"
+        )
+        assert r == "This border router, Border router"
 
     def test_source_has_no_random_numbers(self):
         # On any input: the layout does not use Math.random.
@@ -1294,7 +1331,7 @@ class TestTopologyLogic:
 # ---- TopologyPage ----
 
 # Fake routes: GET /device/topology answers S.gets in turn (the last one repeats; 'drop' drops the connection), POST
-# answers S.post, /ping S.ping.
+# answers S.post, /ping S.ping, /device/names S.names.
 PAGE_ROUTES = """(u, o) => {
   if (u === '/device/topology') {
     if (o.method === 'POST')
@@ -1306,6 +1343,8 @@ PAGE_ROUTES = """(u, o) => {
   }
   if (u === '/ping')
     return {status: 200, body: S.ping};
+  if (u === '/device/names')
+    return S.names;
   return {status: 200, body: H.NETWORK};
 }"""
 
@@ -1317,7 +1356,7 @@ const RF = {...R, partial: false};
 const RUNNING = (queried, routers, cq, ct) =>
   ({state: 'running', progress: {routers, queried, ...(ct === undefined ? {} : {children: {total: ct, queried: cq}})}});
 const DONE = (result, age) => ({state: 'done', age_s: age || 0, result});
-const S = {gets: [{state: 'idle'}], post: {status: 202, body: RUNNING(0, 0)},
+const S = {gets: [{state: 'idle'}], post: {status: 202, body: RUNNING(0, 0)}, names: {status: 404, body: {}},
            ping: {error: 0, message: 'OK', result: {replies: [{rtt: 5}, {rtt: 7}, {rtt: 9}],
                   statistics: {sent: 4, received: 3, loss_percent: 25, rtt_min: 5, rtt_avg: 7, rtt_max: 9}}}};
 const calls = (method, url) => t.calls.filter((c) => c.method === method && c.url === url);

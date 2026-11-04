@@ -61,7 +61,7 @@ Out of scope:
 | Lease | this board's server: key-lease and lease remaining in seconds. Other servers: the TTL of the answer |
 | Server status | a new `srp_servers` list says which servers were asked and whether each answered. A server that didn't answer does not make the scan `partial` (`partial` keeps its meaning: routers and children) |
 | Device matching on the page | as today (first host sharing an address), plus a host whose name equals the device's extended address (case-insensitive), plus a host with a `_meshcop._udp` or `_trel._udp` service whose TXT `xa` equals the device's extended address. A device can match several hosts (a border router: its meshcop host and its own SRP host); the dialog shows all of them |
-| Display name | 1. nickname; 2. ESPHome `friendly_name`; 3. HomeKit instance name; 4. meshcop instance name (e.g. "Home Assistant OpenThread Border Router #0EE6"); 5. SRP host name, unless it is the extended address (Matter), then "Matter device 0xNNNN"; 6. "Unknown 0xNNNN" (my call). This board keeps "This border router" |
+| Display name | 1. nickname; 2. ESPHome `friendly_name`; 3. HomeKit instance name; 4. meshcop instance name (e.g. "Home Assistant OpenThread Border Router #0EE6"); 5. SRP host name, unless it is the extended address (Matter), then "Matter device 0xNNNN"; 6. "Unknown 0xNNNN" (my call). This board shows its hostname (`hostname_live`, else `hostname` from `GET /device/names`), else "This border router" |
 | API | no new endpoint; additive fields in `GET /device/topology` |
 | Mockup | `docs/superpowers/specs/2026-11-04-srp-details-mockup.html` (the table, and the ESPHome, Matter and border router dialogs) |
 

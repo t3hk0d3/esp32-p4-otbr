@@ -205,6 +205,8 @@ reason, spec reference.
    meshcop/TREL `xa` = extended address; every match, this board's records first). `displayName`: nickname, this
    board, ESPHome `friendly_name`, HomeKit and meshcop instance names, the SRP host name, "Matter device 0xNNNN",
    "Unknown 0xNNNN"; the table search also matches the friendly name and every matched host name.
+   This board is named by its hostname (`hostname_live`, else `hostname`) from `GET /device/names` (device_api), read
+   once at page start (`boardName`); "This border router" when that read fails.
    Follow-up (2026-11-04, Topology page UI): the page shows the records. A kind line under each device name
    (`kindLine`), a hint "Service records from N SRP servers: …" and an amber note for a server whose `srp_servers` state
    is `no_answer` or `cut_short` (new `t-srp-hint`/`t-srp-warn` in `topology.html`); the dialog gains Device, Project,
