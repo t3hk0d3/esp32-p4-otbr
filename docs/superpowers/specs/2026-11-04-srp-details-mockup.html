@@ -942,7 +942,7 @@ tr:hover td { background: var(--primary-light); }
     <div class="t-d-router"><h3>Router neighbors</h3><div class="t-d-list">
       <div class="t-d-item"><a href="#">This border router</a><span>LQI 3</span></div></div></div>
   </div>
-  <p class="mk-q">Open question: this record comes from the server's discovery proxy (meshcop is published on the LAN, not over SRP), and its addresses are LAN ones. The spec's address filter would drop it. It is matched by <code>xa</code> = ext address instead, so the spec needs a meshcop/TREL exception.</p>
+  <p class="mk-q">This record comes from the server's discovery proxy (meshcop is published on the LAN, not over SRP), with LAN addresses. The board keeps it because its <code>xp</code> is this network's extended PAN ID; the page ties it to router 0x1000 by <code>xa</code> = its extended address.</p>
   <div class="t-d-foot"><button class="t-link">Show on map</button><button class="btn t-btn-plain">Close</button></div>
 </div></div>
 </div>

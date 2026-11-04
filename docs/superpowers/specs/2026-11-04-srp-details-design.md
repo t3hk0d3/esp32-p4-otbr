@@ -51,7 +51,8 @@ Out of scope:
 | Query method | OpenThread DNS client (already built: `CONFIG_OPENTHREAD_DNS_CLIENT=y`, service discovery on by default): `otDnsClientBrowse`, then `otDnsClientResolveService` for each instance the browse answer did not describe. "Described" means the answer carried SRV, TXT and at least one AAAA for that instance; anything less gets a resolve (my call). The query config names the server address and port 53 |
 | Timing | per query 3 s response timeout, 2 attempts; at most 4 queries in flight, enforced by the scan. The step runs **first**, before discover: it needs only the network data, and it then never loses its time to a slow child phase. It has its own 15 s budget inside the existing 60 s cap; at the budget, queries still in flight are given up (my call) |
 | Server outcome | `srp_servers[].state`: `answered` (at least one query answered), `no_answer` (every query timed out or failed), `cut_short` (the budget or the cap ended it with queries in flight). None of them sets `partial`, which keeps its meaning (routers and children) |
-| Which remote hosts are kept | hosts with at least one address under an OMR prefix of the network data or the mesh-local prefix. Others (LAN results from a discovery proxy) are dropped on the board |
+| Which remote hosts are kept | hosts with at least one address under an OMR prefix of the network data or the mesh-local prefix. Others (LAN results from a discovery proxy) are dropped on the board, with one exception below |
+| Border router records (`_meshcop._udp`, `_trel._udp`) | these come from a discovery proxy with LAN addresses, so the address rule would drop them. They are kept when their TXT `xp` (extended PAN ID, 8 bytes) equals this network's extended PAN ID; that needs only the active dataset, so the check works during the SRP step, before discover. The page matches them to a router by TXT `xa` = the router's extended address. Records of this board itself (`xa` = its own extended address) are dropped |
 | Duplicates | one entry per host name (case-insensitive). The host's fields (`source`, lease or TTL, addresses) come from this board's record, else the first server that answered. Services from all sources merge by instance and type; each service has its own `source` (my call) |
 | Raw TXT | the TXT RDATA exactly as received (length-prefixed strings), base64 in JSON. The page decodes it |
 | TXT limits | at most 512 bytes per service (longer: cut at a string boundary, `txt_truncated: true`). TXT and subtype labels of a scan live in one 24 KiB pool, a separate `ops.alloc` block owned by the result; the host struct keeps an offset and length per service instead of inline arrays. When the pool is full, later services have no `txt` and `txt_truncated: true` (my call; PSRAM growth is small next to the ~100 KB result) |
@@ -59,9 +60,10 @@ Out of scope:
 | Subtypes | from this board's server only (`otSrpServerServiceGetSubTypeServiceNameAt`, label only, e.g. `_I3E5D425037C4F971`). Not asked from other servers |
 | Lease | this board's server: key-lease and lease remaining in seconds. Other servers: the TTL of the answer |
 | Server status | a new `srp_servers` list says which servers were asked and whether each answered. A server that didn't answer does not make the scan `partial` (`partial` keeps its meaning: routers and children) |
-| Device matching on the page | as today (first host sharing an address), plus a host whose name equals the device's extended address (case-insensitive) |
-| Display name | 1. nickname; 2. ESPHome `friendly_name`; 3. HomeKit instance name; 4. SRP host name, unless it is the extended address (Matter), then "Matter device"; 5. "Unknown 0xNNNN" (my call) |
+| Device matching on the page | as today (first host sharing an address), plus a host whose name equals the device's extended address (case-insensitive), plus a host with a `_meshcop._udp` or `_trel._udp` service whose TXT `xa` equals the device's extended address. A device can match several hosts (a border router: its meshcop host and its own SRP host); the dialog shows all of them |
+| Display name | 1. nickname; 2. ESPHome `friendly_name`; 3. HomeKit instance name; 4. meshcop instance name (e.g. "Home Assistant OpenThread Border Router #0EE6"); 5. SRP host name, unless it is the extended address (Matter), then "Matter device 0xNNNN"; 6. "Unknown 0xNNNN" (my call). This board keeps "This border router" |
 | API | no new endpoint; additive fields in `GET /device/topology` |
+| Mockup | `docs/superpowers/specs/2026-11-04-srp-details-mockup.html` (the table, and the ESPHome, Matter and border router dialogs) |
 
 ## 4. Scan result
 
@@ -100,7 +102,9 @@ Additions only; existing fields keep their meaning.
   - `ot_ops.c` reads the server list, starts the DNS client queries with the server's address, and copies the answers
     (instance, host, port, addresses, TTL, raw TXT) into the scan through new callbacks. The local snapshot also copies
     port, TXT, subtypes and lease info.
-  - `scan.c` owns the address filter, de-duplication, the limits and the TXT pool.
+  - `scan.c` owns the address filter, the `xp` exception for border router records, de-duplication, the limits and
+    the TXT pool. `ot_ops.c` supplies this network's extended PAN ID and this board's extended address with the server
+    list.
   - `render.c` writes `srp_servers` and the new service fields, with base64 for `txt`.
 - `topology.js` (pure part, `L`):
   - `txtEntries(base64)` → list of `{key, value}` where `value` is a string when printable, otherwise bytes (shown as
@@ -108,7 +112,7 @@ Additions only; existing fields keep their meaning.
   - `describe(host)` → a summary per known type: ESPHome (friendly name, version, board, project), Matter operational
     (fabric count from the instance names, node IDs, `SII`/`SAI`/`SAT`/`ICD`, `T`), Matter commissionable (`VP`, `DT`,
     `DN`), HomeKit (`md`, `ci` as a category name, `sf` paired or not), border router (`vn`, `mn`, `tv`), HTTP (port).
-  - `srpHostFor` gains the extended-address match.
+  - `srpHostFor` becomes `srpHostsFor` (all matching hosts) with the extended-address and `xa` matches.
 - Topology page device dialog, left column, after "SRP host":
   - "Device": the summary from `describe` (e.g. "ESPHome 2026.7.4 · esp32-c6-devkitc-1 · project esp32otbr.srp-probe
     0.1", "Matter, on 2 fabrics · polls every 800 ms idle", "Border router: Home Assistant, OpenThread Border Router,
