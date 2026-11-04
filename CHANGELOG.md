@@ -19,6 +19,7 @@ release's `versions.txt`.
 - The web UI is stored gzipped in the web image (`tools/pack_web.py`, run by the P4 build) and sent with
   `Content-Encoding: gzip`: the SPIFFS pages it fills drop from about 423 KiB to 131 KiB. Pages and scripts are
   unchanged at the source.
+- CI skips the host tests and the build on pull requests that change only documentation.
 
 ## [0.3.0] - 2026-11-03
 

@@ -1,4 +1,5 @@
 # Host tests and release build on every push and pull request; a v* tag also publishes a GitHub release.
+# A pull request that changes only documentation skips them (the jobs report as skipped, which passes a required check).
 # No board is involved: target tests (p4/pytest) run on the bench only.
 name: build
 
@@ -21,7 +22,38 @@ env:
   IDF_EXPORT: /opt/esp/idf/export.sh # the Makefile activates ESP-IDF from here
 
 jobs:
+  # Whether a pull request touches anything besides documentation. Pushes (master, tags) always build:
+  # master runs keep the sizes artifact for the size reports, tag runs make the release.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      firmware: ${{ steps.filter.outputs.firmware }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
+            echo "firmware=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Documentation only: Markdown anywhere, docs/, the site config and its hook, the docs workflow.
+          docs='^(docs/.*|.*\.md|mkdocs\.yml|tools/docs_hooks\.py|\.github/workflows/docs\.yml)$'
+          other="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename' | grep -Ev "$docs" || true)"
+          if [[ -n "$other" ]]; then
+            echo "firmware=true" >>"$GITHUB_OUTPUT"
+            printf 'non-documentation changes:\n%s\n' "$other"
+          else
+            echo "firmware=false" >>"$GITHUB_OUTPUT"
+            echo "documentation only: host tests and build skipped" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
   host-tests:
+    needs: changes
+    if: needs.changes.outputs.firmware == 'true'
     runs-on: ubuntu-latest
     container: espressif/idf:v6.1 # keep in step with IDF_VERSION
     steps:
@@ -40,6 +72,8 @@ jobs:
           make test-tools PYTEST="python3 -m pytest"
 
   build:
+    needs: changes
+    if: needs.changes.outputs.firmware == 'true'
     runs-on: ubuntu-latest
     container: espressif/idf:v6.1 # keep in step with IDF_VERSION
     steps:
