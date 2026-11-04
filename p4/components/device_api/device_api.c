@@ -37,6 +37,9 @@
 #include "esp_br_http_ota.h"
 #include "netcfg.h"
 #include "names_json.h"
+#include "console_json.h"
+#include "console_ws.h"
+#include "ot_console.h"
 #include "thread_json.h"
 #include "netnames.h"
 #include "rcp_sync.h"
@@ -1342,6 +1345,59 @@ static esp_err_t names_put_handler(httpd_req_t *req)
     return send_names(req, &res);
 }
 
+/* ---- /device/console (Thread console spec) ---- */
+
+#define CONSOLE_BODY_MAX 64
+
+static esp_err_t send_console(httpd_req_t *req)
+{
+    char peer[48];
+    uint32_t since_s = 0;
+    const bool attached = ot_console_session(peer, sizeof(peer), &since_s);
+    char body[160];
+
+    if (device_api_console_json(body, sizeof(body), ot_console_enabled(), attached ? peer : NULL, since_s) < 0) {
+        return send_error(req, 500, "internal", "the reply does not fit its buffer", false);
+    }
+    return send_json(req, body);
+}
+
+static esp_err_t console_get_handler(httpd_req_t *req)
+{
+    return send_console(req);
+}
+
+static esp_err_t console_put_handler(httpd_req_t *req)
+{
+    const int length_status = device_api_length_check(req->content_len, CONSOLE_BODY_MAX);
+
+    if (length_status != 0) {
+        return send_error(req, length_status, length_status == 413 ? "payload_too_large" : "length_required",
+                          "send {\"enabled\": true|false}", true);
+    }
+    char *body = read_small_body(req);
+
+    if (!body) {
+        return send_error(req, 400, "invalid_request", "the body could not be read", true);
+    }
+    bool enabled = false;
+    const esp_err_t parse_err = device_api_console_parse(body, &enabled);
+
+    free(body);
+    if (parse_err != ESP_OK) {
+        return send_error(req, 400, "invalid_request", "\"enabled\" must be true or false", false);
+    }
+    const esp_err_t set_err = ot_console_set_enabled(enabled);
+
+    if (set_err == ESP_ERR_INVALID_STATE) {
+        return send_error(req, 503, "not_started", "the Thread console did not start, see the log", false);
+    }
+    if (set_err != ESP_OK) {
+        return send_error(req, 500, "storage_failed", "the console setting could not be stored", false);
+    }
+    return send_console(req);
+}
+
 /* ---- /device/routing (mesh routing spec section 6) ---- */
 
 #define ROUTING_BODY_MAX 2048
@@ -1577,6 +1633,12 @@ static esp_err_t gated_handler(httpd_req_t *req)
     return route->handler(req);
 }
 
+// A WebSocket route's policy check, before the handshake (its frames then need none).
+static esp_err_t gated_ws_handshake(httpd_req_t *req)
+{
+    return netcfg_request_allowed(req, NETCFG_SVC_DEVICE_API) ? ESP_OK : ESP_FAIL;
+}
+
 esp_err_t device_api_register(httpd_handle_t server)
 {
     ESP_RETURN_ON_FALSE(server != NULL, ESP_ERR_INVALID_ARG, TAG, "no server");
@@ -1611,6 +1673,8 @@ esp_err_t device_api_register(httpd_handle_t server)
         {"/device/topology", HTTP_GET, topology_get_handler},
         {"/device/routing", HTTP_GET, routing_get_handler},
         {"/device/routing", HTTP_PUT, routing_put_handler},
+        {"/device/console", HTTP_GET, console_get_handler},
+        {"/device/console", HTTP_PUT, console_put_handler},
         {"/metrics", HTTP_GET, metrics_get_handler},
     };
 
@@ -1619,5 +1683,16 @@ esp_err_t device_api_register(httpd_handle_t server)
 
         ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &uri), TAG, "registering %s failed", routes[i].uri);
     }
+    // The Thread console's WebSocket: the policy check runs before the upgrade, the handler gets each frame after it.
+    const httpd_uri_t console_ws = {
+        .uri = "/device/console/ws",
+        .method = HTTP_GET,
+        .handler = device_api_console_ws_frame,
+        .is_websocket = true,
+        .ws_pre_handshake_cb = gated_ws_handshake,
+        .ws_post_handshake_cb = device_api_console_ws_opened,
+    };
+
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &console_ws), TAG, "registering %s failed", console_ws.uri);
     return ESP_OK;
 }

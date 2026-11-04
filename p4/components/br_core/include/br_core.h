@@ -64,6 +64,13 @@ esp_err_t br_core_start(esp_netif_t *backbone);
 
 br_core_mode_t br_core_get_mode(void);
 
+/**
+ * Set the hook that owns OpenThread's CLI (set it before br_core_start). It is called with true after every OpenThread
+ * initialisation, on the bring-up task with the OpenThread lock held (install the CLI there: its task queue exists
+ * from then on), and with false before every esp_openthread_deinit, without the lock (stop posting to the CLI).
+ */
+void br_core_set_ot_cli_hook(void (*hook)(bool running));
+
 /** True only in BR_MODE_BR_RUNNING: the REST guard allows Thread operations. */
 bool br_core_thread_ops_allowed(void);
 
@@ -258,16 +265,6 @@ typedef enum {
 esp_err_t br_core_test_set_probe_override(br_core_test_probe_t mode);
 br_core_test_probe_t br_core_test_probe_override(void);
 
-/**
- * Test builds: register the console command `ot` (call once the console is initialised). While OpenThread's CLI runs it
- * is ESP-IDF's OpenThread CLI command; otherwise a stand-in that prints `Error 13: InvalidState (OpenThread not running)`,
- * because the CLI command posts to OpenThread's task queue, which exists only between esp_openthread_init and
- * esp_openthread_deinit (posting outside that asserts).
- */
-esp_err_t br_core_test_ot_command_register(void);
-
-/** Test builds, called by br_core: OpenThread's CLI started (after esp_openthread_cli_init) or is about to stop. */
-void br_core_test_ot_command_set_running(bool running);
 #endif
 
 #ifdef __cplusplus

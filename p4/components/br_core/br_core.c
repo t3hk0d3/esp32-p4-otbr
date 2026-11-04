@@ -43,7 +43,6 @@
 #include "sdkconfig.h"
 #ifdef OTBR_TEST_BUILD
 #include "driver/gpio.h"
-#include "esp_openthread_cli.h"
 #endif
 
 static const char *TAG = "br_core";
@@ -134,6 +133,8 @@ static esp_openthread_platform_config_t s_platform_config;
 static bool ot_ready_now(void);
 // TREL setting (br_core_set_trel); applied after every esp_openthread_init.
 static atomic_bool s_trel_wanted = true;
+// br_core_set_ot_cli_hook; called after every OpenThread start and before every stop.
+static void (*_Atomic s_ot_cli_hook)(bool running);
 #if CONFIG_OPENTHREAD_RADIO_TREL
 static esp_timer_handle_t s_trel_query_timer; // runs send_trel_query
 static mdns_search_once_t *s_trel_query;      // the last peer query; used by the esp_timer task only
@@ -468,12 +469,13 @@ static esp_err_t init_openthread(void)
     s_core.ot_netif = netif;
     ESP_RETURN_ON_ERROR(esp_netif_attach(netif, esp_openthread_netif_glue_init(&s_platform_config)), TAG,
                         "attaching the OpenThread netif");
-#ifdef OTBR_TEST_BUILD
-    esp_openthread_lock_acquire(portMAX_DELAY);
-    esp_openthread_cli_init();
-    esp_openthread_lock_release();
-    br_core_test_ot_command_set_running(true);
-#endif
+    void (*cli_hook)(bool) = atomic_load(&s_ot_cli_hook);
+
+    if (cli_hook) {
+        esp_openthread_lock_acquire(portMAX_DELAY);
+        cli_hook(true);
+        esp_openthread_lock_release();
+    }
     return ESP_OK;
 }
 
@@ -1112,9 +1114,11 @@ static void teardown_openthread(void)
     // its UDP callbacks) and deletes the lock itself, so there is no release afterwards. After an initialisation that
     // was abandoned (an incompatible RCP parks the task inside esp_openthread_init) there is nothing safe to deinit.
     if (s_core.ot_initialised) {
-#ifdef OTBR_TEST_BUILD
-        br_core_test_ot_command_set_running(false); // the CLI's task queue goes with esp_openthread_deinit
-#endif
+        void (*cli_hook)(bool) = atomic_load(&s_ot_cli_hook);
+
+        if (cli_hook) {
+            cli_hook(false); // the CLI's task queue goes with esp_openthread_deinit
+        }
         esp_openthread_lock_acquire(portMAX_DELAY);
         esp_openthread_deinit();
         s_core.ot_initialised = false;
@@ -1668,4 +1672,9 @@ esp_err_t br_core_become_leader(br_core_leader_refusal_t *refusal, uint8_t *weig
         ESP_LOGE(TAG, "becoming leader: %s", otThreadErrorToString(error));
         return ESP_FAIL;
     }
+}
+
+void br_core_set_ot_cli_hook(void (*hook)(bool running))
+{
+    atomic_store(&s_ot_cli_hook, hook);
 }

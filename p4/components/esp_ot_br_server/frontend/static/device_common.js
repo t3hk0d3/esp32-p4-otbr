@@ -508,7 +508,34 @@ function DeviceEnv() {
   };
 }
 
+// The Clipboard API needs a secure context and the board serves plain http, so fall back to execCommand('copy') on
+// a hidden textarea in `host`. Resolves when the text was copied.
+function copyText(env, text, host) {
+  var clip = env.navigator && env.navigator.clipboard;
+  if (clip && clip.writeText)
+    return clip.writeText(text);
+  var doc = env.document;
+  try {
+    if (doc.execCommand && host) {
+      var area = doc.createElement('textarea');
+      area.className = 'offscreen';
+      area.value = text;
+      area.setAttribute('readonly', '');
+      host.appendChild(area);
+      area.select();
+      var ok = doc.execCommand('copy');
+      host.removeChild(area);
+      if (ok)
+        return Promise.resolve();
+    }
+  } catch (e) {
+    // falls through to the rejection
+  }
+  return Promise.reject(new Error('no clipboard'));
+}
+
 DeviceCommon.DeviceKit = DeviceKit;
+DeviceCommon.copyText = copyText;
 DeviceCommon.DeviceEnv = DeviceEnv;
 
 if (typeof module !== 'undefined' && module.exports)

@@ -1425,32 +1425,9 @@ function probeStorage(s) {
   }
 }
 
-/* ---- clipboard: the Clipboard API needs a secure context; the board serves plain http, so fall back ---- */
+/* ---- clipboard (inside an open modal dialog, the fallback's textarea must be in the dialog to be selectable) ---- */
 
-function legacyCopy(text) {
-  try {
-    var host = dialogOpen ? $('t-dialog') : doc.body;
-    if (!doc.execCommand || !host)
-      return false;
-    var area = el('textarea', null, 't-offscreen');
-    area.value = text;
-    area.setAttribute('readonly', '');
-    host.appendChild(area);
-    area.select();
-    var ok = doc.execCommand('copy');
-    host.removeChild(area);
-    return ok;
-  } catch (e) {
-    return false;
-  }
-}
-
-function copyText(text) {
-  var clip = env.navigator && env.navigator.clipboard;
-  if (clip && clip.writeText)
-    return clip.writeText(text);
-  return legacyCopy(text) ? Promise.resolve() : Promise.reject(new Error('no clipboard'));
-}
+function copyText(text) { return C.copyText(env, text, dialogOpen ? $('t-dialog') : doc.body); }
 
 function copyButton(addr, cls) {
   var b = button('Copy', cls, function() {

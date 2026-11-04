@@ -115,7 +115,8 @@ reason, spec reference.
    `device_api_register` as the callback before starting the server. (spec 5.7)
    `EXTRA_HANDLER_SLOTS` (the handlers the callback and the catch-all may add to `max_uri_handlers`) was 20 since the
    network names (`GET`/`PUT /device/names`, spec 2026-11-03-network-names-design.md) and is 24 since mesh routing
-   (patch 19). The leader weight (`GET`/`PUT /device/thread`) uses 2 of them: 22 routes plus the catch-all.
+   (patch 19). The leader weight (`GET`/`PUT /device/thread`) uses 2 of them: 22 routes plus the catch-all. It is 27
+   since the Thread console (patch 24): 25 routes plus the catch-all.
 11. Applied (Task 18). `esp_ot_br_server`: the Thread REST background worker `thread_rest` (`rest_process_task`,
    `src/esp_br_web_api.c`) is created with `xTaskCreatePinnedToCore(..., 1)` instead of `xTaskCreate`. Reason: it takes
    the OpenThread lock every 100 ms and was unpinned, so it could run on core 0 next to the network path; it belongs to
@@ -301,6 +302,9 @@ reason, spec reference.
    Thread REST reset (`DELETE /node`) reboots through `reboot_gate_restart`, so a running update or radio push is not
    cut off (`CMakeLists.txt`: `reboot_gate` in `PRIV_REQUIRES`). Host tests: `tests/test_rest.c`
    `test_topology_collector` (release count, late answer dropped), stubs in `tests/host_platform.c`.
+24. Applied (Thread console, Task 3). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 24 -> 27. `device_api`
+   adds `GET`/`PUT /device/console` and the WebSocket `GET /device/console/ws`: 25 routes plus the catch-all, one slot
+   of headroom. (docs/superpowers/specs/2026-11-04-thread-console-design.md)
 
 ### REST guard classification (patches 2 and 9)
 
@@ -358,6 +362,9 @@ target tests: `p4/pytest/test_rest_guard.py`, `test_br_boot.py::test_radio_fault
   The one-time effect on existing boards: `partitions.csv` changed, so flash the P4 once over USB
   (`make erase flash`); an OTA cannot move the partition table.
 
+- Thread console: `CONFIG_HTTPD_WS_SUPPORT=y` with `CONFIG_HTTPD_WS_PRE_HANDSHAKE_CB_SUPPORT=y` (the per-interface policy
+  check before the upgrade) and `CONFIG_HTTPD_WS_POST_HANDSHAKE_CB_SUPPORT=y` (attach to the console right after it; the
+  server does not call the URI handler for the handshake).
 - `CONFIG_OPENTHREAD_BR_START_WEB` is not set: it is an esp-thread-br example Kconfig option we do
   not vendor; `app_main` calls `esp_br_web_start` itself.
 - Task 19 (netcfg, spec 5.13): `CONFIG_LWIP_IP_FORWARD=n` explicit; `CONFIG_MDNS_PREDEF_NETIF_{STA,AP,ETH}=n` and

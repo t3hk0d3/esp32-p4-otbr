@@ -10,6 +10,7 @@
 #include "c6_base_image.h"
 #include "rcp_sync.h"
 #include "device_api.h"
+#include "ot_console.h"
 #include "diag.h"
 #include "metrics.h"
 #include "esp_br_web.h"
@@ -105,6 +106,11 @@ void app_main(void)
     err = netnames_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "netnames_init: %s", esp_err_to_name(err));
+    }
+    // The Thread console owns OpenThread's CLI (br_core hook): before net_init_task starts OpenThread.
+    err = ot_console_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ot_console_init: %s, the Thread console is unavailable", esp_err_to_name(err));
     }
     err = br_core_mdns_start(netnames_hostname(), netnames_ha_name());
     if (err == ESP_OK) {
