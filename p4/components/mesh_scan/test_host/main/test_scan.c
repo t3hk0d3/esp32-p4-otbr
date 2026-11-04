@@ -117,11 +117,16 @@ static void answer_child(uint16_t rloc16, uint8_t n)
     answer_info(rloc16, &NO_TLVS, n);
 }
 
-/** Answer every info query asked so far, and the ones each answer frees a slot for, with no TLV. */
+/**
+ * Answer every info query asked so far, and the ones each answer frees a slot for, with no TLV (and one address when
+ * the query asked for addresses).
+ */
 static void answer_all(void)
 {
+    const uint8_t addr[1][16] = { { 0xfd } };
+
     for (int i = 0; i < g_fake.info_calls && i < FAKE_MAX_QUERIES; i++) {
-        mesh_scan_on_info(g_fake.info_gen[i], g_fake.info_rloc16[i], &NO_TLVS, NULL, 0);
+        mesh_scan_on_info(g_fake.info_gen[i], g_fake.info_rloc16[i], &NO_TLVS, addr, g_fake.info_want_addrs[i]);
     }
 }
 
@@ -509,7 +514,7 @@ TEST_CASE("On a children-addresses report: stores the addresses of the child wit
     mesh_scan_on_child_table_done(MESH_SCAN_OT_ERROR_NONE);
     mesh_scan_on_child_addrs(RLOC16(3) + 2, (const uint8_t (*)[16])addrs, MESH_SCAN_MAX_CHILD_ADDRS + 2);
     mesh_scan_on_child_addrs_done(MESH_SCAN_OT_ERROR_NONE);
-    answer_all();
+    drain_info(); // no answers: the addresses are the child table's
 
     const mesh_scan_router_t *r = &done_result()->routers[3];
     TEST_ASSERT_EQUAL(0, r->children[0].n_addrs);
@@ -1172,7 +1177,7 @@ TEST_CASE("Sleepy child with timeout_s 0: its deadline is 240 s", "[mesh_scan]")
 {
     info_scan();
     answer_awake();
-    answer_child(C_SLEEPY, 0);
+    answer_child(C_SLEEPY, 1);
     TEST_ASSERT_EQUAL(MESH_SCAN_SLEEPY_DEFAULT_MS, g_fake.deadline_ms);
 }
 
@@ -1206,7 +1211,7 @@ TEST_CASE("More than 16 sleepy children: 16 in flight, the rest queued; a reply 
     }
     TEST_ASSERT_EQUAL(MESH_SCAN_SLEEPY_QUERIES + 2, view().sleepy_waiting);
 
-    answer_child(RLOC16(3) + 5, 0);
+    answer_child(RLOC16(3) + 5, 1);
     TEST_ASSERT_EQUAL(2 + MESH_SCAN_SLEEPY_QUERIES, g_fake.info_calls);
     TEST_ASSERT_EQUAL_HEX16(RLOC16(3) + MESH_SCAN_SLEEPY_QUERIES + 1, g_fake.info_rloc16[1 + MESH_SCAN_SLEEPY_QUERIES]);
     TEST_ASSERT_EQUAL(MESH_SCAN_SLEEPY_QUERIES + 1, view().sleepy_waiting);
@@ -1392,19 +1397,55 @@ TEST_CASE("Reply with addresses from a child asked without TLV 8: its addresses 
     TEST_ASSERT_EQUAL(1, child_of(done_result(), C_ADDRS)->n_addrs);
 }
 
-TEST_CASE("Reply with no TLVs: info answered, every field absent", "[mesh_scan]")
+TEST_CASE("Reply with no TLVs from a router or a child asked without addresses: info answered, every field absent",
+          "[mesh_scan]")
 {
-    child_step(1);
-    answer_child(RLOC16(3) + 1, 0);
-    TEST_ASSERT_EQUAL(1, view().info_answered);
-    TEST_ASSERT_EQUAL(1, view().children_queried);
+    info_scan();
+    answer_child(RLOC16(R_A), 0);
+    answer_child(C_ADDRS, 0);
+    TEST_ASSERT_EQUAL(2, view().info_answered);
     answer_all();
 
-    const mesh_scan_child_t *c = child_of(done_result(), RLOC16(3) + 1);
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_EQUAL(MESH_SCAN_INFO_ANSWERED, res->routers[R_A].info.state);
+    assert_no_tlv(&res->routers[R_A].info);
+    const mesh_scan_child_t *c = child_of(res, C_ADDRS);
     TEST_ASSERT_EQUAL(MESH_SCAN_INFO_ANSWERED, c->info.state);
     assert_no_tlv(&c->info);
-    TEST_ASSERT_TRUE(c->addresses_reported); // it answered, without addresses
-    TEST_ASSERT_EQUAL(0, c->n_addrs);
+    TEST_ASSERT_EQUAL(1, c->n_addrs);
+}
+
+TEST_CASE("Reply without addresses from a child asked for them (a stray answer to the REST API's own Get): ignored, "
+          "the query stays in flight", "[mesh_scan]")
+{
+    const mesh_scan_info_t info = full_info("rest");
+
+    child_step(1);
+    answer_info(RLOC16(3) + 1, &info, 0);
+    mesh_scan_view_t v = view();
+    TEST_ASSERT_EQUAL(0, v.info_answered);
+    TEST_ASSERT_EQUAL(0, v.children_queried);
+    TEST_ASSERT_EQUAL(MESH_SCAN_RUNNING, v.state);
+
+    // our own answer, with addresses, still closes it
+    answer_child(RLOC16(3) + 1, 1);
+    TEST_ASSERT_EQUAL(1, view().info_answered);
+    answer_all();
+    const mesh_scan_child_t *c = child_of(done_result(), RLOC16(3) + 1);
+    TEST_ASSERT_EQUAL(MESH_SCAN_INFO_ANSWERED, c->info.state);
+    TEST_ASSERT_EQUAL_STRING("", c->info.vendor_name);
+    TEST_ASSERT_TRUE(c->addresses_reported);
+    TEST_ASSERT_EQUAL(1, c->n_addrs);
+
+    // a sleepy child asked for addresses: the same
+    info_scan();
+    answer_awake();
+    answer_info(C_SLEEPY, &info, 0);
+    TEST_ASSERT_EQUAL(2, view().sleepy_waiting);
+    expire(30000);
+    TEST_ASSERT_EQUAL(1, view().sleepy_waiting);
+    answer_all();
+    TEST_ASSERT_EQUAL(MESH_SCAN_INFO_NO_ANSWER, child_of(done_result(), C_SLEEPY)->info.state);
 }
 
 TEST_CASE("Reply with empty vendor strings: stored as absent", "[mesh_scan]")
@@ -1811,6 +1852,42 @@ TEST_CASE("Sleepy cap (300 s): every sleepy query still waiting no_answer, queue
     TEST_ASSERT_EQUAL(MESH_SCAN_INFO_NO_ANSWER, c->info.state);
     TEST_ASSERT_EQUAL_STRING("", c->info.vendor_name);
     TEST_ASSERT_EQUAL(1, g_fake.snapshot_calls);
+}
+
+TEST_CASE("Deadline at the sleepy cap delivered before the cap, sleepy children still queued: no new query; the "
+          "queued ones cut_short once the cap ends the scan", "[mesh_scan]")
+{
+    const uint16_t n = MESH_SCAN_SLEEPY_QUERIES + 4;
+
+    start(); // at 1000 ms
+    mesh_scan_on_router(router(3, n)); // sleepy
+    mesh_scan_on_discover_done(MESH_SCAN_OT_ERROR_NONE);
+    for (uint16_t i = 1; i <= n; i++) {
+        mesh_scan_child_t entry = table_entry(RLOC16(3) + i);
+        entry.timeout_s = 3600; // every deadline is the sleepy cap
+        mesh_scan_on_child_entry(&entry);
+    }
+    answer_router();
+    answer_child(RLOC16(3), 0);
+    g_fake.now_ms = 1000 + MESH_SCAN_CAP_MS;
+    mesh_scan_on_cap(); // only sleepy left: waits
+    answer_child(RLOC16(3) + 1, 1); // frees a slot: +17 asked
+    const int calls = g_fake.info_calls;
+    TEST_ASSERT_EQUAL(2 + MESH_SCAN_SLEEPY_QUERIES, calls);
+
+    g_fake.now_ms = 1000 + MESH_SCAN_SLEEPY_CAP_MS;
+    mesh_scan_on_child_deadline(g_fake.armed_gen); // the deadline timer fires first
+    TEST_ASSERT_EQUAL(calls, g_fake.info_calls);
+    TEST_ASSERT_EQUAL(MESH_SCAN_RUNNING, view().state);
+    mesh_scan_on_cap();
+
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_FALSE(res->partial);
+    for (uint16_t i = 2; i <= n; i++) {
+        const mesh_scan_child_t *c = child_of(res, RLOC16(3) + i);
+        TEST_ASSERT_EQUAL_MESSAGE(i <= MESH_SCAN_SLEEPY_QUERIES + 1 ? MESH_SCAN_INFO_NO_ANSWER :
+                                  MESH_SCAN_INFO_CUT_SHORT, c->info.state, "child index");
+    }
 }
 
 TEST_CASE("Cancel during the sleepy wait: the scan stops as today; later answers ignored", "[mesh_scan]")

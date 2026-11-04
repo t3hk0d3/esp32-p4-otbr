@@ -358,9 +358,10 @@ static bool next_awake(ask_slot_t *slot)
     }
 }
 
+/** The next queued sleepy child; none from the sleepy cap on: those stay queued for the cap to cut short. */
 static bool next_sleepy(ask_slot_t *slot)
 {
-    return next_child(&s.sleepy_at, false, false, slot);
+    return s.ops.now_ms() < s.start_ms + MESH_SCAN_SLEEPY_CAP_MS && next_child(&s.sleepy_at, false, false, slot);
 }
 
 /** Close the query in `slot` (answered or not) and free the slot. An answer's fields are stored by the caller. */
@@ -445,7 +446,10 @@ static void arm_deadline(void)
     s.ops.arm_child_deadline(wait > 0 ? (uint32_t)wait : 0, s.gen);
 }
 
-/** Fill the free slots of both queues and arm the deadline; the mesh phases are over once nothing is left. */
+/**
+ * Fill the free slots of both queues and arm the deadline; the mesh phases are over once nothing is left. Sleepy
+ * children still queued at the sleepy cap wait for the cap (armed for that instant), which cuts them short.
+ */
 static void fill_slots(void)
 {
     if (!fill_queue(s.awake, MESH_SCAN_CHILD_QUERIES, next_awake, false) ||
@@ -454,7 +458,7 @@ static void fill_slots(void)
     }
     if (any_in_flight(s.awake, MESH_SCAN_CHILD_QUERIES) || any_in_flight(s.sleepy, MESH_SCAN_SLEEPY_QUERIES)) {
         arm_deadline();
-    } else {
+    } else if (s.sleepy_left == 0) {
         mesh_phases_over();
     }
 }
@@ -1225,8 +1229,13 @@ void mesh_scan_on_info(uint32_t gen, uint16_t peer_rloc16, const mesh_scan_info_
     if (!slot) {
         goto out; // no query to that peer in flight: given up already, never asked, or another sender's answer
     }
-    *slot->info = *info; // the state is set by close_slot
     mesh_scan_child_t *c = slot->child;
+    if (c && slot->want_addrs && n == 0) {
+        // Our Get asks a child for TLV 8 and a child always has its ML-EID: an answer without addresses is a stray
+        // one to another sender's Get (the REST API's share the netdiag callback). The query stays in flight.
+        goto out;
+    }
+    *slot->info = *info; // the state is set by close_slot
     for (uint8_t i = 0; c && slot->want_addrs && i < n && c->n_addrs < MESH_SCAN_MAX_CHILD_ADDRS; i++) {
         memcpy(c->addrs[c->n_addrs++], addrs[i], sizeof(c->addrs[0]));
     }

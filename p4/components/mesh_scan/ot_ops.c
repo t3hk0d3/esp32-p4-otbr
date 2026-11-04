@@ -13,8 +13,9 @@
 // API (esp_br_web_api.c) no longer takes our answers or replaces our callback; on_info gets every answer
 // (filter_peer false) with the context of the scan's LATEST send, not of the query being answered. An answer is
 // matched to its device by the peer address (the device's RLOC), and the scan's gen/phase check is a second guard. An
-// answer to another sender's query describes its peer correctly, so using it is harmless. Errors never reach us: a
-// scan-owned deadline per query gives up on devices that don't answer.
+// answer to another sender's query describes its peer correctly, so using it is harmless; only one without addresses
+// to a child asked for them is dropped, since it can't be ours. Errors never reach us: a scan-owned deadline per query
+// gives up on devices that don't answer.
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
