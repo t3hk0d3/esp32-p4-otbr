@@ -24,13 +24,56 @@ below, any of them can answer 500 `internal` or `no_memory`.
 | `GET /device/thread` | leader weight: `leader_weight_adjustment` (stored, -16..16), `leader_weight` (this board's local weight) and `leader_weight_base` (weight minus adjustment); only the adjustment while OpenThread is not running, plus `partial: true` when its lock was not free in time | |
 | `PUT /device/thread` | body `{leader_weight_adjustment?, become_leader?}` (at least one; `8.0` counts as 8; `become_leader: false` does nothing). Order: validate the whole body, store and apply the adjustment, then take over as leader (only from a strictly lower weight; never automatic). Replies the GET body plus `applied` (and `detail` when false: `Thread is not running` or `OpenThread is busy, applied within seconds or at the next start`) and `"become_leader":"started"` (`"partial": true` can follow a started take-over when the weight read times out) | 400 `invalid_config` with `field` (`leader_weight_adjustment`, `become_leader`, `body`), `length_required`, `invalid_request`; 409 `cannot_take_over` with `detail` `weight not higher` / `already leader` / `not attached` / `not router eligible` (an adjustment sent in the same body stays stored); 409 `busy` (`mode <MODE>`); 413 `payload_too_large`; 500 `storage_failed`, `internal` (`taking over failed`); 503 `busy` (`OpenThread is busy, retry` or `OpenThread is restarting, retry`). When the body also had an adjustment, a 409/503/500 from the take-over step also carries `leader_weight_adjustment` (the stored value) and `applied` |
 | `POST /device/topology` | start a mesh scan (or join the running one); 202 with the state object | 409 `busy` (`mode <MODE>`, an update or radio job running, `a capture stream is already running` while a capture stream holds the pcap slot, `mesh diagnostics are in use`); 503 `busy` (`OpenThread is busy, retry`, or `topology scan unavailable` when the scan component failed to start at boot); 500 `no_memory` |
-| `GET /device/topology` | the scan state, progress and the last result (no mesh traffic); in a build with TREL, a link of this board's router carries `transport` when OpenThread knows that neighbour's radios: `{"ieee802154": 0..255\|null, "trel": 0..255\|null}` (OpenThread's preference per radio, `null` for a radio it does not use); no `transport` on this board's link means its radios are unknown, and other routers' links never have it | |
+| `GET /device/topology` | the scan state, progress and the last result (no mesh traffic); in a build with TREL, a link of this board's router carries `transport` when OpenThread knows that neighbour's radios: `{"ieee802154": 0..255\|null, "trel": 0..255\|null}` (OpenThread's preference per radio, `null` for a radio it does not use); no `transport` on this board's link means its radios are unknown, and other routers' links never have it; the result carries service records from every SRP server, see [Service records](#service-records-in-the-topology-scan) | |
 | `GET /device/routing` | routing settings and status, see [Routing](#routing) | 503 `not_started` |
 | `PUT /device/routing` | store the routing settings and apply them live (no reboot) | 400 `invalid_request` (`detail` names the field), `length_required`; 413 `payload_too_large` (over 2048 bytes); 500 `storage_failed` (nothing changed), `internal` (the body could not be checked, `detail` is the error; nothing changed), `no_memory` (the settings were stored and applied, the answer could not be built); 503 `not_started` |
 | `POST /device/reboot` | reboot | 409 `busy` while an update or push runs (other reboots, such as the network trial revert, `net reset` and `DELETE /node`, wait until it ends) |
 | `GET /metrics` | device health and Thread figures in the Prometheus text format, see [metrics](metrics.md) | 500 `no_memory` |
 
 `/device/status` modes: `STARTING`, `BR_RUNNING`, `SNIFFER`, `RADIO_FAULT`.
+
+### Service records in the topology scan
+
+The scan result lists the hosts and services registered with the network's SRP servers (`srp_hosts`) and says which
+servers were asked (`srp_servers`). The SRP step runs next to the router and child phases from the start of the scan, with
+its own 15 s budget inside the 60 s cap.
+
+- Where records come from: this board's SRP server is read locally (with lease and key lease). Every other DNS/SRP
+  server in the network data is asked over DNS-SD on port 53 for `_matter._tcp`, `_matterc._udp`, `_esphomelib._tcp`,
+  `_hap._udp`, `_http._tcp`, `_meshcop._udp` and `_trel._udp`; instances found are resolved for port, host address and
+  TXT (with a follow-up AAAA query when the SRV answer has no address). A record whose TXT cannot be parsed is kept
+  without TXT.
+- Filter: a host is kept when it has an address under an OMR prefix or the mesh-local prefix. A border router record
+  (`_meshcop._udp`, `_trel._udp`) is kept when its extended PAN ID (`xp`) is this network's and it has an extended address (`xa`) other than this board's.
+- De-duplication: by host name; a host seen on several servers is listed once.
+- Limits: 64 hosts, 8 services per host, 512 TXT bytes per service (`txt_truncated` is set when cut), 6 subtypes per
+  service, 48 resolves per scan, 15 s.
+- A server that does not answer never sets `partial`. `srp_servers[].state` is `answered` (at least one query was
+  answered, an empty answer counts), `no_answer` (it never answered), or `cut_short` (it answered something, or only
+  queued queries were left, when the budget or the cap ended the step).
+
+```json
+"srp_servers": [
+  {"rloc16": 26624, "address": "fd8f:...:a75c", "port": 53536, "this_board": true, "state": "answered", "hosts": 1},
+  {"rloc16": 4096, "address": "fd8f:...:bff7", "port": 53554, "this_board": false, "state": "answered", "hosts": 2}
+],
+"srp_hosts": [{
+  "name": "c6-thread-test", "addresses": ["fd87:9b49:8264:1:c158:979b:6560:a15f"],
+  "source": 26624, "lease_s": 7012, "key_lease_s": 1209412,
+  "services": [{
+    "instance": "c6-thread-test", "type": "_esphomelib._tcp", "port": 6053, "source": 26624,
+    "subtypes": [], "txt": "<base64 of the TXT RDATA>", "txt_truncated": false
+  }]
+}]
+```
+
+- `srp_servers[]`: `rloc16` (number) of the server router, its `address`, the SRP `port` from the network data (the
+  DNS query goes to port 53), `this_board`, `state`, and `hosts`, the hosts kept from it (after the address filter, before
+  de-duplication).
+- `srp_hosts[].source` and `services[].source`: the `rloc16` of the server the record came from. `lease_s` and
+  `key_lease_s` only for hosts from this board's server; hosts from other servers have `ttl_s` instead.
+- `services[].port` is the SRV port. `txt` is the base64 of the raw TXT RDATA, `""` when the record has none.
+  `subtypes` is always empty for hosts from other servers.
 
 ### Routing
 
