@@ -262,6 +262,31 @@ function transportText(transport) {
   return transportParts(transport).map(function(p) { return p.text; }).join('');
 }
 
+/* ---- the TREL badge on the map ---- */
+
+// Spots tried for a TREL badge along the far half of its curve: the middle first, then out toward both ends.
+var TREL_BADGE_SPOTS = [0.5, 0.35, 0.65, 0.2, 0.8];
+
+/**
+ * Where the TREL badge of width `w` (16 px high, as an LQI badge) goes on the far half of a TREL curve, the quadratic
+ * from `home` through `c` to `q`: the first spot whose badge overlaps none of `avoid` (boxes already on the map, as
+ * badgeBox gives them); the middle when none is clear. {x, y, box}, rounded.
+ */
+function trelBadgeSpot(home, c, q, w, avoid) {
+  var at = function(t) {
+    var u = 1 - t;
+    var x = Math.round(u * u * home.x + 2 * t * u * c.x + t * t * q.x);
+    var y = Math.round(u * u * home.y + 2 * t * u * c.y + t * t * q.y);
+    return {x : x, y : y, box : {x0 : x - w / 2, x1 : x + w / 2, y0 : y - 8, y1 : y + 8}};
+  };
+  for (var i = 0; i < TREL_BADGE_SPOTS.length; i++) {
+    var spot = at(TREL_BADGE_SPOTS[i]);
+    if (!(avoid || []).some(function(a) { return overlaps(spot.box, a); }))
+      return spot;
+  }
+  return at(TREL_BADGE_SPOTS[0]);
+}
+
 /** "3" when both sides agree or only one is known, else "in/out" in a's view: lqBA + "/" + lqAB. */
 function linkText(link) {
   if (link.lqAB === null || link.lqBA === null)
@@ -812,6 +837,8 @@ return {
   linkText : linkText,
   linkQuality : linkQuality,
   lqColor : lqColor,
+  badgeBox : badgeBox,
+  trelBadgeSpot : trelBadgeSpot,
   displayName : displayName,
   srpHostFor : srpHostFor,
   rows : rows,
@@ -1305,8 +1332,9 @@ function drawLink(layer, l, pos) {
 /*
  * A TREL link of this board: a dashed purple curve from the board through the "Home network · Ethernet" box to the
  * neighbour (the tunnel runs over Ethernet), with "TREL <preference>" on its far half, red when TREL is below 15.4.
+ * The badge keeps clear of the boxes in `avoid`, and is added to it.
  */
-function drawTrelLink(layer, l, board, pos, home) {
+function drawTrelLink(layer, l, board, pos, home, avoid) {
   var p = pos[board.id], q = pos[l.a === board.id ? l.b : l.a];
   var c1 = {x : p.x, y : home.y};                           // leaves the board toward the box
   var c2 = {x : 2 * home.x - c1.x, y : 2 * home.y - c1.y};  // the reflection that keeps the curve smooth at the box
@@ -1317,11 +1345,12 @@ function drawTrelLink(layer, l, board, pos, home) {
       g);
   var text = 'TREL ' + C.preferencePercent(l.transport.trel);
   var w = 10 + 7 * text.length;
-  var mx = Math.round(0.25 * home.x + 0.5 * c2.x + 0.25 * q.x), my = Math.round(0.25 * home.y + 0.5 * c2.y + 0.25 * q.y);
+  var spot = L.trelBadgeSpot(home, c2, q, w, avoid);
   var low = L.trelLow(l.transport);
-  svg('rect', {x : mx - w / 2, y : my - 8, width : w, height : 16, rx : 8, fill : '#fff', stroke : TREL_COLOR}, g);
-  svg('text', {'class' : 't-badge-text', x : mx, y : my, fill : low ? L.lqColor(1) : TREL_COLOR, 'text-anchor' : 'middle',
-               'dominant-baseline' : 'central'},
+  avoid.push(spot.box);
+  svg('rect', {x : spot.x - w / 2, y : spot.y - 8, width : w, height : 16, rx : 8, fill : '#fff', stroke : TREL_COLOR}, g);
+  svg('text', {'class' : 't-badge-text', x : spot.x, y : spot.y, fill : low ? L.lqColor(1) : TREL_COLOR,
+               'text-anchor' : 'middle', 'dominant-baseline' : 'central'},
       g)
       .textContent = text;
   dimmables.push({el : g, lit : function(f) { return f === l.a || f === l.b; }});
@@ -1365,23 +1394,23 @@ function renderMap() {
                    edges);
     dimmables.push({el : line, lit : function(f) { return f === d.id || f === d.parentId; }});
   });
-  var trelLinks = 0;
-  model.links.forEach(function(l) {
-    if (!pos[l.a] || !pos[l.b])
-      return;
-    // A TREL-only link of this board gets no straight radio line, whatever link quality the other side reports.
-    var trelOnly = l.transport && l.transport.ieee802154 === null && typeof l.transport.trel === 'number';
-    if (!trelOnly)
-      drawLink(edges, l, pos);
-    if (l.transport && typeof l.transport.trel === 'number' && board && lay.home) {
-      drawTrelLink(edges, l, board, pos, lay.home);
-      trelLinks++;
-    }
+  // Bottom to top: TREL curves, the home box over them where they pass through it, then the radio links and their LQI
+  // badges, which the TREL badges keep clear of.
+  var shown = model.links.filter(function(l) { return pos[l.a] && pos[l.b]; });
+  // A TREL-only link of this board gets no straight radio line, whatever link quality the other side reports.
+  var straight = shown.filter(function(l) {
+    return !(l.transport && l.transport.ieee802154 === null && typeof l.transport.trel === 'number');
   });
-  // After the TREL curves, so the home box sits on top of them where they pass through it.
+  var trel = shown.filter(function(l) { return l.transport && typeof l.transport.trel === 'number' && board && lay.home; });
+  var badges = straight.map(function(l) { return L.badgeBox(l, pos[l.a], pos[l.b]); });
+  if (trel.length) // nor on the home box
+    badges.push({x0 : lay.home.x - lay.home.w / 2, x1 : lay.home.x + lay.home.w / 2, y0 : lay.home.y - lay.home.h / 2,
+                 y1 : lay.home.y + lay.home.h / 2});
+  trel.forEach(function(l) { drawTrelLink(edges, l, board, pos, lay.home, badges); });
   if (board && pos[board.id] && lay.home)
     drawUplink(edges, board, pos[board.id], lay.home);
-  show('t-lg-trel', trelLinks > 0);
+  straight.forEach(function(l) { drawLink(edges, l, pos); });
+  show('t-lg-trel', trel.length > 0);
   model.devs.forEach(function(d) {
     if (pos[d.id])
       drawNode(nodes, d, pos[d.id]);

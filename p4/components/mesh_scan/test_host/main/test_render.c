@@ -211,6 +211,19 @@ TEST_CASE("On this board's link missing from its diagnostic answer: written from
     sink_free(&s);
 }
 
+TEST_CASE("On this board's link in both its diagnostic answer and the snapshot: the answer's link quality", "[mesh_scan]")
+{
+    mesh_scan_result_t *r = transport_result();
+
+    r->this_links[9].lq_in = 1; // the snapshot disagrees with the answer's 3
+    const mesh_scan_view_t view = done_view(r);
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "{\"router_id\":9,\"lq_in\":3,\"transport\":{\"ieee802154\":230,\"trel\":55}}");
+    sink_free(&s);
+}
+
 TEST_CASE("On another router's links: no transport key", "[mesh_scan]")
 {
     const mesh_scan_view_t view = done_view(transport_result());

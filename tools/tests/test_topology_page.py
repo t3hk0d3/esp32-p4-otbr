@@ -1593,6 +1593,31 @@ class TestTrelTransport:
 
 
 @needs_node
+class TestTrelBadgeSpot:
+    """TopologyLogic.trelBadgeSpot: the TREL badge on the far half of the curve, clear of other badges"""
+
+    # Far half of a curve: from the home box (0, 0) through (100, 0) to the neighbour (100, 100).
+    CURVE = "{x: 0, y: 0}, {x: 100, y: 0}, {x: 100, y: 100}"
+
+    def test_free_curve_puts_the_badge_in_the_middle(self):
+        assert js(
+            f"(({{x, y}}) => ({{x, y}}))(L.trelBadgeSpot({self.CURVE}, 60, []))"
+        ) == {"x": 75, "y": 25}
+
+    def test_badge_moves_off_a_badge_at_the_middle(self):
+        # An LQI badge at (75, 25): the middle, 0.35, 0.65 and 0.2 come within the 6 px gap of it; 0.8 (96, 64) is clear.
+        r = js(
+            f"(({{x, y, box}}) => [x, y, box])(L.trelBadgeSpot({self.CURVE}, 60, [{{x0: 55, x1: 95, y0: 17, y1: 33}}]))"
+        )
+        assert r == [96, 64, {"x0": 66, "x1": 126, "y0": 56, "y1": 72}]
+
+    def test_badge_stays_in_the_middle_when_no_spot_is_clear(self):
+        r = js(
+            f"(({{x, y}}) => ({{x, y}}))(L.trelBadgeSpot({self.CURVE}, 60, [{{x0: -50, x1: 150, y0: -50, y1: 150}}]))"
+        )
+        assert r == {"x": 75, "y": 25}
+
+
 class TestTrelMap:
     """TREL links of this board on the map, in the legend, the dialog and the device table"""
 
@@ -1627,6 +1652,28 @@ class TestTrelMap:
             " return [Math.max(...at('t-trel-edge')) < Math.min(...at('t-uplink')), at('t-uplink').length];"
         )
         assert r == [True, 1]
+
+    def test_radio_links_are_drawn_over_the_home_box(self):
+        r = run(
+            self.LOAD_TR + " const all = t.el('t-map').findAll(() => true);"
+            " const at = (f) => all.map((e, i) => f(e) ? i : -1).filter((i) => i >= 0);"
+            " const radio = at((e) => e.classes.has('t-link-edge') && !e.classes.has('t-trel-edge'));"
+            " return Math.max(...at((e) => e.classes.has('t-uplink'))) < Math.min(...radio);"
+        )
+        assert r is True
+
+    def test_trel_badges_overlap_no_lqi_badge(self):
+        r = run(
+            self.LOAD_TR
+            + " const box = (e) => { const r = e.findAll((x) => x.tag === 'rect')[0].attrs;"
+            " return {x0: Number(r.x), x1: Number(r.x) + Number(r.width), y0: Number(r.y), y1: Number(r.y) + Number(r.height)}; };"
+            " const edges = t.el('t-map').findAll((e) => e.classes.has('t-link-edge'));"
+            " const trel = edges.filter((e) => e.classes.has('t-trel-edge')).map(box);"
+            " const lqi = edges.filter((e) => !e.classes.has('t-trel-edge')).map(box);"
+            " const hit = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;"
+            " return [trel.length, trel.some((a) => lqi.some((b) => hit(a, b)))];"
+        )
+        assert r == [2, False]
 
     def test_trel_only_link_has_no_straight_line(self):
         # R's badges are ["2", "3", "1/3", "3/0", "2"]; the last one is the board's link to r40, TREL only in TR.

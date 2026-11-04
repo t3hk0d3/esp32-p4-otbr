@@ -24,7 +24,8 @@ at a glance; on the Topology map, each of this board's router links shows whethe
 
 Goals:
 
-1. Expose each TREL peer's extended PAN ID and whether it is this board's network, in the API and the metrics.
+1. Expose each TREL peer's extended PAN ID and whether it is this board's network in the API, and the peer counts
+   per network (this one, others) in the API and the metrics.
 2. Show it on the Ethernet page's TREL card, foreign peers marked.
 3. Show the transport of this board's own router links on the Topology map and in the device details.
 4. Show OpenThread's per-radio preference (TREL and 15.4) in the TREL peer list and on the map, red when TREL's is
