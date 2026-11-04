@@ -41,6 +41,21 @@ def console(base_url):
     requests.put(f"{base_url}/device/console", json={"enabled": False}, timeout=10)
 
 
+def wait_node_state(base_url, states, timeout):
+    """Poll GET /node until its state is one of `states`: the USB `ot` command is refused while a session is open."""
+    deadline = time.monotonic() + timeout
+    state = None
+    while time.monotonic() < deadline:
+        try:
+            state = requests.get(f"{base_url}/node", timeout=10).json().get("state")
+        except (requests.RequestException, ValueError):
+            state = None
+        if state in states:
+            return
+        time.sleep(2)
+    pytest.fail(f"node state is {state!r}, expected one of {states}")
+
+
 def wait_for_mode(base_url, mode, timeout):
     deadline = time.monotonic() + timeout
     current = None
@@ -53,8 +68,8 @@ def wait_for_mode(base_url, mode, timeout):
 
 
 async def frame(ws, timeout=ANSWER_S):
-    """The next text frame; fails on a close."""
-    msg = await ws.receive(timeout=timeout)
+    """The next text frame; fails on a close. wait_for, since the board's pings restart receive()'s own timeout."""
+    msg = await asyncio.wait_for(ws.receive(), timeout)
     assert msg.type == aiohttp.WSMsgType.TEXT, (msg.type, msg.data, ws.close_code)
     return msg.data
 
@@ -163,7 +178,7 @@ def test_busy_while_a_ping_runs(console, dut):
                 if data.startswith("# "):
                     notices.append(data)
                 else:
-                    text += data
+                    text += data.replace("\r", "")
             after, _ = await run(ws, "state")
             await ws.close()
             return mleid, notices, after
@@ -207,7 +222,9 @@ def test_sniffer_refuses_lines_and_the_console_recovers(base_url, console, dut):
             await asyncio.to_thread(
                 wait_for_mode, base_url, "BR_RUNNING", MODE_TIMEOUT_S
             )
-            await asyncio.to_thread(wait_ot_state, dut, RUNNING_ROLES, STATE_TIMEOUT_S)
+            await asyncio.to_thread(
+                wait_node_state, base_url, RUNNING_ROLES, STATE_TIMEOUT_S
+            )
             after, _ = await run(ws, "state")
             await ws.close()
             return refused, after
@@ -313,12 +330,13 @@ def test_usb_ot_command_is_refused_while_a_session_is_attached(dut, console):
 def test_usb_ot_command_times_out(dut, board_ip):
     wait_ot_state(dut, RUNNING_ROLES, STATE_TIMEOUT_S)
     mleid = ot(dut, "ipaddr mleid")[0]
-    # Five pings 3 s apart: the prompt comes after about 12 s, past the command's 10 s wait.
+    # Five pings 3 s apart: the prompt comes after about 12 s, past the command's 10 s wait. OpenThread does not
+    # answer pings to its own address, so only the count sent is certain.
     dut.write(f"ot ping {mleid} 8 5 3")
     dut.expect(
         re.compile(rb"No prompt after 10 s: \"ping [^\"]+\" is still running"),
         timeout=USB_TIMEOUT_S + 5,
     )
-    dut.expect(re.compile(rb"5 packets transmitted, 5 packets received"), timeout=10)
-    dut.expect(re.compile(rb"\r?\nDone\r?\n"), timeout=5)
+    dut.expect(re.compile(rb"5 packets transmitted, "), timeout=10)
+    dut.expect(re.compile(rb"\r*\nDone\r*\n"), timeout=5)
     assert ot(dut, "state")[-1] in RUNNING_ROLES

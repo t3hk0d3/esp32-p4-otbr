@@ -23,6 +23,7 @@ static const char *TAG = "device_api";
 #define PING_US (10 * 1000 * 1000)
 #define NO_ANSWER_US (30 * 1000 * 1000)
 #define STALLED_US (15 * 1000 * 1000)
+#define CLOSE_WAIT_US (2 * 1000 * 1000) // for the client's close frame, after which ESP-IDF closes the socket
 #define FRAME_IN_MAX 1024 // longer lines are refused by the console anyway; this only bounds the read
 #define FRAME_OUT_MAX 1024
 #define CLOSE_GOING_AWAY 1001
@@ -44,6 +45,7 @@ typedef struct {
     int64_t last_pong_us;
     int64_t last_ping_us;
     int64_t last_progress_us; // output was drained, or nothing waited
+    int64_t closing_us;       // our close frame went out (0: open)
     atomic_bool drain_queued;
 } ws_slot_t;
 
@@ -61,7 +63,9 @@ static esp_err_t send_text(ws_slot_t *slot, const char *text, size_t len)
     return httpd_ws_send_frame_async(slot->hd, slot->fd, &frame);
 }
 
-// Close frame with a code and reason, then close the socket. On the server task.
+// Close frame with a code and reason. On the server task. A slot's socket stays open for the client's close frame
+// (closing it at once can reset the connection before the client reads ours); the tick closes it after
+// CLOSE_WAIT_US. A socket without a slot is closed at once.
 static void close_with(ws_slot_t *slot, uint16_t code, const char *reason)
 {
     uint8_t payload[2 + 64];
@@ -73,7 +77,11 @@ static void close_with(ws_slot_t *slot, uint16_t code, const char *reason)
     httpd_ws_frame_t frame = {.type = HTTPD_WS_TYPE_CLOSE, .final = true, .payload = payload, .len = 2 + reason_len};
 
     httpd_ws_send_frame_async(slot->hd, slot->fd, &frame);
-    httpd_sess_trigger_close(slot->hd, slot->fd);
+    if (slot->active && slot->timer) {
+        slot->closing_us = esp_timer_get_time();
+    } else {
+        httpd_sess_trigger_close(slot->hd, slot->fd);
+    }
 }
 
 static void drain_work(void *arg)
@@ -81,7 +89,7 @@ static void drain_work(void *arg)
     ws_slot_t *slot = arg;
 
     atomic_store(&slot->drain_queued, false);
-    if (!slot->active) {
+    if (!slot->active || slot->closing_us) {
         return;
     }
     size_t n;
@@ -110,7 +118,7 @@ static void sink_close(void *ctx, uint16_t code, const char *notice)
 {
     ws_slot_t *slot = ctx;
 
-    if (!slot->active) {
+    if (!slot->active || slot->closing_us) {
         return;
     }
     send_text(slot, notice, strlen(notice));
@@ -126,6 +134,12 @@ static void tick_work(void *arg)
     }
     const int64_t now = esp_timer_get_time();
 
+    if (slot->closing_us) {
+        if (now - slot->closing_us > CLOSE_WAIT_US) {
+            httpd_sess_trigger_close(slot->hd, slot->fd);
+        }
+        return;
+    }
     if (now - slot->last_pong_us > NO_ANSWER_US) {
         ESP_LOGW(TAG, "console: no answer to pings for 30 s, closing");
         close_with(slot, CLOSE_GOING_AWAY, "no answer");
@@ -238,14 +252,6 @@ esp_err_t device_api_console_ws_opened(httpd_req_t *req)
         close_with(&refused, CLOSE_TRY_AGAIN, "too many console sockets");
         return ESP_OK;
     }
-    if (!ot_console_enabled()) {
-        char text[64];
-
-        ot_console_notice_turned_off(text, sizeof(text));
-        send_text(&refused, text, strlen(text));
-        close_with(&refused, OT_CONSOLE_CLOSE_TURNED_OFF, NULL);
-        return ESP_OK;
-    }
     if (slot_prepare(slot) != ESP_OK) {
         close_with(&refused, CLOSE_TRY_AGAIN, "no memory");
         return ESP_OK;
@@ -256,6 +262,7 @@ esp_err_t device_api_console_ws_opened(httpd_req_t *req)
     slot->fd = fd;
     slot->id = 0;
     slot->last_pong_us = slot->last_ping_us = slot->last_progress_us = now;
+    slot->closing_us = 0;
     atomic_store(&slot->drain_queued, false);
     slot->active = true;
     if (esp_timer_start_periodic(slot->timer, TICK_US) != ESP_OK) {
@@ -263,13 +270,21 @@ esp_err_t device_api_console_ws_opened(httpd_req_t *req)
         close_with(&refused, CLOSE_TRY_AGAIN, "no timer");
         return ESP_OK;
     }
+    req->sess_ctx = slot;
+    req->free_ctx = slot_free;
+    if (!ot_console_enabled()) {
+        char text[64];
+
+        ot_console_notice_turned_off(text, sizeof(text));
+        send_text(slot, text, strlen(text));
+        close_with(slot, OT_CONSOLE_CLOSE_TURNED_OFF, NULL);
+        return ESP_OK;
+    }
     char peer[48];
 
     peer_address(fd, peer, sizeof(peer));
     const ot_console_sink_t sink = {.wake = wake, .close = sink_close, .ctx = slot};
 
-    req->sess_ctx = slot;
-    req->free_ctx = slot_free;
     if (ot_console_attach(peer, sink, &slot->id) != ESP_OK) { // turned off in between
         close_with(slot, OT_CONSOLE_CLOSE_TURNED_OFF, NULL);
     }

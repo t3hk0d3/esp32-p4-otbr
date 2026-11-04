@@ -54,6 +54,7 @@ static struct {
     ot_console_sink_t sink;
     char notices[NOTICE_SLOTS][NOTICE_LEN]; // waiting notices, oldest first
     size_t notice_count;
+    bool greeted; // the greeting went out: output may follow
 } s_session;
 static uint32_t s_next_id = 1;
 static SemaphoreHandle_t s_usb_done; // given at the prompt of a USB line
@@ -301,6 +302,7 @@ esp_err_t ot_console_attach(const char *peer, ot_console_sink_t sink, uint32_t *
     s_session.since_us = esp_timer_get_time();
     s_session.sink = sink;
     s_session.notice_count = 0;
+    s_session.greeted = false;
     ot_console_buf_init(&s_out, s_storage, sizeof(s_storage));
     ot_console_arb_attach(&s_arb, true);
     *session_id = s_session.id;
@@ -401,6 +403,16 @@ esp_err_t ot_console_submit(uint32_t session_id, const char *line)
     return ESP_OK;
 }
 
+// The oldest waiting notice. Under s_mux.
+static size_t take_notice(char *out, size_t cap)
+{
+    size_t n = strlcpy(out, s_session.notices[0], cap);
+
+    s_session.notice_count--;
+    memmove(s_session.notices[0], s_session.notices[1], s_session.notice_count * NOTICE_LEN);
+    return n < cap ? n : cap - 1;
+}
+
 size_t ot_console_take(uint32_t session_id, char *out, size_t cap)
 {
     size_t n = 0;
@@ -410,19 +422,21 @@ size_t ot_console_take(uint32_t session_id, char *out, size_t cap)
         taskEXIT_CRITICAL(&s_mux);
         return 0;
     }
-    const size_t dropped = ot_console_buf_take_dropped(&s_out);
+    const size_t dropped = s_session.greeted ? ot_console_buf_take_dropped(&s_out) : 0;
 
-    if (dropped > 0) {
+    if (!s_session.greeted) { // the greeting comes first, even after a line that already answered
+        if (s_session.notice_count > 0) {
+            s_session.greeted = true;
+            n = take_notice(out, cap);
+        }
+    } else if (dropped > 0) {
         const int len = ot_console_notice_dropped(out, cap, dropped);
 
         n = len < 0 ? 0 : ((size_t)len < cap ? (size_t)len : cap - 1);
     } else if (s_out.len > 0) {
         n = ot_console_buf_take(&s_out, out, cap);
     } else if (s_session.notice_count > 0) {
-        n = strlcpy(out, s_session.notices[0], cap);
-        n = n < cap ? n : cap - 1;
-        s_session.notice_count--;
-        memmove(s_session.notices[0], s_session.notices[1], s_session.notice_count * NOTICE_LEN);
+        n = take_notice(out, cap);
     }
     taskEXIT_CRITICAL(&s_mux);
     return n;
