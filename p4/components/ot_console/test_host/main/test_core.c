@@ -304,6 +304,60 @@ TEST_CASE("Take into a smaller buffer: the rest stays", "[ot_console]")
     TEST_ASSERT_EQUAL(2, b.len);
 }
 
+TEST_CASE("Take that would end inside a UTF-8 character: stops before it", "[ot_console]")
+{
+    uint8_t storage[16];
+    ot_console_buf_t b;
+    char got[16] = {0};
+
+    ot_console_buf_init(&b, storage, sizeof(storage));
+    ot_console_buf_push(&b, "ab\xc3\xa9" "cd", 6); // "abécd"
+    TEST_ASSERT_EQUAL(2, ot_console_buf_take(&b, got, 3));
+    TEST_ASSERT_EQUAL_STRING("ab", got);
+    memset(got, 0, sizeof(got));
+    TEST_ASSERT_EQUAL(4, ot_console_buf_take(&b, got, sizeof(got)));
+    TEST_ASSERT_EQUAL_STRING("\xc3\xa9" "cd", got);
+}
+
+TEST_CASE("Take smaller than one UTF-8 character: takes nothing, keeps it", "[ot_console]")
+{
+    uint8_t storage[16];
+    ot_console_buf_t b;
+    char got[16] = {0};
+
+    ot_console_buf_init(&b, storage, sizeof(storage));
+    ot_console_buf_push(&b, "\xe2\x82\xac", 3); // a 3-byte character, read with room for 2: no progress would hang
+    TEST_ASSERT_EQUAL(0, ot_console_buf_take(&b, got, 2));
+    TEST_ASSERT_EQUAL(3, b.len);
+}
+
+TEST_CASE("Drop that ends inside a UTF-8 character: drops the rest of it too", "[ot_console]")
+{
+    uint8_t storage[4];
+    ot_console_buf_t b;
+    char got[8] = {0};
+
+    ot_console_buf_init(&b, storage, sizeof(storage));
+    ot_console_buf_push(&b, "\xc3\xa9" "ab", 4);
+    ot_console_buf_push(&b, "c", 1); // the oldest byte goes: the character's second byte must go with it
+    TEST_ASSERT_EQUAL(2, ot_console_buf_take_dropped(&b));
+    TEST_ASSERT_EQUAL(3, ot_console_buf_take(&b, got, sizeof(got)));
+    TEST_ASSERT_EQUAL_STRING("abc", got);
+}
+
+TEST_CASE("Push larger than the cap starting the kept part inside a character: drops it", "[ot_console]")
+{
+    uint8_t storage[4];
+    ot_console_buf_t b;
+    char got[8] = {0};
+
+    ot_console_buf_init(&b, storage, sizeof(storage));
+    ot_console_buf_push(&b, "x\xc3\xa9" "abc", 6); // the newest 4 bytes start at the character's second byte
+    TEST_ASSERT_EQUAL(3, ot_console_buf_take_dropped(&b));
+    TEST_ASSERT_EQUAL(3, ot_console_buf_take(&b, got, sizeof(got)));
+    TEST_ASSERT_EQUAL_STRING("abc", got);
+}
+
 /* ---- ot_console_notice_* ---- */
 
 TEST_CASE("Each notice: exact text", "[ot_console]")

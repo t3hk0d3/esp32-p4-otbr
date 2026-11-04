@@ -19,7 +19,8 @@ extern "C" {
 
 /** The transport's side of a session. */
 typedef struct {
-    /** Output or a notice is waiting (ot_console_take). Called from the OpenThread task too: must not block. */
+    /** Output or a notice is waiting (ot_console_take). Called from the OpenThread task holding the OpenThread lock:
+     *  must not block and must not call lwIP (its thread may be waiting for that lock). */
     void (*wake)(void *ctx);
     /** The session ended from this side (take-over, turned off): send the notice, then close with the code. */
     void (*close)(void *ctx, uint16_t code, const char *notice);

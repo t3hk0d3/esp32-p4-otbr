@@ -20,6 +20,7 @@ USB_TIMEOUT_S = 10
 ANSWER_S = 15
 MODE_TIMEOUT_S = 30
 NO_ANSWER_CLOSE_S = 40
+KEEP_ALIVE_SOCKETS = 6
 FRONTEND = (
     Path(__file__).resolve().parents[1] / "components" / "esp_ot_br_server" / "frontend"
 )
@@ -217,16 +218,32 @@ def test_sniffer_refuses_lines_and_the_console_recovers(base_url, console, dut):
 
 
 def test_loading_every_page_leaves_the_console_open(base_url, console):
+    """A browser's six keep-alive sockets plus the console fill the server's seven; every extra connection makes it
+    close the least recently used one, which must not be the console that answers its pings."""
     pages = sorted(p.name for p in FRONTEND.glob("*.html"))
 
     async def go():
         async with aiohttp.ClientSession() as session:
             ws = await connected(session, console)
-            for name in pages:
-                r = await asyncio.to_thread(
-                    requests.get, f"{base_url}/{name}", timeout=10
-                )
-                assert r.status_code == 200, name
+            connector = aiohttp.TCPConnector(limit=KEEP_ALIVE_SOCKETS)
+            async with aiohttp.ClientSession(connector=connector) as browser:
+                for name in pages:
+                    replies = await asyncio.gather(
+                        *(
+                            browser.get(f"{base_url}/{name}")
+                            for _ in range(KEEP_ALIVE_SOCKETS)
+                        )
+                    )
+                    for r in replies:
+                        assert r.status == 200, name
+                        await r.read()
+                    await asyncio.sleep(1.5)  # past the console's stamp refresh
+                    # A new socket: the server purges one.
+                    async with (
+                        aiohttp.ClientSession() as other,
+                        other.get(f"{base_url}/device/status") as r,
+                    ):
+                        assert r.status == 200
             after, _ = await run(ws, "state")
             await ws.close()
             return after

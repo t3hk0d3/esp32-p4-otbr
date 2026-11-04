@@ -43,7 +43,7 @@ function riskyReason(cmd, network) {
 function noticeState(text) {
   var rules = [['# Connected to ', 'connected'], ['# Thread is not running', 'not-running'],
                ['# Closed: a new console session', 'taken-over'], ['# Closed: the console was turned off', 'off'],
-               ['# Busy: ', 'busy']];
+               ['# Busy: ', 'busy'], ['# Line too long', 'too-long']];
   for (var i = 0; i < rules.length; i++) {
     if (String(text).indexOf(rules[i][0]) === 0)
       return rules[i][1];
@@ -85,7 +85,10 @@ var connected = false;
 var userClosed = false;
 var attempts = 0;
 var retryTimer = null;
+var checking = false; // a reconnect is asking the board whether the console is free
+var openedAt = null; // when the last socket opened (env.now)
 var waiting = null; // the line sent last, until its Done or Error
+var before = null; // what waited before it, back in place if the board refuses the line
 var partial = ''; // output after the last newline
 var history = [];
 var hpos = -1;
@@ -104,7 +107,20 @@ function setOnline(on) {
   connected = on;
   $('con-cmd').disabled = !on;
   $('con-run').disabled = !on;
-  $('con-toggle').textContent = on || retryTimer !== null ? 'Disconnect' : 'Connect';
+  $('con-toggle').textContent = on || retrying() ? 'Disconnect' : 'Connect';
+}
+
+function retrying() { return retryTimer !== null || checking; }
+
+function get(url) {
+  return env.fetch(url, {method : 'GET'}).then(function(r) {
+    return r.text().then(function(t) { return r.status === 200 ? JSON.parse(t) : null; });
+  });
+}
+
+function inUse(session) {
+  pill('in-use');
+  $('con-where').textContent = 'In use by ' + session.peer;
 }
 
 function print(text, kind) {
@@ -138,11 +154,13 @@ function onMessage(ev) {
     return;
   }
   print(text, 'note');
+  if (state === 'busy' || state === 'too-long' || state === 'not-running') {
+    waiting = before; // refused: it never ran
+    before = null;
+  }
   if (state === 'connected' || state === 'not-running') {
     attempts = 0;
     pill(state);
-    if (state === 'not-running')
-      waiting = null; // refused: it never ran
   } else if (state === 'taken-over' || state === 'off') {
     userClosed = true; // the board closed it on purpose: no reconnect
     pill(state);
@@ -169,38 +187,90 @@ function onClose(ev) {
     setOnline(false);
     return;
   }
+  retry();
+}
+
+function retry() {
   attempts++;
   pill('reconnecting');
   retryTimer = env.setTimeout(function() {
     retryTimer = null;
-    connect();
+    reconnect();
   }, L.backoff(attempts));
   setOnline(false);
 }
 
-function connect() {
-  userClosed = false;
+// Reconnect only into a free console, or one still held by this page's own dropped socket: a session that began
+// after that socket opened is someone else's, and taking it over would cut them off.
+function reconnect() {
+  checking = true;
+  var elapsed = openedAt === null ? Infinity : (env.now() - openedAt) / 1000;
+  get('/device/console').then(function(c) {
+    if (!checking)
+      return; // disconnected meanwhile
+    checking = false;
+    if (!c)
+      return retry();
+    if (!c.enabled) {
+      $('con-off').classList.remove('hidden');
+      pill('off');
+    } else if (c.session && c.session.since_s < elapsed - 2) {
+      inUse(c.session);
+    } else {
+      connect();
+      return;
+    }
+    attempts = 0;
+    setOnline(false);
+  }, function() {
+    if (checking) {
+      checking = false;
+      retry();
+    }
+  });
+}
+
+function stopRetry() {
+  checking = false;
   if (retryTimer !== null) {
     env.clearTimeout(retryTimer);
     retryTimer = null;
   }
+}
+
+function connect() {
+  userClosed = false;
+  stopRetry();
   pill(attempts ? 'reconnecting' : 'connecting');
-  ws = new env.WebSocket('ws://' + env.location.host + '/device/console/ws');
-  ws.onopen = function() { setOnline(true); };
-  ws.onmessage = onMessage;
-  ws.onclose = onClose;
+  // Events of a socket this page already let go of (a close that arrives late) change nothing.
+  var sock = new env.WebSocket('ws://' + env.location.host + '/device/console/ws');
+  ws = sock;
+  sock.onopen = function() {
+    if (sock === ws) {
+      openedAt = env.now();
+      setOnline(true);
+    }
+  };
+  sock.onmessage = function(ev) {
+    if (sock === ws)
+      onMessage(ev);
+  };
+  sock.onclose = function(ev) {
+    if (sock === ws)
+      onClose(ev);
+  };
   $('con-where').textContent = '';
   $('con-toggle').textContent = 'Disconnect';
 }
 
 function disconnect() {
   userClosed = true;
-  if (retryTimer !== null) {
-    env.clearTimeout(retryTimer);
-    retryTimer = null;
+  stopRetry();
+  var sock = ws;
+  if (sock) {
+    onClose({code : 1000});
+    sock.close(1000);
   }
-  if (ws)
-    ws.close(1000);
   pill('disconnected');
   setOnline(false);
 }
@@ -211,6 +281,7 @@ function send(line) {
   if (history[history.length - 1] !== line)
     history.push(line);
   hpos = -1;
+  before = waiting;
   waiting = line;
   $('con-cmd').value = '';
 }
@@ -231,11 +302,6 @@ function run(raw) {
 }
 
 function load() {
-  var get = function(url) {
-    return env.fetch(url, {method : 'GET'}).then(function(r) {
-      return r.text().then(function(t) { return r.status === 200 ? JSON.parse(t) : null; });
-    });
-  };
   get('/node').then(function(n) { network = n && typeof n.networkName === 'string' ? n.networkName : null; },
                     function() {});
   return get('/device/console').then(function(c) {
@@ -247,8 +313,7 @@ function load() {
       return;
     }
     if (c.session) {
-      pill('in-use');
-      $('con-where').textContent = 'In use by ' + c.session.peer;
+      inUse(c.session);
       return;
     }
     connect();
@@ -288,7 +353,7 @@ function init() {
       $('con-cmd').value = s.value;
     }
   });
-  $('con-toggle').addEventListener('click', function() { connected || retryTimer !== null ? disconnect() : connect(); });
+  $('con-toggle').addEventListener('click', function() { ws !== null || retrying() ? disconnect() : connect(); });
   $('con-enable').addEventListener('click', enable);
   $('con-clear').addEventListener('click', function() {
     var out = $('con-out');

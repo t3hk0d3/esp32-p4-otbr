@@ -10,6 +10,8 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "lwip/sockets.h"
 #include "ot_console.h"
 #include "ot_console_core.h"
@@ -17,7 +19,7 @@
 static const char *TAG = "device_api";
 
 #define SLOTS 4 // an open session, one being taken over, and room for a refusal
-#define TICK_US (5 * 1000 * 1000)
+#define TICK_US (1000 * 1000) // also how fresh the socket's LRU stamp stays
 #define PING_US (10 * 1000 * 1000)
 #define NO_ANSWER_US (30 * 1000 * 1000)
 #define STALLED_US (15 * 1000 * 1000)
@@ -26,9 +28,13 @@ static const char *TAG = "device_api";
 #define CLOSE_GOING_AWAY 1001
 #define CLOSE_TOO_BIG 1009
 #define CLOSE_TRY_AGAIN 1013
+#define FWD_STACK 3072
+#define FWD_PRIORITY 5
+#define DRAIN_BIT(i) (1u << (i))
+#define TICK_BIT(i) (1u << (SLOTS + (i)))
 
-// One socket. Slots are static: a wake or a tick queued before the socket closed finds the slot inactive (or reused,
-// then it drains the new session, which is harmless) instead of freed memory.
+// One socket. Slots and their timers are static and never freed: a wake or a tick queued before the socket closed
+// finds the slot inactive (or reused, then it drains the new session, which is harmless) instead of freed memory.
 typedef struct {
     bool active;
     httpd_handle_t hd;
@@ -43,6 +49,10 @@ typedef struct {
 
 static ws_slot_t s_slots[SLOTS];
 static char s_out[FRAME_OUT_MAX]; // used on the server task only
+// Queues drains and ticks on the server task. The wake comes from the OpenThread task holding the OpenThread lock,
+// and httpd_queue_work sends on a socket: lwIP's thread may be waiting for that lock to transmit to Thread, so the
+// OpenThread task (and the esp_timer task, to be safe) only notify this task, which never blocks them.
+static TaskHandle_t s_fwd;
 
 static esp_err_t send_text(ws_slot_t *slot, const char *text, size_t len)
 {
@@ -85,15 +95,13 @@ static void drain_work(void *arg)
     }
 }
 
-// The console's wake: from the OpenThread task too, so it only queues the drain on the server task.
+// The console's wake: from the OpenThread task too, so it only notifies the forwarder (see s_fwd).
 static void wake(void *ctx)
 {
     ws_slot_t *slot = ctx;
 
     if (!atomic_exchange(&slot->drain_queued, true)) {
-        if (httpd_queue_work(slot->hd, drain_work, slot) != ESP_OK) {
-            atomic_store(&slot->drain_queued, false);
-        }
+        xTaskNotify(s_fwd, DRAIN_BIT(slot - s_slots), eSetBits);
     }
 }
 
@@ -123,6 +131,7 @@ static void tick_work(void *arg)
         close_with(slot, CLOSE_GOING_AWAY, "no answer");
         return;
     }
+    httpd_sess_update_lru_counter(slot->hd, slot->fd); // a console that answers is not the socket to purge
     if (ot_console_queued(slot->id) == 0) {
         slot->last_progress_us = now;
     } else if (now - slot->last_progress_us > STALLED_US) {
@@ -138,11 +147,47 @@ static void tick_work(void *arg)
     }
 }
 
+// On the esp_timer task: only notifies the forwarder (see s_fwd).
 static void tick(void *arg)
 {
     ws_slot_t *slot = arg;
 
-    httpd_queue_work(slot->hd, tick_work, slot);
+    xTaskNotify(s_fwd, TICK_BIT(slot - s_slots), eSetBits);
+}
+
+static void forwarder(void *arg)
+{
+    uint32_t bits;
+
+    for (;;) {
+        xTaskNotifyWait(0, UINT32_MAX, &bits, portMAX_DELAY);
+        for (size_t i = 0; i < SLOTS; i++) {
+            ws_slot_t *slot = &s_slots[i];
+
+            if ((bits & DRAIN_BIT(i)) && httpd_queue_work(slot->hd, drain_work, slot) != ESP_OK) {
+                atomic_store(&slot->drain_queued, false);
+            }
+            if (bits & TICK_BIT(i)) {
+                httpd_queue_work(slot->hd, tick_work, slot);
+            }
+        }
+    }
+}
+
+// The forwarder and the slot's timer, made once. On the server task.
+static esp_err_t slot_prepare(ws_slot_t *slot)
+{
+    if (!s_fwd && xTaskCreatePinnedToCore(forwarder, "console_ws", FWD_STACK, NULL, FWD_PRIORITY, &s_fwd,
+                                          tskNO_AFFINITY) != pdPASS) {
+        s_fwd = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+    if (!slot->timer) {
+        const esp_timer_create_args_t args = {.callback = tick, .arg = slot, .name = "console_ws"};
+
+        return esp_timer_create(&args, &slot->timer);
+    }
+    return ESP_OK;
 }
 
 // The socket closed (either side): free_ctx of its session.
@@ -150,11 +195,7 @@ static void slot_free(void *ctx)
 {
     ws_slot_t *slot = ctx;
 
-    if (slot->timer) {
-        esp_timer_stop(slot->timer);
-        esp_timer_delete(slot->timer);
-        slot->timer = NULL;
-    }
+    esp_timer_stop(slot->timer);
     ot_console_detach(slot->id);
     slot->active = false;
 }
@@ -205,15 +246,20 @@ esp_err_t device_api_console_ws_opened(httpd_req_t *req)
         close_with(&refused, OT_CONSOLE_CLOSE_TURNED_OFF, NULL);
         return ESP_OK;
     }
+    if (slot_prepare(slot) != ESP_OK) {
+        close_with(&refused, CLOSE_TRY_AGAIN, "no memory");
+        return ESP_OK;
+    }
     const int64_t now = esp_timer_get_time();
 
-    *slot = (ws_slot_t) {
-        .active = true, .hd = req->handle, .fd = fd, .last_pong_us = now, .last_ping_us = now, .last_progress_us = now,
-    };
-    const esp_timer_create_args_t args = {.callback = tick, .arg = slot, .name = "console_ws"};
-
-    if (esp_timer_create(&args, &slot->timer) != ESP_OK || esp_timer_start_periodic(slot->timer, TICK_US) != ESP_OK) {
-        slot_free(slot);
+    slot->hd = req->handle;
+    slot->fd = fd;
+    slot->id = 0;
+    slot->last_pong_us = slot->last_ping_us = slot->last_progress_us = now;
+    atomic_store(&slot->drain_queued, false);
+    slot->active = true;
+    if (esp_timer_start_periodic(slot->timer, TICK_US) != ESP_OK) {
+        slot->active = false;
         close_with(&refused, CLOSE_TRY_AGAIN, "no timer");
         return ESP_OK;
     }
@@ -241,7 +287,7 @@ esp_err_t device_api_console_ws_frame(httpd_req_t *req)
     }
     if (frame.len > FRAME_IN_MAX) {
         close_with(slot, CLOSE_TOO_BIG, "line too long");
-        return ESP_OK;
+        return ESP_FAIL; // its payload is still unread: drop the socket now
     }
     char *buf = calloc(1, frame.len + 1);
 

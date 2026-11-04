@@ -120,11 +120,23 @@ void ot_console_buf_init(ot_console_buf_t *b, uint8_t *storage, size_t cap)
     b->dropped = 0;
 }
 
+static bool continuation(uint8_t c)
+{
+    return (c & 0xC0) == 0x80;
+}
+
+// Drop the oldest n bytes, and the rest of a UTF-8 character they cut: output goes out as WebSocket text frames,
+// which must be valid UTF-8.
 static void drop(ot_console_buf_t *b, size_t n)
 {
     b->head = (b->head + n) % b->cap;
     b->len -= n;
     b->dropped += n;
+    while (b->len > 0 && continuation(b->data[b->head])) {
+        b->head = (b->head + 1) % b->cap;
+        b->len--;
+        b->dropped++;
+    }
 }
 
 void ot_console_buf_push(ot_console_buf_t *b, const char *s, size_t n)
@@ -145,15 +157,21 @@ void ot_console_buf_push(ot_console_buf_t *b, const char *s, size_t n)
         tail = tail + 1 == b->cap ? 0 : tail + 1;
     }
     b->len += n;
+    drop(b, 0); // a kept part that starts inside a character
 }
 
 size_t ot_console_buf_take(ot_console_buf_t *b, char *out, size_t cap)
 {
-    const size_t n = b->len < cap ? b->len : cap;
+    size_t n = b->len < cap ? b->len : cap;
 
-    for (size_t i = 0; i < n; i++) {
-        out[i] = (char)b->data[(b->head + i) % b->cap];
+    // Never end inside a UTF-8 character (see drop).
+    while (n > 0 && n < b->len && continuation(b->data[(b->head + n) % b->cap])) {
+        n--;
     }
+    const size_t first = b->cap - b->head < n ? b->cap - b->head : n;
+
+    memcpy(out, b->data + b->head, first);
+    memcpy(out + first, b->data, n - first);
     b->head = (b->head + n) % b->cap;
     b->len -= n;
     return n;

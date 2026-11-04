@@ -58,11 +58,15 @@ class TestConsoleLogic:
     @pytest.mark.parametrize(
         "text,state",
         [
-            ("# Connected to esp-otbr-d2cafc (OpenThread 1.4, router 0x6800)", "connected"),
+            (
+                "# Connected to esp-otbr-d2cafc (OpenThread 1.4, router 0x6800)",
+                "connected",
+            ),
             ("# Thread is not running (mode SNIFFER)", "not-running"),
             ("# Closed: a new console session opened from 192.168.1.20", "taken-over"),
             ("# Closed: the console was turned off", "off"),
             ('# Busy: "ping fd00::1" is still running', "busy"),
+            ("# Line too long (max 383 bytes)", "too-long"),
             ("router", None),
         ],
     )
@@ -97,7 +101,10 @@ def routes(enabled=True, session="null", network=NET):
 
 
 START = "t.page.init(); await t.advance(100);"
-OPEN = START + "const ws = t.sockets[0]; ws.open(); ws.recv('# Connected to esp-otbr-d2cafc (OpenThread 1.4, router 0x6800)');"
+OPEN = (
+    START
+    + "const ws = t.sockets[0]; ws.open(); ws.recv('# Connected to esp-otbr-d2cafc (OpenThread 1.4, router 0x6800)');"
+)
 
 
 @needs_node
@@ -111,7 +118,13 @@ class TestConsolePage:
             + "return [t.sockets.length, ws.url, t.el('con-pill').textContent, t.el('con-cmd').disabled,"
             " t.el('con-toggle').textContent];"
         )
-        assert r == [1, "ws://board.lan/device/console/ws", "Connected", False, "Disconnect"]
+        assert r == [
+            1,
+            "ws://board.lan/device/console/ws",
+            "Connected",
+            False,
+            "Disconnect",
+        ]
 
     def test_open_with_another_session_waits_for_connect(self):
         r = scenario(
@@ -196,6 +209,59 @@ class TestConsolePage:
             " return [t.el('con-pill').textContent, t.sockets.length, t.el('con-toggle').textContent];"
         )
         assert r == ["Taken over", 1, "Connect"]
+
+    def test_a_reconnect_that_finds_another_session_stops_and_says_who(self):
+        r = scenario(
+            page("console", routes(session="globalThis.sess || null"))
+            + OPEN
+            + "await t.advance(20000); globalThis.sess = {peer: '192.168.1.20', since_s: 3}; ws.drop(1006);"
+            " await t.advance(1100);"
+            " return [t.sockets.length, t.el('con-pill').textContent, t.el('con-where').textContent,"
+            " t.el('con-toggle').textContent];"
+        )
+        assert r == [1, "In use", "In use by 192.168.1.20", "Connect"]
+
+    def test_a_reconnect_that_finds_its_own_stale_session_takes_it_back(self):
+        r = scenario(
+            page("console", routes(session="globalThis.sess || null"))
+            + OPEN
+            + "await t.advance(20000); globalThis.sess = {peer: '192.168.1.5', since_s: 21}; ws.drop(1006);"
+            " await t.advance(1100); return t.sockets.length;"
+        )
+        assert r == 2
+
+    def test_disconnect_while_connecting_closes_that_socket(self):
+        r = scenario(
+            page("console", routes())
+            + START
+            + "t.el('con-toggle').click(); await t.advance(10000);"
+            " return [t.sockets.length, t.sockets[0].closedWith, t.el('con-toggle').textContent];"
+        )
+        assert r == [1, 1000, "Connect"]
+
+    def test_a_late_close_of_the_old_socket_leaves_the_new_session_alone(self):
+        r = scenario(
+            page("console", routes())
+            + OPEN
+            + "ws.close = function(code) { ws.closedWith = code; };"
+            " t.el('con-toggle').click(); t.el('con-toggle').click(); await t.advance(100);"
+            " const ws2 = t.sockets[1]; ws2.open(); ws2.recv('# Connected to x (OpenThread 1.4, router 0x6800)');"
+            " ws.drop(1000); await t.advance(10000);"
+            " return [t.sockets.length, t.el('con-pill').textContent, t.el('con-cmd').disabled,"
+            " t.el('con-toggle').textContent];"
+        )
+        assert r == [2, "Connected", False, "Disconnect"]
+
+    def test_a_refused_line_leaves_the_earlier_one_waiting(self):
+        r = scenario(
+            page("console", routes())
+            + OPEN
+            + "t.page.run('ping fd00::1'); t.page.run('state');"
+            " ws.recv('# Busy: \"ping fd00::1\" is still running'); ws.drop(1006);"
+            " return t.el('con-out').allText();"
+        )
+        assert '"ping fd00::1" got no answer' in r
+        assert '"state" got no answer' not in r
 
 
 def test_nav_lists_the_console_after_tools():
