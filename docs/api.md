@@ -142,7 +142,7 @@ border router while it is used. It is off by default: turn it on with `PUT /devi
 websocat ws://<board>/device/console/ws
 ```
 
-<img src="images/console.png" width="640" alt="Thread Console page: connected, with the output of state and router table and the quick command buttons">
+<img src="images/console.png" width="640" alt="Thread Console page: connected, with the output of state and router table">
 
 ## Thread REST API
 
