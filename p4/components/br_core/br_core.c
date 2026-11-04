@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "board.h"
+#include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_event.h"
 #include "esp_br_web.h"
@@ -34,11 +35,13 @@
 #include "openthread/link.h"
 #include "openthread/link_raw.h"
 #include "openthread/multi_radio.h"
+#include "openthread/netdiag.h"
 #include "openthread/platform/radio.h"
 #include "openthread/thread.h"
 #include "openthread/thread_ftd.h"
 #include "openthread/trel.h"
 #include "mode_fsm.h"
+#include "vendor_info.h"
 #include "rcp_sync.h"
 #include "sdkconfig.h"
 #ifdef OTBR_TEST_BUILD
@@ -443,6 +446,20 @@ static bool backbone_has_ip6(void)
     return esp_netif_get_all_ip6(s_core.backbone, addresses) > 0;
 }
 
+/** The SW version in Network Diagnostic answers: "YYYYMMDD-<7 hex>" from the build stamp. A failure is only logged. */
+static void set_vendor_sw_version(void)
+{
+    char version[BR_CORE_VENDOR_SW_VERSION_SIZE];
+
+    br_core_vendor_sw_version(esp_app_get_description()->version, version);
+    esp_openthread_lock_acquire(portMAX_DELAY);
+    otError err = otThreadSetVendorSwVersion(esp_openthread_get_instance(), version);
+    esp_openthread_lock_release();
+    if (err != OT_ERROR_NONE) {
+        ESP_LOGW(TAG, "vendor SW version \"%s\": %s", version, otThreadErrorToString(err));
+    }
+}
+
 static esp_err_t init_openthread(void)
 {
     esp_vfs_eventfd_config_t eventfd_config = {.max_fds = EVENTFD_COUNT};
@@ -457,6 +474,7 @@ static esp_err_t init_openthread(void)
     s_platform_config = platform_config();
     ESP_RETURN_ON_ERROR(esp_openthread_init(&s_platform_config), TAG, "esp_openthread_init");
     s_core.ot_initialised = true;
+    set_vendor_sw_version();
 #if CONFIG_OPENTHREAD_RADIO_TREL
     esp_openthread_lock_acquire(portMAX_DELAY);
     otTrelSetEnabled(esp_openthread_get_instance(), atomic_load(&s_trel_wanted));

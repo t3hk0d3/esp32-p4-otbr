@@ -1,14 +1,14 @@
 if(IDF_TARGET STREQUAL "linux")
-    # Host tests cover the mode state machine, the leader weight logic (leader.c) and the TREL peer sorter; they need
-    # nothing from OpenThread but a few types (stubbed).
-    idf_component_register(SRCS "mode_fsm.c" "leader.c" "trel_peers.c"
+    # Host tests cover the mode state machine, the leader weight logic (leader.c), the TREL peer sorter and the vendor
+    # version helper; they need nothing from OpenThread but a few types (stubbed).
+    idf_component_register(SRCS "mode_fsm.c" "leader.c" "trel_peers.c" "vendor_info.c"
                            INCLUDE_DIRS "include" "." "test_host/stubs"
                            REQUIRES rcp_sync
                            PRIV_REQUIRES log)
     return()
 endif()
 
-set(srcs "br_core.c" "mode_fsm.c" "validity.c" "leader.c" "trel_peers.c")
+set(srcs "br_core.c" "mode_fsm.c" "validity.c" "leader.c" "trel_peers.c" "vendor_info.c")
 if(OTBR_TEST_BUILD)
     list(APPEND srcs "br_core_test.c")
 endif()
