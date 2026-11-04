@@ -2,8 +2,8 @@
 
 - The home page is the landing page (docs/overrides/home.html); the repository README.md becomes the Overview page.
   docs/README.md (the index for browsing on GitHub) is left out, the site navigation replaces it.
-- Relative links are written for GitHub. A link to a file the site carries is kept (made relative to the page); a link
-  to anything else in the repository (sources, LICENSE, CHANGELOG.md, docs/superpowers/) becomes a GitHub URL.
+- Relative links are written for GitHub. A link to a file the site carries is kept (made relative to the page; image
+  src= in raw HTML relative to the page's URL); a link to anything else in the repository (sources, LICENSE, CHANGELOG.md, docs/superpowers/) becomes a GitHub URL.
 """
 
 import posixpath
@@ -42,6 +42,11 @@ def on_page_markdown(markdown, page, config, files):
         else posixpath.dirname("docs/" + page.file.src_uri)
     )
     site_dir = posixpath.dirname(page.file.src_uri)
+    # raw HTML (src=") is not rewritten by MkDocs, so it must be relative to the page's URL, which is a directory
+    # (home-assistant/) when use_directory_urls is on
+    url_dir = (
+        page.url if page.url.endswith("/") else posixpath.dirname(page.url)
+    ).rstrip("/") or "."
 
     def rewrite(match):
         target = posixpath.normpath(posixpath.join(repo_dir, match.group(2)))
@@ -49,9 +54,8 @@ def on_page_markdown(markdown, page, config, files):
             target.startswith("docs/")
             and files.get_file_from_path(target[len("docs/") :]) is not None
         ):
-            return match.group(1) + posixpath.relpath(
-                target[len("docs/") :], site_dir or "."
-            )
+            base = url_dir if match.group(1) == 'src="' else site_dir or "."
+            return match.group(1) + posixpath.relpath(target[len("docs/") :], base)
         return match.group(1) + BLOB + target
 
     return LINK.sub(rewrite, markdown)
