@@ -74,6 +74,7 @@ return {normalise : normalise, riskyReason : riskyReason, noticeState : noticeSt
 function ConsolePage(env) {
 var L = ConsoleLogic;
 var MAX_LINES = 2000;
+var SETTLE_MS = 1500; // a closing socket's session is gone by then
 var CHIPS = ['state', 'netdata show', 'router table', 'child table', 'leaderdata', 'srp server host'];
 var PILLS = {
   connected : ['Connected', 'ok'], connecting : ['Connecting', 'warn'], reconnecting : ['Reconnecting', 'warn'],
@@ -312,11 +313,23 @@ function load() {
       pill('off');
       return;
     }
-    if (c.session) {
-      inUse(c.session);
-      return;
-    }
-    connect();
+    if (!c.session)
+      return connect();
+    // After a reload the old page's socket may still be closing: ask once more before calling it someone else's.
+    pill('connecting');
+    env.setTimeout(function() {
+      get('/device/console').then(function(again) {
+        if (again && again.enabled && again.session)
+          inUse(again.session);
+        else if (again && again.enabled)
+          connect();
+        else if (again) {
+          $('con-off').classList.remove('hidden');
+          pill('off');
+        } else
+          pill('disconnected');
+      }, function() { pill('disconnected'); });
+    }, SETTLE_MS);
   }, function() { pill('disconnected'); });
 }
 

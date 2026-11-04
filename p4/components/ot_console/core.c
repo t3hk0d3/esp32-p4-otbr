@@ -61,10 +61,10 @@ ot_console_verdict_t ot_console_arb_submit(ot_console_arb_t *a, ot_console_src_t
 
 static ot_console_dest_t route(const ot_console_arb_t *a)
 {
-    if (a->has_pending) {
-        return a->pending_src == OT_CONSOLE_SRC_WS && a->attached ? OT_CONSOLE_TO_SESSION : OT_CONSOLE_TO_STDOUT;
+    if (a->has_pending && a->pending_src == OT_CONSOLE_SRC_USB) {
+        return OT_CONSOLE_TO_STDOUT;
     }
-    return a->attached ? OT_CONSOLE_TO_SESSION : OT_CONSOLE_TO_STDOUT;
+    return a->attached ? OT_CONSOLE_TO_SESSION : OT_CONSOLE_DROP;
 }
 
 static ot_console_dest_t prompt(ot_console_arb_t *a, ot_console_span_t *span)
@@ -98,6 +98,14 @@ void ot_console_arb_attach(ot_console_arb_t *a, bool attached)
     a->attached = attached;
 }
 
+void ot_console_arb_cancel(ot_console_arb_t *a, const char *line)
+{
+    if (a->has_pending && strcmp(a->pending, line) == 0) {
+        a->has_pending = false;
+        a->pending[0] = '\0';
+    }
+}
+
 void ot_console_arb_stack(ot_console_arb_t *a, bool running)
 {
     a->running = running;
@@ -109,6 +117,20 @@ void ot_console_arb_stack(ot_console_arb_t *a, bool running)
 const char *ot_console_arb_pending(const ot_console_arb_t *a)
 {
     return a->has_pending ? a->pending : NULL;
+}
+
+ot_console_take_t ot_console_take_next(bool greeted, size_t notices, size_t dropped, size_t buffered)
+{
+    if (!greeted) {
+        return notices > 0 ? OT_CONSOLE_TAKE_GREETING : OT_CONSOLE_TAKE_NONE;
+    }
+    if (dropped > 0) {
+        return OT_CONSOLE_TAKE_DROPPED;
+    }
+    if (buffered > 0) {
+        return OT_CONSOLE_TAKE_OUTPUT;
+    }
+    return notices > 0 ? OT_CONSOLE_TAKE_NOTICE : OT_CONSOLE_TAKE_NONE;
 }
 
 void ot_console_buf_init(ot_console_buf_t *b, uint8_t *storage, size_t cap)

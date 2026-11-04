@@ -130,12 +130,31 @@ class TestConsolePage:
         r = scenario(
             page("console", routes(session="{peer: '192.168.1.20', since_s: 40}"))
             + START
-            + "const before = [t.sockets.length, t.el('con-pill').textContent, t.el('con-where').textContent,"
+            + "await t.advance(2000);"
+            " const before = [t.sockets.length, t.el('con-pill').textContent, t.el('con-where').textContent,"
             " t.el('con-cmd').disabled];"
             " t.el('con-toggle').click(); await t.advance(10);"
             " return before.concat([t.sockets.length]);"
         )
         assert r == [0, "In use", "In use by 192.168.1.20", True, 1]
+
+    def test_open_while_a_reloaded_page_still_holds_the_session_connects_once_it_is_gone(
+        self,
+    ):
+        r = scenario(
+            page(
+                "console",
+                routes(
+                    session="(globalThis.gets = (globalThis.gets || 0) + 1) === 1"
+                    " ? {peer: '192.168.1.20', since_s: 0} : null"
+                ),
+            )
+            + START
+            + "const first = [t.sockets.length, t.el('con-pill').textContent];"
+            " await t.advance(2000);"
+            " return first.concat([t.sockets.length, t.el('con-where').textContent]);"
+        )
+        assert r == [0, "Connecting", 1, ""]
 
     def test_open_with_the_console_off_offers_to_turn_it_on(self):
         r = scenario(

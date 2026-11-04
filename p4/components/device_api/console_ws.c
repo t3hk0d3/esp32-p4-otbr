@@ -18,7 +18,10 @@
 
 static const char *TAG = "device_api";
 
-#define SLOTS 4 // an open session, one being taken over, and room for a refusal
+// More than the server's open sockets (ESP_BR_WEB_MAX_OPEN_SOCKETS, 7): every socket it can hold gets a slot, so a
+// closing one (up to CLOSE_WAIT_US) never crowds out a new one.
+#define SLOTS 8
+_Static_assert(2 * SLOTS <= 32, "drain and tick bits share one notification word");
 #define TICK_US (1000 * 1000) // also how fresh the socket's LRU stamp stays
 #define PING_US (10 * 1000 * 1000)
 #define NO_ANSWER_US (30 * 1000 * 1000)

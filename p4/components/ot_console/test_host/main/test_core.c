@@ -130,6 +130,25 @@ TEST_CASE("USB line while a session is attached: IN_USE", "[ot_console]")
     TEST_ASSERT_NULL(ot_console_arb_pending(&a));
 }
 
+TEST_CASE("Cancel of the pending line: cleared", "[ot_console]")
+{
+    ot_console_arb_t a = running_arb();
+
+    ot_console_arb_submit(&a, OT_CONSOLE_SRC_WS, "state");
+    ot_console_arb_cancel(&a, "state");
+    TEST_ASSERT_NULL(ot_console_arb_pending(&a));
+}
+
+TEST_CASE("Cancel of factoryreset sent while another line is pending: that line kept", "[ot_console]")
+{
+    ot_console_arb_t a = running_arb();
+
+    ot_console_arb_submit(&a, OT_CONSOLE_SRC_WS, "ping fd00::1");
+    ot_console_arb_submit(&a, OT_CONSOLE_SRC_WS, "factoryreset");
+    ot_console_arb_cancel(&a, "factoryreset");
+    TEST_ASSERT_EQUAL_STRING("ping fd00::1", ot_console_arb_pending(&a));
+}
+
 /* ---- ot_console_arb_output ---- */
 
 TEST_CASE("Output while a WebSocket line is pending: to the session", "[ot_console]")
@@ -163,12 +182,23 @@ TEST_CASE("Output with nothing pending and a session: to the session", "[ot_cons
     TEST_ASSERT_EQUAL(OT_CONSOLE_TO_SESSION, out(&a, "Done\r\n", &span));
 }
 
-TEST_CASE("Output with nothing pending and no session: to stdout", "[ot_console]")
+TEST_CASE("Output with nothing pending and no session: dropped", "[ot_console]")
 {
     ot_console_arb_t a = running_arb();
     ot_console_span_t span;
 
-    TEST_ASSERT_EQUAL(OT_CONSOLE_TO_STDOUT, out(&a, "Done\r\n", &span));
+    TEST_ASSERT_EQUAL(OT_CONSOLE_DROP, out(&a, "Done\r\n", &span));
+}
+
+TEST_CASE("Output of a WebSocket line after its session left: dropped", "[ot_console]")
+{
+    ot_console_arb_t a = running_arb();
+    ot_console_span_t span;
+
+    ot_console_arb_attach(&a, true);
+    ot_console_arb_submit(&a, OT_CONSOLE_SRC_WS, "ping fd00::1");
+    ot_console_arb_attach(&a, false);
+    TEST_ASSERT_EQUAL(OT_CONSOLE_DROP, out(&a, "16 bytes from fd00::1\r\n", &span));
 }
 
 TEST_CASE("Prompt: not forwarded, pending cleared", "[ot_console]")
@@ -239,6 +269,38 @@ TEST_CASE("Detach while pending: pending kept until the prompt", "[ot_console]")
     TEST_ASSERT_EQUAL_STRING("ping fd00::1", ot_console_arb_pending(&a));
     TEST_ASSERT_EQUAL(OT_CONSOLE_DROP_PROMPT, out(&a, "> ", &span));
     TEST_ASSERT_NULL(ot_console_arb_pending(&a));
+}
+
+/* ---- ot_console_take_next ---- */
+
+TEST_CASE("Take before the greeting with output waiting: nothing yet", "[ot_console]")
+{
+    TEST_ASSERT_EQUAL(OT_CONSOLE_TAKE_NONE, ot_console_take_next(false, 0, 0, 12));
+}
+
+TEST_CASE("Take before the greeting with the greeting queued: the greeting, before output and drops", "[ot_console]")
+{
+    TEST_ASSERT_EQUAL(OT_CONSOLE_TAKE_GREETING, ot_console_take_next(false, 1, 40, 12));
+}
+
+TEST_CASE("Take after the greeting with bytes dropped: the dropped notice first", "[ot_console]")
+{
+    TEST_ASSERT_EQUAL(OT_CONSOLE_TAKE_DROPPED, ot_console_take_next(true, 2, 40, 12));
+}
+
+TEST_CASE("Take after the greeting with output and notices: output first", "[ot_console]")
+{
+    TEST_ASSERT_EQUAL(OT_CONSOLE_TAKE_OUTPUT, ot_console_take_next(true, 2, 0, 12));
+}
+
+TEST_CASE("Take after the greeting with only notices: a notice", "[ot_console]")
+{
+    TEST_ASSERT_EQUAL(OT_CONSOLE_TAKE_NOTICE, ot_console_take_next(true, 2, 0, 0));
+}
+
+TEST_CASE("Take with nothing waiting: nothing", "[ot_console]")
+{
+    TEST_ASSERT_EQUAL(OT_CONSOLE_TAKE_NONE, ot_console_take_next(true, 0, 0, 0));
 }
 
 /* ---- ot_console_buf ---- */

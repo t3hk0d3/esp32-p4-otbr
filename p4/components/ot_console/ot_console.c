@@ -139,6 +139,8 @@ static void route(const char *text, size_t len)
     case OT_CONSOLE_DROP_PROMPT:
         usb_done();
         break;
+    case OT_CONSOLE_DROP: // nobody reads it: no UART writes on the OpenThread task
+        break;
     }
 }
 
@@ -183,6 +185,12 @@ static void cli_hook(bool running)
     usb_done();
 }
 
+// Only the command word: the rest can carry keys (dataset networkkey, dataset set active <tlvs>).
+static void log_line(const char *from, const char *line)
+{
+    ESP_LOGI(TAG, "console %s: %.*s (%zu bytes)", from, (int)strcspn(line, " "), line, strlen(line));
+}
+
 // Post a line the arbiter let through. False when it could not be posted (the pending line is cleared again).
 static bool post(const char *line)
 {
@@ -194,7 +202,7 @@ static bool post(const char *line)
     }
     if (!posted) {
         taskENTER_CRITICAL(&s_mux);
-        ot_console_arb_stack(&s_arb, s_arb.running); // clears the pending line it recorded
+        ot_console_arb_cancel(&s_arb, line);
         taskEXIT_CRITICAL(&s_mux);
     }
     return posted;
@@ -348,7 +356,9 @@ esp_err_t ot_console_submit(uint32_t session_id, const char *line)
         strlcpy(peer, s_session.peer, sizeof(peer));
     }
     taskEXIT_CRITICAL(&s_mux);
-    ESP_RETURN_ON_FALSE(current, ESP_ERR_INVALID_STATE, TAG, "not the current session");
+    if (!current) { // taken over or turned off: an expected race, its close is on the way
+        return ESP_ERR_INVALID_STATE;
+    }
 
     if (strlcpy(copy, line, sizeof(copy)) >= sizeof(copy)) {
         ot_console_notice_too_long(text, sizeof(text), CLI_LINE_MAX);
@@ -384,7 +394,7 @@ esp_err_t ot_console_submit(uint32_t session_id, const char *line)
 
     switch (verdict) {
     case OT_CONSOLE_SEND:
-        ESP_LOGI(TAG, "console %s: %s", peer, copy);
+        log_line(peer, copy);
         if (!post(copy)) {
             ot_console_notice_not_running(text, sizeof(text), mode_name(br_core_get_mode()));
             notice(session_id, text);
@@ -422,21 +432,25 @@ size_t ot_console_take(uint32_t session_id, char *out, size_t cap)
         taskEXIT_CRITICAL(&s_mux);
         return 0;
     }
-    const size_t dropped = s_session.greeted ? ot_console_buf_take_dropped(&s_out) : 0;
-
-    if (!s_session.greeted) { // the greeting comes first, even after a line that already answered
-        if (s_session.notice_count > 0) {
-            s_session.greeted = true;
-            n = take_notice(out, cap);
-        }
-    } else if (dropped > 0) {
-        const int len = ot_console_notice_dropped(out, cap, dropped);
+    switch (ot_console_take_next(s_session.greeted, s_session.notice_count, s_out.dropped, s_out.len)) {
+    case OT_CONSOLE_TAKE_GREETING:
+        s_session.greeted = true;
+        n = take_notice(out, cap);
+        break;
+    case OT_CONSOLE_TAKE_DROPPED: {
+        const int len = ot_console_notice_dropped(out, cap, ot_console_buf_take_dropped(&s_out));
 
         n = len < 0 ? 0 : ((size_t)len < cap ? (size_t)len : cap - 1);
-    } else if (s_out.len > 0) {
+        break;
+    }
+    case OT_CONSOLE_TAKE_OUTPUT:
         n = ot_console_buf_take(&s_out, out, cap);
-    } else if (s_session.notice_count > 0) {
+        break;
+    case OT_CONSOLE_TAKE_NOTICE:
         n = take_notice(out, cap);
+        break;
+    case OT_CONSOLE_TAKE_NONE:
+        break;
     }
     taskEXIT_CRITICAL(&s_mux);
     return n;
@@ -519,7 +533,7 @@ static int usb_ot_command(int argc, char **argv)
     case OT_CONSOLE_SEND:
         break;
     }
-    ESP_LOGI(TAG, "console usb: %s", line);
+    log_line("usb", line);
     xSemaphoreTake(s_usb_done, 0); // a give left from an earlier command that timed out
     atomic_store(&s_usb_waiting, true);
     if (!post(line)) {

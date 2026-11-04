@@ -36,7 +36,17 @@ typedef enum {
     OT_CONSOLE_TO_SESSION,
     OT_CONSOLE_TO_STDOUT,
     OT_CONSOLE_DROP_PROMPT, /**< the CLI's "> " prompt: not forwarded */
+    OT_CONSOLE_DROP,        /**< nobody to read it (no session, or the line's session left) */
 } ot_console_dest_t;
+
+/** What a session's transport gets next. */
+typedef enum {
+    OT_CONSOLE_TAKE_NONE,
+    OT_CONSOLE_TAKE_GREETING, /**< the first queued notice, before anything else */
+    OT_CONSOLE_TAKE_DROPPED,  /**< the "Output dropped" notice */
+    OT_CONSOLE_TAKE_OUTPUT,
+    OT_CONSOLE_TAKE_NOTICE,
+} ot_console_take_t;
 
 typedef struct ot_console_arb {
     char pending[OT_CONSOLE_PENDING_LEN]; /**< the line waiting for its prompt, "" when none */
@@ -78,11 +88,17 @@ ot_console_dest_t ot_console_arb_output(ot_console_arb_t *a, const char *text, s
 
 void ot_console_arb_attach(ot_console_arb_t *a, bool attached);
 
+/** Posting `line` failed: forget it if it is the pending line (a factoryreset sent past a pending line is not). */
+void ot_console_arb_cancel(ot_console_arb_t *a, const char *line);
+
 /** The stack started or stopped: either way no command is pending any more. */
 void ot_console_arb_stack(ot_console_arb_t *a, bool running);
 
 /** The pending line, NULL when none. */
 const char *ot_console_arb_pending(const ot_console_arb_t *a);
+
+/** Order of a session's output: the greeting first, then dropped bytes, output, notices. */
+ot_console_take_t ot_console_take_next(bool greeted, size_t notices, size_t dropped, size_t buffered);
 
 void ot_console_buf_init(ot_console_buf_t *b, uint8_t *storage, size_t cap);
 
