@@ -198,6 +198,13 @@ reason, spec reference.
    pill) when it is the POST's own reply with `age_s` of at most 5 s, or when polling ended a scan this page followed;
    any other `done` shows as a saved result (amber). Host tests:
    `tools/tests/test_topology_page.py`.
+   Follow-up (2026-11-04, service details, docs/superpowers/specs/2026-11-04-srp-details-design.md): `TopologyLogic`
+   decodes the scan's SRP records: `txtEntries` (base64 TXT RDATA to `{key, value, bytes}`, key-only entries with a
+   null value, binary values as bytes, `hexText`), `describe` (ESPHome, Matter operational and commissionable,
+   HomeKit, border router meshcop/TREL), `srpHostsFor` replacing `srpHostFor` (address, host name = extended address,
+   meshcop/TREL `xa` = extended address; every match, this board's records first). `displayName`: nickname, this
+   board, ESPHome `friendly_name`, HomeKit and meshcop instance names, the SRP host name, "Matter device 0xNNNN",
+   "Unknown 0xNNNN"; the table search also matches the friendly name and every matched host name.
 17. Applied. `esp_ot_br_server`: every Network Diagnostic Get goes through the new `netdiag_mux` component (spec
    2026-11-02 section 3.5). OpenThread's netdiag client keeps one callback slot and every `otThreadSendDiagnosticGet`
    replaces it, so `/topology`, the REST diagnostics and discovery, and the `mesh_scan` child step took each other's

@@ -1,5 +1,7 @@
 """Topology page (BDD: TopologyLogic, TopologyPage). Runs static/topology.js under node."""
 
+import base64
+
 import pytest
 from device_js import logic, needs_node, page, scenario
 
@@ -166,6 +168,94 @@ def js(expression):
 
 def plain(expression):
     return logic("topology", expression)
+
+
+def txt(*entries):
+    """Base64 of TXT RDATA (length-prefixed strings) built from `key=value` entries (str or bytes)."""
+    raw = b""
+    for e in entries:
+        b = e.encode() if isinstance(e, str) else e
+        raw += bytes([len(b)]) + b
+    return base64.b64encode(raw).decode()
+
+
+# TXT records rebuilt from the keys and values recorded on 2026-11-04 on ha-thread-bbc1 (spec section 2 and the
+# mockup): the ESPHome test device (this board's SRP server), a Matter device on two fabrics and the HA border router's
+# meshcop record (the HA server; xp/xa as in the srp.c host tests, the meshcop entry order is not the recorded one).
+ESPHOME_TXT = txt(
+    "friendly_name=C6 Thread Test", "version=2026.7.4", "platform=ESP32", "board=esp32-c6-devkitc-1",
+    "network=thread", "mac=acebe60bffa4", "project_name=esp32otbr.srp-probe", "project_version=0.1",
+    "config_hash=e89f8cd1", "api_encryption=Noise_NNpsk0_25519_ChaChaPoly_SHA256",
+)  # fmt: skip
+MATTER_TXT = txt("SII=800", "SAI=2000", "SAT=4000")
+MATTER_T_TXT = txt("SII=800", "SAI=2000", "SAT=4000", "T=0")
+MESHCOP_TXT = txt(
+    "rv=1", "nn=ha-thread-bbc1", b"xp=" + bytes.fromhex("5965b57e30c0def4"), "tv=1.4.0",
+    b"xa=" + bytes.fromhex("7e287c8b8b140ee6"), b"sb=" + bytes.fromhex("000009b1"), "vn=Home Assistant",
+    "mn=OpenThread Border Router",
+)  # fmt: skip
+# Synthetic (built from the HAP and Matter specs, never seen on the test network): a HomeKit outlet, a Matter
+# device in pairing mode, an ICD, key-only and odd entries.
+HOMEKIT_TXT = txt(
+    "c#=3",
+    "ff=0",
+    "id=AA:BB:CC:DD:EE:FF",
+    "md=Eve Energy 20EBO8301",
+    "pv=1.1",
+    "s#=1",
+    "sf=0",
+    "ci=7",
+)
+MATTERC_TXT = txt(
+    "D=3840", "CM=1", "VP=4447+40961", "DT=266", "DN=Smart Plug", "SII=5000", "SAI=300"
+)
+ICD_TXT = txt("SII=5000", "SAI=300", "SAT=4000", "ICD=1")
+ODD_TXT = txt("at", "=nokey", "empty=", "name=<b>x</b>")
+
+# Hosts as the scan reports them (spec section 4) and devices as L.devices builds them, for the SRP decoders.
+# 0x1000 is the HA border router: its meshcop host (LAN address, from its discovery proxy) and its own SRP host
+# registered with this board. 0x3000 is a Matter device registered with the HA server (host name = ext address).
+SRP_FIXTURE = f"""
+const svc = (instance, type, port, source, txt) => ({{instance, type, port, source, subtypes: [], txt,
+                                                     txt_truncated: false}});
+const HOSTS = [
+  {{name: 'homeassistant', addresses: ['fdaa:20::69'], source: 4096, ttl_s: 10,
+   services: [svc('Home Assistant OpenThread Border Router #0EE6', '_meshcop._udp', 49154, 4096, '{MESHCOP_TXT}')]}},
+  {{name: 'c6-thread-test', addresses: ['fd87:9b49:8264:1:c158:979b:6560:a15f'], source: 26624, lease_s: 7012,
+   key_lease_s: 1209412, services: [svc('c6-thread-test', '_esphomelib._tcp', 6053, 26624, '{ESPHOME_TXT}'),
+                                    svc('c6-thread-test', '_http._tcp', 80, 26624, '')]}},
+  {{name: 'FEF6E5E01729FF7F', addresses: ['fd87:9b49:8264:1:69d5:55aa:6eff:e014'], source: 4096, ttl_s: 2940,
+   services: [svc('CAC23A5DA6E7644C-000000000F4B0B5F', '_matter._tcp', 5540, 4096, '{MATTER_TXT}'),
+              svc('3E5D425037C4F971-0000000000000003', '_matter._tcp', 5540, 4096, '{MATTER_T_TXT}')]}},
+  {{name: 'homeassistant-otbr', addresses: ['fd87:9b49:8264:1:aaaa::1000'], source: 26624, lease_s: 5000,
+   key_lease_s: 1200000, services: []}},
+  {{name: 'eve-energy-1a2b', addresses: ['fd87:9b49:8264:1::4c01'], source: 26624, lease_s: 5000,
+   key_lease_s: 1200000, services: [svc('Eve Energy 1A2B', '_hap._udp', 5001, 26624, '{HOMEKIT_TXT}')]}},
+  {{name: '0E1F2A3B4C5D6E7F', addresses: ['fd87:9b49:8264:1::5001'], source: 26624, lease_s: 100, key_lease_s: 100,
+   services: [svc('5F3A1B2C3D4E5F60', '_matterc._udp', 5540, 26624, '{MATTERC_TXT}')]}},
+  {{name: 'A1B2C3D4E5F60718', addresses: ['fd87:9b49:8264:1::5002'], source: 26624, lease_s: 100, key_lease_s: 100,
+   services: [svc('CAC23A5DA6E7644C-0000000000000009', '_matter._tcp', 5540, 26624, '{ICD_TXT}')]}},
+  {{name: 'printer', addresses: ['fd87:9b49:8264:1::7001'], source: 26624, lease_s: 100, key_lease_s: 100,
+   services: [svc('Printer', '_ipp._tcp', 631, 26624, '{txt("rp=ipp/print")}')]}},
+  {{name: 'esp-otbr', addresses: ['fd87:9b49:8264:1::6800'], source: 26624, lease_s: 100, key_lease_s: 100,
+   services: []}}];
+const dev = (id, rloc16, ext, addrs, extra) => ({{id, rloc16, ext, addrs, thisBoard: false, parentId: null, ...extra}});
+const DEVS = [
+  dev('r1', 0x6400, '4eeb2e6a619150e3', ['fd87:9b49:8264:1:c158:979b:6560:a15f']),
+  dev('r2', 0x3000, 'fef6e5e01729ff7f', ['fdde:ad00:beef::ff:fe00:3000']),
+  dev('r3', 0x1000, '7e287c8b8b140ee6', ['fd87:9b49:8264:1:aaaa::1000']),
+  dev('r4', 0x4c00, 'c100000000004c00', ['fd87:9b49:8264:1::4c01']),
+  dev('r5', 0x5c00, 'aa00000000005c00', []),
+  dev('r6', 0x6800, 'bb00000000006800', ['fd87:9b49:8264:1::6800'], {{thisBoard: true}}),
+  dev('r7', 0x7000, 'cc00000000007000', ['fd87:9b49:8264:1::7001'])];
+const host = (name) => HOSTS.find((h) => h.name === name);
+const dv = (id) => DEVS.find((d) => d.id === id);
+"""
+
+
+def srp(expression):
+    """Evaluate `expression` with the SRP fixture (HOSTS, DEVS, host(name), dv(id)) in scope."""
+    return logic("topology", f"(() => {{ {SRP_FIXTURE} return ({expression}); }})()")
 
 
 NETWORK = "{mesh_local_prefix: 'fdde:ad00:beef:0::/64', omr_prefixes: ['2001:db8:4a2:1::/64', 'fd7a:91c3:22e0:1::/64']}"
@@ -820,6 +910,265 @@ class TestTopologyLogic:
             "#c62828",
             "#5f5f5f",
         ]
+
+    # txtEntries
+
+    def test_txtentries_decodes_the_recorded_esphome_txt_in_order(self):
+        # On the ESPHome TXT recorded 2026-11-04: every entry in order, friendly_name "C6 Thread Test".
+        got = srp(f"L.txtEntries('{ESPHOME_TXT}')")
+        assert [e["key"] for e in got] == [
+            "friendly_name", "version", "platform", "board", "network", "mac", "project_name", "project_version",
+            "config_hash", "api_encryption",
+        ]  # fmt: skip
+        assert got[0]["value"] == "C6 Thread Test"
+        assert got[9]["value"] == "Noise_NNpsk0_25519_ChaChaPoly_SHA256"
+
+    def test_txtentries_gives_a_key_only_entry_a_null_value(self):
+        # On a key-only entry ("at"): {key, value: null}.
+        assert srp(f"L.txtEntries('{ODD_TXT}')[0]") == {
+            "key": "at",
+            "value": None,
+            "bytes": None,
+        }
+
+    def test_txtentries_keeps_an_empty_value_and_skips_an_entry_without_key(self):
+        # On "empty=" and "=nokey": "" kept as a value, the entry without a key dropped; markup stays plain text.
+        got = srp(f"L.txtEntries('{ODD_TXT}').map((e) => [e.key, e.value])")
+        assert got == [["at", None], ["empty", ""], ["name", "<b>x</b>"]]
+
+    def test_txtentries_gives_a_binary_value_as_bytes_with_hex_text(self):
+        # On meshcop xa (binary): value as a byte array, L.hexText of it "7e287c8b8b140ee6".
+        got = srp(
+            f"((e) => [Array.isArray(e.value), e.value.length, L.hexText(e.value), L.hexText(e.bytes)])"
+            f"(L.txtEntries('{MESHCOP_TXT}').find((e) => e.key === 'xa'))"
+        )
+        assert got == [True, 8, "7e287c8b8b140ee6", "7e287c8b8b140ee6"]
+
+    def test_txtentries_keeps_the_raw_bytes_of_a_text_value(self):
+        # On a text value: bytes holds its raw bytes too.
+        assert srp(f"L.hexText(L.txtEntries('{MESHCOP_TXT}')[0].bytes)") == "31"
+
+    def test_txtentries_of_empty_or_invalid_base64_is_empty(self):
+        # On "", undefined, "AA=A", "@@@@" or a single zero-length string: [].
+        got = plain(
+            "['', undefined, null, 'AA=A', '@@@@', 'AA==', 'Zm9v!'].map((b) => L.txtEntries(b))"
+        )
+        assert got == [[], [], [], [], [], [], []]
+
+    def test_txtentries_stops_at_a_length_running_past_the_end(self):
+        # On a string length past the end: the entries before it, nothing read beyond.
+        cut = base64.b64encode(b"\x03a=1\x09b=2").decode()
+        assert srp(f"L.txtEntries('{cut}').map((e) => e.key)") == ["a"]
+
+    # describe
+
+    def test_describe_esphome_host(self):
+        # On the ESPHome host: kind "ESPHome", name, version, board, platform, project, encrypted API, ports.
+        got = srp("L.describe(host('c6-thread-test'))")
+        assert {k: v for k, v in got.items() if k != "services"} == {
+            "kind": "ESPHome", "name": "C6 Thread Test", "version": "2026.7.4", "board": "esp32-c6-devkitc-1",
+            "platform": "ESP32", "project": "esp32otbr.srp-probe", "projectVersion": "0.1", "encrypted": True,
+            "apiPort": 6053, "webPort": 80,
+        }  # fmt: skip
+
+    def test_describe_esphome_without_api_encryption_is_not_encrypted(self):
+        # On an ESPHome TXT without api_encryption: encrypted false, webPort null without _http._tcp.
+        plain_txt = txt("friendly_name=Plain", "version=2025.1.0")
+        got = plain(
+            f"L.describe({{name: 'p', services: [{{instance: 'p', type: '_esphomelib._tcp', port: 6053,"
+            f" txt: '{plain_txt}'}}]}})"
+        )
+        assert [got["encrypted"], got["webPort"], got["board"]] == [False, None, None]
+
+    def test_describe_matter_host_on_two_fabrics(self):
+        # On a Matter host with two instances on two fabrics: kind "Matter", one {fabric, node} per instance,
+        # SII/SAI/SAT in ms, ICD null, T from the record that has it.
+        got = srp("L.describe(host('FEF6E5E01729FF7F'))")
+        assert {k: v for k, v in got.items() if k != "services"} == {
+            "kind": "Matter",
+            "fabrics": [{"fabric": "CAC23A5DA6E7644C", "node": "000000000F4B0B5F"},
+                        {"fabric": "3E5D425037C4F971", "node": "0000000000000003"}],
+            "sii": 800, "sai": 2000, "sat": 4000, "icd": None, "tcp": 0, "commissionable": None,
+        }  # fmt: skip
+
+    def test_describe_matter_icd_when_present(self):
+        # On a Matter TXT with ICD=1 (synthetic): icd 1.
+        assert srp("L.describe(host('A1B2C3D4E5F60718')).icd") == 1
+
+    def test_describe_matter_commissionable(self):
+        # On a _matterc._udp record (synthetic): vendor id, product id, device type and device name.
+        got = srp("L.describe(host('0E1F2A3B4C5D6E7F'))")
+        assert [got["kind"], got["fabrics"], got["commissionable"]] == [
+            "Matter",
+            [],
+            {
+                "vendorId": 4447,
+                "productId": 40961,
+                "deviceType": 266,
+                "deviceName": "Smart Plug",
+            },
+        ]
+
+    def test_describe_homekit_host(self):
+        # On a _hap._udp record (synthetic): model, category name from ci, paired from sf.
+        got = srp("L.describe(host('eve-energy-1a2b'))")
+        assert {k: v for k, v in got.items() if k != "services"} == {
+            "kind": "HomeKit", "name": "Eve Energy 1A2B", "model": "Eve Energy 20EBO8301", "category": "Outlet",
+            "paired": True,
+        }  # fmt: skip
+
+    def test_describe_homekit_category_names_cover_1_to_36(self):
+        # On ci 1, 2, 36, 37 and sf=1: "Other", "Bridge", "TV Streaming Stick", null; sf=1 means not paired.
+        got = plain(
+            "[1, 2, 36, 37].map((ci) => L.describe({name: 'h', services: [{instance: 'h', type: '_hap._udp',"
+            " txt: Buffer.from([3 + String(ci).length, ...Buffer.from('ci=' + ci), 4, ...Buffer.from('sf=1')])"
+            ".toString('base64')}]})).map((d) => [d.category, d.paired])"
+        )
+        assert got == [
+            ["Other", False],
+            ["Bridge", False],
+            ["TV Streaming Stick", False],
+            [None, False],
+        ]
+
+    def test_describe_meshcop_host(self):
+        # On the recorded meshcop record: vendor, model, Thread version, extended address from xa.
+        got = srp("L.describe(host('homeassistant'))")
+        assert {k: v for k, v in got.items() if k != "services"} == {
+            "kind": "Border router", "name": "Home Assistant OpenThread Border Router #0EE6",
+            "vendor": "Home Assistant", "model": "OpenThread Border Router", "threadVersion": "1.4.0",
+            "ext": "7e287c8b8b140ee6",
+        }  # fmt: skip
+
+    def test_describe_unknown_type_keeps_the_raw_entries(self):
+        # On an unknown service type: kind null, each service with its port, source and decoded entries.
+        got = srp("L.describe(host('printer'))")
+        assert got == {
+            "kind": None,
+            "services": [{"instance": "Printer", "type": "_ipp._tcp", "port": 631, "source": 26624,
+                          "txtTruncated": False, "entries": [{"key": "rp", "value": "ipp/print",
+                                                              "bytes": list(b"ipp/print")}]}],
+        }  # fmt: skip
+
+    def test_describe_lists_every_service_with_its_entries(self):
+        # On the ESPHome host: both services, the _http._tcp one with no entries.
+        got = srp(
+            "L.describe(host('c6-thread-test')).services.map((s) => [s.type, s.port, s.entries.length])"
+        )
+        assert got == [["_esphomelib._tcp", 6053, 10], ["_http._tcp", 80, 0]]
+
+    def test_describe_of_a_host_from_older_firmware(self):
+        # On a host without txt or port fields: kind from the type alone, nothing decoded, no error.
+        got = plain(
+            "L.describe({name: 'kitchen-plug', services: [{instance: 'kitchen-plug', type: '_matter._tcp'}]})"
+        )
+        assert [
+            got["kind"],
+            got["fabrics"],
+            got["sii"],
+            got["services"][0]["port"],
+        ] == ["Matter", [], None, None]
+
+    # srpHostsFor
+
+    def test_srphostsfor_matches_by_address(self):
+        # On a host sharing an address: that host.
+        assert srp("L.srpHostsFor(dv('r1'), HOSTS).map((h) => h.name)") == [
+            "c6-thread-test"
+        ]
+
+    def test_srphostsfor_matches_a_host_named_after_the_ext_address(self):
+        # On a host name equal to the ext address in any case: that host.
+        got = srp(
+            "[L.srpHostsFor(dv('r2'), HOSTS), L.srpHostsFor({...dv('r2'), ext: 'FEF6E5E01729FF7F'}, HOSTS)]"
+            ".map((l) => l.map((h) => h.name))"
+        )
+        assert got == [["FEF6E5E01729FF7F"], ["FEF6E5E01729FF7F"]]
+
+    def test_srphostsfor_matches_meshcop_or_trel_xa(self):
+        # On a _meshcop._udp or _trel._udp service whose xa is the ext address: that host.
+        trel = txt(b"xa=" + bytes.fromhex("7e287c8b8b140ee6"))
+        got = srp(
+            f"[L.srpHostsFor({{...dv('r3'), addrs: []}}, HOSTS),"
+            f" L.srpHostsFor({{...dv('r3'), addrs: []}}, [{{name: 't', addresses: [], services: [{{instance: 't',"
+            f" type: '_trel._udp', txt: '{trel}'}}]}}]),"
+            f" L.srpHostsFor({{...dv('r3'), addrs: []}}, [{{name: 'h', addresses: [], services: [{{instance: 'h',"
+            f" type: '_http._tcp', txt: '{trel}'}}]}}])].map((l) => l.map((h) => h.name))"
+        )
+        assert got == [["homeassistant"], ["t"], []]
+
+    def test_srphostsfor_returns_every_match_this_boards_record_first(self):
+        # On a border router with its own SRP host on this board and a meshcop host from its server: both, this board's
+        # record (with a lease) first.
+        assert srp("L.srpHostsFor(dv('r3'), HOSTS).map((h) => h.name)") == [
+            "homeassistant-otbr",
+            "homeassistant",
+        ]
+
+    def test_srphostsfor_without_a_match_is_empty(self):
+        # On no match (or no hosts): [].
+        assert srp(
+            "[L.srpHostsFor(dv('r5'), HOSTS), L.srpHostsFor(dv('r5'), undefined)]"
+        ) == [[], []]
+
+    # displayName with service records
+
+    def test_displayname_prefers_the_nickname_over_the_records(self):
+        # On a nickname: the nickname.
+        assert (
+            srp("L.displayName(dv('r1'), {'4eeb2e6a619150e3': 'Test C6'}, HOSTS)")
+            == "Test C6"
+        )
+
+    def test_displayname_uses_the_esphome_friendly_name(self):
+        # On an ESPHome record: its friendly_name.
+        assert srp("L.displayName(dv('r1'), {}, HOSTS)") == "C6 Thread Test"
+
+    def test_displayname_uses_the_homekit_instance_name(self):
+        # On a HomeKit record: its instance name.
+        assert srp("L.displayName(dv('r4'), {}, HOSTS)") == "Eve Energy 1A2B"
+
+    def test_displayname_uses_the_meshcop_instance_name(self):
+        # On a meshcop record: its instance name, before the router's own SRP host name.
+        assert (
+            srp("L.displayName(dv('r3'), {}, HOSTS)")
+            == "Home Assistant OpenThread Border Router #0EE6"
+        )
+
+    def test_displayname_of_a_host_named_after_the_ext_address_is_matter_device(self):
+        # On only a host named after the ext address: "Matter device 0xNNNN".
+        assert srp("L.displayName(dv('r2'), {}, HOSTS)") == "Matter device 0x3000"
+
+    def test_displayname_falls_back_to_the_srp_host_name(self):
+        # On a host with no record that names the device: the host name.
+        assert srp("L.displayName(dv('r7'), {}, HOSTS)") == "printer"
+
+    def test_displayname_without_records_is_unknown_and_this_board_keeps_its_label(
+        self,
+    ):
+        # On no match: "Unknown 0xNNNN"; this board stays "This border router" even with an SRP host of its own.
+        assert srp(
+            "[L.displayName(dv('r5'), {}, HOSTS), L.displayName(dv('r6'), {}, HOSTS)]"
+        ) == [
+            "Unknown 0x5c00",
+            "This border router",
+        ]
+
+    # rows search with service records
+
+    def test_rows_query_matches_the_esphome_friendly_name(self):
+        # On a query in the ESPHome friendly_name, also when a nickname hides it: that device.
+        got = srp(
+            "[L.rows(DEVS, 'all', 'thread test', {}, HOSTS), L.rows(DEVS, 'all', 'C6 THREAD',"
+            " {'4eeb2e6a619150e3': 'Lab'}, HOSTS)].map((l) => l.map((d) => d.id))"
+        )
+        assert got == [["r1"], ["r1"]]
+
+    def test_rows_query_matches_any_matched_host_name(self):
+        # On a query in the name of a second matched host: that device.
+        assert srp(
+            "L.rows(DEVS, 'all', 'homeassistant-otbr', {}, HOSTS).map((d) => d.id)"
+        ) == ["r3"]
 
 
 # ---- TopologyPage ----
