@@ -37,6 +37,28 @@ typedef uint8_t mesh_scan_ip6_t[16];
 /** The first 64 bits of an address. */
 typedef uint8_t mesh_scan_prefix_t[8];
 
+/** What became of the device-info query to one router or child. Zero means not asked. */
+typedef enum {
+    MESH_SCAN_INFO_NOT_ASKED = 0, /**< never asked: a router that did not answer discover, or a zeroed entry */
+    MESH_SCAN_INFO_ANSWERED,      /**< any reply from the device; the fields it did not carry stay empty */
+    MESH_SCAN_INFO_NO_ANSWER,     /**< asked, the deadline passed or the send failed */
+    MESH_SCAN_INFO_CUT_SHORT,     /**< still queued when a cap hit */
+} mesh_scan_info_state_t;
+
+/** Device info from the Network Diagnostic TLVs 23, 25-28, 35 and 44. Empty strings mean absent. */
+typedef struct {
+    mesh_scan_info_state_t state;
+    bool has_eui64;
+    uint8_t eui64[8];
+    bool has_oui;
+    uint32_t oui; /**< 24 bits */
+    char vendor_name[33];
+    char vendor_model[33];
+    char vendor_sw_version[17];
+    char thread_stack_version[65];
+    char vendor_app_url[97];
+} mesh_scan_info_t;
+
 typedef struct {
     uint16_t rloc16;
     uint8_t ext[8];
@@ -60,6 +82,7 @@ typedef struct {
     uint8_t n_addrs;
     bool addresses_reported; /**< false: asked directly (spec 3.4) and gave no answer; true otherwise */
     bool ask_pending;        /**< internal to scan.c: picked for the child address step, not answered yet */
+    mesh_scan_info_t info;
 } mesh_scan_child_t;
 
 typedef struct {
@@ -79,6 +102,7 @@ typedef struct {
     bool children_detail;
     mesh_scan_child_t *children; /**< n_children entries allocated by scan.c through ops.alloc; NULL when 0 */
     uint16_t n_children;
+    mesh_scan_info_t info;
 } mesh_scan_router_t;
 
 typedef enum {
@@ -169,6 +193,10 @@ typedef struct {
     uint8_t queried;         /**< running: routers finished */
     uint16_t children_total;   /**< running: children asked for their addresses, 0 before that step */
     uint16_t children_queried; /**< running: of those, answered or given up */
+    uint16_t info_total;       /**< running: devices to ask for their info, 0 before that step */
+    uint16_t info_answered;    /**< running: of those, answered or given up */
+    uint16_t sleepy_waiting;   /**< running: sleepy devices still waiting for an answer */
+    uint16_t sleepy_wait_s;    /**< running: seconds until the latest sleepy deadline, 0 when none waits */
     uint32_t age_s;          /**< done and failed: seconds since the scan ended */
     const mesh_scan_result_t *result; /**< done only, non-NULL then */
 } mesh_scan_view_t;

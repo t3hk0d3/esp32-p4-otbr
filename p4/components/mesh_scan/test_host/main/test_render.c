@@ -94,7 +94,9 @@ TEST_CASE("On running before discover ends: writes progress {\"routers\":0,\"que
     sink_t s;
 
     TEST_ASSERT_EQUAL_STRING("{\"state\":\"running\",\"progress\":{\"routers\":0,\"queried\":0,"
-                             "\"children\":{\"total\":0,\"queried\":0}}}", render(&view, &s));
+                             "\"children\":{\"total\":0,\"queried\":0},"
+                             "\"info\":{\"total\":0,\"answered\":0,\"sleepy_waiting\":0,\"wait_s\":0}}}",
+                             render(&view, &s));
     sink_free(&s);
 }
 
@@ -105,7 +107,9 @@ TEST_CASE("On running during queries: writes progress with routers = discovered 
     sink_t s;
 
     TEST_ASSERT_EQUAL_STRING("{\"state\":\"running\",\"progress\":{\"routers\":5,\"queried\":3,"
-                             "\"children\":{\"total\":0,\"queried\":0}}}", render(&view, &s));
+                             "\"children\":{\"total\":0,\"queried\":0},"
+                             "\"info\":{\"total\":0,\"answered\":0,\"sleepy_waiting\":0,\"wait_s\":0}}}",
+                             render(&view, &s));
     sink_free(&s);
 }
 
@@ -125,7 +129,7 @@ TEST_CASE("On done: writes age_s and the full result in the spec 3.3 field names
                     "\"full_thread_device\":false,\"full_network_data\":false},\"lq_in\":3,\"timeout_s\":240,"
                     "\"age_s\":12,\"connected_s\":86400,\"rssi_avg\":-61,\"rssi_last\":-63,\"link_margin_db\":39,"
                     "\"frame_error_pct\":0.4,\"message_error_pct\":0.0,\"version\":4,\"csl\":false,"
-                    "\"addresses\":[\"2001:db8:4a2:1:2be4:6c19:a0f7:3381\"]}");
+                    "\"addresses\":[\"2001:db8:4a2:1:2be4:6c19:a0f7:3381\"],\"info\":{\"state\":\"not_asked\"}}");
     assert_contains(out, "],\"srp_hosts\":[{\"name\":\"kitchen-plug\","
                     "\"addresses\":[\"2001:db8:4a2:1:2be4:6c19:a0f7:3381\"],"
                     "\"services\":[{\"instance\":\"kitchen-plug\",\"type\":\"_matter._tcp\",");
@@ -254,13 +258,13 @@ TEST_CASE("On a build without TREL (has_transport false): no transport key anywh
     sink_free(&s);
 }
 
-TEST_CASE("On done: writes a stub router as router_id, rloc16, responded:false and nothing else", "[mesh_scan]")
+TEST_CASE("On done: writes a stub router as router_id, rloc16, responded:false and info not_asked", "[mesh_scan]")
 {
     const mesh_scan_view_t view = done_view(sample_result());
     sink_t s;
     const char *out = render(&view, &s);
 
-    assert_contains(out, "},{\"router_id\":25,\"rloc16\":25600,\"responded\":false},{");
+    assert_contains(out, "},{\"router_id\":25,\"rloc16\":25600,\"responded\":false,\"info\":{\"state\":\"not_asked\"}},{");
     sink_free(&s);
 }
 
@@ -272,7 +276,7 @@ TEST_CASE("On done: omits the child-table fields of children under children_deta
 
     assert_contains(out, "\"responded\":true,\"children_detail\":false,\"children\":[{\"rloc16\":17409,"
                     "\"mode\":{\"rx_on_when_idle\":false,\"full_thread_device\":false,\"full_network_data\":false},"
-                    "\"lq_in\":3,\"addresses\":[\"2001:db8:4a2:1::4401\"]}]");
+                    "\"lq_in\":3,\"addresses\":[\"2001:db8:4a2:1::4401\"],\"info\":{\"state\":\"not_asked\"}}]");
     sink_free(&s);
 }
 
@@ -289,7 +293,7 @@ TEST_CASE("On done: omits the child-table fields of a child the child table did 
     const char *out = render(&view, &s);
 
     assert_contains(out, "{\"rloc16\":3074,\"mode\":{\"rx_on_when_idle\":false,\"full_thread_device\":false,"
-                    "\"full_network_data\":false},\"lq_in\":3,\"addresses\":[\"2001:db8:4a2:1::c02\"]}");
+                    "\"full_network_data\":false},\"lq_in\":3,\"addresses\":[\"2001:db8:4a2:1::c02\"],\"info\":{\"state\":\"not_asked\"}}");
     assert_contains(out, "{\"rloc16\":3073,\"ext_address\":\"3000000000000001\",");
     sink_free(&s);
 }
@@ -393,7 +397,207 @@ TEST_CASE("On running in the child address step: writes progress {\"routers\",\"
     sink_t s;
 
     TEST_ASSERT_EQUAL_STRING("{\"state\":\"running\",\"progress\":{\"routers\":5,\"queried\":5,"
-                             "\"children\":{\"total\":7,\"queried\":2}}}", render(&view, &s));
+                             "\"children\":{\"total\":7,\"queried\":2},"
+                             "\"info\":{\"total\":0,\"answered\":0,\"sleepy_waiting\":0,\"wait_s\":0}}}",
+                             render(&view, &s));
+    sink_free(&s);
+}
+
+TEST_CASE("On running in the info phase: progress gains info with total, answered, sleepy_waiting and wait_s",
+          "[mesh_scan]")
+{
+    const mesh_scan_view_t view = {
+        .state = MESH_SCAN_RUNNING, .routers = 5, .queried = 5, .children_total = 7, .children_queried = 7,
+        .info_total = 12, .info_answered = 9, .sleepy_waiting = 2, .sleepy_wait_s = 231
+    };
+    sink_t s;
+
+    TEST_ASSERT_EQUAL_STRING("{\"state\":\"running\",\"progress\":{\"routers\":5,\"queried\":5,"
+                             "\"children\":{\"total\":7,\"queried\":7},"
+                             "\"info\":{\"total\":12,\"answered\":9,\"sleepy_waiting\":2,\"wait_s\":231}}}",
+                             render(&view, &s));
+    sink_free(&s);
+}
+
+static void set_answered(mesh_scan_info_t *info)
+{
+    memset(info, 0, sizeof(*info));
+    info->state = MESH_SCAN_INFO_ANSWERED;
+    info->has_eui64 = true;
+    memcpy(info->eui64, "\x8c\x73\xda\xff\xfe\x95\x2c\xfb", 8);
+    info->has_oui = true;
+    info->oui = 0x0a1b2c;
+    strcpy(info->vendor_name, "Home Assistant");
+    strcpy(info->vendor_model, "OpenThread Border Router");
+    strcpy(info->vendor_sw_version, "20261104-bb169ca");
+    strcpy(info->thread_stack_version, "OPENTHREAD/cb18e0f; POSIX; Oct  6 2026 20:28:48");
+    strcpy(info->vendor_app_url, "https://example.com/otbr");
+}
+
+/** The info object of router `id`. */
+static cJSON *router_info_of(cJSON *root, int id)
+{
+    cJSON *routers = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "result"), "routers");
+    cJSON *router = NULL;
+
+    cJSON_ArrayForEach(router, routers) {
+        if (cJSON_GetObjectItem(router, "router_id")->valueint == id) {
+            return cJSON_GetObjectItem(router, "info");
+        }
+    }
+    TEST_FAIL_MESSAGE("router not in the output");
+    return NULL;
+}
+
+TEST_CASE("On a router with info answered: writes info with state, eui64, the strings and vendor_oui", "[mesh_scan]")
+{
+    mesh_scan_result_t *result = sample_result();
+
+    set_answered(&result->routers[3].info);
+    const mesh_scan_view_t view = done_view(result);
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "],\"info\":{\"state\":\"answered\",\"eui64\":\"8c73dafffe952cfb\","
+                    "\"vendor_name\":\"Home Assistant\",\"vendor_model\":\"OpenThread Border Router\","
+                    "\"vendor_sw_version\":\"20261104-bb169ca\","
+                    "\"thread_stack_version\":\"OPENTHREAD/cb18e0f; POSIX; Oct  6 2026 20:28:48\","
+                    "\"vendor_app_url\":\"https://example.com/otbr\",\"vendor_oui\":\"0a1b2c\"}}");
+    assert_json(out);
+    sink_free(&s);
+}
+
+TEST_CASE("On a child with info answered: writes info after addresses", "[mesh_scan]")
+{
+    mesh_scan_result_t *result = sample_result();
+
+    set_answered(&result->routers[3].children[0].info);
+    const mesh_scan_view_t view = done_view(result);
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "\"addresses\":[\"2001:db8:4a2:1::c01\"],\"info\":{\"state\":\"answered\",");
+    assert_json(out);
+    sink_free(&s);
+}
+
+TEST_CASE("On info answered with fields absent: leaves the absent fields out", "[mesh_scan]")
+{
+    mesh_scan_result_t *result = sample_result();
+
+    memset(&result->routers[3].info, 0, sizeof(result->routers[3].info));
+    result->routers[3].info.state = MESH_SCAN_INFO_ANSWERED;
+    strcpy(result->routers[3].info.thread_stack_version, "SL-OPENTHREAD/2.4.2.0_GitHub-7074a43e4; EFR32; Oct 30 2024");
+    const mesh_scan_view_t view = done_view(result);
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "\"info\":{\"state\":\"answered\",\"thread_stack_version\":"
+                    "\"SL-OPENTHREAD/2.4.2.0_GitHub-7074a43e4; EFR32; Oct 30 2024\"}}");
+    sink_free(&s);
+}
+
+TEST_CASE("On info no_answer, cut_short or not_asked: writes the state only", "[mesh_scan]")
+{
+    mesh_scan_result_t *result = sample_result();
+    const struct {
+        mesh_scan_info_state_t state;
+        const char *name;
+    } cases[] = {
+        { MESH_SCAN_INFO_NO_ANSWER, "no_answer" },
+        { MESH_SCAN_INFO_CUT_SHORT, "cut_short" },
+        { MESH_SCAN_INFO_NOT_ASKED, "not_asked" },
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        set_answered(&result->routers[3].info); // fields left over from an earlier state must not show
+        result->routers[3].info.state = cases[i].state;
+        const mesh_scan_view_t view = done_view(result);
+        sink_t s;
+        const char *out = render(&view, &s);
+        char want[64];
+
+        snprintf(want, sizeof(want), "],\"info\":{\"state\":\"%s\"}}", cases[i].name);
+        assert_contains(out, want);
+        assert_json(out);
+        sink_free(&s);
+    }
+}
+
+TEST_CASE("On this board's router in the sample: writes its local info answered", "[mesh_scan]")
+{
+    const mesh_scan_view_t view = done_view(sample_result());
+    sink_t s;
+    const char *out = render(&view, &s);
+    cJSON *root = cJSON_Parse(out);
+
+    TEST_ASSERT_NOT_NULL_MESSAGE(root, out);
+    cJSON *got = router_info_of(root, 34);
+
+    TEST_ASSERT_EQUAL_STRING("answered", cJSON_GetObjectItem(got, "state")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("0a1b2c3d4e5f6071", cJSON_GetObjectItem(got, "eui64")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("ESP32-P4-WIFI6-POE-ETH", cJSON_GetObjectItem(got, "vendor_name")->valuestring);
+    cJSON_Delete(root);
+    sink_free(&s);
+}
+
+TEST_CASE("On a stub router: writes info not_asked after responded", "[mesh_scan]")
+{
+    const mesh_scan_view_t view = done_view(sample_result());
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "{\"router_id\":25,\"rloc16\":25600,\"responded\":false,"
+                    "\"info\":{\"state\":\"not_asked\"}}");
+    sink_free(&s);
+}
+
+TEST_CASE("On info strings with a quote, a control byte or invalid UTF-8: escapes them so the output parses",
+          "[mesh_scan]")
+{
+    mesh_scan_result_t *result = sample_result();
+    mesh_scan_info_t *info = &result->routers[3].info;
+
+    set_answered(info);
+    strcpy(info->vendor_name, "<b>x\"y\\z</b>");
+    strcpy(info->vendor_model, "a\x01\x1f" "b");
+    strcpy(info->vendor_sw_version, "v\xff\xc3");
+    const mesh_scan_view_t view = done_view(result);
+    sink_t s;
+    const char *out = render(&view, &s);
+    cJSON *root = cJSON_Parse(out);
+
+    TEST_ASSERT_NOT_NULL_MESSAGE(root, out);
+    cJSON *got = router_info_of(root, 3);
+
+    TEST_ASSERT_EQUAL_STRING("<b>x\"y\\z</b>", cJSON_GetObjectItem(got, "vendor_name")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("a\x01\x1f" "b", cJSON_GetObjectItem(got, "vendor_model")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("v\xef\xbf\xbd\xef\xbf\xbd", cJSON_GetObjectItem(got, "vendor_sw_version")->valuestring);
+    cJSON_Delete(root);
+    sink_free(&s);
+}
+
+TEST_CASE("On info strings filling their arrays: writes them whole", "[mesh_scan]")
+{
+    mesh_scan_result_t *result = sample_result();
+    mesh_scan_info_t *info = &result->routers[3].info;
+
+    set_answered(info);
+    memset(info->vendor_name, 'n', sizeof(info->vendor_name) - 1);
+    memset(info->thread_stack_version, 's', sizeof(info->thread_stack_version) - 1);
+    memset(info->vendor_app_url, 'u', sizeof(info->vendor_app_url) - 1);
+    const mesh_scan_view_t view = done_view(result);
+    sink_t s;
+    const char *out = render(&view, &s);
+    cJSON *root = cJSON_Parse(out);
+
+    TEST_ASSERT_NOT_NULL_MESSAGE(root, out);
+    cJSON *got = router_info_of(root, 3);
+
+    TEST_ASSERT_EQUAL(32, strlen(cJSON_GetObjectItem(got, "vendor_name")->valuestring));
+    TEST_ASSERT_EQUAL(64, strlen(cJSON_GetObjectItem(got, "thread_stack_version")->valuestring));
+    TEST_ASSERT_EQUAL(96, strlen(cJSON_GetObjectItem(got, "vendor_app_url")->valuestring));
+    cJSON_Delete(root);
     sink_free(&s);
 }
 
@@ -409,7 +613,7 @@ TEST_CASE("On a child with addresses_reported false: writes \"addresses_reported
     sink_t s;
     const char *out = render(&view, &s);
 
-    assert_contains(out, "\"csl\":false,\"addresses\":[],\"addresses_reported\":false},{\"rloc16\":9219,");
+    assert_contains(out, "\"csl\":false,\"addresses\":[],\"addresses_reported\":false,\"info\":{\"state\":\"not_asked\"}},{\"rloc16\":9219,");
     const char *first = strstr(out, "addresses_reported");
     TEST_ASSERT_NULL(strstr(first + 1, "addresses_reported")); // the other children leave the key out
     assert_json(out);

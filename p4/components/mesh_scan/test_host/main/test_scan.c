@@ -976,7 +976,7 @@ TEST_CASE("On a render while running: emits progress only", "[mesh_scan]")
     answer_router();
     TEST_ASSERT_EQUAL(ESP_OK, mesh_scan_render(text_sink, &s));
     TEST_ASSERT_EQUAL_STRING("{\"state\":\"running\",\"progress\":{\"routers\":2,\"queried\":1,"
-                             "\"children\":{\"total\":0,\"queried\":0}}}", s.text);
+                             "\"children\":{\"total\":0,\"queried\":0},\"info\":{\"total\":0,\"answered\":0,\"sleepy_waiting\":0,\"wait_s\":0}}}", s.text);
 }
 
 // child address step (spec 3.4, ruling R14)
@@ -1280,7 +1280,7 @@ TEST_CASE("On a render in the child address step: writes progress with children 
     answer_child(RLOC16(3) + 2, 1);
     TEST_ASSERT_EQUAL(ESP_OK, mesh_scan_render(text_sink, &s));
     TEST_ASSERT_EQUAL_STRING("{\"state\":\"running\",\"progress\":{\"routers\":1,\"queried\":1,"
-                             "\"children\":{\"total\":6,\"queried\":1}}}", s.text);
+                             "\"children\":{\"total\":6,\"queried\":1},\"info\":{\"total\":0,\"answered\":0,\"sleepy_waiting\":0,\"wait_s\":0}}}", s.text);
 }
 
 // mesh_scan_rloc16_from_peer
