@@ -787,3 +787,16 @@ tr:hover td { background: var(--primary-light); }
 .ld-explain p { margin: 8px 0 0; color: var(--text-light); }
 .ld-explain-list { margin: 0 0 0 20px; font-size: 13px; color: var(--text-light); }
 @media (max-width: 480px) { .ld-tiles { grid-template-columns: 1fr; } }
+
+/* Service records on the Topology page (spec 2026-11-04): kind line, servers hint, dialog facts and raw TXT tables. */
+.t-kind { font-size: 12.5px; color: var(--text-light); margin-top: 2px; }
+.t-srp-hint { margin-top: 10px; }
+.t-chip-kind { background: var(--primary-light); }
+.t-svc { margin-bottom: 2px; }
+.t-after { margin-left: 5px; }
+.t-d-raw { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.t-d-raw .t-link { font-size: 13px; }
+.t-txt { border-collapse: collapse; font-size: 12.5px; width: 100%; }
+.t-txt caption { text-align: left; font-size: 13px; color: var(--text-light); padding: 4px 0; }
+.t-txt td { border-bottom: 1px solid #f0f0f0; padding: 3px 8px; font-family: ui-monospace, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+.t-txt td:first-child { color: var(--text-light); width: 160px; }

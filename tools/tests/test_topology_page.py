@@ -1031,6 +1031,13 @@ class TestTopologyLogic:
             [None, False],
         ]
 
+    def test_describe_homekit_paired_is_null_without_sf(self):
+        # On a _hap._udp record without sf: paired null (unknown), not false.
+        got = plain(
+            "L.describe({name: 'h', services: [{instance: 'h', type: '_hap._udp', txt: ''}]}).paired"
+        )
+        assert got is None
+
     def test_describe_meshcop_host(self):
         # On the recorded meshcop record: vendor, model, Thread version, extended address from xa.
         got = srp("L.describe(host('homeassistant'))")
@@ -1154,6 +1161,109 @@ class TestTopologyLogic:
             "This border router",
         ]
 
+    def test_displayname_reads_name_sources_on_the_hosts_other_services(self):
+        # On a host with _matter._tcp first and _hap._udp second: the HomeKit instance name, not the host name.
+        got = srp(
+            "L.displayName(dv('r3'), {}, [{name: 'bridge', addresses: dv('r3').addrs, services: ["
+            f"svc('AAAAAAAAAAAAAAAA-0000000000000001', '_matter._tcp', 5540, 1, '{MATTER_TXT}'),"
+            f" svc('Hue Bridge', '_hap._udp', 5001, 1, '{HOMEKIT_TXT}')]}}])"
+        )
+        assert got == "Hue Bridge"
+
+    def test_displayname_prefers_esphome_over_homekit_across_hosts(self):
+        # On two matched hosts, HomeKit first and ESPHome second: the ESPHome friendly_name wins (spec order).
+        got = srp(
+            "L.displayName(dv('r3'), {}, [{name: 'a', addresses: dv('r3').addrs, services: ["
+            f"svc('Hue Bridge', '_hap._udp', 5001, 1, '{HOMEKIT_TXT}')]}},"
+            " {name: 'b', addresses: dv('r3').addrs, services: ["
+            f"svc('b', '_esphomelib._tcp', 6053, 1, '{ESPHOME_TXT}')]}}])"
+        )
+        assert got == "C6 Thread Test"
+
+    # isUnnamed
+
+    def test_isunnamed_is_true_for_the_generic_matter_name(self):
+        # On a device shown as "Matter device 0xNNNN" or "Unknown 0xNNNN": unnamed.
+        assert srp(
+            "[L.isUnnamed(dv('r2'), {}, HOSTS), L.isUnnamed(dv('r5'), {}, HOSTS)]"
+        ) == [True, True]
+
+    def test_isunnamed_is_false_for_a_device_with_a_real_name(self):
+        # On an ESPHome friendly_name, a meshcop name, a plain SRP host name: named.
+        assert srp(
+            "['r1', 'r3', 'r7'].map((id) => L.isUnnamed(dv(id), {}, HOSTS))"
+        ) == [False, False, False]
+
+    def test_isunnamed_is_false_with_a_nickname_and_for_this_board(self):
+        # On a nickname on a generic device, and on this board: named.
+        assert srp(
+            "[L.isUnnamed(dv('r2'), {'fef6e5e01729ff7f': 'Plug'}, HOSTS), L.isUnnamed(dv('r6'), {}, HOSTS)]"
+        ) == [False, False]
+
+    # srpIndex
+
+    def test_srpindex_decodes_each_host_once_for_many_lookups(self):
+        # On an index built once, then displayName, rows and srpHostsFor repeatedly: the hosts' services are read once.
+        got = srp(
+            "(() => { let reads = 0; const counted = HOSTS.map((h) => ({...h, get services() { reads++;"
+            " return h.services; }})); const idx = L.srpIndex(counted); const built = reads;"
+            " for (let i = 0; i < 5; i++) { DEVS.forEach((d) => L.displayName(d, {}, idx));"
+            " L.rows(DEVS, 'all', 'thread', {}, idx); DEVS.forEach((d) => L.srpHostsFor(d, idx)); }"
+            " return [built, reads - built, built <= HOSTS.length * 2]; })()"
+        )
+        assert got[1] == 0 and got[2] is True
+
+    def test_srpindex_of_an_index_is_the_index(self):
+        # On an index passed to srpIndex: itself.
+        assert (
+            srp(
+                "(() => { const i = L.srpIndex(HOSTS); return L.srpIndex(i) === i; })()"
+            )
+            is True
+        )
+
+    # kindLine
+
+    def test_kindline_per_kind(self):
+        # On each kind: the table's kind line (mockup section 1).
+        got = srp(
+            "['c6-thread-test', 'FEF6E5E01729FF7F', 'eve-energy-1a2b', 'homeassistant', 'printer']"
+            ".map((n) => L.kindLine(L.describe(host(n))))"
+        )
+        assert got == [
+            "ESPHome 2026.7.4 · esp32-c6-devkitc-1",
+            "Matter · 2 fabrics",
+            "HomeKit · Outlet · paired",
+            "Border router · Home Assistant · Thread 1.4.0",
+            "",
+        ]
+
+    def test_kindline_of_a_homekit_host_without_sf_says_nothing_about_pairing(self):
+        # On a HomeKit record without sf: paired is null and the line leaves pairing out.
+        got = srp(
+            "(() => { const s = L.describe({name: 'h', services: [svc('Lamp', '_hap._udp', 1, 1, '')]});"
+            " return [s.paired, L.kindLine(s)]; })()"
+        )
+        assert got == [None, "HomeKit"]
+
+    # omrAddress
+
+    def test_omraddress_is_the_first_address_under_an_omr_prefix(self):
+        # On addresses with a mesh-local one first: the first under an OMR prefix.
+        got = plain(
+            "L.omrAddress(['fdde:ad00:beef::1', 'fe80::1', 'fd87:9b49:8264:1::7', 'fd87:9b49:8264:1::8'],"
+            " {mesh_local_prefix: 'fdde:ad00:beef::/64', omr_prefixes: ['fd87:9b49:8264:1::/64']})"
+        )
+        assert got == "fd87:9b49:8264:1::7"
+
+    def test_omraddress_without_a_match_is_null(self):
+        # On no address under an OMR prefix, or no prefixes: null.
+        got = plain(
+            "[L.omrAddress(['fdde:ad00:beef::1'], {omr_prefixes: ['fd87:9b49:8264:1::/64']}),"
+            " L.omrAddress(['fd87:9b49:8264:1::7'], {}), L.omrAddress(undefined, {})]"
+        )
+        assert got == [None, None, None]
+
     # rows search with service records
 
     def test_rows_query_matches_the_esphome_friendly_name(self):
@@ -1233,6 +1343,47 @@ CLOSE_BY = {
     "esc": "t.el('t-dialog').fire('cancel'); t.el('t-dialog').close();",
     "backdrop": "t.el('t-dialog').click();",
 }
+
+
+# ---- TopologyPage with service records ----
+
+# The 2026-11-04 mesh in SRP_FIXTURE's terms: this board 0x6800 (SRP server of the ESPHome device 0x6400), the HA border
+# router 0x1000 (SRP server of the Matter device 0x3000's proxied records), and the page helpers fact(label) and
+# openSV(id). SERVERS is the scan's srp_servers.
+SV_FIXTURE = r"""
+const SERVERS = [
+  {rloc16: 0x6800, address: 'fd87:9b49:8264:1::6800', port: 53, this_board: true, state: 'answered', hosts: 4},
+  {rloc16: 0x1000, address: 'fd87:9b49:8264:1:aaaa::1000', port: 53, this_board: false, state: 'answered', hosts: 2}];
+const sr = (id, rloc16, ext, addrs, extra) =>
+  srouter(rloc16, id, [[26, 3]], [], {ext_address: ext, addresses: addrs, ...extra});
+const SV = {partial: false, srp_hosts: HOSTS, srp_servers: SERVERS,
+  network: {...NET, mesh_local_prefix: 'fdde:ad00:beef::/64', omr_prefixes: ['fd87:9b49:8264:1::/64'],
+            leader_router_id: 4, this_rloc16: 0x6800},
+  routers: [
+    sr(4, 0x1000, '7e287c8b8b140ee6', ['fd87:9b49:8264:1:aaaa::1000'], {leader: true, border_router: true}),
+    sr(12, 0x3000, 'fef6e5e01729ff7f', []),
+    sr(25, 0x6400, '4eeb2e6a619150e3', ['fd87:9b49:8264:1:c158:979b:6560:a15f']),
+    srouter(0x6800, 26, [[4, 3], [12, 3], [25, 3]], [],
+            {ext_address: 'bb00000000006800', addresses: ['fd87:9b49:8264:1::6800'], this_device: true,
+             border_router: true})]};
+const showSV = async (result) => { save(60000, result || SV); await start(); t.el('t-show-last').click(); await t.flush(); };
+const openSV = async (id, result) => { await showSV(result); await pick(id); };
+const fact = (label) => {
+  const k = t.el('t-d-facts').children[0].children;
+  const i = k.findIndex((e) => e.tag === 'dt' && e.textContent === label);
+  return i < 0 ? null : k[i + 1].allText();
+};
+const kind = (id) => row(id).children[0].findAll((e) => e.classes.has('t-kind')).map((e) => e.textContent);
+const rawBtn = () => t.el('t-d-raw').findAll((e) => e.tag === 'button')[0];
+const rawTables = () => t.el('t-d-raw').findAll((e) => e.tag === 'table');
+const rawRows = (tbl) => tbl.findAll((e) => e.tag === 'tr').map((r) => r.children.map((c) => c.textContent));
+"""
+
+BOLD_TXT = txt("friendly_name=<b>Hi</b>", "at", b"bin=\x00\xff", "empty=")
+
+
+def sv(body):
+    return run(SRP_FIXTURE + SV_FIXTURE + body)
 
 
 @needs_node
@@ -1881,6 +2032,315 @@ class TestTopologyPage:
         assert '<b>"x"</b>' in r[2]
         assert r[3] == [0, 0, 0]
 
+    # service records: device table
+
+    def test_table_row_shows_a_kind_line_under_the_name(self):
+        # On devices with a description: the kind line under the name (ESPHome, Matter, border router).
+        r = sv("await showSV(); return [kind('r25'), kind('r12'), kind('r4')];")
+        assert r == [
+            ["ESPHome 2026.7.4 · esp32-c6-devkitc-1"],
+            ["Matter · 2 fabrics"],
+            ["Border router · Home Assistant · Thread 1.4.0"],
+        ]
+
+    def test_table_row_without_a_description_has_no_kind_line(self):
+        # On this board, whose only record has no services: no kind line.
+        assert sv("await showSV(); return kind('r26');") == []
+
+    def test_table_names_come_from_the_records(self):
+        # On the records of the sample mesh: the ESPHome friendly name and the meshcop name replace "Unknown".
+        r = sv(
+            "await showSV(); return ['r25', 'r4', 'r12'].map((id) => row(id).children[0].children[0].textContent);"
+        )
+        assert r == [
+            "C6 Thread Test",
+            "Home Assistant OpenThread Border Router #0EE6",
+            "Matter device 0x3000",
+        ]
+
+    def test_table_hint_names_every_srp_server_with_its_device_count(self):
+        # On srp_servers all answered: the hint, this board by "this board", the other by display name.
+        r = sv(
+            "await showSV(); return [vis('t-srp-hint'), txt('t-srp-hint'), vis('t-srp-warn')];"
+        )
+        assert r == [
+            True,
+            (
+                "Service records from 2 SRP servers: this board (4 devices) and"
+                " Home Assistant OpenThread Border Router #0EE6 (2 devices)."
+            ),
+            False,
+        ]
+
+    def test_table_hint_counts_a_single_server_in_the_singular(self):
+        # On one server with one host: "1 SRP server" and "1 device".
+        r = sv(
+            "await showSV({...SV, srp_servers: [{...SERVERS[0], hosts: 1}]}); return txt('t-srp-hint');"
+        )
+        assert r == "Service records from 1 SRP server: this board (1 device)."
+
+    def test_table_warns_about_a_server_that_did_not_answer(self):
+        # On a server in state no_answer: the amber note naming it.
+        r = sv(
+            "await showSV({...SV, srp_servers: [SERVERS[0], {...SERVERS[1], state: 'no_answer'}]});"
+            " return [vis('t-srp-warn'), t.el('t-srp-warn').classes.has('t-warn'), txt('t-srp-warn')];"
+        )
+        assert r == [
+            True,
+            True,
+            (
+                "Home Assistant OpenThread Border Router #0EE6's SRP server didn't answer, so the devices"
+                " registered there show without names."
+            ),
+        ]
+
+    def test_table_warns_about_a_server_whose_answer_was_cut_short(self):
+        # On a server in state cut_short that no device in the scan matches: the note names it by RLOC16.
+        r = sv(
+            "await showSV({...SV, srp_servers: [SERVERS[0], {...SERVERS[1], rloc16: 0x7400, state: 'cut_short'}]});"
+            " return txt('t-srp-warn');"
+        )
+        assert r == (
+            "Router 0x7400's SRP server's answer was cut short, so some devices registered there may be missing."
+        )
+
+    # service records: device dialog
+
+    def test_dialog_of_an_esphome_device_lists_device_project_and_node_name(self):
+        # On the ESPHome device: Device, Project and Node name from its records.
+        r = sv(
+            "await openSV('r25'); return [fact('Device'), fact('Project'), fact('Node name')];"
+        )
+        assert r == [
+            "ESPHome 2026.7.4 on esp32-c6-devkitc-1 (ESP32)",
+            "esp32otbr.srp-probe 0.1",
+            "c6-thread-test",
+        ]
+
+    def test_dialog_says_registered_with_this_board_and_the_lease(self):
+        # On a record with lease_s 7012 (this board's server): "This board · lease ends in 1 h 56 min".
+        r = sv("await openSV('r25'); return fact('Registered with');")
+        assert r == "This board · lease ends in 1 h 56 min"
+
+    def test_dialog_lists_the_services_with_their_ports(self):
+        # On the ESPHome device: both services with their ports.
+        r = sv("await openSV('r25'); return fact('Services');")
+        assert "_esphomelib._tcp port 6053" in r
+        assert "_http._tcp port 80" in r
+
+    def test_dialog_offers_an_open_link_to_the_web_server_on_the_omr_address(self):
+        # On the ESPHome _http._tcp service and an OMR address: Open, to http://[address]:80/ in a new tab.
+        r = sv(
+            "await openSV('r25'); const a = t.el('t-d-facts').findAll((e) => e.tag === 'a');"
+            " return a.map((e) => [e.textContent, e.attrs.href, e.attrs.target, e.attrs.rel]);"
+        )
+        assert r == [
+            [
+                "Open",
+                "http://[fd87:9b49:8264:1:c158:979b:6560:a15f]:80/",
+                "_blank",
+                "noopener",
+            ]
+        ]
+
+    def test_dialog_has_no_open_link_without_an_omr_address(self):
+        # On a network without OMR prefixes: no Open link.
+        r = sv(
+            "await openSV('r25', {...SV, network: {...SV.network, omr_prefixes: []}});"
+            " return t.el('t-d-facts').findAll((e) => e.tag === 'a').length;"
+        )
+        assert r == 0
+
+    def test_dialog_of_a_matter_device_lists_fabrics_and_retry_timing(self):
+        # On the Matter device: Device, a Fabrics list and the retry timing from SII, SAI and SAT.
+        r = sv(
+            "await openSV('r12'); return [fact('Device'), fact('Fabrics'), fact('Retry timing')];"
+        )
+        assert r[0] == "Matter, paired with 2 controllers"
+        assert "CAC23A5DA6E7644C" in r[1] and "000000000F4B0B5F" in r[1]
+        assert "3E5D425037C4F971" in r[1] and "0000000000000003" in r[1]
+        assert r[2] == "800 ms idle, 2 s active, active for 4 s after traffic"
+
+    def test_dialog_names_the_server_a_proxied_record_came_from(self):
+        # On a record with ttl_s 2940 from the server 0x1000: its display name, RLOC16 and "record valid 49 min".
+        r = sv("await openSV('r12'); return fact('Registered with');")
+        assert r == (
+            "Home Assistant OpenThread Border Router #0EE6 (0x1000) · record valid 49 min"
+        )
+
+    def test_dialog_links_the_registering_server_to_its_own_details(self):
+        # On a click on the server's name: that router's dialog opens.
+        r = sv(
+            "await openSV('r12'); const b = buttons(t.el('t-d-facts'), 'Home Assistant OpenThread Border Router #0EE6');"
+            " b[0].click(); await t.flush(); return txt('t-d-name');"
+        )
+        assert r == "Home Assistant OpenThread Border Router #0EE6"
+
+    def test_dialog_of_a_matter_device_explains_the_missing_vendor_and_product(self):
+        # On a Matter device without a commissionable record: the pairing-mode note; the ESPHome device has none.
+        r = sv(
+            "await openSV('r12'); const a = [vis('t-d-note'), txt('t-d-note')]; await pick('r25');"
+            " a.push(vis('t-d-note')); return a;"
+        )
+        assert r == [
+            True,
+            (
+                "Vendor, product and device type are not in these records: Matter publishes them only while the"
+                " device is in pairing mode."
+            ),
+            False,
+        ]
+
+    def test_dialog_of_the_other_border_router_lists_vendor_model_and_version(self):
+        # On the HA border router: vendor, model and Thread version from its meshcop record.
+        r = sv("await openSV('r4'); return fact('Device');")
+        assert r == "Home Assistant · OpenThread Border Router · Thread 1.4.0"
+
+    def test_dialog_of_a_border_router_shows_its_srp_server_line(self):
+        # On a router with an srp_servers entry: "Yes, N devices registered · state".
+        r = sv(
+            "await openSV('r4'); const a = [fact('SRP server')];"
+            " await showSV({...SV, srp_servers: [SERVERS[0], {...SERVERS[1], state: 'no_answer', hosts: 0}]});"
+            " await pick('r4'); a.push(fact('SRP server')); await pick('r25'); a.push(fact('SRP server'));"
+            " return a;"
+        )
+        assert r == [
+            "Yes, 2 devices registered · answered",
+            "Yes, 0 devices registered · didn't answer",
+            None,
+        ]
+
+    # service records: raw records
+
+    def test_dialog_hides_the_raw_records_until_asked(self):
+        # On a device with services: "Show raw records (2)" and no tables.
+        r = sv(
+            "await openSV('r12'); return [vis('t-d-raw'), rawBtn().textContent, rawTables().length];"
+        )
+        assert r == [True, "Show raw records (2)", 0]
+
+    def test_dialog_toggles_the_raw_records_open_and_closed(self):
+        # On two clicks: "Hide raw records" with a table per service, then back to "Show raw records (2)".
+        r = sv(
+            "await openSV('r12'); rawBtn().click(); await t.flush(); const a = [rawBtn().textContent, rawTables().length];"
+            " rawBtn().click(); await t.flush(); a.push(rawBtn().textContent, rawTables().length); return a;"
+        )
+        assert r == [
+            "Hide raw records",
+            2,
+            "Show raw records (2)",
+            0,
+        ]
+
+    def test_raw_records_list_every_txt_entry_of_a_service(self):
+        # On the ESPHome device: each TXT entry as key and value rows; a service without TXT says so.
+        r = sv(
+            "await openSV('r25'); rawBtn().click(); await t.flush(); const [api, web] = rawTables();"
+            " return [rawRows(api).length, rawRows(api)[0], rawRows(api)[9], web.allText()];"
+        )
+        assert r[0] == 10
+        assert r[1] == ["friendly_name", "C6 Thread Test"]
+        assert r[2] == ["api_encryption", "Noise_NNpsk0_25519_ChaChaPoly_SHA256"]
+        assert "No TXT entries" in r[3]
+
+    def test_raw_records_show_binary_values_as_hex(self):
+        # On the border router's meshcop record: xa and sb (binary) in hex.
+        r = sv(
+            "await openSV('r4'); rawBtn().click(); await t.flush();"
+            " return rawTables().flatMap(rawRows).filter((x) => ['xa', 'sb', 'xp'].includes(x[0]));"
+        )
+        assert r == [
+            ["xp", "5965b57e30c0def4"],
+            ["xa", "7e287c8b8b140ee6"],
+            ["sb", "000009b1"],
+        ]
+
+    def test_raw_records_caption_names_the_instance_port_and_source(self):
+        # On a service from this board and one from the HA server: instance.type, port and where it came from.
+        r = sv(
+            "await openSV('r25'); rawBtn().click(); await t.flush(); const a = [rawTables()[0].allText()];"
+            " await pick('r12'); rawBtn().click(); await t.flush(); a.push(rawTables()[0].allText()); return a;"
+        )
+        assert (
+            "c6-thread-test._esphomelib._tcp" in r[0]
+            and "port 6053" in r[0]
+            and "from this board" in r[0]
+        )
+        assert "_matter._tcp" in r[1] and "port 5540" in r[1]
+        assert "from Home Assistant OpenThread Border Router #0EE6" in r[1]
+
+    def test_raw_records_start_closed_for_the_next_device(self):
+        # On opening another device after opening raw records: closed again.
+        r = sv(
+            "await openSV('r25'); rawBtn().click(); await t.flush(); t.el('t-d-close').click(); await pick('r12');"
+            " return rawTables().length;"
+        )
+        assert r == 0
+
+    # service records: markup and odd values
+
+    def test_markup_in_a_friendly_name_stays_text(self):
+        # On friendly_name=<b>Hi</b> (RF3): shown as text in the table, dialog, raw records and map; no <b> made.
+        r = sv(
+            f"const X = {{...SV, srp_hosts: HOSTS.map((h) => h.name !== 'c6-thread-test' ? h : {{...h, services: ["
+            f"svc('c6-thread-test', '_esphomelib._tcp', 6053, 26624, '{BOLD_TXT}')]}})}};"
+            " await openSV('r25', X); rawBtn().click(); await t.flush();"
+            " const made = ['t-rows', 't-dialog', 't-map'].map((id) => t.el(id).findAll((e) => e.tag === 'b').length);"
+            " return [row('r25').children[0].children[0].textContent, txt('t-d-name'), made,"
+            " rawRows(rawTables()[0])];"
+        )
+        assert r[0] == "<b>Hi</b>"
+        assert r[1] == "<b>Hi</b>"
+        assert r[2] == [0, 0, 0]
+
+    def test_raw_records_show_key_only_empty_and_binary_entries(self):
+        # On key-only, empty and binary TXT entries (RF3): the key alone for a flag, an empty value, hex for binary.
+        r = sv(
+            f"const X = {{...SV, srp_hosts: HOSTS.map((h) => h.name !== 'c6-thread-test' ? h : {{...h, services: ["
+            f"svc('c6-thread-test', '_esphomelib._tcp', 6053, 26624, '{BOLD_TXT}')]}})}};"
+            " await openSV('r25', X); rawBtn().click(); await t.flush(); return rawRows(rawTables()[0]);"
+        )
+        assert r == [
+            ["friendly_name", "<b>Hi</b>"],
+            ["at", "no value"],
+            ["bin", "00ff"],
+            ["empty", ""],
+        ]
+
+    # service records: nicknames and generic names
+
+    def test_generic_matter_name_is_styled_as_unnamed(self):
+        # On a device shown as "Matter device 0x3000": the unnamed style, in the table and the dialog title.
+        r = sv(
+            "await openSV('r12'); return [row('r12').children[0].children[0].classes.has('t-unnamed'),"
+            " t.el('t-d-name').classes.has('t-unnamed'), row('r25').children[0].children[0].classes.has('t-unnamed')];"
+        )
+        assert r == [True, True, False]
+
+    def test_a_nickname_on_a_generic_matter_device_is_not_unnamed(self):
+        # On a nickname given to "Matter device 0x3000": named.
+        r = sv(
+            "await openSV('r12'); t.el('t-d-rename').click(); t.el('t-d-name-input').value = 'Plug';"
+            " t.el('t-d-save').click(); await t.flush();"
+            " return [row('r12').children[0].children[0].textContent,"
+            " row('r12').children[0].children[0].classes.has('t-unnamed')];"
+        )
+        assert r == ["Plug", False]
+
+    # service records: results from older firmware
+
+    def test_saved_result_from_older_firmware_renders_as_before(self):
+        # On a result with no srp_servers and no txt (RF5): no kind lines, no servers hint or note, no Device facts.
+        r = run(
+            "await loaded(); const a = [row('c40961').children[0].findAll((e) => e.classes.has('t-kind')).length,"
+            " vis('t-srp-hint'), vis('t-srp-warn')]; await pick('c40961');"
+            " const dts = t.el('t-d-facts').findAll((e) => e.tag === 'dt').map((e) => e.textContent);"
+            " a.push(dts.includes('Device'), dts.includes('Registered with'), vis('t-d-raw'), vis('t-d-note'),"
+            " txt('t-d-facts')); return a;"
+        )
+        assert r[:7] == [0, False, False, False, False, False, False]
+        assert "SRP host kitchen-plug.default.service.arpa" in r[7]
+        assert "kitchen-plug" in r[7] and "_matter._tcp" in r[7]
 
 @needs_node
 class TestTrelTransport:
