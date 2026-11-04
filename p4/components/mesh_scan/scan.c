@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "render.h"
+#include "srp.h"
 #include "srp_step.h"
 
 static const char *TAG = "mesh_scan";
@@ -57,10 +58,13 @@ typedef struct {
     mesh_scan_stage_t stage;
     srp_job_t jobs[MAX_SRP_JOBS]; /**< browses first, in round-robin over the servers; resolves appended */
     uint16_t n_jobs;
-    uint16_t next_job;            /**< jobs before it have been issued */
+    uint16_t queued;              /**< jobs in state JOB_QUEUED */
     uint8_t in_flight;
+    uint8_t server_cap;           /**< queries in flight per server at most */
     uint8_t resolves;             /**< resolves queued so far */
+    uint8_t server_in_flight[MESH_SCAN_MAX_SRP_SERVERS];
     bool answered[MESH_SCAN_MAX_SRP_SERVERS]; /**< a query to that server got an answer */
+    bool dead[MESH_SCAN_MAX_SRP_SERVERS];     /**< given up: timed out before any answer, its queued jobs dropped */
     bool cut[MESH_SCAN_MAX_SRP_SERVERS];      /**< that server still had queries when the step was cut */
 } srp_step_t;
 
@@ -407,10 +411,15 @@ static void next_router(int from)
 }
 
 // SRP step: from the start, in parallel with the mesh phases, browse SRP_TYPES on every remote SRP server, at most
-// MESH_SCAN_SRP_QUERIES queries at a time, and resolve the instances a browse answer does not describe (at most
-// MESH_SCAN_SRP_RESOLVES). Ends when every query is over or MESH_SCAN_SRP_BUDGET_MS after the start, whichever is first.
+// MESH_SCAN_SRP_QUERIES queries at a time (MESH_SCAN_SRP_SERVER_QUERIES per server when several are asked), and resolve
+// the instances a browse answer does not describe (at most MESH_SCAN_SRP_RESOLVES). A server whose query times out
+// before it ever answered is given up: its queued jobs are dropped. Ends when every query is over or
+// MESH_SCAN_SRP_BUDGET_MS after the start, whichever is first.
 
-/** Final server states: no_answer when nothing ever answered, cut_short when queries were left, answered otherwise. */
+/**
+ * Final server states: no_answer when nothing it was asked got an answer, or it was given up; cut_short when the cut
+ * (or, after a late answer, giving it up) left it with jobs; answered otherwise.
+ */
 static void srp_close(void)
 {
     mesh_scan_result_t *r = &s.block->result;
@@ -419,10 +428,12 @@ static void srp_close(void)
         mesh_scan_srp_server_t *srv = &r->srp_servers[i];
         if (srv->this_board) {
             srv->state = MESH_SCAN_SRP_ANSWERED; // read locally at finish
-        } else if (!s.srp || !s.srp->answered[i]) {
+        } else if (!s.srp) {
             srv->state = MESH_SCAN_SRP_NO_ANSWER;
+        } else if (s.srp->answered[i]) {
+            srv->state = s.srp->cut[i] || s.srp->dead[i] ? MESH_SCAN_SRP_CUT_SHORT : MESH_SCAN_SRP_ANSWERED;
         } else {
-            srv->state = s.srp->cut[i] ? MESH_SCAN_SRP_CUT_SHORT : MESH_SCAN_SRP_ANSWERED;
+            srv->state = s.srp->cut[i] && !s.srp->dead[i] ? MESH_SCAN_SRP_CUT_SHORT : MESH_SCAN_SRP_NO_ANSWER;
         }
     }
     s.srp_over = true;
@@ -438,8 +449,9 @@ static void srp_cut(void)
             job->state = JOB_OVER;
         }
     }
-    s.srp->next_job = s.srp->n_jobs;
+    s.srp->queued = 0;
     s.srp->in_flight = 0;
+    memset(s.srp->server_in_flight, 0, sizeof(s.srp->server_in_flight));
     srp_close();
 }
 
@@ -451,28 +463,55 @@ static void srp_ended(void)
     }
 }
 
+/** Issue order: browses, then resolves of the types that carry a device name (ESPHome, HomeKit), then the rest. */
+static uint8_t job_rank(const srp_job_t *job)
+{
+    if (!job->resolve) {
+        return 0;
+    }
+    const char *type = SRP_TYPES[job->type];
+    return strcmp(type, "_esphomelib._tcp") == 0 || strcmp(type, "_hap._udp") == 0 ? 1 : 2;
+}
+
+/** The queued job to issue next: lowest rank, then queue order, on a server below its cap. -1 when there is none. */
+static int srp_next_job(const srp_step_t *st)
+{
+    int best = -1;
+
+    for (uint16_t i = 0; i < st->n_jobs; i++) {
+        const srp_job_t *job = &st->jobs[i];
+        if (job->state == JOB_QUEUED && st->server_in_flight[job->server] < st->server_cap &&
+                (best < 0 || job_rank(job) < job_rank(&st->jobs[best]))) {
+            best = i;
+        }
+    }
+    return best;
+}
+
 /** Issue queued jobs while there is room; end the step once nothing is in flight or queued. Last thing a caller does. */
 static void srp_pump(void)
 {
     srp_step_t *st = s.srp;
     const mesh_scan_result_t *r = &s.block->result;
+    int id;
 
-    while (st->in_flight < MESH_SCAN_SRP_QUERIES && st->next_job < st->n_jobs) {
-        const uint16_t id = st->next_job++;
+    while (st->in_flight < MESH_SCAN_SRP_QUERIES && (id = srp_next_job(st)) >= 0) {
         srp_job_t *job = &st->jobs[id];
         const mesh_scan_srp_server_t *srv = &r->srp_servers[job->server];
         const char *type = SRP_TYPES[job->type];
-        int err = job->resolve ? s.ops.dns_resolve(srv, job->instance, type, s.gen, id)
-                  : s.ops.dns_browse(srv, type, s.gen, id);
+        int err = job->resolve ? s.ops.dns_resolve(srv, job->instance, type, s.gen, (uint16_t)id)
+                  : s.ops.dns_browse(srv, type, s.gen, (uint16_t)id);
 
+        st->queued--;
         if (err == MESH_SCAN_OT_ERROR_NONE) {
             job->state = JOB_IN_FLIGHT;
             st->in_flight++;
+            st->server_in_flight[job->server]++;
         } else {
             job->state = JOB_OVER; // NO_BUFS and the like: counts as done, without an answer
         }
     }
-    if (st->in_flight == 0 && st->next_job == st->n_jobs) {
+    if (st->in_flight == 0 && st->queued == 0) {
         srp_close();
         srp_ended();
     }
@@ -505,13 +544,15 @@ static void srp_start(void)
     }
     memcpy(s.srp->stage.ext_pan_id, ext_pan_id, sizeof(ext_pan_id));
     memcpy(s.srp->stage.own_ext, own_ext, sizeof(own_ext));
-    // Round-robin over the servers, so a silent one holds at most its share of the slots at first.
+    // Round-robin over the servers, and with several a per-server cap, so a silent one holds at most two slots.
+    s.srp->server_cap = remote > 1 ? MESH_SCAN_SRP_SERVER_QUERIES : MESH_SCAN_SRP_QUERIES;
     for (uint8_t t = 0; t < N_SRP_TYPES; t++) {
         for (uint8_t i = 0; i < r->n_srp_servers; i++) {
             if (!r->srp_servers[i].this_board) {
                 s.srp->jobs[s.srp->n_jobs++] = (srp_job_t) {
                     .server = i, .type = t, .state = JOB_QUEUED
                 };
+                s.srp->queued++;
             }
         }
     }
@@ -1016,6 +1057,36 @@ out:
     unlock();
 }
 
+/**
+ * True when a resolve of `rec` cannot make it kept: it has addresses and none passes the address filter (a LAN host
+ * from a discovery proxy). Border router types are judged by TXT, never by address.
+ */
+static bool lan_only(const char *type, const mesh_scan_srp_record_t *rec)
+{
+    const mesh_scan_network_t *net = &s.block->result.network;
+    const uint8_t n = rec->n_addrs < MESH_SCAN_MAX_SRP_ADDRS ? rec->n_addrs : MESH_SCAN_MAX_SRP_ADDRS;
+
+    if (strcmp(type, "_meshcop._udp") == 0 || strcmp(type, "_trel._udp") == 0 || n == 0) {
+        return false;
+    }
+    return !mesh_scan_srp_addr_kept(rec->addrs, n, net->omr, net->n_omr, net->ml_prefix);
+}
+
+/** A server that never answered timed out: drop its queued jobs, so it holds no more slots. */
+static void srp_give_up(uint8_t server)
+{
+    srp_step_t *st = s.srp;
+
+    st->dead[server] = true;
+    for (uint16_t i = 0; i < st->n_jobs; i++) {
+        if (st->jobs[i].server == server && st->jobs[i].state == JOB_QUEUED) {
+            st->jobs[i].state = JOB_OVER;
+            st->queued--;
+        }
+    }
+    ESP_LOGW(TAG, "SRP server 0x%04x did not answer; not asked again", s.block->result.srp_servers[server].rloc16);
+}
+
 void mesh_scan_on_srp_record(uint32_t gen, uint16_t id, const mesh_scan_srp_record_t *rec)
 {
     lock();
@@ -1027,13 +1098,15 @@ void mesh_scan_on_srp_record(uint32_t gen, uint16_t id, const mesh_scan_srp_reco
         goto out; // given up at the deadline, already done, or never issued
     }
     srp_step_t *st = s.srp;
-    if (!job->resolve && !rec->described && rec->instance[0] && st->resolves < MESH_SCAN_SRP_RESOLVES) {
+    if (!job->resolve && !rec->described && rec->instance[0] && st->resolves < MESH_SCAN_SRP_RESOLVES &&
+            !st->dead[job->server] && !lan_only(SRP_TYPES[job->type], rec)) {
         srp_job_t *next = &st->jobs[st->n_jobs++]; // room: MAX_SRP_JOBS counts every browse and resolve
         *next = (srp_job_t) {
             .resolve = true, .server = job->server, .type = job->type, .state = JOB_QUEUED
         };
         strncpy(next->instance, rec->instance, sizeof(next->instance) - 1);
         st->resolves++;
+        st->queued++;
         goto out; // issued once a slot frees up
     }
     mesh_scan_stage_record(&st->stage, &s.block->result, job->server, SRP_TYPES[job->type], rec);
@@ -1053,8 +1126,12 @@ void mesh_scan_on_srp_query_done(uint32_t gen, uint16_t id, int ot_error)
     }
     job->state = JOB_OVER;
     s.srp->in_flight--;
+    s.srp->server_in_flight[job->server]--;
     if (ot_error == MESH_SCAN_OT_ERROR_NONE || ot_error == MESH_SCAN_OT_ERROR_NOT_FOUND) {
         s.srp->answered[job->server] = true;
+    } else if (ot_error == MESH_SCAN_OT_ERROR_RESPONSE_TIMEOUT && !s.srp->answered[job->server] &&
+               !s.srp->dead[job->server]) {
+        srp_give_up(job->server);
     }
     srp_pump();
 out:

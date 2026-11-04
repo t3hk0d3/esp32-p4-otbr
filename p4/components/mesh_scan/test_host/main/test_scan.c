@@ -1440,6 +1440,47 @@ static int in_flight(void)
     return n;
 }
 
+/** Queries to `server` issued so far, and of those, still open. */
+static int calls_to(uint16_t server)
+{
+    int n = 0;
+
+    for (int i = 0; i < g_fake.dns_calls; i++) {
+        n += g_fake.dns[i].server == server;
+    }
+    return n;
+}
+
+static int in_flight_of(uint16_t server)
+{
+    int n = 0;
+
+    for (int i = 0; i < g_fake.dns_calls; i++) {
+        n += !s_closed[i] && g_fake.dns[i].server == server;
+    }
+    return n;
+}
+
+/** The first open query to `server`, or -1. */
+static int open_call_of(uint16_t server)
+{
+    for (int i = 0; i < g_fake.dns_calls; i++) {
+        if (!s_closed[i] && g_fake.dns[i].server == server) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/** An undescribed browse answer: instance only, no host, no address. */
+static mesh_scan_srp_record_t bare_rec(const char *instance)
+{
+    mesh_scan_srp_record_t rec = { 0 };
+
+    strcpy(rec.instance, instance);
+    return rec;
+}
+
 static const mesh_scan_srp_host_t *srp_host(const mesh_scan_result_t *res, const char *name)
 {
     for (uint8_t i = 0; i < res->n_srp; i++) {
@@ -1531,7 +1572,7 @@ TEST_CASE("ops.dns_browse fails for one job: that job counts as done, the rest g
 {
     srp_setup(1);
     g_fake.dns_rets[1] = MESH_SCAN_OT_ERROR_NO_BUFS;
-    mesh_scan_core_start();
+    TEST_ASSERT_EQUAL(ESP_OK, mesh_scan_core_start());
     s_closed[1] = true; // never started
     TEST_ASSERT_EQUAL(MESH_SCAN_SRP_QUERIES + 1, g_fake.dns_calls);
     TEST_ASSERT_EQUAL(MESH_SCAN_SRP_QUERIES, in_flight());
@@ -1615,6 +1656,75 @@ TEST_CASE("Browse answer not described: the resolve's answer is staged", "[mesh_
     TEST_ASSERT_NOT_NULL(h);
     TEST_ASSERT_EQUAL(1, h->n_services); // the browse data itself was not staged
     TEST_ASSERT_EQUAL_STRING("_hap._udp", h->services[0].type);
+}
+
+TEST_CASE("Browse answer not described, its addresses all outside the OMR and mesh-local prefixes: no resolve, "
+          "dropped", "[mesh_scan]")
+{
+    srp_start(1);
+    mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_LAN); // LAN host from a discovery proxy
+    rec.described = false;
+    rec.n_addrs = 2;
+    memset(rec.addrs[1], 0x30, 8);
+    const mesh_scan_result_t *res = srp_finish_with(&rec);
+
+    TEST_ASSERT_LESS_THAN(0, find_call(REMOTE_A, "_matter._tcp", true));
+    TEST_ASSERT_EQUAL(SRP_TYPES, g_fake.dns_calls);
+    TEST_ASSERT_NULL(srp_host(res, "plug-1"));
+}
+
+TEST_CASE("Browse answer not described, one address under the OMR prefix among LAN ones: a resolve is queued",
+          "[mesh_scan]")
+{
+    srp_start(1);
+    mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_LAN);
+    rec.described = false;
+    rec.n_addrs = 2;
+    memset(rec.addrs[1], ADDR_OMR, 8);
+    srp_answer(browse_of(REMOTE_A, "_matter._tcp"), &rec);
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, find_call(REMOTE_A, "_matter._tcp", true));
+}
+
+TEST_CASE("Browse answer not described, a _meshcop._udp record with a LAN address: a resolve is still queued (judged "
+          "by TXT)", "[mesh_scan]")
+{
+    srp_start(1);
+    mesh_scan_srp_record_t rec = srp_rec("HA OTBR", "ha-otbr", ADDR_LAN);
+    rec.described = false;
+    srp_answer(browse_of(REMOTE_A, "_meshcop._udp"), &rec);
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, find_call(REMOTE_A, "_meshcop._udp", true));
+}
+
+/** The call index of the resolve of `instance`, or -1. */
+static int resolve_of(const char *instance)
+{
+    for (int i = 0; i < g_fake.dns_calls; i++) {
+        if (g_fake.dns[i].resolve && !strcmp(g_fake.dns[i].instance, instance)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+TEST_CASE("Resolves queued for several types: _esphomelib._tcp and _hap._udp ones are issued before the others",
+          "[mesh_scan]")
+{
+    srp_start(1);
+    const mesh_scan_srp_record_t m1 = bare_rec("M1"), m2 = bare_rec("M2"), h = bare_rec("H"), e = bare_rec("E");
+    const int bm = find_call(REMOTE_A, "_matter._tcp", false);
+    srp_answer(bm, &m1);
+    srp_answer(bm, &m2);
+    srp_answer(find_call(REMOTE_A, "_hap._udp", false), &h);
+    srp_answer(find_call(REMOTE_A, "_esphomelib._tcp", false), &e);
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+
+    TEST_ASSERT_GREATER_OR_EQUAL(0, resolve_of("M2"));
+    TEST_ASSERT_LESS_THAN(resolve_of("M1"), resolve_of("H"));
+    TEST_ASSERT_LESS_THAN(resolve_of("M1"), resolve_of("E"));
+    TEST_ASSERT_LESS_THAN(resolve_of("M2"), resolve_of("M1")); // in queue order within a rank
+    TEST_ASSERT_LESS_THAN(resolve_of("E"), resolve_of("H"));
 }
 
 TEST_CASE("49th resolve wanted: not queued; the browse data is kept if it passes the filter, else dropped",
@@ -1863,12 +1973,50 @@ TEST_CASE("Every query of a server timed out (Review focus 1): server state no_a
     srp_drain(MESH_SCAN_OT_ERROR_RESPONSE_TIMEOUT);
 
     const mesh_scan_result_t *res = done_result();
-    TEST_ASSERT_EQUAL(2 * SRP_TYPES, g_fake.dns_calls);
     TEST_ASSERT_EQUAL(MESH_SCAN_SRP_NO_ANSWER, srp_server_of(res, REMOTE_A)->state);
     TEST_ASSERT_EQUAL(MESH_SCAN_SRP_ANSWERED, srp_server_of(res, REMOTE_B)->state);
     TEST_ASSERT_EQUAL(1, srp_server_of(res, REMOTE_B)->hosts);
     TEST_ASSERT_EQUAL_HEX16(REMOTE_B, srp_host(res, "plug-1")->source);
     TEST_ASSERT_FALSE(res->partial);
+}
+
+TEST_CASE("Every query of a server timed out (Review focus 1): after its first timeout no further job goes to that "
+          "server; the other server's browses and resolves are issued", "[mesh_scan]")
+{
+    srp_start(2);
+    const int b = find_call(REMOTE_B, "_matter._tcp", false);
+    const mesh_scan_srp_record_t rec = bare_rec("Plug 1");
+    srp_answer(b, &rec);                                        // queues a resolve on REMOTE_B
+    srp_done(open_call_of(REMOTE_A), MESH_SCAN_OT_ERROR_RESPONSE_TIMEOUT); // REMOTE_A never answered: given up
+    const int to_a = calls_to(REMOTE_A);
+    while (open_call_of(REMOTE_B) >= 0) {
+        srp_done(open_call_of(REMOTE_B), MESH_SCAN_OT_ERROR_NONE);
+    }
+    TEST_ASSERT_EQUAL(to_a, calls_to(REMOTE_A));
+    TEST_ASSERT_EQUAL(SRP_TYPES + 1, calls_to(REMOTE_B));
+    TEST_ASSERT_GREATER_OR_EQUAL(0, find_call(REMOTE_B, "_matter._tcp", true));
+    srp_drain(MESH_SCAN_OT_ERROR_RESPONSE_TIMEOUT);
+    mesh_over();
+    TEST_ASSERT_EQUAL(to_a, calls_to(REMOTE_A));
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_NO_ANSWER, srp_server_of(done_result(), REMOTE_A)->state);
+}
+
+TEST_CASE("Two remote servers, one silent: no server has more than 2 queries in flight", "[mesh_scan]")
+{
+    srp_start(2);
+    while (open_call_of(REMOTE_B) >= 0) {
+        TEST_ASSERT_LESS_OR_EQUAL(2, in_flight_of(REMOTE_A));
+        TEST_ASSERT_LESS_OR_EQUAL(2, in_flight_of(REMOTE_B));
+        srp_done(open_call_of(REMOTE_B), MESH_SCAN_OT_ERROR_NONE);
+    }
+    TEST_ASSERT_EQUAL(2, in_flight_of(REMOTE_A));
+    TEST_ASSERT_EQUAL(SRP_TYPES, calls_to(REMOTE_B));
+}
+
+TEST_CASE("One remote server: up to 4 queries in flight to it", "[mesh_scan]")
+{
+    srp_start(1);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_QUERIES, in_flight_of(REMOTE_A));
 }
 
 TEST_CASE("Two remote servers: their browses alternate, so a silent one cannot hold back the other", "[mesh_scan]")
@@ -1921,11 +2069,50 @@ TEST_CASE("On the SRP deadline with queries in flight: their servers cut_short; 
     TEST_ASSERT_NULL(srp_host(done_result(), "plug-1"));
 }
 
-TEST_CASE("On the SRP deadline, a server that never answered: no_answer", "[mesh_scan]")
+TEST_CASE("On the SRP deadline, a server that never answered with queries still in flight or queued: cut_short",
+          "[mesh_scan]")
 {
     srp_start(1);
     mesh_over();
     mesh_scan_on_srp_deadline(g_fake.srp_deadline_gen);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_CUT_SHORT, srp_server_of(done_result(), REMOTE_A)->state);
+}
+
+TEST_CASE("On the SRP deadline, a server given up after a timeout: no_answer, though queries were still in flight",
+          "[mesh_scan]")
+{
+    srp_start(1);
+    mesh_over();
+    srp_done(0, MESH_SCAN_OT_ERROR_RESPONSE_TIMEOUT);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_QUERIES - 1, in_flight());
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_QUERIES, g_fake.dns_calls); // its queued browses dropped
+    mesh_scan_on_srp_deadline(g_fake.srp_deadline_gen);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_NO_ANSWER, srp_server_of(done_result(), REMOTE_A)->state);
+}
+
+TEST_CASE("A server given up after a timeout that answers a query still in flight: cut_short, its records kept",
+          "[mesh_scan]")
+{
+    srp_start(1);
+    mesh_over();
+    srp_done(0, MESH_SCAN_OT_ERROR_RESPONSE_TIMEOUT); // given up, its queued browses dropped
+    const mesh_scan_srp_record_t rec = srp_rec("Plug 1", "plug-1", ADDR_OMR);
+    srp_answer(1, &rec);
+    srp_drain(MESH_SCAN_OT_ERROR_NONE);
+    const mesh_scan_result_t *res = done_result();
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_QUERIES, g_fake.dns_calls);
+    TEST_ASSERT_EQUAL(MESH_SCAN_SRP_CUT_SHORT, srp_server_of(res, REMOTE_A)->state);
+    TEST_ASSERT_NOT_NULL(srp_host(res, "plug-1"));
+}
+
+TEST_CASE("Every query of a server failed to start: no_answer", "[mesh_scan]")
+{
+    srp_setup(1);
+    for (int i = 0; i < SRP_TYPES; i++) {
+        g_fake.dns_rets[i] = MESH_SCAN_OT_ERROR_NO_BUFS;
+    }
+    TEST_ASSERT_EQUAL(ESP_OK, mesh_scan_core_start());
+    mesh_over();
     TEST_ASSERT_EQUAL(MESH_SCAN_SRP_NO_ANSWER, srp_server_of(done_result(), REMOTE_A)->state);
 }
 

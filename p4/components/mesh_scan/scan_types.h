@@ -25,6 +25,7 @@ extern "C" {
 #define MESH_SCAN_NAME_LEN 64
 #define MESH_SCAN_MAX_OMR 4
 #define MESH_SCAN_SRP_QUERIES 4        /**< DNS queries in flight at most */
+#define MESH_SCAN_SRP_SERVER_QUERIES 2 /**< ... to one server, when more than one remote server is asked */
 #define MESH_SCAN_SRP_RESOLVES 48      /**< service resolves per scan */
 #define MESH_SCAN_SRP_BUDGET_MS 15000  /**< SRP step budget from scan start, inside the cap */
 #define MESH_SCAN_DNS_TIMEOUT_MS 3000  /**< DNS response timeout per attempt */
@@ -131,8 +132,9 @@ typedef struct {
 } mesh_scan_network_t;
 
 /**
- * About 100 KB (the SRP host array alone is 64 x ~1.2 KB): allocated by scan.c through `ops.alloc` (PSRAM on target),
- * never on a stack. Up to two can exist at once: a new scan allocates its result while a render still holds the old one.
+ * About 106 KB (the SRP hosts 64 x ~1.3 KB = 84 KB, the routers 22 KB): allocated by scan.c through `ops.alloc`
+ * (PSRAM on target), never on a stack. Up to two can exist at once: a new scan allocates its result while a render
+ * still holds the old one.
  */
 #define MESH_SCAN_PREF_NONE (-1) /**< the neighbour does not use that radio */
 

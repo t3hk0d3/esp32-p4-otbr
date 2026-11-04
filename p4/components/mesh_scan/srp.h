@@ -1,6 +1,6 @@
 #pragma once
 
-// Pure helpers of the SRP step: parsing, filtering and packing. No OpenThread, so the host tests build them as they are.
+// Pure helpers of the SRP step: parsing, filtering and packing. No OpenThread, so the host tests build them as is.
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -26,7 +26,7 @@ bool mesh_scan_srp_addr_kept(const mesh_scan_ip6_t *addrs, uint8_t n, const mesh
 
 /**
  * Find a key in raw TXT RDATA. `val` is NULL and `val_len` 0 for a key-only entry. Stops at a malformed length. Keys
- * match case-sensitively (OTBR publishes lower-case keys).
+ * match case-sensitively (the known publishers use lower-case keys).
  */
 bool mesh_scan_txt_find(const uint8_t *txt, uint16_t len, const char *key, const uint8_t **val, uint8_t *val_len);
 

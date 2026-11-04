@@ -35,22 +35,27 @@ below, any of them can answer 500 `internal` or `no_memory`.
 ### Service records in the topology scan
 
 The scan result lists the hosts and services registered with the network's SRP servers (`srp_hosts`) and says which
-servers were asked (`srp_servers`). The SRP step runs next to the router and child phases from the start of the scan, with
-its own 15 s budget inside the 60 s cap.
+servers were asked (`srp_servers`). The SRP step runs next to the router and child phases from the start of the scan,
+with its own 15 s budget inside the 60 s cap.
 
 - Where records come from: this board's SRP server is read locally (with lease and key lease). Every other DNS/SRP
   server in the network data is asked over DNS-SD on port 53 for `_matter._tcp`, `_matterc._udp`, `_esphomelib._tcp`,
-  `_hap._udp`, `_http._tcp`, `_meshcop._udp` and `_trel._udp`; instances found are resolved for port, host address and
-  TXT (with a follow-up AAAA query when the SRV answer has no address). A record whose TXT cannot be parsed is kept
-  without TXT.
+  `_hap._udp`, `_http._tcp`, `_meshcop._udp` and `_trel._udp`. An instance the browse answer did not describe (SRV,
+  TXT and an address) is resolved for port, host address and TXT (with a follow-up AAAA query when the SRV answer has
+  no address), unless the browse answer gave addresses and none passes the filter below; ESPHome and HomeKit resolves
+  go first. At most 4 queries are in flight, 2 per server when several are asked; a server whose query times out
+  before it answered anything is not asked again. A record whose TXT cannot be parsed is kept without TXT.
 - Filter: a host is kept when it has an address under an OMR prefix or the mesh-local prefix. A border router record
-  (`_meshcop._udp`, `_trel._udp`) is kept when its extended PAN ID (`xp`) is this network's and it has an extended address (`xa`) other than this board's.
+  (`_meshcop._udp`, `_trel._udp`) is kept when its extended PAN ID (`xp`) is this network's and it has an extended
+  address (`xa`) other than this board's.
 - De-duplication: by host name; a host seen on several servers is listed once.
 - Limits: 64 hosts, 8 services per host, 512 TXT bytes per service (`txt_truncated` is set when cut), 6 subtypes per
   service, 48 resolves per scan, 15 s.
 - A server that does not answer never sets `partial`. `srp_servers[].state` is `answered` (at least one query was
-  answered, an empty answer counts), `no_answer` (it never answered), or `cut_short` (it answered something, or only
-  queued queries were left, when the budget or the cap ended the step).
+  answered, an empty answer counts, and all its queries ended), `no_answer` (no query it was asked got an answer:
+  they all timed out or failed, or it was given up after a timeout), or `cut_short` (the budget or the cap ended the
+  step while it still had queries in flight or waiting and had not been given up, or it answered only after its
+  waiting queries were dropped).
 
 ```json
 "srp_servers": [
@@ -68,8 +73,8 @@ its own 15 s budget inside the 60 s cap.
 ```
 
 - `srp_servers[]`: `rloc16` (number) of the server router, its `address`, the SRP `port` from the network data (the
-  DNS query goes to port 53), `this_board`, `state`, and `hosts`, the hosts kept from it (after the address filter, before
-  de-duplication).
+  DNS query goes to port 53), `this_board`, `state`, and `hosts`, the hosts kept from it (after the address filter,
+  before de-duplication).
 - `srp_hosts[].source` and `services[].source`: the `rloc16` of the server the record came from. `lease_s` and
   `key_lease_s` only for hosts from this board's server; hosts from other servers have `ttl_s` instead.
 - `services[].port` is the SRV port. `txt` is the base64 of the raw TXT RDATA, `""` when the record has none.
