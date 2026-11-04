@@ -46,7 +46,8 @@ typedef struct {
         bool built;   /**< false: no TREL families */
         bool enabled; /**< the setting */
         bool active;  /**< OpenThread runs TREL */
-        uint32_t peers;
+        uint32_t peers;       /**< of the board's Thread network */
+        uint32_t peers_other; /**< of other Thread networks */
         uint64_t tx_packets, tx_bytes, tx_failures, rx_packets, rx_bytes;
     } trel;
 } metrics_thread_t;

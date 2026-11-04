@@ -21,6 +21,40 @@ function wholeNumber(value, min, max) {
   return (n >= min && n <= max) ? n : null;
 }
 
+/*
+ * OpenThread's per-radio preference of a Thread neighbour, as /device/status (TREL peers) and /device/topology (this
+ * board's links) give it: {ieee802154, trel}, each 0..255 or null when the neighbour does not use that radio.
+ */
+function radioPref(preference, radio) {
+  return preference && typeof preference[radio] === 'number' ? preference[radio] : null;
+}
+
+/** A preference as the pages show it: 0..255 as a whole percent, "86%" for OpenThread's TREL threshold 220. */
+function preferencePercent(pref) {
+  return Math.round(pref * 100 / 255) + '%';
+}
+
+/** TREL's preference is below 15.4's: the tunnel is losing to the radio (shown red). Compares the raw values. */
+function trelLow(preference) {
+  var trel = radioPref(preference, 'trel'), radio = radioPref(preference, 'ieee802154');
+  return trel !== null && radio !== null && trel < radio;
+}
+
+/** [{text, low}] of "15.4 100% · TREL 22%", low marking the TREL figure when trelLow; [] when neither radio is used. */
+function preferenceParts(preference) {
+  var radio = radioPref(preference, 'ieee802154'), trel = radioPref(preference, 'trel');
+  var parts = [];
+  if (radio !== null)
+    parts.push({text : '15.4 ' + preferencePercent(radio), low : false});
+  if (radio !== null && trel !== null)
+    parts.push({text : ' \u00b7 ', low : false});
+  if (trel !== null) {
+    parts.push({text : 'TREL ', low : false});
+    parts.push({text : preferencePercent(trel), low : trelLow(preference)});
+  }
+  return parts;
+}
+
 var STATUS_TEXT = {
   409 : 'The device is busy',
   412 : 'Not possible without the maintenance jumper',
@@ -160,7 +194,11 @@ return {
   coreLabel : coreLabel,
   pct : pct,
   loadText : loadText,
-  bytesText : bytesText
+  bytesText : bytesText,
+  radioPref : radioPref,
+  preferencePercent : preferencePercent,
+  trelLow : trelLow,
+  preferenceParts : preferenceParts
 };
 })();
 

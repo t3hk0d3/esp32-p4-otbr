@@ -36,6 +36,11 @@ TREL_PEER = os.environ.get(
 ATTACH_TIMEOUT_S = 120  # the peer attaches as a child, then may become a router
 LINK_TIMEOUT_S = 120  # DNS-SD discovery plus the first MLE exchange over TREL
 TRAFFIC_TIMEOUT_S = 90  # MLE advertisements alone carry packets every 30 s or so
+ROUTER_TIMEOUT_S = (
+    240  # a REED becomes a router after a random delay of up to 120 s, plus the attach
+)
+SCAN_TIMEOUT_S = 120  # the Topology scan of a two-router mesh
+POLL_INTERVAL_S = 1
 
 
 @pytest.fixture
@@ -252,8 +257,14 @@ def test_board_links_with_a_trel_border_router(
     # peer's link to the board uses TREL next to 15.4, and TREL packets flow in both directions on the board.
     linked_over_trel(dut, base_url, trel_peer, stored_dataset)
     wait_for_traffic(base_url)
-    peer_entry = status(base_url)["peer_list"][0]
-    assert peer_entry["ext_address"] and peer_entry["address"]
+    trel = status(base_url)
+    entry = peer_entry(trel, trel_peer)
+    assert entry["address"]
+    # Same network, a Thread neighbour: its extended PAN ID and both radio preferences are reported.
+    assert entry["same_network"] is True
+    assert entry["ext_pan_id"] == trel_peer.command("extpanid")[-1]
+    assert isinstance(entry["preference"]["trel"], int)
+    assert trel["peers"] >= 1
 
 
 def test_trel_off_ends_the_link_and_on_brings_it_back(
@@ -285,3 +296,77 @@ def test_trel_off_ends_the_link_and_on_brings_it_back(
         "the TREL link back",
     )
     wait_for_traffic(base_url)
+
+
+def peer_entry(trel, trel_peer):
+    """The TREL peer's entry in a /device/status `trel` object (fails when the board does not list it)."""
+    ext = trel_peer.command("extaddr")[-1]
+    for entry in trel["peer_list"]:
+        if entry["ext_address"] == ext:
+            return entry
+    pytest.fail(
+        f"the TREL peer {ext} is not in the board's peer list: {trel['peer_list']}"
+    )
+
+
+def test_peer_of_another_network_is_listed_apart(
+    dut, stored_dataset, base_url, trel_peer
+):
+    # On a TREL border router of another Thread network on the link: the board lists it with same_network false and no
+    # preference (never a neighbour), and counts it in peers_other.
+    wait_ot_state(dut, {"leader"}, LEADER_TIMEOUT_S)
+    trel_peer.command("dataset init new")
+    trel_peer.command("dataset commit active")
+    trel_peer.command("ifconfig up")
+    trel_peer.command("thread start")
+    ext = trel_peer.command("extaddr")[-1]
+    other_pan = trel_peer.command("extpanid")[-1]
+
+    def listed_apart():
+        trel = status(base_url)
+        entries = [e for e in trel["peer_list"] if e["ext_address"] == ext]
+        if entries and entries[0]["ext_pan_id"] == other_pan:
+            return trel, entries[0]
+        return None
+
+    trel, entry = wait_for(
+        listed_apart, LINK_TIMEOUT_S, "the peer listed with its own network"
+    )
+    assert entry["same_network"] is False
+    assert entry["preference"] is None
+    assert trel["peers_other"] >= 1
+
+
+def run_scan(base_url):
+    """POST /device/topology, then poll GET until the scan is no longer running; the final state object."""
+    response = requests.post(f"{base_url}/device/topology", timeout=REQUEST_TIMEOUT_S)
+    assert response.status_code == 202, response.text
+    deadline = time.monotonic() + SCAN_TIMEOUT_S
+    state = response.json()
+    while state["state"] == "running" and time.monotonic() < deadline:
+        time.sleep(POLL_INTERVAL_S)
+        state = requests.get(
+            f"{base_url}/device/topology", timeout=REQUEST_TIMEOUT_S
+        ).json()
+    assert state["state"] == "done", state
+    return state
+
+
+def test_topology_scan_shows_the_trel_link(dut, stored_dataset, base_url, trel_peer):
+    # On the TREL peer linked as a router: the scan's entry for this board carries, on its link to the peer, the
+    # transport with a TREL preference; the peer's own entry carries none.
+    linked_over_trel(dut, base_url, trel_peer, stored_dataset)
+    wait_for(
+        lambda: trel_peer.command("state")[-1] in ("router", "leader"),
+        ROUTER_TIMEOUT_S,
+        "the TREL peer to become a router",
+    )
+    peer_id = int(trel_peer.command("rloc16")[-1], 16) >> 10
+    routers = run_scan(base_url)["result"]["routers"]
+    board = next(r for r in routers if r.get("this_device"))
+    links = [link for link in board["links"] if link["router_id"] == peer_id]
+    assert links, f"no link from the board to router {peer_id}: {board['links']}"
+    assert isinstance(links[0]["transport"]["trel"], int)
+    for router in routers:
+        if not router.get("this_device"):
+            assert all("transport" not in link for link in router.get("links", []))

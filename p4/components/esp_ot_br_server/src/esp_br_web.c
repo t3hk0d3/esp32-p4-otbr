@@ -1391,6 +1391,7 @@ static esp_err_t favicon_get_handler(httpd_req_t *req)
 
 /**
  * @brief Provide a method to send message to @param req client accord to @param path.
+ *        Sends <path>.gz with Content-Encoding: gzip when the image has it, else the file itself.
  *
  * @param[in] req  The request from the client
  * @param[in] path The path of file which will be sent.
@@ -1400,9 +1401,18 @@ static esp_err_t favicon_get_handler(httpd_req_t *req)
  */
 static esp_err_t httpd_resp_send_spiffs_file(httpd_req_t *req, char *path)
 {
-    ESP_LOGI(WEB_TAG, "Reading %s", path);
-
-    FILE *fp = fopen(path, "r");
+    /* The image stores pages and scripts gzipped as <path>.gz (tools/pack_web.py): send them as they are. */
+    char gz_path[FILEPATH_MAX_SIZE + sizeof(".gz")];
+    snprintf(gz_path, sizeof(gz_path), "%s.gz", path);
+    FILE *fp = fopen(gz_path, "r");
+    if (fp) {
+        ESP_LOGI(WEB_TAG, "Reading %s", gz_path);
+        httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+        httpd_resp_set_hdr(req, "Vary", "Accept-Encoding");
+    } else {
+        ESP_LOGI(WEB_TAG, "Reading %s", path);
+        fp = fopen(path, "r");
+    }
     ESP_RETURN_ON_FALSE(fp, ESP_FAIL, WEB_TAG, "Failed to open %s file", path);
 
     char buf[FILE_CHUNK_SIZE];

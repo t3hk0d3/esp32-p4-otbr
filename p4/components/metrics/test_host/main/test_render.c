@@ -237,7 +237,7 @@ TEST_CASE("On a valid cache younger than 30 s: every Thread family, state sets w
                               "br_mac_rx_errors_total", "br_thread_ip6_packets_total", "br_border_routing_packets_total",
                               "br_border_routing_bytes_total", "br_border_routing_ra_total", "br_border_routing_rs_total",
                               "br_srp_hosts", "br_srp_services", "br_trel_enabled", "br_trel_active", "br_trel_peers",
-                              "br_trel_packets_total", "br_trel_bytes_total", "br_trel_tx_failures_total"
+                              "br_trel_peers_other", "br_trel_packets_total", "br_trel_bytes_total", "br_trel_tx_failures_total"
                              };
 
     for (size_t i = 0; i < sizeof(families) / sizeof(families[0]); i++) {
@@ -557,16 +557,33 @@ TEST_CASE("On a build without TREL: no TREL families", "[metrics]")
     free(out);
 }
 
+TEST_CASE("On TREL peers of both networks: br_trel_peers counts this network, br_trel_peers_other the rest",
+          "[metrics]")
+{
+    with_sample();
+    s_in.collector.thread.trel.peers = 2;
+    s_in.collector.thread.trel.peers_other = 3;
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "br_trel_peers 2"));
+    TEST_ASSERT_TRUE(has_line(out, "br_trel_peers_other 3"));
+    TEST_ASSERT_TRUE(strstr(out, "# TYPE br_trel_peers ") < strstr(out, "# TYPE br_trel_peers_other "));
+    TEST_ASSERT_TRUE(strstr(out, "# TYPE br_trel_peers_other ") < strstr(out, "# TYPE br_trel_packets_total "));
+    free(out);
+}
+
 TEST_CASE("On TREL switched off: enabled 0, active 0, families still written", "[metrics]")
 {
     with_sample();
     s_in.collector.thread.trel.enabled = false;
     s_in.collector.thread.trel.active = false;
     s_in.collector.thread.trel.peers = 0;
+    s_in.collector.thread.trel.peers_other = 0;
     char *out = render();
 
     TEST_ASSERT_TRUE(has_line(out, "br_trel_enabled 0"));
     TEST_ASSERT_TRUE(has_line(out, "br_trel_active 0"));
     TEST_ASSERT_TRUE(has_line(out, "br_trel_peers 0"));
+    TEST_ASSERT_TRUE(has_line(out, "br_trel_peers_other 0"));
     free(out);
 }

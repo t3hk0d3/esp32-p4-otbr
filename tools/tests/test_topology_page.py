@@ -75,6 +75,25 @@ const M = {partial: false, srp_hosts: [],
     {rloc16: 0xe400, router_id: 57, ext_address: 'a10000000000e400', version: 5, leader: true, this_device: false,
      border_router: false, links: [{router_id: 13, lq_in: 3}, {router_id: 4, lq_in: 2}],
      addresses: ['fdde:ad00:beef::ff:fe00:e400'], responded: true, children_detail: true, children: []}]};
+// SH: the mesh of the 2026-11-03 screenshots (the old layout put the Home box on the board's links and LQI badges):
+// this board 0x8800 linked to all three other routers, each with children.
+const kid = (rloc16) => ({rloc16, ext_address: 'f' + rloc16.toString(16).padStart(15, '0'), mode: mode(false), lq_in: 3,
+                          ...detail, addresses: []});
+const srouter = (rloc16, router_id, links, kids, extra) => ({rloc16, router_id, ext_address: rloc16.toString(16).padStart(16, '0'),
+  version: 5, leader: false, this_device: false, border_router: false, addresses: [], responded: true,
+  children_detail: true, links: links.map(([id, lq]) => ({router_id: id, lq_in: lq})), children: kids.map(kid), ...extra});
+const SH = {partial: false, srp_hosts: [], network: {...NET, leader_router_id: 9, this_rloc16: 0x8800}, routers: [
+  srouter(0x2400, 9, [[34, 3], [23, 2], [40, 3]], [0x2401], {leader: true}),
+  srouter(0x5c00, 23, [[9, 2], [34, 3]], [0x5c01, 0x5c02]),
+  srouter(0x8800, 34, [[9, 3], [23, 3], [40, 2]], [0x8801, 0x8802, 0x8803], {this_device: true, border_router: true}),
+  srouter(0xa000, 40, [[9, 3], [34, 2]], [0xa001, 0xa002])]};
+// TR: R with this board's radios: it reaches the leader (9) over 15.4 and TREL (TREL losing), router 40 over TREL only.
+const TR = (() => {
+  const r = routers();
+  r[2].links = [{router_id: 9, lq_in: 3, transport: {ieee802154: 230, trel: 55}},
+                {router_id: 40, lq_in: 2, transport: {ieee802154: null, trel: 255}}];
+  return {...R, partial: false, routers: r};
+})();
 const D = L.devices(R), DB = L.devices(B), LK = L.routerLinks(R);
 const byId = (ds, id) => ds.find((d) => d.id === id);
 const names = (ds, list) => list.map((d) => d.id);
@@ -105,13 +124,33 @@ HOME_HITS = f"""((ds, lk) => {{
           width: m.width, height: m.height}};
 }})"""
 
+# Every line the page draws, as [a, b] node centres: router links, then parent lines. (ds, lk, m) -> [[a, b]].
+LINES = """((ds, lk, m) => lk.filter((l) => m.pos[l.a] && m.pos[l.b]).map((l) => [m.pos[l.a], m.pos[l.b]])
+  .concat(ds.filter((d) => d.parentId !== null && m.pos[d.id] && m.pos[d.parentId]).map((d) => [m.pos[d.parentId], m.pos[d.id]])))"""
+
+# The LQI badges as the page draws them: 10 + 7 px per character wide, 16 px high, at the link middle. -> [[x0, x1, y0, y1]].
+BADGES = """((lk, m) => lk.filter((l) => m.pos[l.a] && m.pos[l.b]).map((l) => {
+  const w = 10 + 7 * L.linkText(l).length, x = (m.pos[l.a].x + m.pos[l.b].x) / 2, y = (m.pos[l.a].y + m.pos[l.b].y) / 2;
+  return [x - w / 2, x + w / 2, y - 8, y + 8];
+}))"""
+
+# (ds, lk) -> {lines: drawn lines through the Home box, badges: LQI badges it overlaps}.
+HOME_ON_LINKS = f"""((ds, lk) => {{
+  const m = L.layout(ds, lk, {LABELS}(ds)), h = m.home;
+  const box = {{x0: h.x - h.w / 2, x1: h.x + h.w / 2, y0: h.y - h.h / 2, y1: h.y + h.h / 2}};
+  return {{lines: {LINES}(ds, lk, m).filter(([a, b]) => L.crosses(a, b, box)).length,
+          badges: {BADGES}(lk, m).filter((b) => box.x0 < b[1] && b[0] < box.x1 && box.y0 < b[3] && b[2] < box.y1).length}};
+}})"""
+
 # (ds, lk) -> {closer: a free box centre more than 12 px nearer the board than the box, or null}. Grid step 4 px.
 HOME_NEAREST = f"""((ds, lk) => {{
   const labels = {LABELS}(ds), m = L.layout(ds, lk, labels), h = m.home;
-  const board = ds.find((d) => d.thisBoard), b = m.pos[board.id], fps = {FOOTPRINTS}(ds, m, labels);
+  const board = ds.find((d) => d.thisBoard), b = m.pos[board.id];
+  const fps = {FOOTPRINTS}(ds, m, labels).map((f) => f.slice(1)).concat({BADGES}(lk, m)), lines = {LINES}(ds, lk, m);
   const taken = Math.hypot(h.x - b.x, h.y - b.y);
-  const free = (x, y) => fps.every((f) => !(x - h.w / 2 < f[2] + 6 && f[1] < x + h.w / 2 + 6 &&
-                                            y - h.h / 2 < f[4] + 6 && f[3] < y + h.h / 2 + 6));
+  const free = (x, y) => fps.every((f) => !(x - h.w / 2 < f[1] + 6 && f[0] < x + h.w / 2 + 6 &&
+                                            y - h.h / 2 < f[3] + 6 && f[2] < y + h.h / 2 + 6)) &&
+      lines.every(([p, q]) => !L.crosses(p, q, {{x0: x - h.w / 2, x1: x + h.w / 2, y0: y - h.h / 2, y1: y + h.h / 2}}));
   for (let dx = -taken; dx <= taken; dx += 4)
     for (let dy = -taken; dy <= taken; dy += 4)
       if (Math.hypot(dx, dy) < taken - 12 && free(b.x + dx, b.y + dy))
@@ -544,11 +583,29 @@ class TestTopologyLogic:
         assert got["hits"] == [], got
         assert got["inside"] is True, got
 
-    def test_home_box_is_the_nearest_free_spot_around_the_board(self):
-        # On the fixtures: no free spot for the box (clear of every footprint by the layout's 6 px gap) is more than
-        # one ring step (12 px) closer to the board than the one taken.
+    def test_home_box_stays_off_every_link_parent_line_and_lqi_badge(self):
+        # On the screenshot mesh (the old layout put the box across the board's links and two LQI badges) and the
+        # other fixtures: no drawn line passes through the box and no LQI badge overlaps it.
         got = js(
-            f"[[L.devices(M), L.routerLinks(M)], [D, LK], [DB, L.routerLinks(B)]].map(([ds, lk]) => {HOME_NEAREST}(ds, lk))"
+            "[[L.devices(SH), L.routerLinks(SH)], [L.devices(M), L.routerLinks(M)], [D, LK], [DB, L.routerLinks(B)]]"
+            f".map(([ds, lk]) => {HOME_ON_LINKS}(ds, lk))"
+        )
+        assert all(g == {"lines": 0, "badges": 0} for g in got), got
+
+    def test_crosses_detects_a_segment_through_a_box_and_not_one_beside_it(self):
+        # On a 100x20 box: a line across it, one ending inside, one passing 20 px above, one parallel 10 px beside.
+        got = plain(
+            "[[{x: -10, y: 10}, {x: 110, y: 10}], [{x: 50, y: -40}, {x: 50, y: 5}], [{x: -10, y: -20}, {x: 110, y: -20}],"
+            " [{x: 120, y: -40}, {x: 120, y: 60}]].map(([a, b]) => L.crosses(a, b, {x0: 0, x1: 100, y0: 0, y1: 20}))"
+        )
+        assert got == [True, True, False, False]
+
+    def test_home_box_is_the_nearest_free_spot_around_the_board(self):
+        # On the fixtures: no free spot for the box (clear of every footprint and LQI badge by the layout's 6 px gap,
+        # and off every line) is more than one ring step (12 px) closer to the board than the one taken.
+        got = js(
+            "[[L.devices(SH), L.routerLinks(SH)], [L.devices(M), L.routerLinks(M)], [D, LK], [DB, L.routerLinks(B)]]"
+            f".map(([ds, lk]) => {HOME_NEAREST}(ds, lk))"
         )
         assert all(g["closer"] is None for g in got), got
 
@@ -1474,3 +1531,196 @@ class TestTopologyPage:
         assert r[1] == '<b>"x"</b>'
         assert '<b>"x"</b>' in r[2]
         assert r[3] == [0, 0, 0]
+
+
+@needs_node
+class TestTrelTransport:
+    """TopologyLogic: routerLinks transport, sendsOver, trelLow, transportText"""
+
+    def test_board_links_carry_their_transport(self):
+        r = js(
+            "L.routerLinks(TR).filter((l) => l.transport).map((l) => [l.a, l.b, l.transport])"
+        )
+        assert r == [
+            ["r9", "r34", {"ieee802154": 230, "trel": 55}],
+            ["r34", "r40", {"ieee802154": None, "trel": 255}],
+        ]
+
+    def test_links_between_other_routers_have_no_transport(self):
+        r = js(
+            "L.routerLinks(TR).filter((l) => l.a !== 'r34' && l.b !== 'r34').some((l) => 'transport' in l)"
+        )
+        assert r is False
+
+    @pytest.mark.parametrize(
+        ("transport", "radio"),
+        [
+            ("{ieee802154: 255, trel: 255}", "trel"),
+            ("{ieee802154: 255, trel: 230}", "trel"),
+            ("{ieee802154: 210, trel: 200}", "ieee802154"),
+            ("{ieee802154: 200, trel: 200}", "trel"),
+            ("{ieee802154: 200, trel: null}", "ieee802154"),
+        ],
+    )
+    def test_sends_over_mirrors_the_openthread_radio_selector(self, transport, radio):
+        assert plain(f"L.sendsOver({transport})") == radio
+
+    def test_trel_below_the_radio_is_low(self):
+        assert plain("L.trelLow({ieee802154: 230, trel: 55})") is True
+
+    def test_trel_alone_is_never_low(self):
+        assert plain("L.trelLow({ieee802154: null, trel: 255})") is False
+
+    @pytest.mark.parametrize(
+        ("transport", "text"),
+        [
+            ("{ieee802154: 255, trel: null}", "15.4 100%"),
+            ("{ieee802154: null, trel: 255}", "TREL 100%"),
+            (
+                "{ieee802154: 255, trel: 55}",
+                "15.4 100% \u00b7 TREL 22%, sends over 15.4",
+            ),
+            (
+                "{ieee802154: 255, trel: 255}",
+                "15.4 100% \u00b7 TREL 100%, sends over TREL",
+            ),
+        ],
+    )
+    def test_transport_text_names_both_preferences_and_the_radio_in_use(
+        self, transport, text
+    ):
+        assert plain(f"L.transportText({transport})") == text
+
+
+@needs_node
+class TestTrelBadgeSpot:
+    """TopologyLogic.trelBadgeSpot: the TREL badge on the far half of the curve, clear of other badges"""
+
+    # Far half of a curve: from the home box (0, 0) through (100, 0) to the neighbour (100, 100).
+    CURVE = "{x: 0, y: 0}, {x: 100, y: 0}, {x: 100, y: 100}"
+
+    def test_free_curve_puts_the_badge_in_the_middle(self):
+        assert js(
+            f"(({{x, y}}) => ({{x, y}}))(L.trelBadgeSpot({self.CURVE}, 60, []))"
+        ) == {"x": 75, "y": 25}
+
+    def test_badge_moves_off_a_badge_at_the_middle(self):
+        # An LQI badge at (75, 25): the middle, 0.35, 0.65 and 0.2 come within the 6 px gap of it; 0.8 (96, 64) is clear.
+        r = js(
+            f"(({{x, y, box}}) => [x, y, box])(L.trelBadgeSpot({self.CURVE}, 60, [{{x0: 55, x1: 95, y0: 17, y1: 33}}]))"
+        )
+        assert r == [96, 64, {"x0": 66, "x1": 126, "y0": 56, "y1": 72}]
+
+    def test_badge_stays_in_the_middle_when_no_spot_is_clear(self):
+        r = js(
+            f"(({{x, y}}) => ({{x, y}}))(L.trelBadgeSpot({self.CURVE}, 60, [{{x0: -50, x1: 150, y0: -50, y1: 150}}]))"
+        )
+        assert r == {"x": 75, "y": 25}
+
+
+class TestTrelMap:
+    """TREL links of this board on the map, in the legend, the dialog and the device table"""
+
+    LOAD_TR = (
+        "save(60000, TR); await start(); t.el('t-show-last').click(); await t.flush();"
+    )
+    TREL_EDGES = "t.el('t-map').findAll((e) => e.classes.has('t-trel-edge'))"
+
+    def test_link_over_both_radios_gets_a_straight_line_and_a_dashed_curve_through_the_home_box(
+        self,
+    ):
+        r = run(
+            self.LOAD_TR + f" const g = {self.TREL_EDGES};"
+            " const badge = (e) => e.findAll((x) => x.classes.has('t-badge-text'))[0].textContent;"
+            " const path = g.map((e) => e.findAll((x) => x.tag === 'path')[0]);"
+            " const home = t.el('t-map').findAll((e) => e.classes.has('t-uplink'))[0]"
+            ".findAll((e) => e.tag === 'rect')[0].attrs;"
+            " const cx = Number(home.x) + Number(home.width) / 2, cy = Number(home.y) + Number(home.height) / 2;"
+            " const straight = t.el('t-map').findAll((e) => e.classes.has('t-link-edge') && !e.classes.has('t-trel-edge'))"
+            ".map((e) => e.findAll((x) => x.classes.has('t-badge-text'))[0].textContent);"
+            " return [g.map(badge), path.map((p) => [p.attrs['stroke-dasharray'], p.attrs.stroke,"
+            " p.attrs.d.includes(' ' + cx + ' ' + cy + ' T ')]), straight];"
+        )
+        assert r[0] == ["TREL 22%", "TREL 100%"]
+        assert r[1] == [["7 4", "#7b3fb5", True], ["7 4", "#7b3fb5", True]]
+        assert "3" in r[2]  # the 15.4 line to the leader stays
+
+    def test_home_box_is_drawn_over_the_trel_curves(self):
+        r = run(
+            self.LOAD_TR + " const all = t.el('t-map').findAll(() => true);"
+            " const at = (cls) => all.map((e, i) => e.classes.has(cls) ? i : -1).filter((i) => i >= 0);"
+            " return [Math.max(...at('t-trel-edge')) < Math.min(...at('t-uplink')), at('t-uplink').length];"
+        )
+        assert r == [True, 1]
+
+    def test_radio_links_are_drawn_over_the_home_box(self):
+        r = run(
+            self.LOAD_TR + " const all = t.el('t-map').findAll(() => true);"
+            " const at = (f) => all.map((e, i) => f(e) ? i : -1).filter((i) => i >= 0);"
+            " const radio = at((e) => e.classes.has('t-link-edge') && !e.classes.has('t-trel-edge'));"
+            " return Math.max(...at((e) => e.classes.has('t-uplink'))) < Math.min(...radio);"
+        )
+        assert r is True
+
+    def test_trel_badges_overlap_no_lqi_badge(self):
+        r = run(
+            self.LOAD_TR
+            + " const box = (e) => { const r = e.findAll((x) => x.tag === 'rect')[0].attrs;"
+            " return {x0: Number(r.x), x1: Number(r.x) + Number(r.width), y0: Number(r.y), y1: Number(r.y) + Number(r.height)}; };"
+            " const edges = t.el('t-map').findAll((e) => e.classes.has('t-link-edge'));"
+            " const trel = edges.filter((e) => e.classes.has('t-trel-edge')).map(box);"
+            " const lqi = edges.filter((e) => !e.classes.has('t-trel-edge')).map(box);"
+            " const hit = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;"
+            " return [trel.length, trel.some((a) => lqi.some((b) => hit(a, b)))];"
+        )
+        assert r == [2, False]
+
+    def test_trel_only_link_has_no_straight_line(self):
+        # R's badges are ["2", "3", "1/3", "3/0", "2"]; the last one is the board's link to r40, TREL only in TR.
+        r = run(
+            self.LOAD_TR
+            + " return t.el('t-map').findAll((e) => e.classes.has('t-link-edge') && !e.classes.has('t-trel-edge'))"
+            ".map((e) => e.findAll((x) => x.classes.has('t-badge-text'))[0].textContent);"
+        )
+        assert r == ["2", "3", "1/3", "3/0"]
+
+    def test_trel_below_the_radio_gets_a_red_badge(self):
+        r = run(
+            self.LOAD_TR
+            + f" return {self.TREL_EDGES}.map((e) => e.findAll((x) => x.classes.has('t-badge-text'))[0].attrs.fill);"
+        )
+        assert r == ["#c62828", "#7b3fb5"]
+
+    def test_legend_names_trel_only_when_a_trel_link_is_on_the_map(self):
+        r = run(
+            "await loaded(); const without = vis('t-lg-trel');"
+            " save(60000, TR); await start(); t.el('t-show-last').click(); await t.flush();"
+            " return [without, vis('t-lg-trel')];"
+        )
+        assert r == [False, True]
+
+    def test_dialog_names_both_preferences_the_radio_in_use_and_the_lqi_caveat(self):
+        r = run(
+            self.LOAD_TR
+            + " node('r9').click(); return t.el('t-d-neighbors').children.map((c) => c.allText().replace(/\\s+/g, ' ').replace(/ ,/g, ','));"
+        )
+        assert r[1] == (
+            "This border router LQI 3 15.4 90% \u00b7 TREL 22%, sends over 15.4 link quality includes TREL frames"
+        )
+
+    def test_dialog_marks_a_low_trel_figure_red(self):
+        r = run(
+            self.LOAD_TR
+            + " node('r9').click(); return t.el('t-d-neighbors').findAll((e) => e.classes.has('pref-low'))"
+            ".map((e) => e.textContent);"
+        )
+        assert r == ["22%"]
+
+    def test_connected_via_names_the_boards_transport_to_that_router(self):
+        r = run(
+            self.LOAD_TR
+            + " return [row('r9').children[2].allText().replace(/\\s+/g, ' ').replace(/ ,/g, ','),"
+            " row('r23').children[2].allText()];"
+        )
+        assert r[0] == "3 router neighbors 15.4 90% \u00b7 TREL 22%, sends over 15.4"
+        assert "TREL" not in r[1]
