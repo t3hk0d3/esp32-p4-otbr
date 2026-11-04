@@ -32,7 +32,8 @@ Get the board from [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.
   by default, switched live on the Ethernet page.
 - **Built for your network.** An optional VLAN split mode puts management and the Thread backbone on separate VLANs,
   and confirm-or-revert means a bad network setting can't lock you out.
-- **Sees what is on the air.** Sniffer mode streams 802.15.4 traffic as pcap straight into Wireshark.
+- **Sees what is on the air.** Sniffer mode streams 802.15.4 traffic as pcap straight into Wireshark, and the Thread
+  Console runs OpenThread CLI commands on the board from the browser.
 - **Fixes its own radio.** With three optional jumper wires, the board repairs the C6 radio by itself and captures its
   console.
 - **Shows what it is doing.** The device pages and `/device/diag` report CPU load per core and task, memory and

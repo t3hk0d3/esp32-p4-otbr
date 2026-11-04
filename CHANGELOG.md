@@ -7,6 +7,13 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+### Added
+
+- Thread console: the board's OpenThread CLI over a WebSocket (`/device/console/ws`), on a new **Console** page under
+  Management (desktop and phone) and from a shell with `websocat`. Off by default (`GET`/`PUT /device/console`); one
+  session at a time, the board stays a border router, risky commands ask first on the page. OpenThread's CLI now
+  runs in release images too (it was set up only in test builds). See `docs/api.md`, "Thread console".
+
 ### Changed
 
 - The web UI is stored gzipped in the web image (`tools/pack_web.py`, run by the P4 build) and sent with
