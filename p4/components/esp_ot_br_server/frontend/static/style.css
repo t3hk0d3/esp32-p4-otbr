@@ -606,7 +606,7 @@ tr:hover td { background: var(--primary-light); }
 .t-mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
 .t-muted { color: var(--text-light); }
 .t-hint { font-size: 13px; color: var(--text-light); }
-.t-offscreen { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.offscreen { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
 .t-link { border: 0; background: none; padding: 0; font: inherit; font-size: 14px; font-weight: 600; color: var(--primary-text); cursor: pointer; text-align: left; }
 .t-link:hover { text-decoration: underline; }
 .device-page .t-btn-outline { background: var(--card); color: var(--primary-text); border: 1px solid var(--primary-text); font-weight: 600; }

@@ -28,7 +28,7 @@ below, any of them can answer 500 `internal` or `no_memory`.
 | `GET /device/routing` | routing settings and status, see [Routing](#routing) | 503 `not_started` |
 | `PUT /device/routing` | store the routing settings and apply them live (no reboot) | 400 `invalid_request` (`detail` names the field), `length_required`; 413 `payload_too_large` (over 2048 bytes); 500 `storage_failed` (nothing changed), `internal` (the body could not be checked, `detail` is the error; nothing changed), `no_memory` (the settings were stored and applied, the answer could not be built); 503 `not_started` |
 | `GET /device/console` | Thread console setting and session: `{"enabled": bool, "session": null \| {"peer": "<address>", "since_s": <s>}}`, see [Thread console](#thread-console) | |
-| `PUT /device/console` | body `{"enabled": bool}`; stored, off by default; turning it off closes the session (4003); replies like GET | 400 `invalid_request` (`enabled` missing or not a boolean), `length_required`; 413 `payload_too_large`; 500 `storage_failed` |
+| `PUT /device/console` | body `{"enabled": bool}`; stored, off by default; turning it off closes the session (4003); replies like GET | 400 `invalid_request` (`enabled` missing or not a boolean), `length_required`; 413 `payload_too_large`; 500 `storage_failed`; 503 `not_started` (the console did not start at boot) |
 | `GET /device/console/ws` | WebSocket: the board's OpenThread CLI, see [Thread console](#thread-console) | 403 on an interface that does not serve the device API |
 | `POST /device/reboot` | reboot | 409 `busy` while an update or push runs (other reboots, such as the network trial revert, `net reset` and `DELETE /node`, wait until it ends) |
 | `GET /metrics` | device health and Thread figures in the Prometheus text format, see [metrics](metrics.md) | 500 `no_memory` |
@@ -132,11 +132,14 @@ border router while it is used. It is off by default: turn it on with `PUT /devi
   (more than 8 KB waiting), `# Closed: a new console session opened from <address>`,
   `# Closed: the console was turned off`.
 - Close codes: 4001 taken over, 4003 the console is off (also right after the upgrade), 4009 output not read for 15 s,
-  1001 `no answer` (the board pings every 10 s; 30 s without a pong).
-- Every command is logged at INFO (`console <peer>: <line>`). The page asks before `factoryreset`, `reset`,
-  `thread stop`, `ifconfig down` and `dataset` changes; a raw WebSocket client does not.
+  1001 `no answer` (the board pings every 10 s; 30 s without a pong), 1007 a line with a NUL byte, 1009 a frame over
+  1 KB.
+- Every command is logged at INFO by its first word and length only, as the rest can carry keys
+  (`console <peer>: dataset (52 bytes)`). The page asks before `factoryreset`, `reset`, `thread stop`, `ifconfig down`
+  and `dataset` changes; a raw WebSocket client does not.
 - Test builds: the USB console's `ot` command uses the same CLI. It answers `console in use from <address>` while a
-  session is attached and gives up waiting for the prompt after 10 s.
+  session is attached, refuses lines outside `BR_RUNNING` like the WebSocket, and gives up waiting for the prompt
+  after 10 s.
 
 ```
 websocat ws://<board>/device/console/ws

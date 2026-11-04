@@ -72,9 +72,11 @@ return {normalise : normalise, riskyReason : riskyReason, noticeState : noticeSt
 })();
 
 function ConsolePage(env) {
+var C = typeof DeviceCommon !== 'undefined' ? DeviceCommon : require('./device_common.js');
 var L = ConsoleLogic;
 var MAX_LINES = 2000;
 var SETTLE_MS = 1500; // a closing socket's session is gone by then
+var COPY_RESET_MS = 2000;
 var CHIPS = ['state', 'netdata show', 'router table', 'child table', 'leaderdata', 'srp server host'];
 var PILLS = {
   connected : ['Connected', 'ok'], connecting : ['Connecting', 'warn'], reconnecting : ['Reconnecting', 'warn'],
@@ -87,6 +89,7 @@ var userClosed = false;
 var attempts = 0;
 var retryTimer = null;
 var checking = false; // a reconnect is asking the board whether the console is free
+var settle = null; // the load's second look at a session (a timer id, then true while its GET runs)
 var openedAt = null; // when the last socket opened (env.now)
 var waiting = null; // the line sent last, until its Done or Error
 var before = null; // what waited before it, back in place if the board refuses the line
@@ -142,8 +145,10 @@ function output(text) {
   lines.forEach(function(line) {
     var end = line === 'Done' || /^Error \d+:/.test(line);
     print(line, end ? (line === 'Done' ? 'done' : 'err') : 'line');
-    if (end)
+    if (end) {
       waiting = null;
+      before = null; // finished: a later refusal brings back nothing
+    }
   });
 }
 
@@ -178,6 +183,8 @@ function onClose(ev) {
     print('# "' + waiting + '" got no answer before the connection dropped; it was not sent again', 'note');
     waiting = null;
   }
+  if (ev.code === 4001 || ev.code === 4003)
+    userClosed = true; // the board closed it on purpose, even if its notice was lost
   if (userClosed) {
     if (ev.code === 4001)
       pill('taken-over');
@@ -233,6 +240,9 @@ function reconnect() {
 
 function stopRetry() {
   checking = false;
+  if (typeof settle === 'number')
+    env.clearTimeout(settle);
+  settle = null;
   if (retryTimer !== null) {
     env.clearTimeout(retryTimer);
     retryTimer = null;
@@ -317,8 +327,12 @@ function load() {
       return connect();
     // After a reload the old page's socket may still be closing: ask once more before calling it someone else's.
     pill('connecting');
-    env.setTimeout(function() {
+    settle = env.setTimeout(function() {
+      settle = true;
       get('/device/console').then(function(again) {
+        if (settle !== true)
+          return; // Connect or Disconnect meanwhile
+        settle = null;
         if (again && again.enabled && again.session)
           inUse(again.session);
         else if (again && again.enabled)
@@ -328,7 +342,12 @@ function load() {
           pill('off');
         } else
           pill('disconnected');
-      }, function() { pill('disconnected'); });
+      }, function() {
+        if (settle === true) {
+          settle = null;
+          pill('disconnected');
+        }
+      });
     }, SETTLE_MS);
   }, function() { pill('disconnected'); });
 }
@@ -374,10 +393,13 @@ function init() {
       out.removeChild(out.firstChild);
   });
   $('con-copy').addEventListener('click', function() {
+    var b = $('con-copy');
+    var label = b.textContent;
     var text = $('con-out').children.map ? $('con-out').children.map(function(c) { return c.textContent; }).join('\n')
                                          : $('con-out').innerText;
-    if (env.navigator && env.navigator.clipboard)
-      env.navigator.clipboard.writeText(text).catch(function() {});
+    C.copyText(env, text, env.document.body)
+        .then(function() { b.textContent = 'Copied'; }, function() { b.textContent = 'Copy failed'; })
+        .then(function() { env.setTimeout(function() { b.textContent = label; }, COPY_RESET_MS); });
   });
   $('con-dlg-cancel').addEventListener('click', function() {
     pendingRisky = null;

@@ -30,9 +30,13 @@ typedef struct {
 /** Load the setting and register the br_core CLI hook. Call before br_core_start. */
 esp_err_t ot_console_init(void);
 
+/** The stored setting; false while ot_console_init has not succeeded. */
 bool ot_console_enabled(void);
 
-/** Store the setting; turning it off closes the session with 4003 and the off notice. */
+/**
+ * Store the setting; turning it off closes the session with 4003 and the off notice. ESP_ERR_INVALID_STATE when
+ * ot_console_init has not succeeded.
+ */
 esp_err_t ot_console_set_enabled(bool on);
 
 /**

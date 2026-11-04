@@ -75,6 +75,7 @@ class El {
   removeAttribute(k) { delete this.attrs[k]; }
   scrollIntoView() { this.scrolled++; }
   focus() { this.doc.activeElement = this; }
+  select() { this.selected = true; }
   /* Depth-first list of this element and its children that pass `test`. */
   findAll(test) {
     return (test(this) ? [this] : []).concat(...this.children.map((c) => c.findAll(test)));

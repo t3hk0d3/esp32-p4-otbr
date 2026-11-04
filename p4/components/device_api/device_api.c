@@ -1387,7 +1387,12 @@ static esp_err_t console_put_handler(httpd_req_t *req)
     if (parse_err != ESP_OK) {
         return send_error(req, 400, "invalid_request", "\"enabled\" must be true or false", false);
     }
-    if (ot_console_set_enabled(enabled) != ESP_OK) {
+    const esp_err_t set_err = ot_console_set_enabled(enabled);
+
+    if (set_err == ESP_ERR_INVALID_STATE) {
+        return send_error(req, 503, "not_started", "the Thread console did not start, see the log", false);
+    }
+    if (set_err != ESP_OK) {
         return send_error(req, 500, "storage_failed", "the console setting could not be stored", false);
     }
     return send_console(req);

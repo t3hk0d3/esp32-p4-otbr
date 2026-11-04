@@ -163,6 +163,9 @@ def test_state_dns_browse_and_the_session_report(base_url, console, dut):
     assert browse.rstrip().endswith("Done")
 
 
+PIPELINED_LINES = 6  # more than the console's 4 waiting notices
+
+
 def test_busy_while_a_ping_runs(console, dut):
     wait_ot_state(dut, RUNNING_ROLES, STATE_TIMEOUT_S)
 
@@ -171,7 +174,8 @@ def test_busy_while_a_ping_runs(console, dut):
             ws = await connected(session, console)
             mleid = (await run(ws, "ipaddr mleid"))[0].splitlines()[0]
             await ws.send_str(f"ping {mleid} 8 3 2")
-            await ws.send_str("state")
+            for _ in range(PIPELINED_LINES):
+                await ws.send_str("state")
             text, notices = "", []
             while "packets transmitted" not in text or not END.search(text):
                 data = await frame(ws)
@@ -184,8 +188,22 @@ def test_busy_while_a_ping_runs(console, dut):
             return mleid, notices, after
 
     mleid, notices, after = asyncio.run(go())
-    assert f'# Busy: "ping {mleid} 8 3 2" is still running' in notices
+    assert (
+        notices.count(f'# Busy: "ping {mleid} 8 3 2" is still running')
+        == PIPELINED_LINES
+    )
     assert after.splitlines()[0] in RUNNING_ROLES
+
+
+def test_a_line_with_a_nul_byte_closes_with_1007(console):
+    async def go():
+        async with aiohttp.ClientSession() as session:
+            ws = await connected(session, console)
+            await ws.send_str("state\0factoryreset")
+            return await closed(ws)
+
+    notices, code = asyncio.run(go())
+    assert notices == [] and code == 1007
 
 
 def test_a_new_session_takes_over(console):
@@ -217,6 +235,15 @@ def test_sniffer_refuses_lines_and_the_console_recovers(base_url, console, dut):
                 )
                 await ws.send_str("state")
                 refused = await frame(ws)
+                await (
+                    ws.close()
+                )  # the USB command answers "in use" while a session is attached
+                dut.write("ot state")
+                await asyncio.to_thread(
+                    dut.expect,
+                    re.compile(rb"OpenThread not running, mode SNIFFER"),
+                    timeout=10,
+                )
             finally:
                 await asyncio.to_thread(stop_capture, base_url, capture)
             await asyncio.to_thread(
@@ -225,6 +252,7 @@ def test_sniffer_refuses_lines_and_the_console_recovers(base_url, console, dut):
             await asyncio.to_thread(
                 wait_node_state, base_url, RUNNING_ROLES, STATE_TIMEOUT_S
             )
+            ws = await connected(session, console)
             after, _ = await run(ws, "state")
             await ws.close()
             return refused, after

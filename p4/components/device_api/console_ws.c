@@ -30,6 +30,7 @@ _Static_assert(2 * SLOTS <= 32, "drain and tick bits share one notification word
 #define FRAME_IN_MAX 1024 // longer lines are refused by the console anyway; this only bounds the read
 #define FRAME_OUT_MAX 1024
 #define CLOSE_GOING_AWAY 1001
+#define CLOSE_INVALID 1007
 #define CLOSE_TOO_BIG 1009
 #define CLOSE_TRY_AGAIN 1013
 #define FWD_STACK 3072
@@ -87,11 +88,9 @@ static void close_with(ws_slot_t *slot, uint16_t code, const char *reason)
     }
 }
 
-static void drain_work(void *arg)
+// Send everything the console holds for the slot's session. On the server task.
+static void drain(ws_slot_t *slot)
 {
-    ws_slot_t *slot = arg;
-
-    atomic_store(&slot->drain_queued, false);
     if (!slot->active || slot->closing_us) {
         return;
     }
@@ -104,6 +103,14 @@ static void drain_work(void *arg)
         }
         slot->last_progress_us = esp_timer_get_time();
     }
+}
+
+static void drain_work(void *arg)
+{
+    ws_slot_t *slot = arg;
+
+    atomic_store(&slot->drain_queued, false);
+    drain(slot);
 }
 
 // The console's wake: from the OpenThread task too, so it only notifies the forwarder (see s_fwd).
@@ -149,6 +156,10 @@ static void tick_work(void *arg)
         return;
     }
     httpd_sess_update_lru_counter(slot->hd, slot->fd); // a console that answers is not the socket to purge
+    drain(slot); // also retries a drain the forwarder could not queue
+    if (slot->closing_us) {
+        return;
+    }
     if (ot_console_queued(slot->id) == 0) {
         slot->last_progress_us = now;
     } else if (now - slot->last_progress_us > STALLED_US) {
@@ -317,11 +328,16 @@ esp_err_t device_api_console_ws_frame(httpd_req_t *req)
         if (frame.type == HTTPD_WS_TYPE_PONG) {
             slot->last_pong_us = esp_timer_get_time();
             httpd_sess_update_lru_counter(slot->hd, slot->fd); // an idle console is not the socket to purge
+        } else if (frame.type == HTTPD_WS_TYPE_TEXT && memchr(buf, '\0', frame.len)) {
+            close_with(slot, CLOSE_INVALID, "NUL in a line"); // the CLI would run only the part before it
         } else if (frame.type == HTTPD_WS_TYPE_TEXT) {
             err = ot_console_submit(slot->id, buf);
             if (err == ESP_ERR_INVALID_STATE) { // taken over or turned off; its close is on the way
                 err = ESP_OK;
             }
+            // Its notice goes out before the next frame is read: pipelined refused lines never overflow the
+            // console's notice queue.
+            drain(slot);
         }
     }
     free(buf);

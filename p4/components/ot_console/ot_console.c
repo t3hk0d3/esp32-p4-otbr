@@ -43,6 +43,7 @@ static const char *TAG = "ot_console";
 
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_enabled;
+static bool s_ready; // ot_console_init succeeded: the CLI hook is in place
 static ot_console_arb_t s_arb;
 static uint8_t s_storage[OUTPUT_CAP];
 static ot_console_buf_t s_out;
@@ -228,13 +229,16 @@ esp_err_t ot_console_init(void)
     s_usb_done = xSemaphoreCreateBinary();
     ESP_RETURN_ON_FALSE(s_usb_done, ESP_ERR_NO_MEM, TAG, "semaphore");
     br_core_set_ot_cli_hook(cli_hook);
+    taskENTER_CRITICAL(&s_mux);
+    s_ready = true;
+    taskEXIT_CRITICAL(&s_mux);
     return ESP_OK;
 }
 
 bool ot_console_enabled(void)
 {
     taskENTER_CRITICAL(&s_mux);
-    const bool on = s_enabled;
+    const bool on = s_enabled && s_ready;
     taskEXIT_CRITICAL(&s_mux);
     return on;
 }
@@ -243,6 +247,10 @@ esp_err_t ot_console_set_enabled(bool on)
 {
     nvs_handle_t nvs;
 
+    taskENTER_CRITICAL(&s_mux);
+    const bool ready = s_ready;
+    taskEXIT_CRITICAL(&s_mux);
+    ESP_RETURN_ON_FALSE(ready, ESP_ERR_INVALID_STATE, TAG, "not started");
     ESP_RETURN_ON_ERROR(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs), TAG, "nvs_open");
     esp_err_t err = nvs_set_u8(nvs, KEY_ENABLED, on ? 1 : 0);
 
@@ -297,7 +305,7 @@ esp_err_t ot_console_attach(const char *peer, ot_console_sink_t sink, uint32_t *
     char text[NOTICE_LEN];
 
     taskENTER_CRITICAL(&s_mux);
-    if (!s_enabled) {
+    if (!s_enabled || !s_ready) {
         taskEXIT_CRITICAL(&s_mux);
         return ESP_ERR_INVALID_STATE;
     }
@@ -509,6 +517,12 @@ static int usb_ot_command(int argc, char **argv)
         return 0;
     case OT_CONSOLE_LINE_OK:
         break;
+    }
+    const br_core_mode_t mode = br_core_get_mode();
+
+    if (mode != BR_MODE_BR_RUNNING) { // as for the network session: the sniffer owns the radio
+        printf("Error 13: InvalidState (OpenThread not running, mode %s)\n", mode_name(mode));
+        return 0;
     }
     taskENTER_CRITICAL(&s_mux);
     const ot_console_verdict_t verdict = ot_console_arb_submit(&s_arb, OT_CONSOLE_SRC_USB, line);

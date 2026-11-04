@@ -282,6 +282,83 @@ class TestConsolePage:
         assert '"ping fd00::1" got no answer' in r
         assert '"state" got no answer' not in r
 
+    def test_a_busy_notice_after_the_first_line_finished_does_not_bring_it_back(self):
+        r = scenario(
+            page("console", routes())
+            + OPEN
+            + "t.page.run('state'); t.page.run('ping fd00::1');"
+            " ws.recv('leader\\r\\nDone\\r\\n'); ws.recv('# Busy: \"state\" is still running'); ws.drop(1006);"
+            " return t.el('con-out').allText();"
+        )
+        assert "got no answer" not in r
+
+    @pytest.mark.parametrize("code,pill", [(4001, "Taken over"), (4003, "Off")])
+    def test_a_close_from_the_board_without_its_notice_is_not_retried(self, code, pill):
+        r = scenario(
+            page("console", routes())
+            + OPEN
+            + f"ws.drop({code}); await t.advance(10000);"
+            " return [t.el('con-pill').textContent, t.sockets.length, t.el('con-toggle').textContent];"
+        )
+        assert r == [pill, 1, "Connect"]
+
+    def test_connect_during_the_reload_check_cancels_it(self):
+        r = scenario(
+            page("console", routes(session="{peer: '192.168.1.20', since_s: 0}"))
+            + START
+            + "t.el('con-toggle').click(); const ws = t.sockets[0]; ws.open();"
+            " ws.recv('# Connected to x (OpenThread 1.4, router 0x6800)'); await t.advance(3000);"
+            " return [t.sockets.length, t.el('con-pill').textContent, t.el('con-where').textContent];"
+        )
+        assert r == [1, "Connected", ""]
+
+    def test_disconnect_during_the_reload_check_cancels_it(self):
+        r = scenario(
+            page(
+                "console",
+                routes(
+                    session="(globalThis.gets = (globalThis.gets || 0) + 1) === 1"
+                    " ? {peer: '192.168.1.20', since_s: 0} : null"
+                ),
+            )
+            + START
+            + "t.el('con-toggle').click(); t.el('con-toggle').click(); await t.advance(3000);"
+            " return [t.sockets.length, t.el('con-pill').textContent];"
+        )
+        assert r == [1, "Disconnected"]
+
+    def test_copy_all_puts_the_output_on_the_clipboard(self):
+        r = scenario(
+            page("console", routes())
+            + OPEN
+            + "ws.recv('leader\\r\\nDone\\r\\n'); t.el('con-copy').click(); await t.advance(10);"
+            " return [t.clipboard.written.length, t.clipboard.written[0].includes('leader'),"
+            " t.el('con-copy').textContent];"
+        )
+        assert r == [1, True, "Copied"]
+
+    def test_copy_all_without_the_clipboard_api_falls_back_to_exec_command(self):
+        r = scenario(
+            page("console", routes())
+            + OPEN
+            + "t.env.navigator.clipboard = null; t.doc.body = t.el('con-chips');"
+            " t.doc.execCommand = (cmd) => { globalThis.cmd = cmd; return true; };"
+            " t.el('con-copy').click(); await t.advance(10);"
+            " return [globalThis.cmd, t.el('con-copy').textContent];"
+        )
+        assert r == ["copy", "Copied"]
+
+    def test_copy_all_says_so_when_no_way_to_copy_works(self):
+        r = scenario(
+            page("console", routes())
+            + OPEN
+            + "t.env.navigator.clipboard = null; t.el('con-copy').textContent = 'Copy all';"
+            " t.el('con-copy').click(); await t.advance(10);"
+            " const shown = t.el('con-copy').textContent; await t.advance(3000);"
+            " return [shown, t.el('con-copy').textContent];"
+        )
+        assert r == ["Copy failed", "Copy all"]
+
 
 def test_nav_lists_the_console_after_tools():
     api = (FRONTEND / "static" / "api.js").read_text()
