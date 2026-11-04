@@ -343,6 +343,35 @@ function overlaps(a, b) {
   return a.x0 < b.x1 + BOX_GAP && b.x0 < a.x1 + BOX_GAP && a.y0 < b.y1 + BOX_GAP && b.y0 < a.y1 + BOX_GAP;
 }
 
+/** Whether the segment a-b passes through `box` grown by BOX_GAP (Liang-Barsky clipping). */
+function crosses(a, b, box) {
+  var dx = b.x - a.x, dy = b.y - a.y, t0 = 0, t1 = 1;
+  var edges = [ [ -dx, a.x - (box.x0 - BOX_GAP) ], [ dx, box.x1 + BOX_GAP - a.x ], [ -dy, a.y - (box.y0 - BOX_GAP) ],
+                [ dy, box.y1 + BOX_GAP - a.y ] ];
+  for (var i = 0; i < edges.length; i++) {
+    var pe = edges[i][0], qe = edges[i][1];
+    if (pe === 0) {
+      if (qe < 0)
+        return false;
+    } else {
+      var t = qe / pe;
+      if (pe < 0)
+        t0 = Math.max(t0, t);
+      else
+        t1 = Math.min(t1, t);
+      if (t0 > t1)
+        return false;
+    }
+  }
+  return true;
+}
+
+/** The LQI badge drawn at the middle of a link (the page draws it 10 + 7 px per character wide, 16 px high). */
+function badgeBox(l, a, b) {
+  var w = 10 + 7 * linkText(l).length, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+  return {x0 : mx - w / 2, x1 : mx + w / 2, y0 : my - 8, y1 : my + 8};
+}
+
 /** How crowded the direction `angle` is from `p`, given the positions of its neighbours. */
 function crowding(p, angle, others) {
   return others.reduce(function(sum, q) {
@@ -437,13 +466,14 @@ function resolve(devs, pos, fps, centre) {
  * growing radius around the board; on each ring the spots go from straight below, alternating either side. Past the
  * farthest box every spot is clear, so the search always ends; the map then grows to hold the box.
  */
-function placeHome(p, boxes) {
+function placeHome(p, boxes, lines) {
   function homeBox(at) {
     return {x0 : at.x - HOME_W / 2, x1 : at.x + HOME_W / 2, y0 : at.y - HOME_H / 2, y1 : at.y + HOME_H / 2};
   }
   function clear(at) {
     var box = homeBox(at);
-    return !boxes.some(function(b) { return overlaps(box, b); });
+    return !boxes.some(function(b) { return overlaps(box, b); }) &&
+           !(lines || []).some(function(l) { return crosses(l.a, l.b, box); });
   }
   var far = 0;
   boxes.forEach(function(b) {
@@ -568,7 +598,17 @@ function layout(devs, links, labels) {
   var board = devs.filter(function(d) { return d.thisBoard && pos[d.id]; })[0];
   var home = null;
   if (board) {
-    home = placeHome(pos[board.id], boxes);
+    /* The box keeps off the lines and LQI badges too, not just the nodes: it used to land on the board's links. */
+    var lines = [], badges = [];
+    usable.forEach(function(l) {
+      lines.push({a : pos[l.a], b : pos[l.b]});
+      badges.push(badgeBox(l, pos[l.a], pos[l.b]));
+    });
+    devs.forEach(function(d) {
+      if (d.parentId !== null && pos[d.id] && pos[d.parentId])
+        lines.push({a : pos[d.parentId], b : pos[d.id]});
+    });
+    home = placeHome(pos[board.id], boxes.concat(badges), lines);
     boxes.push({x0 : home.x - HOME_W / 2, x1 : home.x + HOME_W / 2, y0 : home.y - HOME_H / 2, y1 : home.y + HOME_H / 2});
   }
 
@@ -726,6 +766,7 @@ return {
   srpHostFor : srpHostFor,
   rows : rows,
   layout : layout,
+  crosses : crosses,
   mapLabel : mapLabel,
   nodeHalf : nodeHalf,
   savedResult : savedResult,
