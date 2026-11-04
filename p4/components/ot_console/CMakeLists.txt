@@ -5,5 +5,6 @@ if(IDF_TARGET STREQUAL "linux")
     return()
 endif()
 
-idf_component_register(SRCS "core.c"
-                       INCLUDE_DIRS "include")
+idf_component_register(SRCS "core.c" "ot_console.c"
+                       INCLUDE_DIRS "include"
+                       PRIV_REQUIRES br_core console esp_timer netnames nvs_flash openthread log)

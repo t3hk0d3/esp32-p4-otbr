@@ -28,6 +28,7 @@
 #include "device_api.h"
 #include "c6_board.h"
 #include "driver/gpio.h"
+#include "ot_console.h"
 #include "rcp_sync.h"
 #include "storage.h"
 
@@ -601,7 +602,7 @@ esp_err_t test_cmds_register(void)
     ESP_RETURN_ON_ERROR(register_command("c6_stock_restore", "c6_stock_restore <url>: write a build's flash_args images to the C6 over the jumper",
                                          cmd_c6_stock_restore), TAG, "c6_stock_restore");
     ESP_RETURN_ON_ERROR(register_command("c6_erase", "c6_erase <bootloader|ptable|otadata|test|ota0|ota1>: erase a C6 flash region over the jumper", cmd_c6_erase), TAG, "c6_erase");
-    return br_core_test_ot_command_register();
+    return ot_console_usb_command_register();
 }
 
 #endif // OTBR_TEST_BUILD
