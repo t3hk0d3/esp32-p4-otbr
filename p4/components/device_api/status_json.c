@@ -64,6 +64,37 @@ static void str_or_null(json_out_t *w, const char *text)
     json_out_str(w, text && text[0] ? text : NULL);
 }
 
+static void preference_or_null(json_out_t *w, int16_t pref)
+{
+    if (pref == DEVICE_API_TREL_PREF_NONE) {
+        json_out_raw(w, "null");
+    } else {
+        json_out_uint(w, (uint32_t)pref);
+    }
+}
+
+static void trel_peer_json(json_out_t *w, const device_api_trel_peer_t *p)
+{
+    json_out_raw(w, "{\"ext_address\":");
+    json_out_str(w, p->ext_address);
+    json_out_raw(w, ",\"ext_pan_id\":");
+    json_out_str(w, p->ext_pan_id);
+    json_out_raw(w, ",\"same_network\":");
+    json_out_bool(w, p->same_network);
+    if (p->neighbor) {
+        json_out_raw(w, ",\"preference\":{\"ieee802154\":");
+        preference_or_null(w, p->pref_154);
+        json_out_raw(w, ",\"trel\":");
+        preference_or_null(w, p->pref_trel);
+        json_out_raw(w, "}");
+    } else {
+        json_out_raw(w, ",\"preference\":null");
+    }
+    json_out_raw(w, ",\"address\":");
+    json_out_str(w, p->address);
+    json_out_raw(w, "}");
+}
+
 static void trel_json(json_out_t *w, const device_api_trel_t *t)
 {
     if (!t->built) {
@@ -73,13 +104,15 @@ static void trel_json(json_out_t *w, const device_api_trel_t *t)
     json_out_raw(w, "{\"enabled\":");
     json_out_bool(w, t->enabled);
     if (!t->state_valid) {
-        json_out_raw(w, ",\"active\":null,\"peers\":null,\"tx_packets\":null,\"tx_failures\":null,\"rx_packets\":null,\"peer_list\":[]}");
+        json_out_raw(w, ",\"active\":null,\"peers\":null,\"peers_other\":null,\"tx_packets\":null,\"tx_failures\":null,\"rx_packets\":null,\"peer_list\":[]}");
         return;
     }
     json_out_raw(w, ",\"active\":");
     json_out_bool(w, t->active);
     json_out_raw(w, ",\"peers\":");
     json_out_uint(w, t->peers);
+    json_out_raw(w, ",\"peers_other\":");
+    json_out_uint(w, t->peers_other);
     json_out_raw(w, ",\"tx_packets\":");
     json_out_u64(w, t->tx_packets);
     json_out_raw(w, ",\"tx_failures\":");
@@ -88,11 +121,10 @@ static void trel_json(json_out_t *w, const device_api_trel_t *t)
     json_out_u64(w, t->rx_packets);
     json_out_raw(w, ",\"peer_list\":[");
     for (size_t i = 0; i < t->peer_count && i < DEVICE_API_TREL_PEERS_MAX; i++) {
-        json_out_raw(w, i > 0 ? ",{\"ext_address\":" : "{\"ext_address\":");
-        json_out_str(w, t->peer_list[i].ext_address);
-        json_out_raw(w, ",\"address\":");
-        json_out_str(w, t->peer_list[i].address);
-        json_out_raw(w, "}");
+        if (i > 0) {
+            json_out_raw(w, ",");
+        }
+        trel_peer_json(w, &t->peer_list[i]);
     }
     json_out_raw(w, "]}");
 }

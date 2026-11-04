@@ -157,6 +157,102 @@ TEST_CASE("On done: writes links only for lq_in > 0", "[mesh_scan]")
     sink_free(&s);
 }
 
+/* The sample with transports on: this board (router 34) reaches the leader (9) over 15.4 and TREL, router 50 over
+ * 15.4 only. */
+static mesh_scan_result_t *transport_result(void)
+{
+    mesh_scan_result_t *r = sample_result();
+
+    r->has_transport = true;
+    r->this_links[9] = (mesh_scan_transport_t) {
+        .valid = true, .pref_154 = 230, .pref_trel = 55
+    };
+    r->this_links[50] = (mesh_scan_transport_t) {
+        .valid = true, .pref_154 = 255, .pref_trel = MESH_SCAN_PREF_NONE
+    };
+    r->this_links[3] = (mesh_scan_transport_t) {
+        .valid = true, .pref_154 = 200, .pref_trel = 200
+    }; // no link from 34
+    return r;
+}
+
+TEST_CASE("On this board's router with TREL built: each link has transport with both preferences", "[mesh_scan]")
+{
+    const mesh_scan_view_t view = done_view(transport_result());
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "\"links\":[{\"router_id\":9,\"lq_in\":3,\"transport\":{\"ieee802154\":230,\"trel\":55}},");
+    assert_json(out);
+    sink_free(&s);
+}
+
+TEST_CASE("On this board's router with TREL built: a radio the neighbour does not use is null", "[mesh_scan]")
+{
+    const mesh_scan_view_t view = done_view(transport_result());
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "{\"router_id\":50,\"lq_in\":1,\"transport\":{\"ieee802154\":255,\"trel\":null}}]");
+    sink_free(&s);
+}
+
+TEST_CASE("On this board's link missing from its diagnostic answer: written from the snapshot", "[mesh_scan]")
+{
+    mesh_scan_result_t *r = transport_result();
+
+    r->this_links[3].lq_in = 2; // linked by the time of the snapshot, after this board answered
+    const mesh_scan_view_t view = done_view(r);
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "\"links\":[{\"router_id\":3,\"lq_in\":2,\"transport\":{\"ieee802154\":200,\"trel\":200}},");
+    assert_json(out);
+    sink_free(&s);
+}
+
+TEST_CASE("On this board's link in both its diagnostic answer and the snapshot: the answer's link quality", "[mesh_scan]")
+{
+    mesh_scan_result_t *r = transport_result();
+
+    r->this_links[9].lq_in = 1; // the snapshot disagrees with the answer's 3
+    const mesh_scan_view_t view = done_view(r);
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    assert_contains(out, "{\"router_id\":9,\"lq_in\":3,\"transport\":{\"ieee802154\":230,\"trel\":55}}");
+    sink_free(&s);
+}
+
+TEST_CASE("On another router's links: no transport key", "[mesh_scan]")
+{
+    const mesh_scan_view_t view = done_view(transport_result());
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    int keys = 0;
+
+    for (const char *at = strstr(out, "\"transport\""); at; at = strstr(at + 1, "\"transport\"")) {
+        keys++;
+    }
+    assert_contains(out, LEADER_HEAD); // the leader's links are written as before
+    TEST_ASSERT_EQUAL(2, keys);        // this board's two links only
+    sink_free(&s);
+}
+
+TEST_CASE("On a build without TREL (has_transport false): no transport key anywhere", "[mesh_scan]")
+{
+    mesh_scan_result_t *r = transport_result();
+
+    r->has_transport = false;
+    const mesh_scan_view_t view = done_view(r);
+    sink_t s;
+    const char *out = render(&view, &s);
+
+    TEST_ASSERT_NULL(strstr(out, "\"transport\""));
+    sink_free(&s);
+}
+
 TEST_CASE("On done: writes a stub router as router_id, rloc16, responded:false and nothing else", "[mesh_scan]")
 {
     const mesh_scan_view_t view = done_view(sample_result());

@@ -224,26 +224,70 @@ TEST_CASE("On TREL whose state could not be read: enabled is written, the rest i
     s.trel.built = true;
     s.trel.enabled = true;
     render(&s);
-    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":{\"enabled\":true,\"active\":null,\"peers\":null,\"tx_packets\":null,"
-                                "\"tx_failures\":null,\"rx_packets\":null,\"peer_list\":[]}"));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":{\"enabled\":true,\"active\":null,\"peers\":null,\"peers_other\":null,"
+                                "\"tx_packets\":null,\"tx_failures\":null,\"rx_packets\":null,\"peer_list\":[]}"));
 }
 
-TEST_CASE("On TREL with peers: state, counters and the peer list are written", "[device_api]")
+/* Two peers: a neighbour of this network (both radios) and a peer of another network (no preference). */
+static device_api_status_t trel_two_networks(void)
 {
     device_api_status_t s = sample();
 
     s.trel = (device_api_trel_t) {
-        .built = true, .enabled = true, .state_valid = true, .active = true, .peers = 2,
+        .built = true, .enabled = true, .state_valid = true, .active = true, .peers = 1, .peers_other = 1,
         .tx_packets = 5000000000ULL, .tx_failures = 1, .rx_packets = 17, .peer_count = 2,
     };
+    s.trel.peer_list[0] = (device_api_trel_peer_t) {
+        .same_network = true, .neighbor = true, .pref_154 = 230, .pref_trel = 55,
+    };
     strcpy(s.trel.peer_list[0].ext_address, "1a2b3c4d5e6f7081");
+    strcpy(s.trel.peer_list[0].ext_pan_id, "adf0d025c4b51f00");
     strcpy(s.trel.peer_list[0].address, "[fe80::1]:12390");
+    s.trel.peer_list[1] = (device_api_trel_peer_t) {
+        .pref_154 = DEVICE_API_TREL_PREF_NONE, .pref_trel = DEVICE_API_TREL_PREF_NONE,
+    };
     strcpy(s.trel.peer_list[1].ext_address, "9f8e7d6c5b4a3921");
+    strcpy(s.trel.peer_list[1].ext_pan_id, "5965b57e30c0def4");
     strcpy(s.trel.peer_list[1].address, "[fe80::2]:12390");
+    return s;
+}
+
+TEST_CASE("On TREL peers of both networks: state, counters and both peer counts are written", "[device_api]")
+{
+    device_api_status_t s = trel_two_networks();
+
     render(&s);
-    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":{\"enabled\":true,\"active\":true,\"peers\":2,\"tx_packets\":5000000000,"
-                                "\"tx_failures\":1,\"rx_packets\":17,\"peer_list\":[{\"ext_address\":\"1a2b3c4d5e6f7081\","
-                                "\"address\":\"[fe80::1]:12390\"},{\"ext_address\":\"9f8e7d6c5b4a3921\",\"address\":\"[fe80::2]:12390\"}]}"));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":{\"enabled\":true,\"active\":true,\"peers\":1,\"peers_other\":1,"
+                                "\"tx_packets\":5000000000,\"tx_failures\":1,\"rx_packets\":17,\"peer_list\":["));
+}
+
+TEST_CASE("On TREL peers of both networks: each entry has ext_pan_id, same_network and preference", "[device_api]")
+{
+    device_api_status_t s = trel_two_networks();
+
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"peer_list\":[{\"ext_address\":\"1a2b3c4d5e6f7081\",\"ext_pan_id\":\"adf0d025c4b51f00\","
+                                "\"same_network\":true,\"preference\":{\"ieee802154\":230,\"trel\":55},"
+                                "\"address\":\"[fe80::1]:12390\"},"));
+}
+
+TEST_CASE("On a TREL peer that is not a neighbour: preference is null", "[device_api]")
+{
+    device_api_status_t s = trel_two_networks();
+
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "{\"ext_address\":\"9f8e7d6c5b4a3921\",\"ext_pan_id\":\"5965b57e30c0def4\","
+                                "\"same_network\":false,\"preference\":null,\"address\":\"[fe80::2]:12390\"}]}"));
+}
+
+TEST_CASE("On a TREL neighbour that never used 15.4: preference.ieee802154 is null", "[device_api]")
+{
+    device_api_status_t s = trel_two_networks();
+
+    s.trel.peer_list[0].pref_154 = DEVICE_API_TREL_PREF_NONE;
+    s.trel.peer_list[0].pref_trel = 255;
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"preference\":{\"ieee802154\":null,\"trel\":255}"));
 }
 
 TEST_CASE("On TREL switched off: enabled false, active false", "[device_api]")
@@ -257,10 +301,10 @@ TEST_CASE("On TREL switched off: enabled false, active false", "[device_api]")
     TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":{\"enabled\":false,\"active\":false,\"peers\":0,"));
 }
 
-TEST_CASE("On a full status (8 TREL peers, 6 IPv6 addresses, BGP routing): fits the 2048-byte handler buffer", "[device_api]")
+TEST_CASE("On a full status (8 TREL peers, 6 IPv6 addresses, BGP routing): fits the 3072-byte handler buffer", "[device_api]")
 {
     device_api_status_t s = sample();
-    char full[2048];
+    char full[3072];
 
     for (size_t i = 0; i < DEVICE_API_MAX_IPV6; i++) {
         strcpy(s.ipv6[i], "2001:db8:1234:5678:9abc:def0:1234:5678");
@@ -273,14 +317,19 @@ TEST_CASE("On a full status (8 TREL peers, 6 IPv6 addresses, BGP routing): fits 
     s.routing_peers_established = UINT8_MAX;
     s.routing_peers_configured = UINT8_MAX;
     s.trel = (device_api_trel_t) {
-        .built = true, .enabled = true, .state_valid = true, .active = true, .peers = 8, .peer_count = 8,
+        .built = true, .enabled = true, .state_valid = true, .active = true, .peers = UINT16_MAX,
+        .peers_other = UINT16_MAX, .peer_count = 8,
         .tx_packets = UINT64_MAX, .tx_failures = UINT64_MAX, .rx_packets = UINT64_MAX,
     };
     for (size_t i = 0; i < DEVICE_API_TREL_PEERS_MAX; i++) {
+        s.trel.peer_list[i] = (device_api_trel_peer_t) {
+            .same_network = false, .neighbor = true, .pref_154 = 255, .pref_trel = 255,
+        };
         strcpy(s.trel.peer_list[i].ext_address, "1a2b3c4d5e6f7081");
+        strcpy(s.trel.peer_list[i].ext_pan_id, "5965b57e30c0def4");
         strcpy(s.trel.peer_list[i].address, "[2001:db8:1234:5678:9abc:def0:1234:5678]:12390");
     }
-    TEST_ASSERT_GREATER_THAN(0, device_api_status_json(full, sizeof(full), &s));
+    TEST_ASSERT_GREATER_THAN(0, device_api_status_json(full, sizeof(full), &s)); // 2505 bytes on 2026-11-03
 }
 
 TEST_CASE("routing bgp: renders method, counts and peers", "[routing]")

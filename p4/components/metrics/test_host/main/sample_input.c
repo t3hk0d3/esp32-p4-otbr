@@ -108,6 +108,7 @@ void sample_input(sample_input_t *s)
     t->trel.enabled = true;
     t->trel.active = true;
     t->trel.peers = 2;
+    t->trel.peers_other = 1;
     t->trel.tx_packets = 18204;
     t->trel.tx_bytes = 5000000000ull;
     t->trel.tx_failures = 3;

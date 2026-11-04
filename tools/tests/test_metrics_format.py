@@ -64,6 +64,7 @@ CATALOGUE = {
     "br_trel_enabled": "gauge",
     "br_trel_active": "gauge",
     "br_trel_peers": "gauge",
+    "br_trel_peers_other": "gauge",
     "br_trel_packets": "counter",
     "br_trel_bytes": "counter",
     "br_trel_tx_failures": "counter",

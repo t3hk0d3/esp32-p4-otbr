@@ -127,19 +127,19 @@ static void read_srp(otInstance *ins, metrics_thread_t *t)
 static void read_trel(otInstance *ins, metrics_thread_t *t)
 {
 #if CONFIG_OPENTHREAD_RADIO_TREL
-    const otTrelCounters *c = otTrelGetCounters(ins);
+    br_core_trel_state_t trel = {0};
 
+    br_core_trel_read_locked(ins, &trel, NULL); // the same walk as /device/status, counts only: both report alike
     t->trel.built = true;
     t->trel.enabled = br_core_trel_wanted();
-    t->trel.active = otTrelIsEnabled(ins);
-    t->trel.peers = otTrelGetNumberOfPeers(ins);
-    if (c) {
-        t->trel.tx_packets = c->mTxPackets;
-        t->trel.tx_bytes = c->mTxBytes;
-        t->trel.tx_failures = c->mTxFailure;
-        t->trel.rx_packets = c->mRxPackets;
-        t->trel.rx_bytes = c->mRxBytes;
-    }
+    t->trel.active = trel.active;
+    t->trel.peers = trel.peers;
+    t->trel.peers_other = trel.peers_other;
+    t->trel.tx_packets = trel.tx_packets;
+    t->trel.tx_bytes = trel.tx_bytes;
+    t->trel.tx_failures = trel.tx_failures;
+    t->trel.rx_packets = trel.rx_packets;
+    t->trel.rx_bytes = trel.rx_bytes;
 #else
     (void)ins;
     (void)t;
