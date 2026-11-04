@@ -2137,7 +2137,7 @@ function servicesFact(items) {
     var list = groups[type];
     var first = list[0];
     var line = el('div', SERVICE_LABEL[type] || first.service.instance || type, 't-svc');
-    line.appendChild(mono(type));
+    line.appendChild(el('span', type, 't-mono t-after'));
     var ports = [];
     list.forEach(function(it) {
       if (it.service.port !== null && ports.indexOf(it.service.port) < 0)
