@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_http_client.h"
+#include "self_update_priv.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -12,6 +13,9 @@ extern "C" {
  * header does not fit the default 512). `url` must stay valid while the config is used.
  */
 esp_http_client_config_t self_update_http_config(const char *url, int timeout_ms);
+
+/** Default ops of the target: esp_http_client GET and esp_timer. */
+extern const self_update_ops_t self_update_http_ops;
 
 #ifdef __cplusplus
 }

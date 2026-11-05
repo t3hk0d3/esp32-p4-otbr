@@ -35,6 +35,23 @@ esp_err_t self_update_asset_url(const char *base, const char *tag, const char *f
 /** "<base>/tag/<tag>", or "<base>/latest" for an empty tag. */
 esp_err_t self_update_release_page_url(const char *base, const char *tag, char *out, size_t cap);
 
+/* ---- self_update.c ---- */
+
+/** Network and clock seam: the target defaults live in self_update_http.c, host tests set fakes. */
+typedef struct {
+    /**
+     * GET `url` into `buf` (at most `cap` bytes), the length in `*len`. On failure `detail` says why and names the
+     * URL asked for.
+     */
+    esp_err_t (*fetch)(const char *url, char *buf, size_t cap, size_t *len, char *detail, size_t detail_cap);
+    int64_t (*now_us)(void);
+} self_update_ops_t;
+
+void self_update_set_ops(const self_update_ops_t *ops);
+
+/** Back to the never-checked state (host tests). */
+void self_update_reset(void);
+
 #ifdef __cplusplus
 }
 #endif
