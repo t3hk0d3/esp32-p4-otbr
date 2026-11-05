@@ -17,7 +17,7 @@ HTTP server listening is rolled back by the bootloader. `tools/make_bundle.py --
 <img src="images/firmware.png" width="640" alt="Firmware page: the Border router (ESP32-P4) and Radio (ESP32-C6) cards with the installed versions and an install box each, and the Radio recovery card with the jumper fitted">
 
 To let the board fetch the bundle itself: `curl -X POST -d '{"url": "http://host/otbr.bundle"}' http://<board>/device/ota/url`.
-Only `http://` URLs work (no certificate bundle is built in; `https://` gives 400 `https_not_supported`).
+Both `http://` and `https://` URLs work. An `https://` server is verified against the certificate bundle built into the firmware (the common root set, which covers GitHub and its download host); certificate expiry dates are not checked, because the board has no clock source. Any other scheme gives 400 `invalid_request`.
 
 Updates are accepted in every mode (also in `RADIO_FAULT` and while sniffing). One update or radio push at a time.
 

@@ -315,6 +315,11 @@ reason, spec reference.
 24. Applied (Thread console, Task 3). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 24 -> 27. `device_api`
    adds `GET`/`PUT /device/console` and the WebSocket `GET /device/console/ws`: 25 routes plus the catch-all, one slot
    of headroom. (docs/superpowers/specs/2026-11-04-thread-console-design.md)
+25. Applied (self-update, Task 1). `esp_ot_br_server` frontend, `frontend/static/firmware.js` and `frontend/firmware.html`:
+   the device downloads over https now (certificate bundle, `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y`).
+   `checkUpdateUrl` accepts `https://` as well as `http://` (message: "The URL must start with http:// or https://"),
+   both URL labels read "Download address (http or https)", and the placeholders are `https://host/...`. Tests:
+   `tools/tests/test_firmware_page.py` (`test_https_update_url_is_accepted`).
 
 ### REST guard classification (patches 2 and 9)
 

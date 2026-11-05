@@ -60,8 +60,8 @@
                             <input type="file" id="otaFile">
                         </label>
                     </div>
-                    <label class="field hidden" id="ota-url-pane" for="otaUrl" style="width: 100%">Download address (http only)
-                        <input type="text" id="otaUrl" placeholder="http://host/otbr.bundle">
+                    <label class="field hidden" id="ota-url-pane" for="otaUrl" style="width: 100%">Download address (http or https)
+                        <input type="text" id="otaUrl" placeholder="https://host/otbr.bundle">
                     </label>
                     <p class="form-hint">The board writes the bundle to the other slot and reboots into it.</p>
                     <button class="btn btn-primary" id="otaInstall" type="button">Install and reboot</button>
@@ -94,8 +94,8 @@
                             <input type="file" id="rcpFile">
                         </label>
                     </div>
-                    <label class="field hidden" id="rcp-url-pane" for="rcpUrl" style="width: 100%">Download address (http only)
-                        <input type="text" id="rcpUrl" placeholder="http://host/c6_rcp.bin">
+                    <label class="field hidden" id="rcp-url-pane" for="rcpUrl" style="width: 100%">Download address (http or https)
+                        <input type="text" id="rcpUrl" placeholder="https://host/c6_rcp.bin">
                     </label>
                     <p class="form-hint">The Thread network stops for about half a minute while the radio is rewritten. Not
                         possible during a packet capture.</p>

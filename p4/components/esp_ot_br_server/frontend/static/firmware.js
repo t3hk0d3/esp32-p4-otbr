@@ -22,10 +22,8 @@ function checkUpdateUrl(url) {
   var u = String(url).trim();
   if (u === '')
     return 'Enter a URL.';
-  if (/^https:/i.test(u))
-    return 'https is not supported: the device downloads over plain http:// only.';
-  if (!/^http:\/\//i.test(u))
-    return 'The URL must start with http://';
+  if (!/^https?:\/\//i.test(u))
+    return 'The URL must start with http:// or https://';
   return null;
 }
 

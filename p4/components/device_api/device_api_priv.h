@@ -81,8 +81,8 @@ device_api_error_t device_api_map_network_confirm_error(esp_err_t err);
 int device_api_length_check(size_t len, size_t max);
 
 /**
- * Check a from_url / ota url: error.http_status 0 = acceptable (http://), 400 "https_not_supported" (no certificate bundle
- * is built in) or 400 "invalid_request" (empty, other scheme).
+ * Check a from_url / ota url: error.http_status 0 = acceptable (http:// or https://, the latter verified against the
+ * certificate bundle), or 400 "invalid_request" (empty, other scheme, no host).
  */
 device_api_error_t device_api_check_url(const char *url);
 

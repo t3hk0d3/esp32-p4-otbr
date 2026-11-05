@@ -35,6 +35,7 @@
 #include "mesh_scan.h"
 #include "metrics.h"
 #include "esp_br_http_ota.h"
+#include "self_update_http.h"
 #include "netcfg.h"
 #include "names_json.h"
 #include "console_json.h"
@@ -697,7 +698,7 @@ static void ota_task(void *arg)
     if (upload) {
         err = esp_br_ota_from_httpd(req);
     } else {
-        esp_http_client_config_t config = {.url = job->url, .timeout_ms = OTA_URL_TIMEOUT_MS};
+        esp_http_client_config_t config = self_update_http_config(job->url, OTA_URL_TIMEOUT_MS);
         err = esp_br_http_ota(&config);
     }
     if (err == ESP_OK) {
@@ -986,7 +987,7 @@ static void push_task(void *arg)
             .total_size = req->content_len, .read = body_source_read, .ctx = &body_src
         };
     } else {
-        const esp_http_client_config_t config = {.url = job->url, .timeout_ms = HTTP_CLIENT_TIMEOUT_MS};
+        const esp_http_client_config_t config = self_update_http_config(job->url, HTTP_CLIENT_TIMEOUT_MS);
 
         url_src.client = esp_http_client_init(&config);
         err = url_src.client ? url_source_open(&url_src) : ESP_ERR_NO_MEM;

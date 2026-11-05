@@ -31,9 +31,9 @@ class TestFirmwareLogic:
         # On an upload: no query.
         assert fw("L.radioFirmwareUrl('')") == "/device/radio/firmware"
 
-    def test_https_update_url_gets_a_clear_message(self):
-        # On an https URL: the check says http only.
-        assert "http://" in fw("L.checkUpdateUrl('https://example.org/x.bin')")
+    def test_https_update_url_is_accepted(self):
+        # On an https URL: no message.
+        assert fw("L.checkUpdateUrl('https://example.org/x.bin')") is None
 
     def test_http_update_url_is_accepted(self):
         # On an http URL: no message.
@@ -196,13 +196,13 @@ class TestFirmwarePage:
             "Radio firmware installed: 2.2.",
         ]
 
-    def test_https_url_is_refused_without_a_request(self):
-        # On an https source: a message and no request.
+    def test_ftp_url_is_refused_without_a_request(self):
+        # On a source that is neither http nor https: a message and no request.
         r = scenario(
             page("firmware", routes())
             + """
             t.page.init(); await t.advance(100); const n = t.calls.length;
-            t.el('ota-src-url').click(); t.el('otaUrl').value = 'https://h/b.bin';
+            t.el('ota-src-url').click(); t.el('otaUrl').value = 'ftp://h/b.bin';
             await t.page.install('ota');
             return [t.calls.length - n, t.el('otaMsg').textContent];
         """
