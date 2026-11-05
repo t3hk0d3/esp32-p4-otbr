@@ -11,9 +11,15 @@ an SMA antenna, and wiring on the 40-pin header.
 
 ![Exploded preview: base with the board, lid lifted](images/case/preview-exploded.png)
 
-More views: [front](images/case/preview-front.png), [back](images/case/preview-back.png),
-[cable end](images/case/preview-cable-end.png), [header end](images/case/preview-header-end.png),
-[button side](images/case/preview-button-side.png). `make case` renders them all into `dist/case/`.
+| Front (lid) | Back (keyholes, screw holes) |
+| --- | --- |
+| ![Front: honeycomb lid](images/case/preview-front.png) | ![Back plate with two keyholes and four screw holes](images/case/preview-back.png) |
+
+| Cable end | Header end | Button side |
+| --- | --- | --- |
+| ![Cable end: USB, RJ45 and microSD](images/case/preview-cable-end.png) | ![Header end: 40-pin slot](images/case/preview-header-end.png) | ![Button side: BOOT and RESET pin-holes](images/case/preview-button-side.png) |
+
+`make case` renders all of these into `dist/case/`.
 
 The model is parametric Python (build123d) in `case/`. Its design is
 `docs/superpowers/specs/2026-11-02-p4-case-design.md`.
