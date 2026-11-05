@@ -86,6 +86,11 @@ class TestFirmwareLogic:
         # On an http URL: no message.
         assert fw("L.checkUpdateUrl('http://example.org/x.bin')") is None
 
+    def test_update_url_with_an_uppercase_scheme_gets_a_message(self):
+        # On HTTPS:// or HTTP://: the board accepts only the lowercase scheme.
+        assert fw("L.checkUpdateUrl('HTTPS://example.org/x.bin')")
+        assert fw("L.checkUpdateUrl('Http://example.org/x.bin')")
+
     def test_empty_update_url_gets_a_message(self):
         # On an empty URL: a message.
         assert fw("L.checkUpdateUrl('  ')")
@@ -275,11 +280,14 @@ class TestUpdateLogic:
         h = fw(f"L.updateHint({upd(app='same')})")
         assert "reboot" not in h and "half a minute" in h
 
-    def test_hint_for_a_newer_running_build(self):
-        assert (
-            fw(f"L.updateHint({upd(app='older')})")
-            == "This board runs a build that is newer than v0.4.0. Installing goes back to the release."
-        )
+    def test_hint_for_a_newer_running_build_names_the_radio_rewrite_when_the_release_has_one(self):
+        # On "Install anyway" with a c6_rcp in the release: force rewrites the radio even when it matches.
+        h = fw(f"L.updateHint({upd(app='older', rcp_differs=False)})")
+        assert "rewrites the radio firmware" in h and "half a minute" in h
+
+    def test_hint_for_a_newer_running_build_without_radio_firmware_has_no_radio_sentence(self):
+        h = fw(f"L.updateHint({upd(app='older', rcp_differs=False, release=rel(rcp=''))})")
+        assert h == "This board runs a build that is newer than v0.4.0. Installing goes back to the release."
 
     def test_hint_when_up_to_date(self):
         assert (
@@ -306,6 +314,20 @@ class TestUpdateLogic:
     def test_question_for_a_newer_running_build(self):
         q = fw(f"L.updateQuestion({upd(app='older')}, 'X')")
         assert "newer than this release" in q
+
+    def test_question_for_a_newer_running_build_names_the_radio_rewrite_when_the_release_has_one(self):
+        q = fw(f"L.updateQuestion({upd(app='older', rcp_differs=False)}, 'X')")
+        assert "radio firmware is rewritten too" in q
+
+    def test_question_for_a_newer_running_build_without_radio_firmware_has_no_radio_sentence(self):
+        q = fw(f"L.updateQuestion({upd(app='older', rcp_differs=False, release=rel(rcp=''))}, 'X')")
+        assert "radio" not in q
+
+    def test_radio_failure_after_a_rollback_does_not_claim_the_border_router_was_updated(self):
+        assert (
+            fw("L.rcpFailedText('cut off', false)")
+            == "The radio firmware was not updated either: cut off."
+        )
 
     def test_check_failed_text_names_the_cause(self):
         assert (
@@ -734,6 +756,27 @@ class TestUpdatesCard:
         assert r[2] is True
         assert r[3:] == ["v0.4.0 available", "", False]
 
+    def test_running_check_is_followed_while_only_the_updates_card_is_on_screen(self):
+        # On the manual cards off screen and the Updates card on it: plain GETs follow the check to its end.
+        r = scenario(
+            page("firmware", routes())
+            + f"""
+            const observed = [];
+            t.env.IntersectionObserver = function(cb) {{ this.observe = (el) => observed.push({{cb, el}}); }};
+            const checking = Object.assign({{}}, {upd()}, {{state: 'checking'}});
+            let n = 0;
+            t.upd = () => ({{status: 200, body: ++n < 3 ? checking : {upd()}}});
+            t.page.init();
+            for (const o of observed)
+              o.cb([{{isIntersecting: o.el === t.el('updCard')}}]);
+            await t.advance(30000);
+            return [observed.map((o) => o.el === t.el('updCard') ? 'updCard' : o.el === t.el('firmwareSection') ? 'firmwareSection' : '?'),
+                    n >= 3, t.el('updChip').textContent];
+        """
+        )
+        assert sorted(r[0]) == ["firmwareSection", "updCard"]
+        assert r[1:] == [True, "v0.4.0 available"]
+
     def test_fresh_check_is_not_repeated_on_open(self):
         # On a page opened with a check 30 s old: only the plain GET.
         r = scenario(
@@ -891,6 +934,22 @@ class TestUpdatesCard:
         )
         assert r[1] == "var(--danger)"
         assert r[2:] == ["", []]
+
+    def test_after_a_rolled_back_reload_the_radio_failure_does_not_say_the_border_router_was_updated(self):
+        # On the board coming back on the version it ran before: no "Border Router was updated", no "install again".
+        r = scenario(
+            page("firmware", routes())
+            + f"""
+            {STORE}
+            store['ota:before'] = '1.0'; store['update:after'] = JSON.stringify({{rcpFailed: 'cut off'}});
+            t.page.init(); await t.advance(100);
+            return [t.el('updMsg').textContent, t.el('updMsg').style.color];
+        """
+        )
+        assert r[0].startswith("The board is back and still runs 1.0")
+        assert "The radio firmware was not updated either: cut off." in r[0]
+        assert "Border Router was updated" not in r[0]
+        assert r[1] == "var(--danger)"
 
     def test_after_the_reload_without_a_radio_failure_the_note_is_plain(self):
         r = scenario(

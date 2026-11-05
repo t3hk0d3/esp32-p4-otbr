@@ -50,8 +50,8 @@ implemented.
 
 Test builds (`OTBR_TEST_BUILD`) add the console command `update_source <base>`, which points the check and the install at
 another releases base: `<base>/latest/download/versions.txt` and `<base>/download/<tag>/<file>`, for example a local HTTP
-server (`p4/pytest/test_self_update.py` does this). An empty argument restores GitHub. The release link on the page still
-points to GitHub.
+server (`p4/pytest/test_self_update.py` does this). An empty argument restores GitHub. The release link on the page then
+points to the same base, and the page shows it only for an `https://` base.
 
 ## P4 and web UI (OTA)
 

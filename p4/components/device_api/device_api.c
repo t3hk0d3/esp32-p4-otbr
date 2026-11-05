@@ -889,6 +889,7 @@ static esp_err_t body_source_read(void *ctx, size_t offset, void *buf, size_t le
 // Re-openable source: an HTTP GET through esp_http_client.
 typedef struct {
     esp_http_client_handle_t client;
+    const char *url; // the address asked for: a redirect leaves the client on a signed URL that expires
     int64_t length;
     size_t got;
 } url_source_t;
@@ -929,6 +930,10 @@ static esp_err_t url_source_reopen(void *ctx)
     url_source_t *src = ctx;
 
     esp_http_client_close(src->client);
+    const esp_err_t err = esp_http_client_set_url(src->client, src->url);
+    if (err != ESP_OK) {
+        return err;
+    }
     return url_source_open(src);
 }
 
@@ -1027,6 +1032,7 @@ static void push_task(void *arg)
         const esp_http_client_config_t config = self_update_http_config(job->url, HTTP_CLIENT_TIMEOUT_MS);
 
         url_src.client = esp_http_client_init(&config);
+        url_src.url = job->url;
         err = url_src.client ? url_source_open(&url_src) : ESP_ERR_NO_MEM;
         if (err != ESP_OK) {
             // Nothing was touched: the border router keeps running.
@@ -1374,6 +1380,7 @@ static esp_err_t update_rcp(update_job_t *job, device_api_error_t *error)
     const esp_http_client_config_t config = self_update_http_config(job->url, HTTP_CLIENT_TIMEOUT_MS);
 
     src.client = esp_http_client_init(&config);
+    src.url = job->url;
     err = src.client ? url_source_open(&src) : ESP_ERR_NO_MEM;
     if (err != ESP_OK) {
         *error = map_url_source_error(err);

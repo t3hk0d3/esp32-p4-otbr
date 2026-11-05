@@ -23,6 +23,9 @@ static bool tag_valid(const char *tag, size_t len)
     if (len < 1 || len > TAG_MAX) {
         return false;
     }
+    if (tag[0] == '.' && (len == 1 || (len == 2 && tag[1] == '.'))) {
+        return false; // "." and ".." are dot segments in the asset path
+    }
     for (size_t i = 0; i < len; i++) {
         char c = tag[i];
         bool ok = is_digit(c) || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.' || c == '_' || c == '-';

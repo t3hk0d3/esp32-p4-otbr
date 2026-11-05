@@ -91,12 +91,14 @@ TEST_CASE("Value of exactly 31 characters: accepted", "[self_update]")
     TEST_ASSERT_EQUAL_STRING("0123456789012345678901234567890", r.app);
 }
 
-TEST_CASE("Tag with a path, a query or 33 characters: ESP_ERR_INVALID_ARG, out untouched", "[self_update]")
+TEST_CASE("Tag with a path, a query, a dot segment or 33 characters: ESP_ERR_INVALID_ARG, out untouched", "[self_update]")
 {
     const char *bad[] = {
         "release: ../x\np4 app: " APP "\n",
         "release: v1?a\np4 app: " APP "\n",
         "release: v1/2\np4 app: " APP "\n",
+        "release: .\np4 app: " APP "\n",
+        "release: ..\np4 app: " APP "\n",
         "release: 012345678901234567890123456789012\np4 app: " APP "\n",
         "release:\np4 app: " APP "\n",
     };
@@ -106,6 +108,13 @@ TEST_CASE("Tag with a path, a query or 33 characters: ESP_ERR_INVALID_ARG, out u
         TEST_ASSERT_EQUAL_MESSAGE(ESP_ERR_INVALID_ARG, parse(bad[i], &r), bad[i]);
         TEST_ASSERT_EACH_EQUAL_UINT8(0xaa, (uint8_t *)&r, sizeof(r));
     }
+}
+
+TEST_CASE("Tag starting with a dot but not a dot segment: accepted", "[self_update]")
+{
+    self_update_release_t r;
+    TEST_ASSERT_EQUAL(ESP_OK, parse("release: .rc1\np4 app: " APP "\n", &r));
+    TEST_ASSERT_EQUAL_STRING(".rc1", r.tag);
 }
 
 TEST_CASE("Tag of exactly 32 characters: accepted", "[self_update]")

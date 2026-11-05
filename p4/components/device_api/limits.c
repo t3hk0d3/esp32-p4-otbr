@@ -17,13 +17,12 @@ device_api_error_t device_api_check_url(const char *url)
     if (url == NULL) {
         return invalid;
     }
-    if (strncmp(url, "https://", 8) == 0 && url[8] != '\0') {
-        return ok;
+    const char *host = strncmp(url, "https://", 8) == 0 ? url + 8 : strncmp(url, "http://", 7) == 0 ? url + 7 : NULL;
+
+    if (host == NULL || host[0] == '\0' || strchr("/?#", host[0]) != NULL) {
+        return invalid;
     }
-    if (strncmp(url, "http://", 7) == 0 && url[7] != '\0') {
-        return ok;
-    }
-    return invalid;
+    return ok;
 }
 
 int device_api_installed_json(char *buf, size_t cap, bool known, const char *version)

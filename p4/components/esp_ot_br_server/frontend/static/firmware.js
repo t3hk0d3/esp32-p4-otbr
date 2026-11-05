@@ -22,7 +22,7 @@ function checkUpdateUrl(url) {
   var u = String(url).trim();
   if (u === '')
     return 'Enter a URL.';
-  if (!/^https?:\/\//i.test(u))
+  if (!/^https?:\/\//.test(u))
     return 'The URL must start with http:// or https://';
   return null;
 }
@@ -148,13 +148,18 @@ function updateAction(u) {
   return null;
 }
 
+/** The release carries radio firmware: "Install anyway" (force) rewrites the radio even when it matches. */
+function releaseHasRcp(u) { return !!(u.release && u.release.rcp); }
+
 /** Description under the card's legend. */
 function updateHint(u) {
   if (u.state === 'checking' || !u.release)
     return 'The board downloads the bundle and, when it differs, the radio firmware from the same release, then reboots.';
   var name = releaseName(u);
   if (u.app === 'older')
-    return 'This board runs a build that is newer than ' + name + '. Installing goes back to the release.';
+    return 'This board runs a build that is newer than ' + name + '. Installing goes back to the release' +
+           (releaseHasRcp(u) ? ' and rewrites the radio firmware (the Thread network stops for about half a minute).'
+                             : '.');
   var app = appDiffers(u);
   if (app && u.rcp_differs)
     return 'The board downloads the bundle and the radio firmware from ' + name + ', rewrites the radio (the Thread ' +
@@ -175,7 +180,7 @@ function updateQuestion(u, running) {
   var gone = 'Thread and the web UI are gone for about a minute';
   if (u.app === 'older')
     return 'The board runs ' + now + ', which is a build that is newer than this release (' + name + '). Install ' +
-           name + ' from GitHub anyway and reboot? ' + (u.rcp_differs ? 'The radio firmware is rewritten too, so the ' +
+           name + ' from GitHub anyway and reboot? ' + (releaseHasRcp(u) ? 'The radio firmware is rewritten too, so the ' +
            'Thread network stops for about half a minute. ' : '') + gone + ' during the reboot.';
   if (appDiffers(u))
     return 'Install ' + name + ' from GitHub and reboot? The board now runs ' + now + '; ' +
@@ -205,7 +210,10 @@ function updateReplyText(r, stamp) {
 }
 
 /** Red line after the reboot of an update whose radio firmware push failed. */
-function rcpFailedText(detail) {
+/** `appChanged` false: the board came back on the old version (rolled back), so the Border Router was not updated. */
+function rcpFailedText(detail, appChanged) {
+  if (appChanged === false)
+    return 'The radio firmware was not updated either: ' + detail + '.';
   return 'The Border Router was updated, but the radio firmware was not: ' + detail +
          '. Install again to update the radio firmware only.';
 }
@@ -238,6 +246,7 @@ return {
   checkFailedText : checkFailedText,
   updateReplyText : updateReplyText,
   rcpFailedText : rcpFailedText,
+  releaseHasRcp : releaseHasRcp,
   repoLabel : repoLabel,
   linkUrl : linkUrl
 };
@@ -260,7 +269,7 @@ var upd = null; // last GET /device/update body
 var rcpInstalled; // rcp.installed of the last status (undefined before the first one)
 var sticky = false; // updMsg shows a result of the user's or the reload: the card's own lines leave it alone
 var checkingShown = false; // updMsg shows the checking line
-var poll = null;
+var updPoll = null; // follows a running check while the Updates card is on screen
 
 function stored(key, value) {
   try {
@@ -285,9 +294,10 @@ function render(s) {
   faultReason = s.fault_reason || null;
   // While an update is waited for, the status is still the old image's: keep the note for the board that comes back.
   rcpInstalled = s.rcp.installed;
-  var after = kit.isWaiting() ? null : L.afterUpdateText(stored(OTA_KEY), s.app.version);
+  var before = stored(OTA_KEY);
+  var after = kit.isWaiting() ? null : L.afterUpdateText(before, s.app.version);
   if (!kit.isWaiting())
-    reportAfterUpdate(after);
+    reportAfterUpdate(after, !before || before !== s.app.version);
   setText('p4-slot', 'Slot ' + s.app.slot);
   setText('rcp-version', L.rcpInstalledText(s.rcp.installed));
   setText('rcp-compat', C.compatText(s.rcp));
@@ -306,14 +316,14 @@ function render(s) {
 }
 
 /* After the reboot of an update: the note goes to the card that started it (update:after), else to the bundle card. */
-function reportAfterUpdate(after) {
+function reportAfterUpdate(after, appChanged) {
   var pending = null;
   try {
     pending = JSON.parse(stored(UPDATE_KEY));
   } catch (e) {
   }
   if (pending && typeof pending === 'object') {
-    var failed = pending.rcpFailed ? L.rcpFailedText(pending.rcpFailed) : null;
+    var failed = pending.rcpFailed ? L.rcpFailedText(pending.rcpFailed, appChanged) : null;
     note('updMsg', [ after, failed ].filter(Boolean).join(' '), !!failed);
     sticky = true;
     checkingShown = false;
@@ -559,8 +569,8 @@ function startCheck() {
   return kit.request('GET', '/device/update?check=true', {timeoutMs : 5000}).then(function(r) {
     if (r.status === 200 && r.body && typeof r.body === 'object') {
       setUpdate(r.body);
-      if (poll)
-        poll.wake();
+      if (updPoll)
+        updPoll.wake();
     }
     else
       note('updMsg', kit.failure(r), true);
@@ -614,13 +624,11 @@ function installUpdate() {
   });
 }
 
-/* One poll: the status, and the card's check while it runs. */
-function refreshAll() {
-  return refreshStatus().then(function(ok) {
-    if (upd && upd.state === 'checking')
-      return loadUpdate().then(function() { return ok; });
-    return ok;
-  });
+/* One poll of the Updates card: the check while it runs, nothing otherwise. */
+function followCheck() {
+  if (!upd || upd.state !== 'checking')
+    return Promise.resolve(true);
+  return loadUpdate().then(function(u) { return u !== null; });
 }
 
 /* ---- radio recovery ---- */
@@ -664,7 +672,8 @@ function init() {
   $('updInstall').addEventListener('click', installUpdate);
   $('updCheck').addEventListener('click', checkUpdate);
   kit.start();
-  poll = kit.poller(refreshAll, 5000, 'firmwareSection');
+  kit.poller(refreshStatus, 5000, 'firmwareSection');
+  updPoll = kit.poller(followCheck, 5000, 'updCard');
   loadUpdate().then(function(u) {
     if (u && L.updateNeedsCheck(u))
       startCheck();

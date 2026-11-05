@@ -16,7 +16,8 @@ extern "C" {
  * - Upload size is checked before anything is torn down: missing length 400 "length_required", more than the C6 slot
  *   (C6_OTA_SLOT_SIZE) 413 "payload_too_large"; the same bound applies to from_url after the response headers.
  *   POST /device/ota is bounded by header + web + app partition sizes (413).
- * - from_url / ota url must be http://; https gives 400 "https_not_supported" (no certificate bundle).
+ * - from_url / ota url must be http:// or https:// with a host, else 400 "invalid_request"; https is verified against
+ *   the certificate bundle, and redirects are followed.
  * - POST /device/radio/recover: 200 {"recovered":true,"rcp":"<installed version>"|"no rcp firmware"|"unknown","mode":...,"detail":...}
  *   once the base image was rewritten (also when the restart then finds no RCP firmware: RADIO_FAULT is the state, not an error);
  *   502 "recovery_failed" only when the recovery failed; 412 "no_jumper"

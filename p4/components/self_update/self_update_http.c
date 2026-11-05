@@ -27,6 +27,7 @@ esp_http_client_config_t self_update_http_config(const char *url, int timeout_ms
 }
 
 #define MAX_REDIRECTS 5
+#define MAX_REDIRECT_BODY 4096 // a redirect body past this is dropped by the close, not read
 
 static bool is_redirect(int status)
 {
@@ -54,7 +55,11 @@ esp_err_t self_update_http_open(esp_http_client_handle_t client, int *status)
             break;
         }
         // Drain first: set_redirection on a new host closes the transport, and a read after that logs an error.
-        while (esp_http_client_read(client, drain, sizeof(drain)) > 0) {
+        for (int drained = 0, n; drained < MAX_REDIRECT_BODY; drained += n) {
+            n = esp_http_client_read(client, drain, sizeof(drain));
+            if (n <= 0) {
+                break;
+            }
         }
         err = esp_http_client_set_redirection(client);
         if (err != ESP_OK) {

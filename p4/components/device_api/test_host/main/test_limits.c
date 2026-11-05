@@ -34,14 +34,15 @@ TEST_CASE("On an https URL: accepted", "[device_api]")
 
 TEST_CASE("On an empty, scheme-less, other-scheme or host-less URL: 400 invalid_request", "[device_api]")
 {
-    const char *bad[] = {"", "example.org/a", "ftp://x/a", "http://", "https://", NULL};
+    const char *bad[] = {"", "example.org/a", "ftp://x/a", "http://", "https://", "https:///a.bin", "https://?x",
+                         "http://#x", NULL};
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 8; i++) {
         TEST_ASSERT_EQUAL(400, device_api_check_url(bad[i]).http_status);
         TEST_ASSERT_EQUAL_STRING("invalid_request", device_api_check_url(bad[i]).code);
         TEST_ASSERT_NOT_NULL(strstr(device_api_check_url(bad[i]).detail, "http"));
     }
-    TEST_ASSERT_EQUAL(400, device_api_check_url(bad[5]).http_status);
+    TEST_ASSERT_EQUAL(400, device_api_check_url(bad[8]).http_status);
 }
 
 TEST_CASE("On a known installed version: the reply carries it", "[device_api]")
