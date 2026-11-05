@@ -56,7 +56,17 @@ class TestDefaultBase:
         assert not solid_bz(base, 38.3, y, 7.0)
         assert solid_bz(base, 38.6, y, 7.0)
         assert not solid_bz(base, 45.0, y, 1.0)  # microSD slot
-        assert solid_bz(base, 45.0, y, 2.3)  # above the slot
+        assert solid_bz(base, 45.0, y, 4.0)  # above the slot and its scoop
+
+    def test_has_the_thumb_scoop_above_the_microsd_slot(self, base):
+        _, _, sz0, sz1 = P.SD_SLOT
+        x = sum(P.SCOOP_X) / 2
+        y = P.OUTER[2] + 0.3  # just inside the outer face
+        assert not solid_bz(base, x, y, sz1 + 0.5)  # scoop above the slot
+        assert solid_bz(base, x, y, sz0 - 0.5)  # nothing below it
+        assert solid_bz(
+            base, x, P.OUTER[2] + P.SCOOP_DEPTH + 0.2, sz1 + 0.3
+        )  # only SCOOP_DEPTH deep
 
     def test_has_one_usb_and_rj45_opening_open_to_the_wall_top(self, base):
         y = -1.5
