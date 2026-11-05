@@ -511,6 +511,7 @@ tr:hover td { background: var(--primary-light); }
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 24px; font-size: 14px; margin-top: 14px; }
 .facts dt { color: var(--text-light); }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
+.facts .was { display: block; color: var(--text-muted); font-size: 12px; }
 .editor { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px 32px; border-top: 1px solid var(--border); padding-top: 16px; margin-top: 16px; }
 .editor fieldset { border: 0; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .editor legend { font-size: 14px; font-weight: 600; margin-bottom: 8px; }

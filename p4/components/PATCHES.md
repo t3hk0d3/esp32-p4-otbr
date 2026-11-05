@@ -324,6 +324,14 @@ reason, spec reference.
 26. Applied (self-update, Task 5). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 27 -> 30. `device_api`
    adds `GET`/`POST /device/update`: 27 routes plus the catch-all (28), which 27 slots no longer cover. 30 leaves 2
    slots of headroom. (docs/superpowers/plans/2026-11-05-self-update.md, Task 5)
+27. Applied (self-update, Task 6). `esp_ot_br_server` frontend, `frontend/firmware.html`, `frontend/static/firmware.js` and
+   `frontend/static/style.css`: the Updates card (`#updCard`, above `#firmwareSection`) shows the latest GitHub release from
+   `GET /device/update`, checks (`?check=true`, polled with the page's refresh timer) and installs (`POST /device/update`,
+   `?force=1` for a build newer than the release). `FirmwareLogic` gains `updateNeedsCheck`, `updateChip`, `versionRow`,
+   `checkedText`, `updateAction`, `updateHint`, `updateQuestion`, `checkFailedText`, `updateReplyText`, `repoLabel` (and
+   helpers); the page keeps `update:after` (`{rcpFailed}`) next to `ota:before` across the reload and reports through
+   `updMsg`. The manual Install buttons (`otaInstall`, `rcpInstall`) are `btn-outline`. `style.css`: `.facts .was`.
+   Tests: `tools/tests/test_firmware_page.py` (`TestUpdateLogic`, `TestUpdatesCard`).
 
 ### REST guard classification (patches 2 and 9)
 

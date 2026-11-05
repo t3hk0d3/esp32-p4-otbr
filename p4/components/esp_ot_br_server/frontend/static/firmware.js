@@ -78,6 +78,147 @@ function rcpInstalledText(installed) {
   return installed === '' ? 'none (no valid RCP firmware)' : String(installed);
 }
 
+/* ---- the Updates card (GET /device/update) ---- */
+
+var UPDATE_CHECK_MAX_AGE_S = 3600; // a check older than this is repeated when the page opens
+
+/** The release as the card names it. */
+function releaseName(u) {
+  return u && u.release && u.release.tag ? u.release.tag : 'the latest release';
+}
+
+/** True when the page should start a check: never checked, or the last one is older than an hour (not while one runs). */
+function updateNeedsCheck(u) {
+  if (u.state === 'checking')
+    return false;
+  if (u.state === 'never')
+    return true;
+  return typeof u.checked_age_s === 'number' && u.checked_age_s > UPDATE_CHECK_MAX_AGE_S;
+}
+
+function appDiffers(u) { return u.app === 'newer' || u.app === 'unknown'; }
+
+/** Chip of the card: {text, cls}. */
+function updateChip(u) {
+  if (u.state === 'checking')
+    return {text : 'Checking', cls : ''};
+  if (u.state === 'failed')
+    return {text : 'Check failed', cls : 'chip-bad'};
+  if (u.state === 'never' || !u.release)
+    return {text : 'Not checked', cls : ''};
+  if (u.app === 'older')
+    return {text : 'Newer than the release', cls : ''};
+  if (appDiffers(u))
+    return {text : u.release.tag ? u.release.tag + ' available' : 'Update available', cls : 'chip-warn'};
+  if (u.rcp_differs)
+    return {text : 'Radio firmware differs', cls : 'chip-warn'};
+  return {text : 'Up to date', cls : 'chip-ok'};
+}
+
+/** A version row: the release version and, under it, what is installed. `newer`: the installed build is the newer one. */
+function versionRow(release, installed, newer) {
+  if (release === null || release === undefined || release === '')
+    return {value : '-', was : ''};
+  if (installed === release)
+    return {value : release, was : 'same as installed'};
+  var was = installed === null || installed === undefined ? 'unknown' : installed === '' ? 'none' : installed;
+  return {value : release, was : 'installed: ' + was + (newer ? ' (newer)' : '')};
+}
+
+/** Age of the last check as text. */
+function checkedText(u) {
+  var age = u.checked_age_s;
+  if (typeof age !== 'number')
+    return '-';
+  var text = age < 60 ? 'just now' : age < 3600 ? Math.floor(age / 60) + ' min ago' : Math.floor(age / 3600) + ' h ago';
+  return u.state === 'failed' ? text + ' (the last check failed)' : text;
+}
+
+/** What Install does: {label, primary, force}, or null (nothing to install, no result, or a check running). */
+function updateAction(u) {
+  if (u.state === 'checking' || !u.release)
+    return null;
+  var name = releaseName(u);
+  if (u.app === 'older')
+    return {label : 'Install ' + name + ' anyway', primary : false, force : true};
+  if (appDiffers(u))
+    return {label : 'Install ' + name + ' and reboot', primary : true, force : false};
+  if (u.rcp_differs)
+    return {label : 'Install the radio firmware of ' + name, primary : true, force : false};
+  return null;
+}
+
+/** Description under the card's legend. */
+function updateHint(u) {
+  if (u.state === 'checking' || !u.release)
+    return 'The board downloads the bundle and, when it differs, the radio firmware from the same release, then reboots.';
+  var name = releaseName(u);
+  if (u.app === 'older')
+    return 'This board runs a build that is newer than ' + name + '. Installing goes back to the release.';
+  var app = appDiffers(u);
+  if (app && u.rcp_differs)
+    return 'The board downloads the bundle and the radio firmware from ' + name + ', rewrites the radio (the Thread ' +
+           'network stops for about half a minute), then reboots.';
+  if (app)
+    return 'The board downloads the bundle from ' + name + ', then reboots.';
+  if (u.rcp_differs)
+    return 'The board downloads the radio firmware from ' + name + ' and rewrites the radio. The Thread network stops ' +
+           'for about half a minute.';
+  return 'Nothing to install: the board runs the latest release.';
+}
+
+/** Confirm text before the install; `running` is the Border Router version of the last status. */
+function updateQuestion(u, running) {
+  var name = releaseName(u);
+  var now = running || (u.running && u.running.app) || 'an unknown version';
+  var radio = 'the radio firmware is rewritten too, so the Thread network stops for about half a minute';
+  var gone = 'Thread and the web UI are gone for about a minute';
+  if (u.app === 'older')
+    return 'The board runs ' + now + ', which is a build that is newer than this release (' + name + '). Install ' +
+           name + ' from GitHub anyway and reboot? ' + (u.rcp_differs ? 'The radio firmware is rewritten too, so the ' +
+           'Thread network stops for about half a minute. ' : '') + gone + ' during the reboot.';
+  if (appDiffers(u))
+    return 'Install ' + name + ' from GitHub and reboot? The board now runs ' + now + '; ' +
+           (u.rcp_differs ? radio + ', and ' : '') + gone + ' during the reboot.';
+  return 'Install the radio firmware of ' + name + ' from GitHub? The Thread network stops for about half a minute.';
+}
+
+/** Red status line of a failed check. */
+function checkFailedText(u) {
+  return 'The check failed' + (u.error ? ': ' + u.error : '') + '. The board needs internet access and DNS.';
+}
+
+var REBOOT_TEXT = 'Update installed. The board is rebooting; this page reloads when it is back.';
+
+/*
+ * Reading of the POST /device/update reply: {text, rebooting, rcpFailed} (`rcpFailed`: the detail to keep across the
+ * reload, or null), or null when the reply is not a 200 (the page then shows the failure text). `stamp` is the radio
+ * firmware version of the card's last check: the reply carries none.
+ */
+function updateReplyText(r, stamp) {
+  if (r.status !== 200)
+    return null;
+  var b = r.body || {};
+  if (b.rebooting)
+    return {text : REBOOT_TEXT, rebooting : true, rcpFailed : b.rcp === 'failed' ? String(b.detail || 'unknown error') : null};
+  return {text : 'Radio firmware installed' + (stamp ? ': ' + stamp : '') + '.', rebooting : false, rcpFailed : null};
+}
+
+/** Red line after the reboot of an update whose radio firmware push failed. */
+function rcpFailedText(detail) {
+  return 'The Border Router was updated, but the radio firmware was not: ' + detail +
+         '. Install again to update the radio firmware only.';
+}
+
+/** "owner/name" of a repository URL; the URL itself when it has no path. */
+function repoLabel(url) {
+  var m = /^[a-z]+:\/\/[^\/]+\/(.+?)\/*$/i.exec(String(url));
+  return m ? m[1] : String(url);
+}
+
+/** The URL when the card may link to it (https only), else null. */
+function linkUrl(url) { return /^https:\/\//i.test(String(url)) ? String(url) : null; }
+
 return {
   radioFirmwareUrl : radioFirmwareUrl,
   checkUpdateUrl : checkUpdateUrl,
@@ -85,19 +226,41 @@ return {
   jumperPresent : jumperPresent,
   installQuestion : installQuestion,
   afterUpdateText : afterUpdateText,
-  rcpInstalledText : rcpInstalledText
+  rcpInstalledText : rcpInstalledText,
+  releaseName : releaseName,
+  updateNeedsCheck : updateNeedsCheck,
+  updateChip : updateChip,
+  versionRow : versionRow,
+  checkedText : checkedText,
+  updateAction : updateAction,
+  updateHint : updateHint,
+  updateQuestion : updateQuestion,
+  checkFailedText : checkFailedText,
+  updateReplyText : updateReplyText,
+  rcpFailedText : rcpFailedText,
+  repoLabel : repoLabel,
+  linkUrl : linkUrl
 };
 })();
 
 function FirmwarePage(env) {
 var C = typeof DeviceCommon !== 'undefined' ? DeviceCommon : require('./device_common.js');
 var L = FirmwareLogic;
-var kit = C.DeviceKit(env, {actionIds : [ 'otaInstall', 'rcpInstall', 'recoverBtn', 'logBtn' ]});
+var kit = C.DeviceKit(env, {
+  actionIds : [ 'otaInstall', 'rcpInstall', 'updInstall', 'updCheck', 'recoverBtn', 'logBtn' ],
+  onBusy : function() { lockUpdateButtons(); }
+});
 var $ = kit.$, setText = kit.setText, show = kit.show, note = kit.note;
 var source = {ota : 'file', rcp : 'file'};
 var running = null; // Border Router version from the last status
 var faultReason = null; // fault_reason from the last status
 var OTA_KEY = 'ota:before'; // version before an update, kept across the reload that follows it
+var UPDATE_KEY = 'update:after'; // JSON {rcpFailed: detail | null}: the card's install, kept across the same reload
+var upd = null; // last GET /device/update body
+var rcpInstalled; // rcp.installed of the last status (undefined before the first one)
+var sticky = false; // updMsg shows a result of the user's or the reload: the card's own lines leave it alone
+var checkingShown = false; // updMsg shows the checking line
+var poll = null;
 
 function stored(key, value) {
   try {
@@ -121,11 +284,10 @@ function render(s) {
   running = s.app.version;
   faultReason = s.fault_reason || null;
   // While an update is waited for, the status is still the old image's: keep the note for the board that comes back.
+  rcpInstalled = s.rcp.installed;
   var after = kit.isWaiting() ? null : L.afterUpdateText(stored(OTA_KEY), s.app.version);
-  if (after) {
-    note('otaMsg', after, false);
-    stored(OTA_KEY, null);
-  }
+  if (!kit.isWaiting())
+    reportAfterUpdate(after);
   setText('p4-slot', 'Slot ' + s.app.slot);
   setText('rcp-version', L.rcpInstalledText(s.rcp.installed));
   setText('rcp-compat', C.compatText(s.rcp));
@@ -139,6 +301,29 @@ function render(s) {
   $('jumperChip').className = present ? 'chip chip-warn' : 'chip';
   show('noJumper', !present);
   show('jumperControls', present);
+  if (upd)
+    renderUpdate();
+}
+
+/* After the reboot of an update: the note goes to the card that started it (update:after), else to the bundle card. */
+function reportAfterUpdate(after) {
+  var pending = null;
+  try {
+    pending = JSON.parse(stored(UPDATE_KEY));
+  } catch (e) {
+  }
+  if (pending && typeof pending === 'object') {
+    var failed = pending.rcpFailed ? L.rcpFailedText(pending.rcpFailed) : null;
+    note('updMsg', [ after, failed ].filter(Boolean).join(' '), !!failed);
+    sticky = true;
+    checkingShown = false;
+    stored(UPDATE_KEY, null);
+    stored(OTA_KEY, null);
+  }
+  else if (after) {
+    note('otaMsg', after, false);
+    stored(OTA_KEY, null);
+  }
 }
 
 function refreshStatus() {
@@ -267,6 +452,177 @@ function install(card) {
   return sendFile(L.radioFirmwareUrl(''), $('rcpFile').files[0], 'rcpMsg', 'rcp');
 }
 
+/* ---- Updates from GitHub ---- */
+
+function lockUpdateButtons() {
+  var on = kit.isBusy() || !!(upd && upd.state === 'checking');
+  [ 'updInstall', 'updCheck' ].forEach(function(id) {
+    var e = $(id);
+    e.disabled = on;
+    e.setAttribute('aria-disabled', on ? 'true' : 'false');
+    e.classList.toggle('disabled', on);
+  });
+}
+
+function linkTo(url, text) {
+  var a = kit.el('a', text);
+  a.setAttribute('href', url);
+  a.setAttribute('target', '_blank');
+  a.setAttribute('rel', 'noopener');
+  return a;
+}
+
+/* A version row: the release version, the installed one under it in muted text. */
+function renderVersion(id, row) {
+  var dd = $(id);
+  kit.clear(dd);
+  dd.appendChild(env.document.createTextNode(row.value));
+  if (row.was)
+    dd.appendChild(kit.el('span', row.was, 'was'));
+}
+
+function renderUpdate() {
+  var u = upd, chip = L.updateChip(u), rel = u.release, run = u.running || {};
+  setText('updChip', chip.text);
+  $('updChip').className = chip.cls ? 'chip ' + chip.cls : 'chip';
+  var repo = $('updRepo'), repoUrl = L.linkUrl(u.repo_url);
+  setText('updRepo', u.repo_url ? L.repoLabel(u.repo_url) : 'the repository');
+  if (repoUrl) {
+    repo.setAttribute('href', repoUrl);
+    repo.setAttribute('target', '_blank');
+    repo.setAttribute('rel', 'noopener');
+  }
+  else
+    repo.removeAttribute('href');
+  var dd = $('updRelease');
+  kit.clear(dd);
+  if (!rel)
+    dd.appendChild(env.document.createTextNode('-'));
+  else {
+    dd.appendChild(env.document.createTextNode(rel.tag || 'latest'));
+    var relUrl = L.linkUrl(rel.url);
+    if (relUrl) {
+      dd.appendChild(env.document.createTextNode(' · '));
+      dd.appendChild(linkTo(relUrl, 'release notes'));
+    }
+  }
+  var runApp = running || run.app, runRcp = rcpInstalled !== undefined ? rcpInstalled : run.rcp;
+  renderVersion('updApp', L.versionRow(rel ? rel.app : null, runApp === undefined ? null : runApp, u.app === 'older'));
+  renderVersion('updRcp', L.versionRow(rel ? rel.rcp : null, runRcp === undefined ? null : runRcp, false));
+  setText('updChecked', L.checkedText(u));
+  setText('updHint', L.updateHint(u));
+  var act = L.updateAction(u), btn = $('updInstall');
+  show('updInstall', !!act);
+  if (act) {
+    setText('updInstall', act.label);
+    btn.className = act.primary ? 'btn btn-primary' : 'btn btn-outline';
+  }
+  lockUpdateButtons();
+}
+
+/* A new GET /device/update body: the card, and the status line when the check starts or ends. */
+function setUpdate(body) {
+  upd = body;
+  renderUpdate();
+  if (sticky)
+    return;
+  if (body.state === 'checking') {
+    note('updMsg', 'Checking GitHub for the latest release...', false);
+    checkingShown = true;
+  }
+  else if (body.state === 'failed') {
+    note('updMsg', L.checkFailedText(body), true);
+    checkingShown = false;
+  }
+  else if (checkingShown) {
+    note('updMsg', '', false);
+    checkingShown = false;
+  }
+}
+
+function loadUpdate() {
+  return kit.request('GET', '/device/update', {timeoutMs : 5000}).then(function(r) {
+    if (r.status === 200 && r.body && typeof r.body === 'object') {
+      setUpdate(r.body);
+      return r.body;
+    }
+    note('updMsg', kit.failure(r), true);
+    return null;
+  }, function(e) {
+    note('updMsg', e.message, true);
+    return null;
+  });
+}
+
+/* Asks the board for a check; the poller follows it to the end. */
+function startCheck() {
+  return kit.request('GET', '/device/update?check=true', {timeoutMs : 5000}).then(function(r) {
+    if (r.status === 200 && r.body && typeof r.body === 'object') {
+      setUpdate(r.body);
+      if (poll)
+        poll.wake();
+    }
+    else
+      note('updMsg', kit.failure(r), true);
+    return r;
+  }, function(e) {
+    note('updMsg', e.message, true);
+    return null;
+  });
+}
+
+function checkUpdate() {
+  if (kit.isBusy() || (upd && upd.state === 'checking'))
+    return Promise.resolve(null);
+  sticky = false;
+  checkingShown = false;
+  note('updMsg', '', false);
+  return startCheck();
+}
+
+function finishUpdate(r) {
+  var reply = L.updateReplyText(r, upd && upd.release ? upd.release.rcp : null);
+  if (!reply) {
+    note('updMsg', kit.failure(r), true);
+    return null;
+  }
+  if (reply.rebooting) {
+    stored(OTA_KEY, running || '');
+    stored(UPDATE_KEY, JSON.stringify({rcpFailed : reply.rcpFailed}));
+    note('updMsg', reply.text, false);
+    kit.waitForBoard('updMsg');
+    return {handoff : true};
+  }
+  note('updMsg', reply.text, false);
+  refreshStatus();
+  sticky = true;
+  startCheck();
+  return r;
+}
+
+function installUpdate() {
+  var act = upd ? L.updateAction(upd) : null;
+  if (kit.isBusy() || !act || !env.confirm(L.updateQuestion(upd, running)))
+    return Promise.resolve(null);
+  return kit.runOp(function() {
+    sticky = true;
+    note('updMsg', 'The device is downloading ' + L.releaseName(upd) + ' from GitHub and installing it ...', false);
+    return kit.request('POST', '/device/update' + (act.force ? '?force=1' : '')).then(finishUpdate, function(e) {
+      note('updMsg', e.message, true);
+      return null;
+    });
+  });
+}
+
+/* One poll: the status, and the card's check while it runs. */
+function refreshAll() {
+  return refreshStatus().then(function(ok) {
+    if (upd && upd.state === 'checking')
+      return loadUpdate().then(function() { return ok; });
+    return ok;
+  });
+}
+
 /* ---- radio recovery ---- */
 
 function recover() {
@@ -305,11 +661,26 @@ function init() {
   [ 'dragover', 'drop' ].forEach(function(t) { env.document.addEventListener(t, function(ev) { ev.preventDefault(); }); });
   $('recoverBtn').addEventListener('click', recover);
   $('logBtn').addEventListener('click', showLog);
+  $('updInstall').addEventListener('click', installUpdate);
+  $('updCheck').addEventListener('click', checkUpdate);
   kit.start();
-  kit.poller(refreshStatus, 5000, 'firmwareSection');
+  poll = kit.poller(refreshAll, 5000, 'firmwareSection');
+  loadUpdate().then(function(u) {
+    if (u && L.updateNeedsCheck(u))
+      startCheck();
+  });
 }
 
-return {init : init, refreshStatus : refreshStatus, install : install, recover : recover, showLog : showLog, kit : kit};
+return {
+  init : init,
+  refreshStatus : refreshStatus,
+  install : install,
+  installUpdate : installUpdate,
+  checkUpdate : checkUpdate,
+  recover : recover,
+  showLog : showLog,
+  kit : kit
+};
 }
 
 if (typeof module !== 'undefined' && module.exports) {
