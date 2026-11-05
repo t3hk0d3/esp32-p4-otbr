@@ -8,6 +8,7 @@ static void release_all(void)
     device_api_op_end(DEVICE_API_OP_OTA);
     device_api_op_end(DEVICE_API_OP_RADIO_PUSH);
     device_api_op_end(DEVICE_API_OP_ROM_RECOVER);
+    device_api_op_end(DEVICE_API_OP_UPDATE_CHECK);
     device_api_op_end(DEVICE_API_OP_PCAP);
 }
 
@@ -142,5 +143,62 @@ TEST_CASE("On a capture stream: device_api_op_pcap_running is true until it is r
     TEST_ASSERT_TRUE(device_api_op_pcap_running());
     device_api_op_end(DEVICE_API_OP_PCAP);
     TEST_ASSERT_FALSE(device_api_op_pcap_running());
+    release_all();
+}
+
+TEST_CASE("Update check, nothing running: true", "[device_api]")
+{
+    release_all();
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_UPDATE_CHECK));
+    release_all();
+}
+
+TEST_CASE("Update check, OTA, radio push or ROM recovery running: false", "[device_api]")
+{
+    const device_api_op_t holders[] = {DEVICE_API_OP_OTA, DEVICE_API_OP_RADIO_PUSH, DEVICE_API_OP_ROM_RECOVER};
+
+    for (size_t i = 0; i < 3; i++) {
+        release_all();
+        TEST_ASSERT_TRUE(device_api_op_try_begin(holders[i]));
+        TEST_ASSERT_FALSE(device_api_op_try_begin(DEVICE_API_OP_UPDATE_CHECK));
+    }
+    release_all();
+}
+
+TEST_CASE("Update check running, then OTA, push or recover asked: false for each", "[device_api]")
+{
+    release_all();
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_UPDATE_CHECK));
+    TEST_ASSERT_FALSE(device_api_op_try_begin(DEVICE_API_OP_OTA));
+    TEST_ASSERT_FALSE(device_api_op_try_begin(DEVICE_API_OP_RADIO_PUSH));
+    TEST_ASSERT_FALSE(device_api_op_try_begin(DEVICE_API_OP_ROM_RECOVER));
+    TEST_ASSERT_NOT_NULL(strstr(device_api_op_busy_detail(DEVICE_API_OP_OTA), "update check"));
+    release_all();
+}
+
+TEST_CASE("Update check running, then a second check: false (the handler joins instead)", "[device_api]")
+{
+    release_all();
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_UPDATE_CHECK));
+    TEST_ASSERT_FALSE(device_api_op_try_begin(DEVICE_API_OP_UPDATE_CHECK));
+    release_all();
+}
+
+TEST_CASE("Update check, pcap running: true", "[device_api]")
+{
+    release_all();
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_PCAP));
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_UPDATE_CHECK));
+    release_all();
+}
+
+TEST_CASE("Only an update check running: device_api_op_long_running is false (a check never defers a reboot)",
+          "[device_api]")
+{
+    release_all();
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_UPDATE_CHECK));
+    TEST_ASSERT_FALSE(device_api_op_long_running());
+    device_api_op_end(DEVICE_API_OP_UPDATE_CHECK);
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_OTA)); /* the slot was released */
     release_all();
 }
