@@ -163,7 +163,8 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
       wide) and no strip above them (it would be 1 mm tall): both were too thin to print well.
     - The lid's lintel (5.3) closes the opening above the connectors.
   - **microSD:** the slot runs from 0.6 mm below the board's top face to 2 mm above it, across X 39.2–51.4. It has a
-    thumb scoop in the outer face below it, so a fingernail or pencil can push the card in and out.
+    thumb scoop in the outer face above it, where the card's grip edge is (print feedback: below it was useless). Its
+    ceiling slopes back to the face at about 40° from vertical, so it prints without support.
   - The connector faces end up 0.5–0.8 mm behind the outer face.
   - The shared opening has no top, so it needs no bridge; the microSD slot's top bridges 12.2 mm.
 - **Header-end wall (Y = 68 edge):**
