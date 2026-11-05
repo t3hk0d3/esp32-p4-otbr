@@ -209,7 +209,8 @@ These were "left to the builder" before the review; they decide whether the PoC 
   snapshot. Nothing else calls `cdc_acm_host_close` or touches the sockets' lifecycle, so close never races an unplug.
 - **USB on core 1, above the web server.** `usb_host_install` is called from a core-1 task so its interrupt lands
   on core 1. The USB host library daemon and the CDC driver task are pinned to core 1 at a priority above the web
-  server and the device API workers (above 5), and below the routing and lwIP tasks. Core 0 (OpenThread, lwIP) gets
+  server and the device API workers (above 5), and below the lwIP tcpip task (the routing task runs at priority 2,
+  below all of them; corrected while planning). Core 0 (OpenThread, lwIP) gets
   no new task.
 - **The data callback only copies.** It copies the received bytes into the dongle → client ring and returns at
   once; it never calls lwIP or blocks. The owner task (or a sender task under it) drains the ring into the socket,
