@@ -1244,16 +1244,30 @@ static esp_err_t send_update_state(httpd_req_t *req)
     return err;
 }
 
+static void release_check_slot(void *ctx)
+{
+    (void)ctx;
+    device_api_op_end(DEVICE_API_OP_UPDATE_CHECK);
+}
+
 // Waits for the handler's go (notification value 1: self_update_check_begin succeeded), runs the check, frees the slot.
+// Order: the slot is freed after the fetch but BEFORE the result is published, while the state still reads checking.
+// A check=true that arrives before the publish joins the running check; one that arrives after it finds the slot free
+// and starts a new check. With the old order (publish, then free) a request between the two got 409 busy.
 static void update_check_task(void *arg)
 {
     uint32_t begun = 0;
 
     xTaskNotifyWait(0, UINT32_MAX, &begun, portMAX_DELAY);
     if (begun) {
-        self_update_check_run();
+        self_update_check_run_then(release_check_slot, NULL);
+    } else {
+        device_api_op_end(DEVICE_API_OP_UPDATE_CHECK);
     }
-    device_api_op_end(DEVICE_API_OP_UPDATE_CHECK);
+#ifdef OTBR_TEST_BUILD
+    ESP_LOGI(TAG, "update check worker stack high water mark: %u of %d bytes free",
+             (unsigned)uxTaskGetStackHighWaterMark(NULL), CHECK_STACK);
+#endif
     vTaskDelete(NULL);
 }
 
@@ -1315,15 +1329,28 @@ typedef struct {
 static esp_err_t update_bundle(update_job_t *job, device_api_error_t *error)
 {
     esp_err_t err = self_update_asset_url(self_update_base(), job->release.tag, "otbr.bundle", job->url, sizeof(job->url));
+    const bool url_failed = err != ESP_OK;
 
-    if (err == ESP_OK) {
+    if (!url_failed) {
         esp_http_client_config_t config = self_update_http_config(job->url, OTA_URL_TIMEOUT_MS);
 
         err = esp_br_http_ota(&config);
     }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "update: bundle failed: %s (%s)", esp_err_to_name(err), job->url);
-        *error = device_api_map_ota_error(err);
+        // POST /device/update takes no arguments, so the OTA mapping's 400s do not fit: an asset URL that does not
+        // fit its buffer is our fault (500), a redirect without Location is the server's (502).
+        if (url_failed) {
+            *error = (device_api_error_t) {
+                500, "internal", NULL
+            };
+        } else if (err == ESP_ERR_INVALID_ARG) {
+            *error = (device_api_error_t) {
+                502, "transfer_failed", NULL
+            };
+        } else {
+            *error = device_api_map_ota_error(err);
+        }
         snprintf(job->detail, sizeof(job->detail), "%s (%s)", error->detail ? error->detail : esp_err_to_name(err),
                  job->url);
     }
@@ -1447,12 +1474,18 @@ static void update_task(void *arg)
     set_socket_timeouts(req, LONG_RECV_TIMEOUT_S, SEND_TIMEOUT_S, &saved);
     const bool rebooting = run_update(job);
 
-    finish_request(req, &saved);
     if (rebooting) {
+        finish_request(req, &saved);
         schedule_reboot(REBOOT_DELAY_MS); // the slot stays taken: the update waits for its reboot
     } else {
+        // Free the slot before the reply goes out: a page that sends GET ?check=true on the reply must not get 409.
         device_api_op_end(DEVICE_API_OP_OTA);
+        finish_request(req, &saved);
     }
+#ifdef OTBR_TEST_BUILD
+    ESP_LOGI(TAG, "update worker stack high water mark: %u of %d bytes free",
+             (unsigned)uxTaskGetStackHighWaterMark(NULL), UPDATE_STACK);
+#endif
     free(job);
     vTaskDelete(NULL);
 }

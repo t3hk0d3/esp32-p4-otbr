@@ -126,11 +126,15 @@ bool self_update_check_begin(void)
     return idle;
 }
 
-void self_update_check_run(void)
+void self_update_check_run_then(void (*fetched)(void *ctx), void *ctx)
 {
     self_update_release_t release;
     char detail[DETAIL_MAX];
     const esp_err_t err = fetch_and_parse(&release, detail, sizeof(detail));
+
+    if (fetched) {
+        fetched(ctx);
+    }
 
     lock();
     const int64_t now = ops()->now_us();
@@ -147,6 +151,11 @@ void self_update_check_run(void)
         snprintf(s_cache.error, sizeof(s_cache.error), "%s", detail);
     }
     unlock();
+}
+
+void self_update_check_run(void)
+{
+    self_update_check_run_then(NULL, NULL);
 }
 
 void self_update_get(self_update_snapshot_t *out)

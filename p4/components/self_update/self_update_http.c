@@ -9,7 +9,7 @@
 #include "self_update_priv.h"
 
 #define HTTP_RX_BUFFER_SIZE 2048
-#define HTTP_TX_BUFFER_SIZE 1024
+#define HTTP_TX_BUFFER_SIZE 2048
 
 static const char *TAG = "self_update_http";
 
@@ -53,11 +53,12 @@ esp_err_t self_update_http_open(esp_http_client_handle_t client, int *status)
         if (hop == MAX_REDIRECTS) {
             break;
         }
+        // Drain first: set_redirection on a new host closes the transport, and a read after that logs an error.
+        while (esp_http_client_read(client, drain, sizeof(drain)) > 0) {
+        }
         err = esp_http_client_set_redirection(client);
         if (err != ESP_OK) {
             return err;
-        }
-        while (esp_http_client_read(client, drain, sizeof(drain)) > 0) {
         }
         esp_http_client_close(client);
     }

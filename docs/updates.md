@@ -8,7 +8,7 @@ The board can fetch and install a release of <https://github.com/t3hk0d3/esp32-p
 Firmware page, or the API (`GET`/`POST /device/update`, see [HTTP API](api.md)).
 
 What is checked, and when. The board reads `versions.txt` of the latest release (`.../releases/latest/download/versions.txt`,
-about 120 bytes, no GitHub API). It lists the release tag (`release:`, releases after v0.3.0), the P4 app version and the
+about 120 bytes, no GitHub API). It lists the release tag (`release:`, releases after v0.4.0; until the first of them the check uses the `latest/download` links), the P4 app version and the
 `c6_rcp` version. Nothing happens in the background: there is no periodic check and no automatic install, because an update
 restarts a border router. The Firmware page starts a check when it opens and the last check is older than one hour or never
 ran; "Check again" and `GET /device/update?check=true` start one on request. The result is cached until the next check or

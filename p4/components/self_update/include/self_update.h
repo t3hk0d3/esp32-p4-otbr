@@ -55,6 +55,12 @@ bool self_update_check_begin(void);
 void self_update_check_run(void);
 
 /**
+ * Like self_update_check_run, but calls `fetched(ctx)` once the network part is over, right before the result is
+ * published (the state still reads checking at that point). `fetched` may be NULL.
+ */
+void self_update_check_run_then(void (*fetched)(void *ctx), void *ctx);
+
+/**
  * A fresh fetch and parse of the latest release's versions.txt. Does not touch the cache. On failure `detail`
  * (may be NULL) says why.
  */

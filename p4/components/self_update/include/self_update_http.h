@@ -9,8 +9,10 @@ extern "C" {
 
 /**
  * HTTP client config for every URL the board fetches (OTA URL, radio firmware URL, versions.txt): http and https, https
- * verified against the certificate bundle, 2048 byte receive and 1024 byte send buffers (a signed redirect Location
- * header does not fit the default 512). `url` must stay valid while the config is used.
+ * verified against the certificate bundle, 2048 byte receive and send buffers. The default 1024 byte send buffer failed
+ * on the request line of the redirected hop (`GET <path>?<query> HTTP/1.1` of a signed release-asset URL, about 885
+ * bytes, must fit it); the response Location is kept on the heap, so the receive buffer was never the limit.
+ * `url` must stay valid while the config is used.
  */
 esp_http_client_config_t self_update_http_config(const char *url, int timeout_ms);
 

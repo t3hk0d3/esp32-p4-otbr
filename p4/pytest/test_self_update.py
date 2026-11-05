@@ -180,7 +180,7 @@ def post_update(base_url, force=False):
         )
         unconfirmed = (
             response.status_code == requests.codes.conflict
-            and "not confirmed" in response.json().get("detail", "")
+            and "not confirmed" in (response.json().get("detail") or "")
         )
         if not unconfirmed or time.monotonic() > deadline:
             return response
