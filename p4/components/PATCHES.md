@@ -116,7 +116,8 @@ reason, spec reference.
    `EXTRA_HANDLER_SLOTS` (the handlers the callback and the catch-all may add to `max_uri_handlers`) was 20 since the
    network names (`GET`/`PUT /device/names`, spec 2026-11-03-network-names-design.md) and is 24 since mesh routing
    (patch 19). The leader weight (`GET`/`PUT /device/thread`) uses 2 of them: 22 routes plus the catch-all. It is 27
-   since the Thread console (patch 24): 25 routes plus the catch-all.
+   since the Thread console (patch 24): 25 routes plus the catch-all. It is 30 since self-update (patch 26): 27 routes
+   plus the catch-all.
 11. Applied (Task 18). `esp_ot_br_server`: the Thread REST background worker `thread_rest` (`rest_process_task`,
    `src/esp_br_web_api.c`) is created with `xTaskCreatePinnedToCore(..., 1)` instead of `xTaskCreate`. Reason: it takes
    the OpenThread lock every 100 ms and was unpinned, so it could run on core 0 next to the network path; it belongs to
@@ -315,6 +316,22 @@ reason, spec reference.
 24. Applied (Thread console, Task 3). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 24 -> 27. `device_api`
    adds `GET`/`PUT /device/console` and the WebSocket `GET /device/console/ws`: 25 routes plus the catch-all, one slot
    of headroom. (docs/superpowers/specs/2026-11-04-thread-console-design.md)
+25. Applied (self-update, Task 1). `esp_ot_br_server` frontend, `frontend/static/firmware.js` and `frontend/firmware.html`:
+   the device downloads over https now (certificate bundle, `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y`).
+   `checkUpdateUrl` accepts `https://` as well as `http://` (message: "The URL must start with http:// or https://"),
+   both URL labels read "Download address (http or https)", and the placeholders are `https://host/...`. Tests:
+   `tools/tests/test_firmware_page.py` (`test_https_update_url_is_accepted`).
+26. Applied (self-update, Task 5). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 27 -> 30. `device_api`
+   adds `GET`/`POST /device/update`: 27 routes plus the catch-all (28), which 27 slots no longer cover. 30 leaves 2
+   slots of headroom. (docs/superpowers/plans/2026-11-05-self-update.md, Task 5)
+27. Applied (self-update, Task 6). `esp_ot_br_server` frontend, `frontend/firmware.html`, `frontend/static/firmware.js` and
+   `frontend/static/style.css`: the Updates card (`#updCard`, above `#firmwareSection`) shows the latest GitHub release from
+   `GET /device/update`, checks (`?check=true`, polled with the page's refresh timer) and installs (`POST /device/update`,
+   `?force=1` for a build newer than the release). `FirmwareLogic` gains `updateNeedsCheck`, `updateChip`, `versionRow`,
+   `checkedText`, `updateAction`, `updateHint`, `updateQuestion`, `checkFailedText`, `updateReplyText`, `repoLabel` (and
+   helpers); the page keeps `update:after` (`{rcpFailed}`) next to `ota:before` across the reload and reports through
+   `updMsg`. The manual Install buttons (`otaInstall`, `rcpInstall`) are `btn-outline`. `style.css`: `.facts .was`.
+   Tests: `tools/tests/test_firmware_page.py` (`TestUpdateLogic`, `TestUpdatesCard`).
 
 ### REST guard classification (patches 2 and 9)
 

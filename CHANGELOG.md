@@ -7,6 +7,16 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+### Added
+
+- Update from GitHub: the board checks the latest release (`versions.txt`) and installs it, the bundle first, then the
+  radio firmware when it differs, then one reboot. New `GET`/`POST /device/update` (`check=true`, `force=1`; see
+  `docs/api.md`) and an "Updates" card on the Firmware page that checks when the page opens, never in the background.
+  A dev build newer than the release can go back to it with "Install anyway". `/device/ota/url` and
+  `/device/radio/firmware?from_url=` now accept `https://` (verified against the built-in certificate bundle) and follow
+  redirects. Bundles are not signed; trust is TLS to GitHub. Test builds add the console command `update_source`. See
+  `docs/updates.md`. Not yet checked on a board.
+
 ## [0.4.0] - 2026-11-05
 
 ### Added

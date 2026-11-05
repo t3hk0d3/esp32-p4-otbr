@@ -35,6 +35,10 @@
 #include "mesh_scan.h"
 #include "metrics.h"
 #include "esp_br_http_ota.h"
+#include "self_update.h"
+#include "self_update_http.h"
+#include "self_update_priv.h"
+#include "update_json.h"
 #include "netcfg.h"
 #include "names_json.h"
 #include "console_json.h"
@@ -52,6 +56,10 @@ static const char *TAG = "device_api";
 #define WORKER_PRIORITY 5
 #define OTA_STACK 8192
 #define PUSH_STACK 10240
+// The versions.txt fetch keeps ~1.5 KB on the stack, on top of a TLS handshake.
+#define CHECK_STACK 8192
+// The install runs the versions.txt fetch, the bundle download and the radio push one after the other on this stack.
+#define UPDATE_STACK 12288
 #define PCAP_STACK 6144
 #define CHUNK_BYTES 4096
 // The 2 MB web slot erase inside esp_br_ota_write stalls the upload for seconds: a recv waits at least this long.
@@ -697,7 +705,7 @@ static void ota_task(void *arg)
     if (upload) {
         err = esp_br_ota_from_httpd(req);
     } else {
-        esp_http_client_config_t config = {.url = job->url, .timeout_ms = OTA_URL_TIMEOUT_MS};
+        esp_http_client_config_t config = self_update_http_config(job->url, OTA_URL_TIMEOUT_MS);
         err = esp_br_http_ota(&config);
     }
     if (err == ESP_OK) {
@@ -881,16 +889,24 @@ static esp_err_t body_source_read(void *ctx, size_t offset, void *buf, size_t le
 // Re-openable source: an HTTP GET through esp_http_client.
 typedef struct {
     esp_http_client_handle_t client;
+    const char *url; // the address asked for: a redirect leaves the client on a signed URL that expires
     int64_t length;
     size_t got;
 } url_source_t;
 
-// Open the connection and read the response headers. ESP_ERR_NOT_FOUND = reachable but not a usable 200.
+// Open the connection and read the response headers, following redirects (a release asset always redirects).
+// ESP_ERR_NOT_FOUND = reachable but not a usable 200.
 static esp_err_t url_source_open(url_source_t *src)
 {
-    ESP_RETURN_ON_ERROR(esp_http_client_open(src->client, 0), TAG, "connecting failed");
-    const int64_t length = esp_http_client_fetch_headers(src->client);
-    const int status = esp_http_client_get_status_code(src->client);
+    int status = 0;
+    const esp_err_t err = self_update_http_open(src->client, &status);
+
+    if (err != ESP_OK) {
+        esp_http_client_close(src->client);
+        ESP_LOGE(TAG, "connecting failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    const int64_t length = esp_http_client_get_content_length(src->client);
 
     if (status != 200) {
         esp_http_client_close(src->client);
@@ -914,6 +930,10 @@ static esp_err_t url_source_reopen(void *ctx)
     url_source_t *src = ctx;
 
     esp_http_client_close(src->client);
+    const esp_err_t err = esp_http_client_set_url(src->client, src->url);
+    if (err != ESP_OK) {
+        return err;
+    }
     return url_source_open(src);
 }
 
@@ -937,6 +957,29 @@ static esp_err_t url_source_read(void *ctx, size_t offset, void *buf, size_t len
     }
     src->got += n;
     return ESP_OK;
+}
+
+// Reply for a url_source_open failure; nothing was touched then.
+static device_api_error_t map_url_source_error(esp_err_t err)
+{
+    if (err == DEVICE_API_ERR_TOO_LARGE) {
+        return (device_api_error_t) {
+            413, "payload_too_large", "the image is larger than the C6 slot"
+        };
+    }
+    if (err == ESP_ERR_INVALID_SIZE) {
+        return (device_api_error_t) {
+            400, "length_required", "the URL gives no Content-Length"
+        };
+    }
+    if (err == ESP_ERR_NO_MEM) {
+        return (device_api_error_t) {
+            500, "no_memory", "out of memory"
+        };
+    }
+    return (device_api_error_t) {
+        502, "fetch_failed", err == ESP_ERR_NOT_FOUND ? "the URL did not answer 200" : "the URL is not reachable"
+    };
 }
 
 static void push_finish(httpd_req_t *req, const sock_timeouts_t *saved)
@@ -986,23 +1029,16 @@ static void push_task(void *arg)
             .total_size = req->content_len, .read = body_source_read, .ctx = &body_src
         };
     } else {
-        const esp_http_client_config_t config = {.url = job->url, .timeout_ms = HTTP_CLIENT_TIMEOUT_MS};
+        const esp_http_client_config_t config = self_update_http_config(job->url, HTTP_CLIENT_TIMEOUT_MS);
 
         url_src.client = esp_http_client_init(&config);
+        url_src.url = job->url;
         err = url_src.client ? url_source_open(&url_src) : ESP_ERR_NO_MEM;
         if (err != ESP_OK) {
             // Nothing was touched: the border router keeps running.
-            const char *why = err == ESP_ERR_NOT_FOUND ? "the URL did not answer 200"
-                              : err == ESP_ERR_INVALID_SIZE ? "the URL gives no Content-Length" : "the URL is not reachable";
-            if (err == DEVICE_API_ERR_TOO_LARGE) {
-                send_error(req, 413, "payload_too_large", "the image is larger than the C6 slot", false);
-            } else if (err == ESP_ERR_INVALID_SIZE) {
-                send_error(req, 400, "length_required", why, false);
-            } else if (err == ESP_ERR_NO_MEM) {
-                send_error(req, 500, "no_memory", "out of memory", false);
-            } else {
-                send_error(req, 502, "fetch_failed", why, false);
-            }
+            const device_api_error_t error = map_url_source_error(err);
+
+            send_mapped_error(req, error, error.detail, false);
             goto done;
         }
         source = (rcp_fw_source_t) {
@@ -1164,6 +1200,334 @@ static esp_err_t radio_log_get_handler(httpd_req_t *req)
 
     free(text);
     return err;
+}
+
+/* ---- GET/POST /device/update (self-update from the GitHub releases) ---- */
+
+#define UPDATE_BODY_MAX 1536
+#define UPDATE_REPLY_MAX 768
+#define UPDATE_DETAIL_MAX (URL_MAX + 64) // a reason and the URL asked for
+#define UPDATE_FLAG_MAX 8
+
+// A query flag: absent or `off` false, `on` true. False for anything else (the caller replies 400).
+static bool query_flag(httpd_req_t *req, const char *key, const char *on, const char *off, bool *value)
+{
+    char *query = request_query(req);
+    char text[UPDATE_FLAG_MAX];
+    const esp_err_t err = device_api_query_value(query, key, text, sizeof(text));
+
+    free(query);
+    if (err == ESP_ERR_NOT_FOUND) {
+        *value = false;
+        return true;
+    }
+    if (err != ESP_OK) {
+        return false;
+    }
+    *value = strcmp(text, on) == 0;
+    return *value || strcmp(text, off) == 0;
+}
+
+static esp_err_t send_update_state(httpd_req_t *req)
+{
+    char *body = malloc(UPDATE_BODY_MAX);
+    self_update_snapshot_t snap;
+    br_core_status_t bs;
+    esp_err_t err;
+
+    if (!body) {
+        return send_error(req, 500, "no_memory", "out of memory", false);
+    }
+    self_update_get(&snap);
+    br_core_get_status(&bs);
+    if (device_api_update_json(body, UPDATE_BODY_MAX, &snap, self_update_base(), esp_app_get_description()->version,
+                               bs.rcp_installed_known, bs.rcp_installed) < 0) {
+        err = send_error(req, 500, "internal", "update state does not fit its buffer", false);
+    } else {
+        err = send_json(req, body);
+    }
+    free(body);
+    return err;
+}
+
+static void release_check_slot(void *ctx)
+{
+    (void)ctx;
+    device_api_op_end(DEVICE_API_OP_UPDATE_CHECK);
+}
+
+// Waits for the handler's go (notification value 1: self_update_check_begin succeeded), runs the check, frees the slot.
+// Order: the slot is freed after the fetch but BEFORE the result is published, while the state still reads checking.
+// A check=true that arrives before the publish joins the running check; one that arrives after it finds the slot free
+// and starts a new check. With the old order (publish, then free) a request between the two got 409 busy.
+static void update_check_task(void *arg)
+{
+    uint32_t begun = 0;
+
+    xTaskNotifyWait(0, UINT32_MAX, &begun, portMAX_DELAY);
+    if (begun) {
+        self_update_check_run_then(release_check_slot, NULL);
+    } else {
+        device_api_op_end(DEVICE_API_OP_UPDATE_CHECK);
+    }
+#ifdef OTBR_TEST_BUILD
+    ESP_LOGI(TAG, "update check worker stack high water mark: %u of %d bytes free",
+             (unsigned)uxTaskGetStackHighWaterMark(NULL), CHECK_STACK);
+#endif
+    vTaskDelete(NULL);
+}
+
+// Start a check on a worker, or join the one that runs. ESP_ERR_INVALID_STATE: another long operation holds the slot.
+// The worker exists before the state moves to checking, so a failed task creation never leaves the cache "checking".
+static esp_err_t start_update_check(void)
+{
+    self_update_snapshot_t snap;
+    TaskHandle_t task = NULL;
+
+    self_update_get(&snap);
+    if (snap.state == SELF_UPDATE_CHECKING) {
+        return ESP_OK; // join: no slot, no second fetch
+    }
+    if (!device_api_op_try_begin(DEVICE_API_OP_UPDATE_CHECK)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (xTaskCreatePinnedToCore(update_check_task, "update_check", CHECK_STACK, NULL, WORKER_PRIORITY, &task,
+                                WORKER_CORE) != pdPASS) {
+        device_api_op_end(DEVICE_API_OP_UPDATE_CHECK);
+        return ESP_ERR_NO_MEM;
+    }
+    // Only holders of the slot begin a check, so this cannot fail; if it did, the worker just frees the slot.
+    xTaskNotify(task, self_update_check_begin() ? 1 : 0, eSetValueWithOverwrite);
+    return ESP_OK;
+}
+
+static esp_err_t update_get_handler(httpd_req_t *req)
+{
+    bool check;
+
+    if (!query_flag(req, "check", "true", "false", &check)) {
+        return send_error(req, 400, "invalid_request", "check must be true or false", false);
+    }
+    if (check) {
+        const esp_err_t err = start_update_check();
+
+        if (err == ESP_ERR_INVALID_STATE) {
+            return send_error(req, 409, "busy", device_api_op_busy_detail(DEVICE_API_OP_UPDATE_CHECK), false);
+        }
+        if (err != ESP_OK) {
+            return send_error(req, 500, "no_memory", "cannot start the update check task", false);
+        }
+    }
+    return send_update_state(req);
+}
+
+typedef struct {
+    httpd_req_t *req; // async copy
+    bool force;
+    self_update_release_t release;
+    char url[URL_MAX + 1]; // the asset being downloaded; esp_br_http_ota reads it while it runs
+    char detail[UPDATE_DETAIL_MAX];
+    char body[UPDATE_REPLY_MAX];
+} update_job_t;
+
+// Bundle step: the release's otbr.bundle through esp_br_http_ota (which follows the redirect). On failure the reply
+// error is in *error and job->detail names the URL.
+static esp_err_t update_bundle(update_job_t *job, device_api_error_t *error)
+{
+    esp_err_t err = self_update_asset_url(self_update_base(), job->release.tag, "otbr.bundle", job->url, sizeof(job->url));
+    const bool url_failed = err != ESP_OK;
+
+    if (!url_failed) {
+        esp_http_client_config_t config = self_update_http_config(job->url, OTA_URL_TIMEOUT_MS);
+
+        err = esp_br_http_ota(&config);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "update: bundle failed: %s (%s)", esp_err_to_name(err), job->url);
+        // POST /device/update takes no arguments, so the OTA mapping's 400s do not fit: an asset URL that does not
+        // fit its buffer is our fault (500), a redirect without Location is the server's (502).
+        if (url_failed) {
+            *error = (device_api_error_t) {
+                500, "internal", NULL
+            };
+        } else if (err == ESP_ERR_INVALID_ARG) {
+            *error = (device_api_error_t) {
+                502, "transfer_failed", NULL
+            };
+        } else {
+            *error = device_api_map_ota_error(err);
+        }
+        snprintf(job->detail, sizeof(job->detail), "%s (%s)", error->detail ? error->detail : esp_err_to_name(err),
+                 job->url);
+    }
+    return err;
+}
+
+// RCP step: the release's c6_rcp.bin through url_source_* and br_core_push_radio_firmware. On failure the reply error
+// (as POST /device/radio/firmware?from_url gives it) is in *error and job->detail says why.
+static esp_err_t update_rcp(update_job_t *job, device_api_error_t *error)
+{
+    url_source_t src = {0};
+    esp_err_t err = self_update_asset_url(self_update_base(), job->release.tag, "c6_rcp.bin", job->url, sizeof(job->url));
+
+    if (err != ESP_OK) {
+        *error = (device_api_error_t) {
+            500, "internal", NULL
+        };
+        strlcpy(job->detail, "the radio firmware URL does not fit its buffer", sizeof(job->detail));
+        return err;
+    }
+    const esp_http_client_config_t config = self_update_http_config(job->url, HTTP_CLIENT_TIMEOUT_MS);
+
+    src.client = esp_http_client_init(&config);
+    src.url = job->url;
+    err = src.client ? url_source_open(&src) : ESP_ERR_NO_MEM;
+    if (err != ESP_OK) {
+        *error = map_url_source_error(err);
+        snprintf(job->detail, sizeof(job->detail), "%s (%s)", error->detail, job->url);
+    } else {
+        const rcp_fw_source_t source = {
+            .total_size = (size_t)src.length, .read = url_source_read, .reopen = url_source_reopen, .ctx = &src,
+        };
+
+        job->detail[0] = '\0';
+        cancel_scan(); // the push tears OpenThread down
+        err = br_core_push_radio_firmware(&source, job->detail, sizeof(job->detail));
+        if (err != ESP_OK) {
+            *error = device_api_map_push_error(err);
+            if (job->detail[0] == '\0') {
+                strlcpy(job->detail, error->detail ? error->detail : esp_err_to_name(err), sizeof(job->detail));
+            }
+        }
+    }
+    if (src.client) {
+        esp_http_client_cleanup(src.client);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "update: radio firmware failed: %s (%s)", esp_err_to_name(err), job->detail);
+    }
+    return err;
+}
+
+// The install: a fresh check, the decision, the bundle, then the radio firmware (design decision 4). Sends the reply;
+// returns true when the bundle was committed (the caller reboots, the slot stays taken).
+static bool run_update(update_job_t *job)
+{
+    httpd_req_t *req = job->req;
+    const self_update_release_t *rel = &job->release;
+    device_api_error_t error;
+    br_core_status_t bs;
+    bool install_app;
+    bool install_rcp;
+
+    if (self_update_fetch_release(&job->release, job->detail, sizeof(job->detail)) != ESP_OK) {
+        send_error(req, 502, "check_failed", job->detail, false);
+        return false;
+    }
+    br_core_get_status(&bs);
+    error = device_api_update_decide(self_update_compare(rel->app, esp_app_get_description()->version),
+                                     self_update_rcp_differs(rel->rcp, bs.rcp_installed, bs.rcp_installed_known),
+                                     rel->rcp[0] != '\0', job->force, &install_app, &install_rcp);
+    if (error.http_status != 0) {
+        send_mapped_error(req, error, error.detail, false);
+        return false;
+    }
+    const br_core_mode_t mode = br_core_get_mode();
+
+    if (install_rcp && (mode == BR_MODE_SNIFFER || mode == BR_MODE_STARTING)) {
+        // Before the bundle: the push would be refused, and nothing is changed yet.
+        send_error(req, 409, "busy", mode == BR_MODE_SNIFFER ? "a capture is running" : "the border router is starting", false);
+        return false;
+    }
+    ESP_LOGI(TAG, "update to %s: app %s, radio firmware %s", rel->tag[0] ? rel->tag : "the latest release",
+             install_app ? "yes" : "no", install_rcp ? "yes" : "no");
+    if (install_app && update_bundle(job, &error) != ESP_OK) {
+        send_mapped_error(req, error, job->detail, false); // nothing was changed
+        return false;
+    }
+    const char *rcp_result = "unchanged";
+
+    if (install_rcp) {
+        if (update_rcp(job, &error) == ESP_OK) {
+            rcp_result = "installed";
+        } else if (!install_app) {
+            send_mapped_error(req, error, job->detail, false); // a failed push leaves the old radio firmware running
+            return false;
+        } else {
+            rcp_result = "failed"; // the committed bundle still boots; the next update pushes the radio firmware only
+        }
+    }
+    // A failed radio step keeps its reason in job->detail (the page shows it after the reboot).
+    if (!install_app) {
+        strlcpy(job->detail, "radio firmware installed", sizeof(job->detail));
+    } else if (strcmp(rcp_result, "failed") != 0) {
+        strlcpy(job->detail, install_rcp ? "update and radio firmware installed, rebooting" : "update installed, rebooting",
+                sizeof(job->detail));
+    }
+    if (device_api_update_reply_json(job->body, sizeof(job->body), install_app, rcp_result, job->detail, install_app) < 0) {
+        send_error(req, 500, "internal", "reply does not fit its buffer", false);
+    } else {
+        send_json(req, job->body);
+    }
+    return install_app;
+}
+
+static void update_task(void *arg)
+{
+    update_job_t *job = arg;
+    httpd_req_t *req = job->req;
+    sock_timeouts_t saved;
+
+    set_socket_timeouts(req, LONG_RECV_TIMEOUT_S, SEND_TIMEOUT_S, &saved);
+    const bool rebooting = run_update(job);
+
+    if (rebooting) {
+        finish_request(req, &saved);
+        schedule_reboot(REBOOT_DELAY_MS); // the slot stays taken: the update waits for its reboot
+    } else {
+        // Free the slot before the reply goes out: a page that sends GET ?check=true on the reply must not get 409.
+        device_api_op_end(DEVICE_API_OP_OTA);
+        finish_request(req, &saved);
+    }
+#ifdef OTBR_TEST_BUILD
+    ESP_LOGI(TAG, "update worker stack high water mark: %u of %d bytes free",
+             (unsigned)uxTaskGetStackHighWaterMark(NULL), UPDATE_STACK);
+#endif
+    free(job);
+    vTaskDelete(NULL);
+}
+
+// Held until the install finishes, like POST /device/ota/url. The OTA slot covers both steps.
+static esp_err_t update_post_handler(httpd_req_t *req)
+{
+    bool force;
+
+    if (req->content_len != 0) {
+        return send_error(req, 400, "invalid_request", "the request takes no body", true);
+    }
+    if (!query_flag(req, "force", "1", "0", &force)) {
+        return send_error(req, 400, "invalid_request", "force must be 0 or 1", false);
+    }
+    if (!device_api_op_try_begin(DEVICE_API_OP_OTA)) {
+        return send_error(req, 409, "busy", device_api_op_busy_detail(DEVICE_API_OP_OTA), false);
+    }
+    update_job_t *job = calloc(1, sizeof(*job));
+    httpd_req_t *async_req = NULL;
+
+    if (!job || httpd_req_async_handler_begin(req, &async_req) != ESP_OK) {
+        free(job);
+        device_api_op_end(DEVICE_API_OP_OTA);
+        return send_error(req, 500, "internal", "cannot start the update", false);
+    }
+    job->req = async_req;
+    job->force = force;
+    if (xTaskCreatePinnedToCore(update_task, "update", UPDATE_STACK, job, WORKER_PRIORITY, NULL, WORKER_CORE) != pdPASS) {
+        send_error(async_req, 500, "no_memory", "cannot start the update task", false);
+        httpd_req_async_handler_complete(async_req);
+        free(job);
+        device_api_op_end(DEVICE_API_OP_OTA);
+    }
+    return ESP_OK;
 }
 
 /* ---- /device/network (spec 5.13) ---- */
@@ -1657,6 +2021,8 @@ esp_err_t device_api_register(httpd_handle_t server)
         {"/device/sniffer", HTTP_DELETE, sniffer_delete_handler},
         {"/device/ota", HTTP_POST, ota_post_handler},
         {"/device/ota/url", HTTP_POST, ota_url_post_handler},
+        {"/device/update", HTTP_GET, update_get_handler},
+        {"/device/update", HTTP_POST, update_post_handler},
         {"/device/radio/firmware", HTTP_POST, radio_firmware_post_handler},
         {"/device/radio/recover", HTTP_POST, radio_recover_post_handler},
         {"/device/radio/log", HTTP_GET, radio_log_get_handler},
