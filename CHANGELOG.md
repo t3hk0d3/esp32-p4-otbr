@@ -7,6 +7,8 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-05
+
 ### Added
 
 - Device info in the topology scan and on the Topology page: vendor name, model and software version, Thread stack
@@ -25,6 +27,11 @@ release's `versions.txt`.
   Management (desktop and phone) and from a shell with `websocat`. Off by default (`GET`/`PUT /device/console`); one
   session at a time, the board stays a border router, risky commands ask first on the page. OpenThread's CLI now
   runs in release images too (it was set up only in test builds). See `docs/api.md`, "Thread console".
+- TREL visibility: the Ethernet page's TREL card lists border routers of other Thread networks apart (extended PAN ID,
+  "other" chip, `peers_other`, `br_trel_peers_other`; never used) and shows each neighbour's 15.4 and TREL preference
+  as a percentage, red when TREL is losing to the radio. The Topology map draws this board's TREL links as dashed
+  curves through the home network box, and links of this board carry `transport` in `GET /device/topology`. See
+  `docs/networking.md`.
 - Documentation site on GitHub Pages (<https://t3hk0d3.github.io/esp32-p4-otbr/>), built from `docs/` and `README.md`
   with Material for MkDocs: a landing page, the docs, and a browser flasher page (ESP Web Tools) that writes the P4
   firmware of the latest release over USB from Chrome or Edge. `make docs`, `make docs-serve`, `make docs-firmware`; see
@@ -160,7 +167,8 @@ on-board ESP32-C6 as the radio co-processor over SPI.
 
 See `docs/troubleshooting.md` for the full list.
 
-[Unreleased]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.1.0...v0.2.0
