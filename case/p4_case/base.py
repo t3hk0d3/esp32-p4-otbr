@@ -137,34 +137,6 @@ def _header_slot() -> Part:
     )
 
 
-def _ribbon_recesses() -> Part:
-    r = P.RIBBON_RECESS
-    ix0, ix1, _, iy1 = P.INNER
-    z0, z1 = 0.0, P.RIBBON_RECESS_TOP
-    # the ceiling slopes back to the wall face, so it prints without support
-    rise = z1 + P.RECESS_CHAMFER_RISE * r
-    y0, y1 = P.RIBBON_RECESS_Y0, iy1 + r
-    cuts = [rounded_block(ix0 - r, ix1 + r, y0, y1, z0, z1, P.RIBBON_RECESS_CORNER_R)]
-    for face_x, out in ((ix0, -1), (ix1, 1)):
-        pts = [
-            (face_x - out * EPS, z0),
-            (face_x + out * r, z0),
-            (face_x + out * r, z1),
-            (face_x - out * EPS, rise),
-        ]
-        prism = extrude(Plane.XZ * Polygon(*pts, align=None), (y1 - y0) / 2, both=True)
-        cuts.append(Pos(0, (y0 + y1) / 2, 0) * prism)
-    pts = [(iy1 - EPS, z0), (iy1 + r, z0), (iy1 + r, z1), (iy1 - EPS, rise)]
-    x0, x1 = ix0 - r, ix1 + r
-    prism = extrude(Plane.YZ * Polygon(*pts, align=None), (x1 - x0) / 2, both=True)
-    cuts.append(Pos((x0 + x1) / 2, 0, 0) * prism)
-    # keep the recess inside its rounded outline, so the wall stays 1 mm thick round the outer corners
-    keep = rounded_block(
-        ix0 - r, ix1 + r, y0, y1, z0 - 1, rise + 1, P.RIBBON_RECESS_CORNER_R
-    )
-    return (Part() + cuts) & keep
-
-
 def _buttons() -> Part:
     a, b = FACTS["button_a"], FACTS["button_b"]
     m = P.BUTTON_RECESS_MARGIN
@@ -223,7 +195,6 @@ def build_base() -> Part:
     part -= _keyholes()
     part -= _cable_wall_openings()
     part -= _header_slot()
-    part -= _ribbon_recesses()
     part -= _buttons()
     part -= _sma()
     part -= _dents()
