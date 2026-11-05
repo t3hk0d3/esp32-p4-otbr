@@ -34,6 +34,7 @@ STATUS_KEYS = {
     "sniffer",
     "fault_reason",
     "storage_ok",
+    "trel",
 }
 CHANNEL = 15
 RCP_OFFSET_MID = 100_000

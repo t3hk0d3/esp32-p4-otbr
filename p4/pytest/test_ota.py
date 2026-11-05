@@ -1,8 +1,9 @@
 """Paired bundle OTA by URL (BDD: esp_br_http_ota patched core; spec 5.6). Deferred to V2: written with Task 13.
 
 The test build's console command `ota_url <url>` calls esp_br_http_ota against an in-process HTTP server on the host.
-The bundle holds a marker web image (`slot.txt`) and the app image of the running build, so a successful update flips
-the running slot and serves the marker from /web. Failing updates must leave the boot partition and /web untouched.
+The bundle holds the build's web UI with a marker (`slot.txt`) and the app image of the running build, so a successful
+update flips the running slot and serves the marker from /web (and the pages, for the tests that run after it). Failing
+updates must leave the boot partition and /web untouched.
 """
 
 import importlib.util
@@ -107,10 +108,10 @@ def host_address_towards(board_ip):
 
 
 @pytest.fixture
-def bundle_server(dut, board_ip, spiffs_image_for, tmp_path):
+def bundle_server(dut, board_ip, spiffs_image, tmp_path):
     # A fresh marker per test: the previous test's successful update left its own marker in the slot now running.
     marker = f"{MARKER_PREFIX}-{uuid.uuid4().hex}"
-    web_image = spiffs_image_for("web_0", {"slot.txt": marker.encode()})
+    web_image = spiffs_image({"slot.txt": marker})
     out = tmp_path / "otbr.bundle"
     make_bundle = load_make_bundle()
     assert (

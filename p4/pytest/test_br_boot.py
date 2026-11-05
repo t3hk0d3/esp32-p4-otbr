@@ -15,6 +15,7 @@ CONSOLE_TIMEOUT_S = 10
 LEADER_TIMEOUT_S = 90
 ATTACH_TIMEOUT_S = 120
 PD_DISABLED = 0
+PD_TIMEOUT_S = 10
 BR_STATUS = (
     rb"br_status: mode=(\w+) installed=(\S*) known=(\d) compatible=(\d) dataset=(\d) channel=(\d+) pd=(-?\d+)"
     rb" prefix=(\S*) fault=([^\r\n]*)"
@@ -90,10 +91,13 @@ class TestBoot:
         assert any("bytes from" in line for line in reply), reply
 
     def test_stored_dataset_enables_dhcpv6_pd(self, dut, stored_dataset):
-        # On stored active dataset and Ethernet address: enables DHCPv6-PD.
-        dut.expect(rb"br_core: DHCPv6-PD enabled", timeout=BOOT_TIMEOUT_S)
+        # On stored active dataset and Ethernet address: enables DHCPv6-PD. The routing hook (route method `pd`)
+        # switches it on without a log line, so br_status is polled.
         dut.expect(rb"mode_fsm: mode BR_RUNNING", timeout=BOOT_TIMEOUT_S)
-        assert br_status(dut)["pd"] != PD_DISABLED
+        deadline = time.monotonic() + PD_TIMEOUT_S
+        while br_status(dut)["pd"] == PD_DISABLED:
+            assert time.monotonic() < deadline, "DHCPv6-PD stayed disabled"
+            time.sleep(1)
 
     def test_stored_dataset_enters_br_running(self, dut, stored_dataset):
         # On stored active dataset and Ethernet address: enters BR_RUNNING.
@@ -248,11 +252,11 @@ class TestBootRadioFault:
         self, dut, c6_held_in_reset
     ):
         # Test console `ot` while OpenThread does not run: answers Error 13 instead of crashing on OpenThread's
-        # missing task queue, and the console keeps working.
+        # missing task queue, names the mode, and the console keeps working.
         dut.expect(rb"mode_fsm: mode RADIO_FAULT", timeout=BOOT_TIMEOUT_S)
         dut.write("ot state")
         dut.expect(
-            rb"Error 13: InvalidState \(OpenThread not running\)",
+            rb"Error 13: InvalidState \(OpenThread not running, mode RADIO_FAULT\)",
             timeout=CONSOLE_TIMEOUT_S,
         )
         assert br_status(dut)["mode"] == "RADIO_FAULT"

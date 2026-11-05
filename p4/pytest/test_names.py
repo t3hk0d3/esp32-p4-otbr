@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 import requests
-from conftest import wait_ot_state
+from conftest import BOOT_TIMEOUT_S, GOT_IP, wait_ot_state, wait_reachable
 from test_br_boot import MDNS_IMAGE, MDNS_NETWORK
 from test_vlan import (  # noqa: F401  (rig, split_board, to_split_trial: fixtures of the VLAN rig)
     http_from,
@@ -145,13 +145,16 @@ class TestNamesApi:
             assert response.json()["error"] == "invalid_config"
             assert response.json()["field"] == field
 
-    def test_values_survive_a_reboot(self, http, board_ip, reboot, default_names):
-        # On a saved set of names and a reboot: GET returns them.
+    def test_values_survive_a_reboot(self, dut, http, board_ip, reboot, default_names):
+        # On a saved set of names and a reboot: GET returns them. The reboot returns at the ROM banner; the board
+        # answers only after its new DHCP lease (about 14 s in).
         put_names(
             http, hostname="names-reboot", dhcp_name="names-router", http_advert=True
         )
         reboot()
-        body = http.get("/device/names").json()
+        address = dut.expect(GOT_IP, timeout=BOOT_TIMEOUT_S).group(1).decode()
+        wait_reachable(address)
+        body = requests.get(f"http://{address}/device/names", timeout=10).json()
         assert (body["hostname"], body["dhcp_name"], body["http_advert"]) == (
             "names-reboot",
             "names-router",

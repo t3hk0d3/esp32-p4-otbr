@@ -14,6 +14,7 @@ from test_br_boot import br_status
 
 CHANNEL = 15
 RACE_ROUNDS = 50
+BACK_TO_BR_S = 60
 WRITE_OK = {200, 201, 204}
 REFUSED = {
     409,
@@ -138,6 +139,7 @@ class TestRestGuard:
     ):
         # mode change racing a write, On PUT /node/dataset/active issued while sniffer starts: either the write
         # completes before SNIFFER or it is refused (409, or 503 within the transition); dataset unchanged during SNIFFER (Review Focus 3).
+        # The console refuses `ot` in SNIFFER, so the stored dataset is read once the board is back in BR_RUNNING.
         for round_no in range(RACE_ROUNDS):
             name = f"race{round_no:03d}"
             before = active_network_name(dut)
@@ -155,15 +157,16 @@ class TestRestGuard:
             stream = start_capture(base_url, CHANNEL)
             writer.join(timeout=60)
             assert result["status"] in WRITE_OK | {409, 503}, (round_no, result)
-            during = active_network_name(dut)
-            if result["status"] in REFUSED:
-                assert during == before, (round_no, before, during)
-            else:
-                assert during == name, (round_no, name, during)
-            # Whatever happened, the sniffer now refuses every further write and the dataset stays as it is.
+            # Whatever happened, the sniffer now refuses every further write.
             late = requests.put(
                 base_url + "/node/dataset/active", json=dataset_body("late"), timeout=10
             )
             assert late.status_code == 409, round_no
-            assert active_network_name(dut) == during, round_no
             stop_capture(base_url, stream)
+            dut.expect(rb"mode_fsm: mode SNIFFER", timeout=BACK_TO_BR_S)
+            dut.expect(rb"mode_fsm: mode BR_RUNNING", timeout=BACK_TO_BR_S)
+            after = active_network_name(dut)
+            if result["status"] in REFUSED:
+                assert after == before, (round_no, before, after)
+            else:
+                assert after == name, (round_no, name, after)
