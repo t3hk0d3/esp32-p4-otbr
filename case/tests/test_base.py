@@ -23,9 +23,9 @@ class TestDefaultBase:
         assert len(base.solids()) == 1
         assert base.is_valid
 
-    def test_has_the_outer_size_60_by_75_by_27_6(self, base):
+    def test_has_the_outer_size_62_by_75_by_27_6(self, base):
         bb = base.bounding_box()
-        assert bb.size.X == pytest.approx(60.0, abs=0.1)
+        assert bb.size.X == pytest.approx(62.0, abs=0.1)
         assert bb.size.Y == pytest.approx(75.0, abs=0.1)
         assert bb.size.Z == pytest.approx(27.6, abs=0.1)
         assert bb.min.Z == pytest.approx(board_z(0.0), abs=0.01)
@@ -88,13 +88,24 @@ class TestDefaultBase:
         assert solid_bz(base, -0.7, 25.0, 1.4)  # no recess away from the buttons
 
     def test_has_the_sma_d_hole_at_y_52(self, base):
-        x = P.INNER[1] + 1.0
+        x = P.INNER[1] + 1.0  # inside the wall, behind the knock-out
         zc = board_z(P.SMA_CASE_Z)
         assert not solid_bz(base, x, P.SMA_Y, zc)
         assert not solid_bz(base, x, P.SMA_Y, zc - 3.1)
         assert not solid_bz(base, x, P.SMA_Y, zc + 2.5)
         assert solid_bz(base, x, P.SMA_Y, zc + 2.8)  # the flat
         assert solid_bz(base, x, P.SMA_Y + 3.5, zc)
+
+    def test_makes_the_whole_sma_side_wall_4_mm_thick(self, base):
+        x = P.INNER[1] + P.SMA_WALL - 0.2
+        for y in (5.0, 35.0, 65.0):
+            assert solid_bz(base, x, y, 10.0)
+        assert not solid_bz(base, P.INNER[1] + P.SMA_WALL + 0.1, 35.0, 10.0)
+
+    def test_closes_the_sma_hole_with_a_one_line_knock_out(self, base):
+        zc = board_z(P.SMA_CASE_Z)
+        assert solid_bz(base, P.OUTER[1] - P.SMA_KNOCKOUT_T / 2, P.SMA_Y, zc)
+        assert not solid_bz(base, P.OUTER[1] - P.SMA_KNOCKOUT_T - 0.1, P.SMA_Y, zc)
 
     def test_has_1_mm_ribbon_plug_recesses_leaving_1_mm_of_wall(self, base):
         z = 8.0  # board Z, within the plug height
