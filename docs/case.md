@@ -119,7 +119,9 @@ After a change, run `make case` again. Its checks catch a change that breaks a f
 
 ## Limits
 
-- The fit is checked against Waveshare's 3D model (`ESP32-P4-WIFI6-POE-ETH_3d-20251213`), not yet against a printed case
-  with a real board.
+- The fit is checked automatically against Waveshare's 3D model (`ESP32-P4-WIFI6-POE-ETH_3d-20251213`) and was tested
+  on a printed case (PETG) with a real board: the board, every connector, the microSD card, both buttons, the SMA
+  antenna and the lid all fit. The changes from that print (screw pilots, the 4 mm SMA wall, the knock-out, the scoop
+  above the card slot, the walls at the 40-pin end) came from it.
 - The camera and display ribbon sockets, the two 4-pin sockets and the battery socket stay covered.
 - The power LED stays covered by the lid's frame.

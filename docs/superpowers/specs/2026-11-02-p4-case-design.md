@@ -1,6 +1,6 @@
 # 3D-printable case for the ESP32-P4-WIFI6-POE-ETH board: design
 
-Date: 2026-11-02. Status: draft for review.
+Date: 2026-11-02. Status: implemented; fit tested on a printed case with a real board.
 
 ## 1. Purpose and scope
 
