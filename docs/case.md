@@ -73,8 +73,11 @@ make case-test    # the model's tests (about 1.5 min)
    slightly and slide it toward the cable wall so the USB and RJ45 go into their holes, then let it settle onto the
    standoffs. Drive the four M2.5 screws from the top through the board into the standoffs. Go gently on the first
    turn: the screw cuts its own thread in the plastic.
-2. **SMA:** clip the pigtail onto the board's antenna socket. Push the SMA bulkhead out through the D-hole in the right
-   wall from inside, and tighten its nut on the outside.
+2. **SMA (optional):** the D-hole in the right wall is closed on the outside by a thin knock-out skin, so the case
+   stays closed when you use an in-case antenna. To fit an SMA antenna, cut the skin out along the hole's edge with a
+   craft knife. Clip the pigtail onto the board's antenna socket, push the SMA bulkhead out through the hole from
+   inside, and tighten its nut on the outside. The wall is 4 mm thick on this side, so the antenna can't lever it
+   apart.
 3. **Header wiring (optional):** plug jumper wires or a 2×20 ribbon plug onto the 40-pin header and lead the wires out
    through the slot in the header-end wall. The way in under the lid is 3.5 mm tall.
 4. **Lid:** set it on so the four corner tabs drop into the corners, and press until it clicks.

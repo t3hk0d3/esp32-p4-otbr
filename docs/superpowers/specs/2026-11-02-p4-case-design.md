@@ -91,16 +91,16 @@ the result.
 | Opening the lid | lever it up through the grille with a small flat screwdriver; no pry cut-outs in this revision |
 | Board fixing | four M2.5 × 6 pan-head screws from the top, through the board into Ø6 × 5 mm standoffs with Ø2.2 pilot holes, where they cut their own thread (print feedback: the first Ø2.8 hole only gripped thick screws). The countersinks in the back plate stay, so countersunk screws with nuts from the back still work if the pilot is drilled out |
 | Board fitting | the board drops straight in from the open top, about 1.7 mm toward the header end, then slides forward (lifted 0.5 mm) so the USB and RJ45 go into their cable-wall holes, and settles onto the standoffs |
-| SMA | D-hole in the right (X = 55) wall; fitted after the board: the pigtail clips onto the board, the bulkhead goes out through the wall from inside, nut tightened outside |
+| SMA | D-hole in the right (X = 55) wall, closed on the outside by a 0.45 mm knock-out (one extrusion line) that is cut out with a knife when an SMA is fitted; fitted after the board: the pigtail clips onto the board, the bulkhead goes out through the wall from inside, nut tightened outside |
 | 40-pin header | wiring (jumpers or a ribbon cable) leaves through a slot along the top of the header-end wall; no opening in the lid over the header |
 | Wall mounting | two L-shaped keyholes in the flat back plate, 32 mm apart, for either orientation |
 | Table | lies on its back; stick-on rubber feet optional, not modelled |
 | Cooling | honeycomb lid (about 60% open over the grille area) plus the header-end slot; no vents in the back plate or side walls |
 | Buttons | Ø2.5 pin-holes in the left wall on the plunger axes; a finger can't reach the plunger |
-| Wall / plate thickness | 2.0 mm; lid plate 2.0 mm |
+| Wall / plate thickness | 2.0 mm, except the SMA side wall: 4.0 mm, grown outward (the antenna levers on it; print feedback); lid plate 2.0 mm |
 | Clearance board ↔ inner wall | 0.5 mm, with a local recess at the buttons (see 5.2) |
 | Clearance over the tallest part | 1.0 mm (lid underside at board Z 17.0); the extra 0.5 mm leaves 1 mm of wall above the USB opening |
-| Outer size | about 60 × 75 × 27.6 mm |
+| Outer size | about 62 × 75 × 27.6 mm |
 | Printing | FDM, 0.4 mm nozzle, PETG recommended (the tabs flex), PLA acceptable; no supports; base prints back-plate down, lid prints top-face down |
 
 ## 5. Geometry
@@ -238,8 +238,8 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 
 1. Lower the board flat, pushed toward the header end, slide it forward so the USB and RJ45 go into their cable-wall
    holes, and let it settle onto the standoffs. Drive four M2.5 × 6 screws from the top into the standoffs' pilot holes.
-2. Clip the pigtail onto the antenna socket, push the SMA bulkhead out through the right wall from inside, and tighten
-   its nut on the outside.
+2. If an SMA antenna is used: cut out the knock-out, clip the pigtail onto the antenna socket, push the SMA bulkhead out
+   through the right wall from inside, and tighten its nut on the outside.
 3. Optional: plug wiring onto the 40-pin header and lead it out through the header-end slot.
 4. Set the lid on so the corner tabs drop into the corners, and press until the four tabs click.
 5. To open: lever the lid up through the grille with a small flat screwdriver, near a tab.

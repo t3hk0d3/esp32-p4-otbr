@@ -27,7 +27,9 @@ PCB_X1, PCB_Y1 = 55.0, 68.0
 # cable wall (outer length 75 mm)
 HEADER_GAP = 2.5
 INNER = (-GAP, PCB_X1 + GAP, -GAP, PCB_Y1 + HEADER_GAP)  # x0, x1, y0, y1
-OUTER = (INNER[0] - WALL, INNER[1] + WALL, INNER[2] - WALL, INNER[3] + WALL)
+# the SMA side wall is twice as thick: the antenna levers on it (print feedback); it grows outward, the board is inside
+SMA_WALL = 4.0
+OUTER = (INNER[0] - WALL, INNER[1] + SMA_WALL, INNER[2] - WALL, INNER[3] + WALL)
 INNER_R = 2.0 + GAP  # board corner radius 2 + gap
 OUTER_R = 2.5  # outer vertical edges; concentric with the ribbon recess corners at the header end
 PLATE_T = 2.0  # case Z 0-2
@@ -95,6 +97,7 @@ SMA_Y = 52.0
 SMA_CASE_Z = 17.6
 SMA_D = 6.5
 SMA_FLAT = 5.9  # across the flat; the flat is on top
+SMA_KNOCKOUT_T = 0.45  # one extrusion line left over the hole at the outer face; cut it out to fit the SMA
 
 # --- lid and tabs (5.3) ---
 # 2.0: 1 mm body inside the walls + 1 mm flange in the rebate

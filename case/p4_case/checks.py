@@ -148,8 +148,13 @@ def opening_paths_spec() -> dict[str, Part]:
             board_z(P.HEADER_SLOT_BOTTOM) + 0.05,
             board_z(P.LID_UNDERSIDE) - 0.05,
         ),
+        # up to the knock-out, which is cut out by hand when an SMA is fitted
         "SMA": _x_rod(
-            P.SMA_Y, board_z(P.SMA_CASE_Z), 5.0, P.INNER[1] - 1, P.OUTER[1] + 2
+            P.SMA_Y,
+            board_z(P.SMA_CASE_Z),
+            5.0,
+            P.INNER[1] - 1,
+            P.OUTER[1] - P.SMA_KNOCKOUT_T - 0.05,
         ),
     }
     for key in ("button_a", "button_b"):
