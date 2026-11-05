@@ -41,7 +41,7 @@ make case-test    # the model's tests (about 1.5 min)
 - clearance to the board is at least 0.3 mm;
 - every opening has a clear path to its part;
 - the board can be fitted (drop in, slide forward, settle);
-- the lid clears the SMA, a ribbon plug and its ribbon;
+- the lid clears the SMA, a ribbon plug and its ribbon, and a ribbon plug has headroom under the lid;
 - the screw heads have room behind the keyholes, and the board screws' heads have room on top;
 - the lid seats on the base without overlap;
 - no opening is wider than 3.5 mm;

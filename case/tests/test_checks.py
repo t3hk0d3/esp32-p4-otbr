@@ -89,11 +89,11 @@ class TestLidClearance:
         assert r.ok, r.detail
 
 
-class TestRibbonPlugFit:
-    """checks.ribbon_plug_fit: On the default base"""
+class TestRibbonPlugHeadroom:
+    """checks.ribbon_plug_headroom: On default parameters"""
 
-    def test_fits_the_plug_with_0_5_mm_to_the_walls_and_1_3_mm_headroom(self, results):
-        r = results["ribbon plug fits"]
+    def test_leaves_1_3_mm_under_the_lid(self, results):
+        r = results["ribbon plug has headroom"]
         assert r.ok, r.detail
 
 

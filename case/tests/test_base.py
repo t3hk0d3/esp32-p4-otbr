@@ -107,18 +107,10 @@ class TestDefaultBase:
         assert solid_bz(base, P.OUTER[1] - P.SMA_KNOCKOUT_T / 2, P.SMA_Y, zc)
         assert not solid_bz(base, P.OUTER[1] - P.SMA_KNOCKOUT_T - 0.1, P.SMA_Y, zc)
 
-    def test_has_1_mm_ribbon_plug_recesses_leaving_1_mm_of_wall(self, base):
-        z = 8.0  # board Z, within the plug height
-        assert not solid_bz(base, P.INNER[0] - 0.5, 63.0, z)
-        assert solid_bz(base, P.INNER[0] - 1.5, 63.0, z)
-        assert not solid_bz(base, P.INNER[1] + 0.5, 63.0, z)
-        assert not solid_bz(base, 27.5, P.INNER[3] + 0.5, z)
-        assert solid_bz(base, 27.5, P.INNER[3] + 1.5, z)
-        # no recess away from the header
-        assert solid_bz(base, P.INNER[0] - 0.5, 40.0, z)
-        top = P.RIBBON_RECESS_TOP
-        assert not solid_bz(base, 27.5, P.INNER[3] + 0.3, top + 0.5)  # sloped ceiling
-        assert solid_bz(base, 27.5, P.INNER[3] + 0.9, top + 0.5)
+    def test_keeps_the_side_walls_full_thickness_at_the_header_end(self, base):
+        for x in (P.INNER[0] - 0.5, P.INNER[1] + 0.5):
+            for z in (2.0, 8.0, 12.0):
+                assert solid_bz(base, x, 63.0, z)
 
     def test_keeps_the_header_end_outer_corners_closed(self, base):
         ox0, ox1, _, oy1 = P.OUTER

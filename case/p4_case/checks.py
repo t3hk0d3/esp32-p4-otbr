@@ -328,15 +328,21 @@ def lid_clearance(board: BoardModel, lid: Part) -> list[CheckResult]:
     return results
 
 
-def ribbon_plug_fit(base: Part) -> CheckResult:
-    """A 2×20 IDC plug on the header fits with 0.5 mm to the walls and leaves 1.3 mm for the ribbon under the lid."""
-    walls = _intersection(ribbon_plug_block(grow=0.5), base)
+RIBBON_HEADROOM = (
+    1.3  # mm between a ribbon plug's top and the lid's underside, for the ribbon's bend
+)
+
+
+def ribbon_plug_headroom() -> CheckResult:
+    """A 2×20 IDC plug on the header leaves room under the lid for its ribbon to bend toward the header slot.
+
+    Its 55.9 mm length fits the 56 mm cavity snugly; the walls are not recessed for it (print feedback).
+    """
     headroom = board_z(P.LID_UNDERSIDE) - (P.HEADER_BODY_TOP + P.RIBBON_PLUG[2])
-    ok = walls <= BOOL_EPS and headroom >= 1.3
     return CheckResult(
-        "ribbon plug fits",
-        ok,
-        f"wall overlap at 0.5 mm margin {walls:.3f} mm³, headroom under the lid {headroom:.1f} mm",
+        "ribbon plug has headroom",
+        headroom >= RIBBON_HEADROOM,
+        f"{headroom:.1f} mm under the lid",
     )
 
 
@@ -502,7 +508,7 @@ def run_all(board: BoardModel, base: Part, lid: Part) -> list[CheckResult]:
         opening_paths(base, lid),
         lid_seats(base, lid),
         fitting_motion(base, board),
-        ribbon_plug_fit(base),
+        ribbon_plug_headroom(),
         keyhole_volumes(board),
         nut_circles(board),
         opening_size(base, lid),
