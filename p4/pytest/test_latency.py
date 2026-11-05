@@ -171,10 +171,10 @@ def snapshot(base_url, directory, name):
 
 
 @pytest.fixture
-def truncated_bundle(dut, spiffs_image_for, tmp_path):
+def truncated_bundle(dut, spiffs_image, tmp_path):
     """A bundle of the running build without its last 4 KB: the upload streams into flash and fails at the end, so
     the load is real flash traffic and the board is not committed to a new slot (no reboot)."""
-    web_image = spiffs_image_for("web_0", {"slot.txt": b"latency"})
+    web_image = spiffs_image({"slot.txt": "latency"})
     out = tmp_path / "otbr.bundle"
     app = Path(dut.app.binary_path) / "p4.bin"
     assert (

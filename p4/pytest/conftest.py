@@ -3,6 +3,7 @@
 import contextlib
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -147,25 +148,33 @@ def erase_partition(dut):
 
 
 @pytest.fixture
-def spiffs_image(spiffs_image_for):
-    """spiffs_image(files): SPIFFS image for the 2 MB `web_0` partition; `files` maps names to text."""
+def spiffs_image(dut, spiffs_image_for):
+    """spiffs_image(files): SPIFFS image for the 2 MB `web_0` partition: the build's web UI plus `files` (names to
+    text). A board left running from such a slot still serves its pages to the tests that come after."""
 
     def build(files):
-        return spiffs_image_for("web_0", {n: t.encode() for n, t in files.items()})
+        return spiffs_image_for(
+            "web_0",
+            {n: t.encode() for n, t in files.items()},
+            base=Path(dut.app.binary_path) / "web_ui",
+        )
 
     return build
 
 
 @pytest.fixture
 def spiffs_image_for(dut, tmp_path):
-    """spiffs_image_for(partition, files): build a SPIFFS image sized for a partition of the app.
+    """spiffs_image_for(partition, files, base=None): build a SPIFFS image sized for a partition of the app.
 
-    `files` maps file names to bytes. Uses ESP-IDF's spiffsgen with the SPIFFS defaults.
+    `files` maps file names to bytes; `base` is a directory copied in first. Uses ESP-IDF's spiffsgen with the
+    SPIFFS defaults.
     """
 
-    def build(partition, files):
+    def build(partition, files, base=None):
         source = tmp_path / f"spiffs_root_{partition}"
         source.mkdir(exist_ok=True)
+        if base is not None:
+            shutil.copytree(base, source, dirs_exist_ok=True)
         for name, content in files.items():
             (source / name).write_bytes(content)
         image = tmp_path / f"{partition}.bin"
