@@ -90,7 +90,7 @@ make case-test    # the model's tests (about 1.5 min)
 5. **Opening:** lever the lid up through the grille with a small flat screwdriver, close to a corner.
 
 BOOT and RESET sit behind the two pin-holes on the left wall, near the cable end. Press them with a pencil or a small
-screwdriver.
+screwdriver; a small funnel at each hole's mouth guides the tip in.
 
 ## Mounting
 
