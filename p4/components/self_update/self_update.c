@@ -5,9 +5,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "self_update_priv.h"
-#ifndef CONFIG_IDF_TARGET_LINUX
-#include "self_update_http.h"
-#endif
 
 #define BASE_MAX 128
 #define URL_MAX 192

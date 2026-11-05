@@ -71,14 +71,19 @@ TEST_CASE("Idle: begin returns true and the state is checking", "[self_update]")
 TEST_CASE("Idle after done or failed: begin returns true", "[self_update]")
 {
     setup();
+    self_update_snapshot_t s;
     serve_valid();
     run_check();
     TEST_ASSERT_TRUE(self_update_check_begin());
+    self_update_get(&s);
+    TEST_ASSERT_EQUAL(SELF_UPDATE_CHECKING, s.state);
     self_update_check_run();
     s_fake.result = ESP_FAIL;
     s_fake.detail = "boom";
     run_check();
     TEST_ASSERT_TRUE(self_update_check_begin());
+    self_update_get(&s);
+    TEST_ASSERT_EQUAL(SELF_UPDATE_CHECKING, s.state);
 }
 
 TEST_CASE("Already checking: begin returns false and the state is unchanged", "[self_update]")

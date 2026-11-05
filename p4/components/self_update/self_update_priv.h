@@ -49,6 +49,11 @@ typedef struct {
 
 void self_update_set_ops(const self_update_ops_t *ops);
 
+#ifndef CONFIG_IDF_TARGET_LINUX
+/** Default ops of the target (self_update_http.c): esp_http_client GET and esp_timer. */
+extern const self_update_ops_t self_update_http_ops;
+#endif
+
 /** Back to the never-checked state (host tests). */
 void self_update_reset(void);
 
