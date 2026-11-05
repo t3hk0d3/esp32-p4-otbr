@@ -125,8 +125,8 @@ function hex4(n) {
  * {id, kind (br|leader|router|stub|med|sed), rloc16, ext, routerId (the router itself, or a child's parent), parentId,
  *  thisBoard, leader, borderRouter, otherBr (a border router that is not this board; its kind stays router/leader),
  *  sleepy, responded, detail, child (the raw child object, or null), addrs, addrsReported (false only for a child that
- *  was asked for its addresses and didn't answer), version, mode}. Routers come in router-id order, each followed by
- *  its children in RLOC16 order.
+ *  was asked for its addresses and didn't answer), version, mode, info (the scan's device info, or null)}. Routers
+ *  come in router-id order, each followed by its children in RLOC16 order.
  */
 function devices(result) {
   var out = [];
@@ -156,7 +156,8 @@ function devices(result) {
       addrs : r.addresses || [],
       addrsReported : true,
       version : r.version === undefined ? null : r.version,
-      mode : null
+      mode : null,
+      info : r.info || null
     });
     sortedBy(r.children || [], 'rloc16').forEach(function(c) {
       var mode = c.mode || null;
@@ -180,7 +181,8 @@ function devices(result) {
         addrs : c.addresses || [],
         addrsReported : c.addresses_reported !== false,
         version : c.version === undefined ? null : c.version,
-        mode : mode
+        mode : mode,
+        info : c.info || null
       });
     });
   });
@@ -524,9 +526,53 @@ function msText(ms) {
   return ms < 1000 ? ms + ' ms' : String(Math.round(ms / 100) / 10) + ' s';
 }
 
-/** The kind line under a device name, from describe(): "ESPHome 2026.7.4 · esp32-c6-devkitc-1"; "" without a kind. */
-function kindLine(sum) {
+/**
+ * A Thread stack version string as {vendor, chip, sdk, version} for the stacks seen so far (version null when the
+ * string carries none), else null.
+ */
+function stackInfo(stack) {
+  if (typeof stack !== 'string')
+    return null;
+  var m = /^SL-OPENTHREAD\/([^;_\s]*)[^;]*;\s*([^;]*?)\s*;/.exec(stack);
+  if (m && m[2])
+    return {vendor : 'Silicon Labs', chip : m[2], sdk : 'SL-OpenThread', version : m[1] || null};
+  m = /^openthread-esp32\/[^;]*;\s*([^;]*?)\s*;/.exec(stack);
+  if (m && m[1])
+    return {vendor : 'Espressif', chip : m[1], sdk : 'OpenThread', version : null};
+  m = /^OPENTHREAD\/[^;]*;\s*([^;]*?)\s*;/.exec(stack);
+  if (m && m[1])
+    return {vendor : 'OpenThread', chip : m[1], sdk : 'OpenThread', version : null};
+  return null;
+}
+
+/** The device's stackInfo from its scan info, or null. */
+function deviceStack(device) {
+  return device && device.info ? stackInfo(device.info.thread_stack_version) : null;
+}
+
+function infoText(v) { return typeof v === 'string' ? v.trim() : ''; }
+
+/** A vendor name without OpenThread's reference-device "RD:" prefix. */
+function vendorOf(info) { return info ? infoText(info.vendor_name).replace(/^RD:/, '').trim() : ''; }
+
+/** "Home Assistant OpenThread Border Router" from a device's info; null without a model or with only "RD:" as name. */
+function infoName(info) {
+  var vendor = vendorOf(info);
+  var model = info ? infoText(info.vendor_model) : '';
+  return vendor !== '' && model !== '' ? vendor + ' ' + model : null;
+}
+
+/** The URL when it is an http(s) one, else null (anything else is shown as text, never as a link). */
+function appUrl(url) { return typeof url === 'string' && /^https?:\/\/\S+$/i.test(url) ? url : null; }
+
+/** The kind line under a device name, from describe(): "ESPHome 2026.7.4 · esp32-c6-devkitc-1"; "" without a kind.
+ *  Without an SRP kind, a known stack of `device` gives "Silicon Labs EFR32". */
+function kindLine(sum, device) {
   var parts = [];
+  if (!sum || !sum.kind) {
+    var st = deviceStack(device);
+    return st ? st.vendor + ' ' + st.chip : '';
+  }
   if (sum.kind === 'ESPHome') {
     parts.push(sum.version ? 'ESPHome ' + sum.version : 'ESPHome');
     if (sum.board)
@@ -716,6 +762,9 @@ function nameInfo(device, names, srpHosts, boardName) {
   }
   if (name)
     return {text : name, generic : false};
+  name = infoName(device.info);
+  if (name)
+    return {text : name, generic : false};
   if (entries.some(function(e) { return e.sum.kind === 'Matter'; }))
     return {text : MATTER_PREFIX + hex4(device.rloc16), generic : true};
   return {text : UNKNOWN_PREFIX + hex4(device.rloc16), generic : true};
@@ -748,6 +797,8 @@ function matches(device, query, names, srpHosts, boardName) {
   if (friendly)
     fields.push(friendly);
   fields = fields.concat(device.addrs || []);
+  if (device.info)
+    fields.push(vendorOf(device.info), infoText(device.info.vendor_model), infoText(device.info.thread_stack_version));
   return fields.some(function(f) { return String(f).toLowerCase().indexOf(q) >= 0; });
 }
 
@@ -1254,6 +1305,11 @@ return {
   srpIndex : srpIndex,
   isUnnamed : isUnnamed,
   kindLine : kindLine,
+  stackInfo : stackInfo,
+  infoText : infoText,
+  vendorOf : vendorOf,
+  infoName : infoName,
+  appUrl : appUrl,
   deviceText : deviceText,
   timingText : timingText,
   omrAddress : omrAddress,
@@ -1462,7 +1518,23 @@ function renderStart(noteText) {
 function renderProgress(state) {
   var p = (state && state.progress) || {};
   var kids = p.children || {};
-  if (kids.total > 0) {
+  var info = p.info || {};
+  if (info.total > 0) {
+    /* awake_left and done: newer firmware. Older firmware only has answered, so guess from what is left. */
+    var newer = typeof info.awake_left === 'number' && typeof info.done === 'number';
+    var done = newer ? info.done : info.answered;
+    var waiting = newer ? info.awake_left === 0 && info.sleepy_waiting > 0 :
+                          info.sleepy_waiting > 0 && info.sleepy_waiting >= info.total - info.answered;
+    if (waiting) {
+      var mins = info.wait_s > 0 ? Math.ceil(info.wait_s / 60) : 0;
+      setText('t-progress', 'Waiting for ' + plural(info.sleepy_waiting, 'sleepy device') +
+                                ' (they answer when they next wake' + (mins > 0 ? ', up to ' + mins + ' min' : '') +
+                                ')');
+    } else {
+      setText('t-progress', 'Asking devices for details: ' + done + ' of ' + info.total);
+    }
+    $('t-progress-bar').style.width = Math.min(100, Math.round(100 * done / info.total)) + '%';
+  } else if (kids.total > 0) {
     setText('t-progress', 'Asking devices for their addresses: ' + kids.queried + ' of ' + kids.total);
     $('t-progress-bar').style.width = Math.min(100, Math.round(100 * kids.queried / kids.total)) + '%';
   } else if (p.routers > 0) {
@@ -1471,7 +1543,7 @@ function renderProgress(state) {
   } else {
     setText('t-progress', 'Finding routers…');
   }
-  show('t-progress-track', p.routers > 0 || kids.total > 0);
+  show('t-progress-track', p.routers > 0 || kids.total > 0 || info.total > 0);
   setText('t-elapsed', 'Elapsed: ' + Math.max(0, Math.round((env.now() - scanStarted) / 1000)) + ' s');
   view('loading');
 }
@@ -2004,7 +2076,7 @@ function rowFor(d) {
   if (badge)
     dev.appendChild(el('span', badge, 'chip chip-warn t-badge'));
   var sum = summaryOf(d);
-  var kindText = sum ? L.kindLine(sum) : '';
+  var kindText = L.kindLine(sum, d);
   if (kindText)
     dev.appendChild(el('div', kindText, 't-kind'));
   dev.appendChild(el('div', rlocText(d.rloc16) + ' · ' + (d.ext || '–'), 't-mono t-sub'));
@@ -2207,6 +2279,61 @@ function renderServiceFacts(dl, d) {
     fact(dl, 'Services', servicesFact(items));
 }
 
+/** "Silicon Labs EFR32 · SL-OpenThread 2.4.2.0" from a stackInfo; parts the string doesn't carry are left out. */
+function stackSummary(st) {
+  var parts = [ st.vendor + ' ' + st.chip ];
+  if (st.version)
+    parts.push(st.sdk + ' ' + st.version);
+  return parts.join(' · ');
+}
+
+/* The facts from the scan's device info (none for a result saved without it, or a device that was not asked). */
+function renderInfoFacts(dl, d) {
+  var info = d.info;
+  if (!info)
+    return;
+  if (info.state === 'no_answer') {
+    fact(dl, 'Device info', d.sleepy ? 'no answer (sleepy device)' : 'no answer');
+    return;
+  }
+  if (info.state === 'cut_short') {
+    fact(dl, 'Device info', 'not asked (scan time limit)');
+    return;
+  }
+  if (info.state !== 'answered')
+    return;
+  var st = L.stackInfo(info.thread_stack_version);
+  /* Vendor and model together name the device; a lone one goes before the stack summary, so neither is lost. */
+  var hardware = L.infoName(info);
+  if (hardware === null) {
+    var parts = [ L.vendorOf(info), L.infoText(info.vendor_model) ].filter(function(x) { return x !== ''; });
+    if (parts.length)
+      hardware = parts.join(' ') + (st ? ' · ' + stackSummary(st) : '');
+    else if (st)
+      hardware = stackSummary(st);
+  }
+  if (hardware !== null)
+    fact(dl, 'Hardware', hardware);
+  if (L.infoText(info.thread_stack_version) !== '')
+    fact(dl, 'Stack', info.thread_stack_version);
+  if (L.infoText(info.vendor_sw_version) !== '')
+    fact(dl, 'Software', info.vendor_sw_version);
+  if (L.infoText(info.eui64) !== '')
+    fact(dl, 'EUI-64', info.eui64, 't-mono');
+  if (L.infoText(info.vendor_app_url) !== '') {
+    var url = L.appUrl(info.vendor_app_url);
+    if (url === null) {
+      fact(dl, 'App URL', info.vendor_app_url);
+    } else {
+      var a = el('a', url);
+      a.setAttribute('href', url);
+      a.setAttribute('target', '_blank');
+      a.setAttribute('rel', 'noopener');
+      fact(dl, 'App URL', a);
+    }
+  }
+}
+
 function renderFacts(d) {
   var box = $('t-d-facts');
   clear(box);
@@ -2214,6 +2341,7 @@ function renderFacts(d) {
   fact(dl, 'RLOC16', rlocText(d.rloc16), 't-mono');
   fact(dl, 'Ext. address', d.ext || '–', 't-mono');
   renderServiceFacts(dl, d);
+  renderInfoFacts(dl, d);
   fact(dl, 'Radio', radioText(d));
   fact(dl, 'Thread version', versionText(d.version));
   box.appendChild(dl);

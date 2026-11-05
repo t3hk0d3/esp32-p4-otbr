@@ -9,6 +9,13 @@ release's `versions.txt`.
 
 ### Added
 
+- Device info in the topology scan and on the Topology page: vendor name, model and software version, Thread stack
+  version, EUI-64, app URL and OUI of every router and child (`info`, `progress.info` in `GET /device/topology`; see
+  `docs/api.md`). The scan now waits for sleepy devices, up to 300 s from its start, and the page says so while it
+  waits. This board now sends vendor name `ESP32-P4-WIFI6-POE-ETH`, model `OpenThread Border Router`, its software
+  version (`YYYYMMDD-<hash>`) and app URL in network diagnostics, instead of `RD:`; OpenThread's reference-device
+  (certification test harness) setting is turned off for that. Checked on ha-thread-bbc1 (2026-11-04), including a
+  sleepy child polling every 120 s; the later 60 s re-send period and the stray-answer checks are host-tested only.
 - The Topology page names devices registered with any border router's SRP server, not only this board's, and shows
   ESPHome, Matter and HomeKit details and border router records. The scan asks the other SRP servers over DNS-SD
   (`srp_servers`, `srp_hosts` in `GET /device/topology`; see `docs/api.md`). Checked on ha-thread-bbc1 (2026-11-04):

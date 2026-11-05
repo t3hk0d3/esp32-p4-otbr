@@ -16,7 +16,8 @@ from conftest import ot, start_capture, stop_capture
 # The peer and its address come from the latency tests' fixture (attach, wait for an OMR address).
 from test_latency import thread_peer_address  # noqa: F401  (pytest fixture)
 
-SCAN_TIMEOUT_S = 60
+SCAN_TIMEOUT_S = 320  # the sleepy cap (300 s from the start) plus slack
+SCAN_CAP_S = 60  # the cap of a scan without sleepy children
 POLL_INTERVAL_S = 0.5
 RUNNING_WAIT_S = 5
 BR_RUNNING_WAIT_S = 30
@@ -112,11 +113,22 @@ class TestTopologyScan:
 
     @pytest.mark.usefixtures("thread_peer_address")
     def test_scan_completes_within_60_s(self, base_url):
-        # On POST then GET polling with the rig attached: the state ends done within 60 s, with a result and an age.
+        # On POST then GET polling with the rig attached: the state ends done with a result and an age, within 60 s
+        # when the mesh has no sleepy child (the scan waits for sleepy children up to 300 s).
+        started = time.monotonic()
         state = run_scan(base_url)
+        elapsed = time.monotonic() - started
         assert state["state"] == "done"
         assert "routers" in state["result"]
         assert state["age_s"] >= 0
+        sleepy = [
+            child
+            for router in state["result"]["routers"]
+            for child in router.get("children", [])
+            if not child["mode"]["rx_on_when_idle"]
+        ]
+        if not sleepy:
+            assert elapsed <= SCAN_CAP_S + 2 * POLL_INTERVAL_S, f"took {elapsed:.1f} s"
 
     def test_every_router_of_the_board_appears(self, scan):
         # On the rig after a finished scan: every router in the board's router table is in the result.
@@ -180,6 +192,24 @@ class TestTopologyScan:
             ]
             assert len(routers) == 1
             assert any(in_prefix(a, omr) for a in routers[0]["addresses"])
+
+    def test_peer_answered_the_info_query(self, scan):
+        # On the rig after a finished scan: the peer, as a child or a router, answered its device info query. Its
+        # vendor strings are not checked: the rig's ot_cli peer does not promise any.
+        result = scan["result"]
+        if scan["peer_state"] == "child":
+            entries = [
+                child
+                for router in result["routers"]
+                for child in router.get("children", [])
+            ]
+        else:
+            entries = result["routers"]
+        peer = [
+            e for e in entries if e.get("ext_address", "").lower() == scan["peer_ext"]
+        ]
+        assert len(peer) == 1
+        assert peer[0]["info"]["state"] == "answered", peer[0]["info"]
 
     @pytest.mark.usefixtures("thread_peer_address")
     def test_post_during_a_running_scan_returns_202(self, base_url):

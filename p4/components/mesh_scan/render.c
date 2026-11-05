@@ -110,12 +110,15 @@ static size_t utf8_len(const uint8_t *p, size_t avail)
     return n;
 }
 
-/** A JSON string: quote, backslash and control bytes escaped, valid UTF-8 as is, anything else as U+FFFD. */
-static void str(writer_t *w, const char *text)
+/**
+ * A JSON string of at most `max` bytes of `text`: quote, backslash and control bytes escaped, valid UTF-8 as is,
+ * anything else as U+FFFD.
+ */
+static void str_max(writer_t *w, const char *text, size_t max)
 {
     static const char hex[] = "0123456789abcdef";
     const uint8_t *p = (const uint8_t *)text;
-    const size_t total = strnlen(text, MESH_SCAN_NAME_LEN);
+    const size_t total = strnlen(text, max);
     size_t i = 0;
 
     raw(w, "\"");
@@ -147,6 +150,11 @@ static void str(writer_t *w, const char *text)
         i++;
     }
     raw(w, "\"");
+}
+
+static void str(writer_t *w, const char *text)
+{
+    str_max(w, text, MESH_SCAN_NAME_LEN);
 }
 
 static void ext_address(writer_t *w, const uint8_t ext[8])
@@ -250,6 +258,62 @@ static void key_u64(writer_t *w, const char *key, uint64_t value)
     u64(w, value);
 }
 
+static const char *info_state_name(mesh_scan_info_state_t state)
+{
+    switch (state) {
+    case MESH_SCAN_INFO_ANSWERED:
+        return "answered";
+    case MESH_SCAN_INFO_NO_ANSWER:
+        return "no_answer";
+    case MESH_SCAN_INFO_CUT_SHORT:
+        return "cut_short";
+    case MESH_SCAN_INFO_NOT_ASKED:
+    default:
+        return "not_asked";
+    }
+}
+
+/** ,"key":"<text>" unless `text` (an array of `max` bytes) is empty. */
+static void info_string(writer_t *w, const char *key, const char *text, size_t max)
+{
+    if (strnlen(text, max) == 0) {
+        return;
+    }
+    raw(w, key);
+    str_max(w, text, max);
+}
+
+/** ,"info":{...}: the fields only after an answer, and only the non-empty ones. */
+static void write_info(writer_t *w, const mesh_scan_info_t *info)
+{
+    raw(w, ",\"info\":{\"state\":\"");
+    raw(w, info_state_name(info->state));
+    raw(w, "\"");
+    if (info->state == MESH_SCAN_INFO_ANSWERED) {
+        if (info->has_eui64) {
+            raw(w, ",\"eui64\":");
+            ext_address(w, info->eui64);
+        }
+        info_string(w, ",\"vendor_name\":", info->vendor_name, sizeof(info->vendor_name));
+        info_string(w, ",\"vendor_model\":", info->vendor_model, sizeof(info->vendor_model));
+        info_string(w, ",\"vendor_sw_version\":", info->vendor_sw_version, sizeof(info->vendor_sw_version));
+        info_string(w, ",\"thread_stack_version\":", info->thread_stack_version, sizeof(info->thread_stack_version));
+        info_string(w, ",\"vendor_app_url\":", info->vendor_app_url, sizeof(info->vendor_app_url));
+        if (info->has_oui) {
+            static const char hex[] = "0123456789abcdef";
+            char digits[6];
+
+            for (size_t i = 0; i < sizeof(digits); i++) {
+                digits[i] = hex[(info->oui >> (20 - 4 * i)) & 15];
+            }
+            raw(w, ",\"vendor_oui\":\"");
+            put(w, digits, sizeof(digits));
+            raw(w, "\"");
+        }
+    }
+    raw(w, "}");
+}
+
 static void write_child(writer_t *w, const mesh_scan_router_t *r, const mesh_scan_child_t *c)
 {
     // The child-table fields are known only when the router answered the query and the table listed this child.
@@ -291,6 +355,7 @@ static void write_child(writer_t *w, const mesh_scan_router_t *r, const mesh_sca
     if (!c->addresses_reported) {
         raw(w, ",\"addresses_reported\":false"); // asked directly and gave no answer (spec 3.4)
     }
+    write_info(w, &c->info);
     raw(w, "}");
 }
 
@@ -333,7 +398,9 @@ static void write_router(writer_t *w, const mesh_scan_result_t *res, const mesh_
     if (!r->responded) {
         key_u64(w, "{\"router_id\":", r->router_id);
         key_u64(w, ",\"rloc16\":", r->rloc16);
-        raw(w, ",\"responded\":false}");
+        raw(w, ",\"responded\":false");
+        write_info(w, &r->info);
+        raw(w, "}");
         return;
     }
     key_u64(w, "{\"rloc16\":", r->rloc16);
@@ -372,7 +439,9 @@ static void write_router(writer_t *w, const mesh_scan_result_t *res, const mesh_
         comma(w, i);
         write_child(w, r, &r->children[i]);
     }
-    raw(w, "]}");
+    raw(w, "]");
+    write_info(w, &r->info);
+    raw(w, "}");
 }
 
 static void write_network(writer_t *w, const mesh_scan_network_t *n)
@@ -556,6 +625,12 @@ esp_err_t mesh_scan_render_view(const mesh_scan_view_t *view, mesh_scan_sink_t s
         key_u64(&w, ",\"queried\":", view->queried);
         key_u64(&w, ",\"children\":{\"total\":", view->children_total);
         key_u64(&w, ",\"queried\":", view->children_queried);
+        key_u64(&w, "},\"info\":{\"total\":", view->info_total);
+        key_u64(&w, ",\"answered\":", view->info_answered);
+        key_u64(&w, ",\"sleepy_waiting\":", view->sleepy_waiting);
+        key_u64(&w, ",\"wait_s\":", view->sleepy_wait_s);
+        key_u64(&w, ",\"awake_left\":", view->awake_left);
+        key_u64(&w, ",\"done\":", view->info_done);
         raw(&w, "}}}");
         break;
     case MESH_SCAN_DONE:

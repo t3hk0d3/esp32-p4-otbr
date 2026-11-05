@@ -39,7 +39,7 @@ TRAFFIC_TIMEOUT_S = 90  # MLE advertisements alone carry packets every 30 s or s
 ROUTER_TIMEOUT_S = (
     240  # a REED becomes a router after a random delay of up to 120 s, plus the attach
 )
-SCAN_TIMEOUT_S = 120  # the Topology scan of a two-router mesh
+SCAN_TIMEOUT_S = 320  # the Topology scan: up to the sleepy cap (300 s) plus slack
 POLL_INTERVAL_S = 1
 
 

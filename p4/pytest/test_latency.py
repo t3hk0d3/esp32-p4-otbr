@@ -64,9 +64,9 @@ P99_OVER_BUDGET = {
     "loss; the mesh-diagnostics queries take radio time, as with topology_requests. Accepted: the page scans only when "
     "someone clicks Load, for troubleshooting, very rarely.",
 }
-TOPOLOGY_SCAN_TIMEOUT_S = 60
+TOPOLOGY_SCAN_TIMEOUT_S = 320  # the sleepy cap (300 s) plus slack
 TOPOLOGY_POLL_S = 0.5
-TOPOLOGY_DRAIN_S = 65  # the scan's 60 s cap plus slack
+TOPOLOGY_DRAIN_S = 320  # the sleepy cap (300 s) plus slack
 
 
 def ping(address, interval=PING_INTERVAL_S, count=PING_COUNT):

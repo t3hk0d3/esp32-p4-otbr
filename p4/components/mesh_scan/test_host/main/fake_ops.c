@@ -35,17 +35,18 @@ static int fake_query_child_addrs(uint16_t rloc16)
     return g_fake.child_addrs_ret;
 }
 
-static int fake_query_child_diag(uint16_t rloc16, uint32_t gen)
+static int fake_query_info(uint16_t rloc16, bool want_addrs, uint32_t gen)
 {
-    const int i = g_fake.child_diag_calls++;
+    const int i = g_fake.info_calls++;
 
     g_fake.ops_calls++;
     if (i >= FAKE_MAX_QUERIES) {
         return MESH_SCAN_OT_ERROR_NONE;
     }
-    g_fake.child_diag_rloc16[i] = rloc16;
-    g_fake.child_diag_gen[i] = gen;
-    return g_fake.child_diag_rets[i];
+    g_fake.info_rloc16[i] = rloc16;
+    g_fake.info_want_addrs[i] = want_addrs;
+    g_fake.info_gen[i] = gen;
+    return g_fake.info_rets[i];
 }
 
 static void fake_arm_child_deadline(uint32_t ms, uint32_t gen)
@@ -79,9 +80,19 @@ static void fake_prefixes(mesh_scan_network_t *net)
     net->n_omr = 1;
 }
 
+static void fake_own_info(mesh_scan_info_t *info)
+{
+    memset(info, 0, sizeof(*info));
+    info->state = MESH_SCAN_INFO_ANSWERED;
+    strcpy(info->vendor_name, FAKE_VENDOR_NAME);
+    strcpy(info->thread_stack_version, FAKE_STACK_VERSION);
+}
+
 /**
- * Fills what ot_ops.c's snapshot fills: the network fields, the SLAAC on-mesh prefixes and the SRP hosts ("lamp" with
- * one _matter._tcp service "lamp-svc", then "local-<i>" without services), all local to this board (RLOC16 0x8800).
+ * Fills what ot_ops.c's snapshot fills: the network fields, the SLAAC on-mesh prefixes, the SRP hosts ("lamp" with
+ * one _matter._tcp service "lamp-svc", then "local-<i>" without services), all local to this board (RLOC16 0x8800),
+ * and the info of this board's own entry, the router with this_device set or the child with own_rloc16 (answered,
+ * vendor name FAKE_VENDOR_NAME).
  */
 static void fake_snapshot(mesh_scan_result_t *r)
 {
@@ -112,6 +123,22 @@ static void fake_snapshot(mesh_scan_result_t *r)
     r->srp[0].n_services = 1;
     r->n_srp = n;
     r->pool_used = g_fake.snapshot_pool_used;
+    for (int id = 0; id < MESH_SCAN_MAX_ROUTERS; id++) {
+        mesh_scan_router_t *router = &r->routers[id];
+        if (router->present && router->this_device) {
+            fake_own_info(&router->info);
+        }
+        for (uint16_t i = 0; i < router->n_children; i++) {
+            if (router->children[i].rloc16 == g_fake.own_rloc16) {
+                fake_own_info(&router->children[i].info);
+            }
+        }
+    }
+}
+
+static uint16_t fake_own_rloc16(void)
+{
+    return g_fake.own_rloc16;
 }
 
 static bool fake_br_running(void)
@@ -212,11 +239,12 @@ static const mesh_scan_ops_t FAKE_OPS = {
     .discover = fake_discover,
     .query_child_table = fake_query_child_table,
     .query_child_addrs = fake_query_child_addrs,
-    .query_child_diag = fake_query_child_diag,
+    .query_info = fake_query_info,
     .arm_child_deadline = fake_arm_child_deadline,
     .cancel = fake_cancel,
     .router_table = fake_router_table,
     .snapshot = fake_snapshot,
+    .own_rloc16 = fake_own_rloc16,
     .br_running = fake_br_running,
     .now_ms = fake_now_ms,
     .arm_cap = fake_arm_cap,

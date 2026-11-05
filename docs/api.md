@@ -83,6 +83,51 @@ with its own 15 s budget inside the 60 s cap.
 - `services[].port` is the SRV port. `txt` is the base64 of the raw TXT RDATA, `""` when the record has none.
   `subtypes` is always empty for hosts from other servers.
 
+### Device info in the topology scan
+
+After the router and child tables, the scan asks every router and every child (except this board, which is read
+locally) for its Network Diagnostic vendor TLVs. Each router and each child in the result carries an `info` object.
+While the scan runs, `progress.info` counts the answers.
+
+- `info.state`: `answered` (the device replied; the fields below follow), `no_answer` (asked, but the deadline passed
+  or the send failed), `cut_short` (still queued when the cap hit), `not_asked` (never asked: a router that did not
+  answer discover, or any device when the 60 s cap hit before the info step). This board's router entry is always
+  `answered`, with its local values.
+- Fields, present only after an answer and only when not empty:
+
+| Field | Format |
+| --- | --- |
+| `eui64` | factory EUI-64, 16 hex digits |
+| `vendor_name` | string, up to 32 bytes |
+| `vendor_model` | string, up to 32 bytes |
+| `vendor_sw_version` | string, up to 16 bytes |
+| `thread_stack_version` | string, up to 64 bytes, e.g. `openthread-esp32/fff9895c-b678a4f; esp32c6;  2026-11-03 21:47:25` |
+| `vendor_app_url` | string, up to 96 bytes |
+| `vendor_oui` | 24-bit OUI, 6 hex digits |
+
+- Strings are JSON-escaped; bytes that are not valid UTF-8 become U+FFFD. A device may answer with none of the asked
+  TLVs: it is `answered` and has no fields.
+- `progress.info` is `{total, answered, sleepy_waiting, wait_s, awake_left, done}`: devices to ask, devices that
+  replied (`answered` counts replies only, not `no_answer`), sleepy devices still waiting, the seconds until the
+  latest sleepy deadline (0 when none waits), awake devices (routers and rx-on children) queued or in flight, and
+  devices answered or given up (`done` counts `no_answer` too). Once `awake_left` is 0 only sleepy devices are left.
+- A sleepy child answers only after its next poll. The scan waits for sleepy children up to 300 s from the scan start,
+  each for the child's own timeout from the child table (240 s when unknown), and asks again every 60 s while it
+  waits (OpenThread drops an unanswered request after 62-93 s, so one request is always pending). Every other step stays bounded by the 60 s cap. At
+  the sleepy cap the scan finishes with what it has. Missing info never sets `partial`.
+- During the info step the scan holds no mesh diagnostics operation, so the REST `/topology` and diagnostics endpoints
+  work; `POST /device/topology` joins the running scan. Both answers reach the scan, which ignores one that can't be
+  its own: with a TLV the scan does not ask for, or with addresses it did not ask for (or none when it did). A REST
+  Get for a subset of the scan's TLVs at the same moment can still be taken as its answer; it describes that device
+  correctly.
+- When this board is a child, its own child entry is read locally, like its router entry.
+
+```json
+"info": {"state": "answered", "eui64": "8c73dafffe952cfb", "vendor_name": "Home Assistant",
+         "vendor_model": "OpenThread Border Router",
+         "thread_stack_version": "OPENTHREAD/cb18e0f; POSIX; Oct  6 2026 20:28:48"}
+```
+
 ### Routing
 
 How the core router learns the route into the mesh (see [Routing to the mesh](networking.md#routing-to-the-mesh)).

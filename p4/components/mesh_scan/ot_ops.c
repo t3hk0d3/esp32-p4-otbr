@@ -8,14 +8,15 @@
 // cancelling (the mode watchdog, a callback that finds the mode lost, a cancel without the OpenThread lock) rely on
 // OpenThread's single mesh-diag slot instead: a new discover gets OT_ERROR_BUSY until the abandoned operation has ended.
 //
-// The child address step (spec 3.4, ruling R14) sends Network Diagnostic Gets through netdiag_mux (spec 3.5), which
+// The info phase (spec 3.4, ruling R14) sends Network Diagnostic Gets through netdiag_mux (spec 3.5), which
 // otMeshDiagCancel does not cover. The mux owns OpenThread's single netdiag callback slot, so the vendored GUI/REST
-// API (esp_br_web_api.c) no longer takes our answers or replaces our callback; on_child_diag gets every answer
+// API (esp_br_web_api.c) no longer takes our answers or replaces our callback; on_info gets every answer
 // (filter_peer false) with the context of the scan's LATEST send, not of the query being answered. An answer is
-// matched to its child by the peer address (the child's RLOC), and the scan's gen/phase check is a second guard. An
-// answer without an IPv6 Address List TLV is dropped; one to another sender's query that carries the list describes
-// its peer correctly, so using it is harmless. Errors never reach us: a scan-owned deadline per query gives up on
-// children that don't answer.
+// matched to its device by the peer address (the device's RLOC), and the scan's gen/phase check is a second guard. An
+// answer that can't be ours is dropped by scan.c: one with a TLV our Get never asks for (on_info flags it), with
+// addresses we did not ask for, or without them when we did. Another sender's answer that passes describes its peer
+// correctly, so using it is harmless. Errors never reach us: a scan-owned deadline per query gives up on devices that
+// don't answer.
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -214,12 +215,50 @@ static void on_child_addrs(otError error, uint16_t child_rloc16, otMeshDiagIp6Ad
     }
 }
 
-/** Network Diagnostic Get answer (any sender's, via netdiag_mux); `ctx` is the scan generation of our latest send. */
-static void on_child_diag(otError error, otMessage *msg, const otMessageInfo *info, void *ctx)
+/**
+ * The TLVs of an info query. TLV 8 first: OpenThread answers in request order and stops at a TLV it can't parse, so a
+ * bad vendor TLV can't lose the addresses. Without them the Get is sent from INFO_TLVS + 1.
+ */
+static const uint8_t INFO_TLVS[] = {
+    OT_NETWORK_DIAGNOSTIC_TLV_IP6_ADDR_LIST,
+    OT_NETWORK_DIAGNOSTIC_TLV_EUI64,
+    OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_NAME,
+    OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_MODEL,
+    OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_SW_VERSION,
+    OT_NETWORK_DIAGNOSTIC_TLV_THREAD_STACK_VERSION,
+    OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_APP_URL,
+    OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_OUI,
+};
+
+/** A TLV an info query asks for (else the answer is to another sender's Get). */
+static bool info_tlv(uint8_t type)
 {
-    static otNetworkDiagTlv tlv; // OpenThread task only; a few hundred bytes, kept off its stack
+    return memchr(INFO_TLVS, type, sizeof(INFO_TLVS)) != NULL;
+}
+
+/** Copy a TLV string into an info field, cut to fit; an empty string is an absent field. */
+static void info_text(char *dst, size_t size, const char *src)
+{
+    snprintf(dst, size, "%s", src);
+}
+
+/** Only a 24-bit (MA-L) vendor OUI is kept; 28- and 36-bit ones don't fit the 24-bit field. */
+static void info_oui(mesh_scan_info_t *out, const otThreadVendorOui *oui)
+{
+    if (oui->mBitLength == OT_THREAD_VENDOR_OUI_MA_L_BIT_LENGTH) {
+        out->has_oui = true;
+        out->oui = ((uint32_t)oui->mBytes[0] << 16) | ((uint32_t)oui->mBytes[1] << 8) | oui->mBytes[2];
+    }
+}
+
+/** Network Diagnostic Get answer (any sender's, via netdiag_mux); `ctx` is the scan generation of our latest send. */
+static void on_info(otError error, otMessage *msg, const otMessageInfo *info, void *ctx)
+{
+    static otNetworkDiagTlv tlv;  // OpenThread task only; a few hundred bytes, kept off its stack
+    static mesh_scan_info_t found; // ditto
     uint8_t addrs[MESH_SCAN_MAX_CHILD_ADDRS][16];
     uint8_t n = 0;
+    bool other_tlvs = false;
     uint16_t rloc16;
 
     if (error != OT_ERROR_NONE || !msg || !info ||
@@ -227,16 +266,44 @@ static void on_child_diag(otError error, otMessage *msg, const otMessageInfo *in
                                         &rloc16)) {
         return;
     }
+    memset(&found, 0, sizeof(found));
+    found.state = MESH_SCAN_INFO_ANSWERED;
     otNetworkDiagIterator it = OT_NETWORK_DIAGNOSTIC_ITERATOR_INIT;
     while (otThreadGetNextDiagnosticTlv(msg, &it, &tlv) == OT_ERROR_NONE) {
-        if (tlv.mType != OT_NETWORK_DIAGNOSTIC_TLV_IP6_ADDR_LIST) {
-            continue;
-        }
-        for (uint8_t i = 0; i < tlv.mData.mIp6AddrList.mCount && n < MESH_SCAN_MAX_CHILD_ADDRS; i++) {
-            memcpy(addrs[n++], tlv.mData.mIp6AddrList.mList[i].mFields.m8, sizeof(addrs[0]));
+        other_tlvs |= !info_tlv(tlv.mType);
+        switch (tlv.mType) {
+        case OT_NETWORK_DIAGNOSTIC_TLV_IP6_ADDR_LIST:
+            for (uint8_t i = 0; i < tlv.mData.mIp6AddrList.mCount && n < MESH_SCAN_MAX_CHILD_ADDRS; i++) {
+                memcpy(addrs[n++], tlv.mData.mIp6AddrList.mList[i].mFields.m8, sizeof(addrs[0]));
+            }
+            break;
+        case OT_NETWORK_DIAGNOSTIC_TLV_EUI64:
+            found.has_eui64 = true;
+            memcpy(found.eui64, tlv.mData.mEui64.m8, sizeof(found.eui64));
+            break;
+        case OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_NAME:
+            info_text(found.vendor_name, sizeof(found.vendor_name), tlv.mData.mVendorName);
+            break;
+        case OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_MODEL:
+            info_text(found.vendor_model, sizeof(found.vendor_model), tlv.mData.mVendorModel);
+            break;
+        case OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_SW_VERSION:
+            info_text(found.vendor_sw_version, sizeof(found.vendor_sw_version), tlv.mData.mVendorSwVersion);
+            break;
+        case OT_NETWORK_DIAGNOSTIC_TLV_THREAD_STACK_VERSION:
+            info_text(found.thread_stack_version, sizeof(found.thread_stack_version), tlv.mData.mThreadStackVersion);
+            break;
+        case OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_APP_URL:
+            info_text(found.vendor_app_url, sizeof(found.vendor_app_url), tlv.mData.mVendorAppUrl);
+            break;
+        case OT_NETWORK_DIAGNOSTIC_TLV_VENDOR_OUI:
+            info_oui(&found, &tlv.mData.mVendorOui);
+            break;
+        default:
+            break;
         }
     }
-    mesh_scan_on_child_diag((uint32_t)(uintptr_t)ctx, rloc16, (const uint8_t (*)[16])addrs, n);
+    mesh_scan_on_info((uint32_t)(uintptr_t)ctx, rloc16, &found, (const uint8_t (*)[16])addrs, n, other_tlvs);
 }
 
 // Cap timer
@@ -371,9 +438,8 @@ static int op_query_child_addrs(uint16_t rloc16)
     return otMeshDiagQueryChildrenIp6Addrs(instance(), rloc16, on_child_addrs, NULL);
 }
 
-static int op_query_child_diag(uint16_t rloc16, uint32_t gen)
+static int op_query_info(uint16_t rloc16, bool want_addrs, uint32_t gen)
 {
-    static const uint8_t tlvs[] = { OT_NETWORK_DIAGNOSTIC_TLV_IP6_ADDR_LIST };
     otIp6Address dest = { 0 };
 
     // The child's RLOC: mesh-local prefix + 0:ff:fe00:<rloc16>.
@@ -382,8 +448,10 @@ static int op_query_child_diag(uint16_t rloc16, uint32_t gen)
     dest.mFields.m8[12] = 0xfe;
     dest.mFields.m8[14] = (uint8_t)(rloc16 >> 8);
     dest.mFields.m8[15] = (uint8_t)rloc16;
-    // Unfiltered: on_child_diag matches the peer to the child itself.
-    return netdiag_mux_send_get(&dest, tlvs, sizeof(tlvs), on_child_diag, (void *)(uintptr_t)gen, false);
+    // Unfiltered: on_info matches the peer to the child itself.
+    return netdiag_mux_send_get(&dest, want_addrs ? INFO_TLVS : INFO_TLVS + 1,
+                                want_addrs ? sizeof(INFO_TLVS) : sizeof(INFO_TLVS) - 1, on_info, (void *)(uintptr_t)gen,
+                                false);
 }
 
 static void op_arm_child_deadline(uint32_t ms, uint32_t gen)
@@ -555,10 +623,72 @@ static void snapshot_transport(otInstance *ins, mesh_scan_result_t *r)
 #endif
 }
 
+/** This board's own device info, from the local values (it doesn't ask itself). */
+static void snapshot_own_info(otInstance *ins, mesh_scan_info_t *out)
+{
+    otExtAddress eui64 = { 0 };
+    otThreadVendorOui oui;
+
+    memset(out, 0, sizeof(*out));
+    out->state = MESH_SCAN_INFO_ANSWERED;
+    otLinkGetFactoryAssignedIeeeEui64(ins, &eui64);
+    out->has_eui64 = true;
+    memcpy(out->eui64, eui64.m8, sizeof(out->eui64));
+    info_text(out->vendor_name, sizeof(out->vendor_name), otThreadGetVendorName(ins));
+    info_text(out->vendor_model, sizeof(out->vendor_model), otThreadGetVendorModel(ins));
+    info_text(out->vendor_sw_version, sizeof(out->vendor_sw_version), otThreadGetVendorSwVersion(ins));
+    info_text(out->thread_stack_version, sizeof(out->thread_stack_version), otGetVersionString());
+    info_text(out->vendor_app_url, sizeof(out->vendor_app_url), otThreadGetVendorAppUrl(ins));
+    otThreadGetVendorOuiInfo(ins, &oui);
+    info_oui(out, &oui);
+}
+
+/**
+ * This board's child entry without addresses (its parent's answer failed or was empty): the board's own unicast
+ * addresses, as a parent would report them (no link-local, RLOC or ALOC).
+ */
+static void snapshot_own_child_addrs(otInstance *ins, mesh_scan_child_t *c)
+{
+    const uint8_t *ml_prefix = otThreadGetMeshLocalPrefix(ins)->m8;
+    uint16_t rloc16;
+
+    if (c->n_addrs > 0) {
+        return;
+    }
+    for (const otNetifAddress *a = otIp6GetUnicastAddresses(ins); a && c->n_addrs < MESH_SCAN_MAX_CHILD_ADDRS;
+            a = a->mNext) {
+        const uint8_t *addr = a->mAddress.mFields.m8;
+        if ((addr[0] == 0xfe && (addr[1] & 0xc0) == 0x80) || mesh_scan_rloc16_from_peer(addr, ml_prefix, &rloc16)) {
+            continue;
+        }
+        memcpy(c->addrs[c->n_addrs++], addr, sizeof(c->addrs[0]));
+    }
+    c->addresses_reported = true;
+}
+
+static uint16_t op_own_rloc16(void)
+{
+    return otThreadGetRloc16(instance());
+}
+
 static void op_snapshot(mesh_scan_result_t *r)
 {
     otInstance *ins = instance();
+    const uint16_t own = otThreadGetRloc16(ins);
 
+    // This board's own entry: its router, or its child entry while it is a child.
+    for (int id = 0; id < MESH_SCAN_MAX_ROUTERS; id++) {
+        mesh_scan_router_t *router = &r->routers[id];
+        if (router->present && router->this_device) {
+            snapshot_own_info(ins, &router->info);
+        }
+        for (uint16_t i = 0; i < router->n_children; i++) {
+            if (router->children[i].rloc16 == own) {
+                snapshot_own_info(ins, &router->children[i].info);
+                snapshot_own_child_addrs(ins, &router->children[i]);
+            }
+        }
+    }
     snapshot_network(ins, &r->network);
     snapshot_transport(ins, r);
     r->n_srp = 0;
@@ -895,11 +1025,12 @@ static const mesh_scan_ops_t real_ops = {
     .discover = op_discover,
     .query_child_table = op_query_child_table,
     .query_child_addrs = op_query_child_addrs,
-    .query_child_diag = op_query_child_diag,
+    .query_info = op_query_info,
     .arm_child_deadline = op_arm_child_deadline,
     .cancel = op_cancel,
     .router_table = op_router_table,
     .snapshot = op_snapshot,
+    .own_rloc16 = op_own_rloc16,
     .br_running = op_br_running,
     .now_ms = op_now_ms,
     .arm_cap = op_arm_cap,

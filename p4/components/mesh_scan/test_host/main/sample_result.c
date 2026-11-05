@@ -103,6 +103,11 @@ mesh_scan_result_t *sample_result(void)
     leader->leader = true;
     board->this_device = true;
     board->border_router = true;
+    board->info.state = MESH_SCAN_INFO_ANSWERED; // this board always answers, from its local values
+    board->info.has_eui64 = true;
+    ext(board->info.eui64, 0x0a1b2c3d4e5f6071ull);
+    strcpy(board->info.vendor_name, "ESP32-P4-WIFI6-POE-ETH");
+    strcpy(board->info.vendor_model, "OpenThread Border Router");
     leader->children = s_children[0];
     board->children = s_children[1];
     r3->children = s_children[2];
