@@ -183,7 +183,8 @@ def _buttons() -> Part:
 
 def _sma() -> Part:
     zc = board_z(P.SMA_CASE_Z)
-    x0, x1 = P.INNER[1] - EPS, P.OUTER[1] + 1
+    # the hole stops short of the outer face: a one-line knock-out closes it until an SMA is fitted
+    x0, x1 = P.INNER[1] - EPS, P.OUTER[1] - P.SMA_KNOCKOUT_T
     hole = x_cylinder(P.SMA_Y, zc, P.SMA_D, x0, x1)
     flat_z = zc + P.SMA_FLAT - P.SMA_D / 2
     keep = block(x0, x1, P.SMA_Y - P.SMA_D, P.SMA_Y + P.SMA_D, zc - P.SMA_D, flat_z)
