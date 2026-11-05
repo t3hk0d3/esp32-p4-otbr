@@ -431,6 +431,10 @@ static bool match_v6(const uint8_t addr[IP6_BYTES], uint32_t scope_id, netcfg_si
         *on_mesh = true;
         return true;
     }
+    // A link-local address of the OpenThread netif is not a side (HTTP keeps refusing it in split mode) but it is the mesh.
+    if (ot && is_link_local(addr) && (int)scope_id == esp_netif_get_netif_impl_index(ot)) {
+        *on_mesh = true;
+    }
     return false;
 }
 
