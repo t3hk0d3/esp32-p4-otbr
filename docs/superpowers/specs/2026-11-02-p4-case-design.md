@@ -89,7 +89,7 @@ the result.
 | Lid | flat honeycomb grille plate with four tabs; sits flush in a rebate on the wall tops |
 | Lid fixing | four corner tabs hang into the inner corners of the base and guide the lid into place; a bump on each, ramped 45° on both sides, clicks into a dent in the side wall: push to close, lever up to open |
 | Opening the lid | lever it up through the grille with a small flat screwdriver; no pry cut-outs in this revision |
-| Board fixing | four M2.5 countersunk (flat-head) screws from the back: through a countersunk hole in the back plate, up through a Ø6 × 5 mm standoff and the board's hole, held by an M2.5 nut on top of the board; the heads sit flush with the back, so the case still lies flat on the wall |
+| Board fixing | four M2.5 × 6 pan-head screws from the top, through the board into Ø6 × 5 mm standoffs with Ø2.2 pilot holes, where they cut their own thread (print feedback: the first Ø2.8 hole only gripped thick screws). The countersinks in the back plate stay, so countersunk screws with nuts from the back still work if the pilot is drilled out |
 | Board fitting | the board drops straight in from the open top, about 1.7 mm toward the header end, then slides forward (lifted 0.5 mm) so the USB and RJ45 go into their cable-wall holes, and settles onto the standoffs |
 | SMA | D-hole in the right (X = 55) wall; fitted after the board: the pigtail clips onto the board, the bulkhead goes out through the wall from inside, nut tightened outside |
 | 40-pin header | wiring (jumpers or a ribbon cable) leaves through a slot along the top of the header-end wall; no opening in the lid over the header |
@@ -141,10 +141,10 @@ outer vertical edges are rounded.
 ### 5.1a Base: board screw holes
 
 - Under each of the four standoffs, a through-hole runs from the outer back face up through the standoff, on the axis
-  of the board's mounting hole: Ø2.8 clearance for M2.5.
+  of the board's mounting hole: a Ø2.2 pilot, so an M2.5 screw cuts its own thread in the plastic (no nut needed).
 - At the back face it has a 90° countersink for an ISO 10642 / DIN 7991 M2.5 head (about Ø5 at the surface), sunk
   0.2 mm below flush so the head never stands proud against the wall.
-- Screw length: 2 mm plate + 5 mm standoff + 1.6 mm board + 2 mm nut + a thread or two, so M2.5 × 12. The docs give it.
+- Screw length: M2.5 × 6 from the top (1.6 mm board + about 4 mm into the standoff). The docs give it.
 - On top of the board, each nut (5 mm across flats, 2 mm tall) needs a free circle of about Ø6.5 around the hole. The
   builder checks this against the top of the board model; the nearest parts are the FPC socket near (3.5, 57.3) and the
   large capacitor near (51.5, 24.3).
@@ -236,9 +236,8 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 
 ## 6. Assembly (goes into the docs page)
 
-1. Tilt the board so the USB and RJ45 go into their cable-wall holes and lower the header end onto the standoffs. Push
-   four M2.5 × 12 countersunk screws in from the back, through the standoffs and the board, and tighten an M2.5 nut on
-   each from the top.
+1. Lower the board flat, pushed toward the header end, slide it forward so the USB and RJ45 go into their cable-wall
+   holes, and let it settle onto the standoffs. Drive four M2.5 × 6 screws from the top into the standoffs' pilot holes.
 2. Clip the pigtail onto the antenna socket, push the SMA bulkhead out through the right wall from inside, and tighten
    its nut on the outside.
 3. Optional: plug wiring onto the 40-pin header and lead it out through the header-end slot.
