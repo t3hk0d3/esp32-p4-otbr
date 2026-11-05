@@ -42,7 +42,7 @@ make case-test    # the model's tests (about 1.5 min)
 - every opening has a clear path to its part;
 - the board can be fitted (drop in, slide forward, settle);
 - the lid clears the SMA, a ribbon plug and its ribbon;
-- the screw heads have room behind the keyholes, and the board-screw nuts have room on top;
+- the screw heads have room behind the keyholes, and the board screws' heads have room on top;
 - the lid seats on the base without overlap;
 - no opening is wider than 3.5 mm;
 - both parts are closed solids;
@@ -62,8 +62,7 @@ make case-test    # the model's tests (about 1.5 min)
 
 | Part | Count | Notes |
 | --- | --- | --- |
-| M2.5 × 12 countersunk (flat-head) screw, ISO 10642 / DIN 7991 | 4 | board to standoffs, from the back |
-| M2.5 nut | 4 | on top of the board |
+| M2.5 × 6 pan-head screw | 4 | board to standoffs, from the top; it cuts its own thread in the standoff's Ø2.2 pilot hole |
 | SMA female bulkhead with u.FL/IPEX pigtail, about 8 cm | 1 | D-flat thread, Ø6.35 |
 | Wall screws, 3.5–4 mm, pan head ≤ Ø7.5 × 2.5 mm | 2 | with wall plugs to suit |
 | Stick-on rubber feet | optional | for the table |
@@ -72,8 +71,8 @@ make case-test    # the model's tests (about 1.5 min)
 
 1. **Board:** lower the board flat into the base, pushed toward the header end (there's 2 mm of room there). Lift it
    slightly and slide it toward the cable wall so the USB and RJ45 go into their holes, then let it settle onto the
-   standoffs. Push the four countersunk screws in from the back through the standoffs and the board,
-   and tighten a nut on each from the top.
+   standoffs. Drive the four M2.5 screws from the top through the board into the standoffs. Go gently on the first
+   turn: the screw cuts its own thread in the plastic.
 2. **SMA:** clip the pigtail onto the board's antenna socket. Push the SMA bulkhead out through the D-hole in the right
    wall from inside, and tighten its nut on the outside.
 3. **Header wiring (optional):** plug jumper wires or a 2×20 ribbon plug onto the 40-pin header and lead the wires out
@@ -104,7 +103,7 @@ Every dimension is a named constant in `case/p4_case/params.py`. The ones most l
 | `BUMP_H` | 0.4 mm | the lid clicks too hard (lower) or falls off (raise) |
 | `LID_CLEAR` | 0.2 mm | the lid binds in the rebate (raise) or rattles (lower) |
 | `TAB_CLEAR` | 0.2 mm | the tabs scrape the walls (raise) |
-| `SCREW_HOLE_D` | 2.8 mm | the M2.5 screws bind in the standoffs |
+| `SCREW_HOLE_D` | 2.2 mm | M2.5 screws are too hard to drive (raise) or don't grip (lower; about 1.7 for M2) |
 | `KEY_ARM_W` | 4.3 mm | the wall screws' shanks do not slide in the keyhole arms |
 
 After a change, run `make case` again. Its checks catch a change that breaks a fit.
