@@ -411,7 +411,7 @@ static bool is_link_local(const uint8_t addr[IP6_BYTES])
 }
 
 // A link-local address is the same on both interfaces (same MAC), the zone tells them apart.
-static bool match_v6(const uint8_t addr[IP6_BYTES], uint32_t scope_id, netcfg_side_t *side)
+static bool match_v6(const uint8_t addr[IP6_BYTES], uint32_t scope_id, netcfg_side_t *side, bool *on_mesh)
 {
     for (size_t i = 0; i < s_net.count; i++) {
         const iface_t *iface = &s_net.iface[i];
@@ -428,6 +428,7 @@ static bool match_v6(const uint8_t addr[IP6_BYTES], uint32_t scope_id, netcfg_si
 
     if (ot && !is_link_local(addr) && has_v6(ot, addr)) { /* OpenThread addresses count as thread_bb */
         *side = NETCFG_SIDE_THREAD;
+        *on_mesh = true;
         return true;
     }
     return false;
@@ -444,12 +445,13 @@ static bool match_v4(esp_ip4_addr_t addr, netcfg_side_t *side)
     return false;
 }
 
-bool netcfg_ifaces_request_side(httpd_req_t *req, netcfg_side_t *side)
+bool netcfg_ifaces_socket_side(int fd, netcfg_side_t *side, bool *on_mesh)
 {
     struct sockaddr_storage local;
     socklen_t len = sizeof(local);
 
-    if (getsockname(httpd_req_to_sockfd(req), (struct sockaddr *)&local, &len) != 0) {
+    *on_mesh = false;
+    if (getsockname(fd, (struct sockaddr *)&local, &len) != 0) {
         return false;
     }
     if (local.ss_family == AF_INET) {
@@ -469,5 +471,12 @@ bool netcfg_ifaces_request_side(httpd_req_t *req, netcfg_side_t *side)
     if (netcfg_v4_from_mapped(v6->sin6_addr.s6_addr, &mapped)) {
         return match_v4(mapped, side);
     }
-    return match_v6(v6->sin6_addr.s6_addr, v6->sin6_scope_id, side);
+    return match_v6(v6->sin6_addr.s6_addr, v6->sin6_scope_id, side, on_mesh);
+}
+
+bool netcfg_ifaces_request_side(httpd_req_t *req, netcfg_side_t *side)
+{
+    bool on_mesh; /* not needed here: an HTTP request on the mesh address is treated as thread_bb, as before */
+
+    return netcfg_ifaces_socket_side(httpd_req_to_sockfd(req), side, &on_mesh);
 }

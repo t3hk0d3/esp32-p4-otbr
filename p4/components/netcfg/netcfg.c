@@ -218,6 +218,45 @@ bool netcfg_request_allowed(httpd_req_t *req, netcfg_service_t svc)
     return false;
 }
 
+#define SOCKET_LOCK_WAIT_MS 100 /* the interface lookup is short; a longer wait means a trial is being applied */
+
+bool netcfg_socket_allowed(int fd, netcfg_service_t svc)
+{
+    netcfg_side_t side = NETCFG_SIDE_MGMT;
+    bool on_mesh = false;
+    bool found;
+    netcfg_mode_t mode;
+
+    if (s.ready) {
+        if (xSemaphoreTake(s.lock, pdMS_TO_TICKS(SOCKET_LOCK_WAIT_MS)) != pdTRUE) {
+            ESP_LOGW(TAG, "refused a connection: the interface lookup did not get the lock in %d ms", SOCKET_LOCK_WAIT_MS);
+            return false;
+        }
+        mode = netcfg_ifaces_mode();
+        found = netcfg_ifaces_socket_side(fd, &side, &on_mesh);
+        xSemaphoreGive(s.lock);
+    } else { /* netcfg not started: no lock, no split mode, only the mesh rule applies */
+        mode = NETCFG_MODE_SINGLE;
+        found = netcfg_ifaces_socket_side(fd, &side, &on_mesh);
+    }
+    if (netcfg_mesh_refused(on_mesh)) {
+        ESP_LOGW(TAG, "refused a connection on a mesh address");
+        return false;
+    }
+    if (mode != NETCFG_MODE_SPLIT) { /* single mode: nothing to separate, also when no interface matches */
+        return true;
+    }
+    if (!found) {
+        ESP_LOGW(TAG, "refused a connection: its interface is unknown");
+        return false;
+    }
+    if (!netcfg_policy_allows(mode, side, svc)) {
+        ESP_LOGW(TAG, "refused a connection: service not available on this interface");
+        return false;
+    }
+    return true;
+}
+
 esp_err_t netcfg_set_trial(const netcfg_config_t *cfg)
 {
     ESP_RETURN_ON_FALSE(s.ready, ESP_ERR_INVALID_STATE, TAG, "not started");

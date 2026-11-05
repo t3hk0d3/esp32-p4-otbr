@@ -49,6 +49,16 @@ esp_netif_t *netcfg_mgmt_netif(void);
 bool netcfg_request_allowed(httpd_req_t *req, netcfg_service_t svc);
 
 /**
+ * Same decision for a connected non-HTTP socket (the USB serial proxy): may the connection on `fd` use `svc` on the
+ * interface its local address belongs to? A local address on the OpenThread netif (the mesh) is refused in every mode,
+ * single included. Otherwise single mode allows everything (also when the interface is not found); split mode applies
+ * the policy and refuses a connection whose interface is not found. Takes the netcfg lock for at most 100 ms to look the
+ * interface up; if it cannot, logs a warning and refuses. Sends nothing on the socket: the caller closes it. Call it
+ * from a task that does not hold the netcfg lock.
+ */
+bool netcfg_socket_allowed(int fd, netcfg_service_t svc);
+
+/**
  * Validate `cfg` and store it as the pending trial, then reboot (after a short delay, so the reply can be sent) into it.
  * ESP_ERR_INVALID_ARG for an invalid config (nothing stored; netcfg_validate names the field).
  */

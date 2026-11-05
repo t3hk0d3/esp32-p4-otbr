@@ -20,10 +20,17 @@ typedef enum {
     NETCFG_SVC_DEVICE_API,  /**< /device/ * */
     NETCFG_SVC_REST_READ,   /**< Thread REST GET / HEAD */
     NETCFG_SVC_REST_WRITE,  /**< every other Thread REST method */
+    NETCFG_SVC_USB_SERIAL,  /**< the raw TCP port of the USB serial proxy (checked by socket, netcfg_socket_allowed) */
 } netcfg_service_t;
 
-/** Single mode allows everything. Split mode: mgmt allows GUI, DEVICE_API, REST_READ; thread allows REST_READ, REST_WRITE. */
+/**
+ * Single mode allows everything. Split mode: mgmt allows GUI, DEVICE_API, REST_READ, USB_SERIAL; thread allows REST_READ,
+ * REST_WRITE, USB_SERIAL.
+ */
 bool netcfg_policy_allows(netcfg_mode_t mode, netcfg_side_t side, netcfg_service_t svc);
+
+/** Must a connection be refused because its local address is on the OpenThread netif (the mesh)? The same in every mode. */
+bool netcfg_mesh_refused(bool on_mesh);
 
 /** A trial is confirmed only by a request that arrived on the management side. */
 bool netcfg_confirm_allowed(netcfg_side_t side);

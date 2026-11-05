@@ -45,7 +45,12 @@ esp_err_t netcfg_ifaces_start(void);
 /** Undo netcfg_ifaces_create/start, also after a failure half-way: a new config can be brought up afterwards. */
 void netcfg_ifaces_destroy(void);
 size_t netcfg_ifaces_state(netcfg_iface_state_t out[NETCFG_MAX_IFACES]);
-/** Side of the request by its local address; false when it matches no interface. */
+/**
+ * Side of a connected socket by its local address; false when it matches no interface. `on_mesh` is set true only when the
+ * match came from the OpenThread netif (a mesh address, reported as the Thread side); it is false in every other case.
+ */
+bool netcfg_ifaces_socket_side(int fd, netcfg_side_t *side, bool *on_mesh);
+/** Side of the request by its local address (netcfg_ifaces_socket_side on the request's socket); false when it matches no interface. */
 bool netcfg_ifaces_request_side(httpd_req_t *req, netcfg_side_t *side);
 /**
  * DHCP client name of the interfaces made from now on and of the existing ones; an interface with a running DHCP client

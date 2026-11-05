@@ -49,3 +49,29 @@ TEST_CASE("On an IPv4-mapped IPv6 local address: the IPv4 address is extracted",
     }), (const uint8_t *)&out.addr, 4);
     TEST_ASSERT_FALSE(netcfg_v4_from_mapped(native, &out));
 }
+
+TEST_CASE("On a USB serial connection arriving on mgmt in split mode: it is allowed", "[netcfg]")
+{
+    TEST_ASSERT_TRUE(netcfg_policy_allows(NETCFG_MODE_SPLIT, NETCFG_SIDE_MGMT, NETCFG_SVC_USB_SERIAL));
+}
+
+TEST_CASE("On a USB serial connection arriving on thread_bb in split mode: it is allowed", "[netcfg]")
+{
+    TEST_ASSERT_TRUE(netcfg_policy_allows(NETCFG_MODE_SPLIT, NETCFG_SIDE_THREAD, NETCFG_SVC_USB_SERIAL));
+}
+
+TEST_CASE("On a USB serial connection in single mode: it is allowed on either side", "[netcfg]")
+{
+    TEST_ASSERT_TRUE(netcfg_policy_allows(NETCFG_MODE_SINGLE, NETCFG_SIDE_MGMT, NETCFG_SVC_USB_SERIAL));
+    TEST_ASSERT_TRUE(netcfg_policy_allows(NETCFG_MODE_SINGLE, NETCFG_SIDE_THREAD, NETCFG_SVC_USB_SERIAL));
+}
+
+TEST_CASE("On a local address on the OpenThread netif: the connection is refused", "[netcfg]")
+{
+    TEST_ASSERT_TRUE(netcfg_mesh_refused(true));
+}
+
+TEST_CASE("On a local address on an Ethernet interface: the connection is not refused", "[netcfg]")
+{
+    TEST_ASSERT_FALSE(netcfg_mesh_refused(false));
+}
