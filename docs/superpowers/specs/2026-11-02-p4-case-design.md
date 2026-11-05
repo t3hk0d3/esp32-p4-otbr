@@ -225,7 +225,7 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
       where the snap bump sits. Below that it tapers 0.5 mm inward to the tip.
     - **End face toward the end wall:** the same flat-then-lead-in profile, so each tip narrows in both directions.
     - The tip is about 1.4 mm thick. Its vertical outer corner follows the wall's rounded inner corner, 0.2 mm clear.
-  - **Snap bump:** each tab carries a bump on its side-wall face, about 0.4 mm high with 30° ramps on both faces, centred
+  - **Snap bump:** each tab carries a bump on its side-wall face, 0.5 mm high (0.4 opened too easily) with 30° ramps on both faces, centred
     1 mm below the lid. It works as a detent rather than a hook: a firm lever pops it out without bending the tab much. The
     dents in the side walls sit level with the bumps, 1 mm below the lid's underside.
   - Bump height and angle, dent fit, tab length and drop, wedge thicknesses and the root fillet go into named constants, so
