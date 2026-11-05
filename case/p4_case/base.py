@@ -120,8 +120,18 @@ def _cable_wall_openings() -> Part:
         block(cx0, cx1, y0, y1, P.OPENING_BOTTOM, board_z(P.TOP) + 1),
         block(sx0, sx1, y0, y1, sz0, sz1),
     ]
-    scoop_y = P.OUTER[2] - (P.SCOOP_R - P.SCOOP_DEPTH)
-    cuts.append(x_cylinder(scoop_y, sz0, 2 * P.SCOOP_R, *P.SCOOP_X))
+    # thumb scoop on the slot's top edge: a wedge into the outer face (YZ profile, extruded along X)
+    face = P.OUTER[2]
+    wedge = [
+        (face - EPS, sz1 - EPS),
+        (face + P.SCOOP_DEPTH, sz1 - EPS),
+        (face - EPS, sz1 + P.SCOOP_RISE),
+    ]
+    sx_a, sx_b = P.SCOOP_X
+    prism = extrude(
+        Plane.YZ * Polygon(*wedge, align=None), (sx_b - sx_a) / 2, both=True
+    )
+    cuts.append(Pos((sx_a + sx_b) / 2, 0, 0) * prism)
     return Part() + cuts
 
 

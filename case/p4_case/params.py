@@ -66,8 +66,10 @@ LINTEL_SPLIT_X = (
     FACTS["usb"].x1 + FACTS["rj45"].x0
 ) / 2  # where the lintel steps from the USB to the RJ45 height
 SCOOP_X = (41.5, 49.0)
-SCOOP_R = 2.4
-SCOOP_DEPTH = 1.5  # into the cable wall's outer face, at the slot's bottom edge
+# above the slot, where the card's grip edge is (print feedback); deepest at the slot's top edge, its ceiling slopes
+# back out to the face at about 40 degrees from vertical so it prints without support
+SCOOP_DEPTH = 1.5
+SCOOP_RISE = 1.8
 
 # --- header-end slot and ribbon-plug room (5.2) ---
 HEADER_SLOT_X = (0.5, 54.5)
