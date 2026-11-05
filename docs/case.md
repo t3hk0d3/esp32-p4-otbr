@@ -109,7 +109,7 @@ Every dimension is a named constant in `case/p4_case/params.py`. The ones most l
 
 | Constant | Default | Change it when |
 | --- | --- | --- |
-| `BUMP_H` | 0.4 mm | the lid clicks too hard (lower) or falls off (raise) |
+| `BUMP_H` | 0.5 mm | the lid clicks too hard (lower) or opens too easily (raise) |
 | `LID_CLEAR` | 0.2 mm | the lid binds in the rebate (raise) or rattles (lower) |
 | `TAB_CLEAR` | 0.2 mm | the tabs scrape the walls (raise) |
 | `SCREW_HOLE_D` | 2.2 mm | M2.5 screws are too hard to drive (raise) or don't grip (lower; about 1.7 for M2) |
