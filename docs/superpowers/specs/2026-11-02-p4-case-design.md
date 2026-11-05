@@ -96,11 +96,11 @@ the result.
 | Wall mounting | two L-shaped keyholes in the flat back plate, 32 mm apart, for either orientation |
 | Table | lies on its back; stick-on rubber feet optional, not modelled |
 | Cooling | honeycomb lid (about 60% open over the grille area) plus the header-end slot; no vents in the back plate or side walls |
-| Buttons | Ø2.5 pin-holes in the left wall on the plunger axes; a finger can't reach the plunger |
-| Wall / plate thickness | 2.0 mm, except the SMA side wall: 4.0 mm, grown outward (the antenna levers on it; print feedback); lid plate 2.0 mm |
+| Buttons | Ø2.5 pin-holes in the left wall on the plunger axes, with a 90° funnel (Ø4.5) at the outer face to guide a pencil tip through the 4 mm wall; a finger can't reach the plunger |
+| Wall / plate thickness | 2.0 mm, except both side walls: 4.0 mm, grown outward (print feedback: the antenna levered the SMA wall apart, and thin side walls flexed so the lid's detents slipped); lid plate 2.0 mm |
 | Clearance board ↔ inner wall | 0.5 mm, with a local recess at the buttons (see 5.2) |
 | Clearance over the tallest part | 1.0 mm (lid underside at board Z 17.0); the extra 0.5 mm leaves 1 mm of wall above the USB opening |
-| Outer size | about 62 × 75 × 27.6 mm |
+| Outer size | about 64 × 75 × 27.6 mm |
 | Printing | FDM, 0.4 mm nozzle, PETG recommended (the tabs flex), PLA acceptable; no supports; base prints back-plate down, lid prints top-face down |
 
 ## 5. Geometry
@@ -178,7 +178,8 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
     it: the 1 mm-thin recessed sections of the first print were unnecessary (print feedback). The 2.5 mm gap at the
     header end leaves room in that direction.
 - **Left wall (X = 0 edge, buttons):**
-  - Two Ø2.5 pin-holes on the plunger axes (Y 5.65 and 12.35 and the plunger's Z, taken from the model).
+  - Two Ø2.5 pin-holes on the plunger axes (Y 5.65 and 12.35 and the plunger's Z, taken from the model), each with a
+    90° funnel, Ø4.5 at the outer face.
   - The plungers sit only 0.15 mm from the inner face, so the inner face gets a shallow local recess around both buttons
     to keep ≥ 0.3 mm clearance as the board slides in. There are no guide tubes.
 - **Right wall (X = 55 edge, SMA):**

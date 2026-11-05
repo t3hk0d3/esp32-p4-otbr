@@ -23,9 +23,9 @@ class TestDefaultBase:
         assert len(base.solids()) == 1
         assert base.is_valid
 
-    def test_has_the_outer_size_62_by_75_by_27_6(self, base):
+    def test_has_the_outer_size_64_by_75_by_27_6(self, base):
         bb = base.bounding_box()
-        assert bb.size.X == pytest.approx(62.0, abs=0.1)
+        assert bb.size.X == pytest.approx(64.0, abs=0.1)
         assert bb.size.Y == pytest.approx(75.0, abs=0.1)
         assert bb.size.Z == pytest.approx(27.6, abs=0.1)
         assert bb.min.Z == pytest.approx(board_z(0.0), abs=0.01)
@@ -105,6 +105,19 @@ class TestDefaultBase:
         assert not solid_bz(base, x, P.SMA_Y, zc + 2.5)
         assert solid_bz(base, x, P.SMA_Y, zc + 2.8)  # the flat
         assert solid_bz(base, x, P.SMA_Y + 3.5, zc)
+
+    def test_makes_the_whole_button_side_wall_4_mm_thick(self, base):
+        x = P.INNER[0] - P.BUTTON_WALL + 0.2
+        for y in (25.0, 45.0, 65.0):
+            assert solid_bz(base, x, y, 10.0)
+        assert not solid_bz(base, P.INNER[0] - P.BUTTON_WALL - 0.1, 45.0, 10.0)
+
+    def test_funnels_the_button_holes_at_the_outer_face(self, base):
+        b = P.FACTS["button_a"]
+        yc, zc = (b.y0 + b.y1) / 2, (b.z0 + b.z1) / 2
+        r = P.BUTTON_FUNNEL_D / 2
+        assert not solid_bz(base, P.OUTER[0] + 0.1, yc + r - 0.3, zc)  # funnel mouth
+        assert solid_bz(base, P.OUTER[0] + 1.5, yc + r - 0.3, zc)  # narrows to the hole
 
     def test_makes_the_whole_sma_side_wall_4_mm_thick(self, base):
         x = P.INNER[1] + P.SMA_WALL - 0.2
