@@ -173,10 +173,9 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
     up to the flange.
   - 3.5 mm keeps to the "nothing wider than 3.5 mm falls in" rule when this end faces up on the wall. Ribbon cable
     (about 1.3 mm) and Dupont housings (2.5 mm) pass.
-  - A real 2×20 IDC ribbon plug (about 55.9 × 9 × 9 mm, seated on the header body) must fit with 0.5 mm clearance. The
-    inner box is only 56 mm wide and ends 2 mm past the header, so the walls get local 1 mm-deep recesses on their
-    inner faces around the header end: both side walls over board Y 58–68.5, and the header-end wall itself, from the
-    board's top face up to the slot. The walls are 1 mm thick there.
+  - A 2×20 IDC ribbon plug (about 55.9 × 9 × 9 mm) fits the 56 mm-wide cavity snugly. The walls are not recessed for
+    it: the 1 mm-thin recessed sections of the first print were unnecessary (print feedback). The 2.5 mm gap at the
+    header end leaves room in that direction.
 - **Left wall (X = 0 edge, buttons):**
   - Two Ø2.5 pin-holes on the plunger axes (Y 5.65 and 12.35 and the plunger's Z, taken from the model).
   - The plungers sit only 0.15 mm from the inner face, so the inner face gets a shallow local recess around both buttons
@@ -186,8 +185,8 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
   - The builder checks clearance inside: a 5 mm radius around the axis, out to 12 mm from the wall, must miss the board,
     the capacitors and the lid tabs.
 - **Tab dents:** each side wall has two dents in its inner face, one near each end, on the axis of the corner tabs' side
-  legs (5.3). Their upper and lower faces match the bump's 30° ramps (60° from horizontal), so they print without supports. At the header end the dent sits
-  above the ribbon-plug recess, where the wall is full thickness.
+  legs (5.3). Their upper and lower faces match the bump's 30° ramps (60° from horizontal), so they print without
+  supports.
 
 ### 5.3 Lid
 
@@ -227,8 +226,7 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
     - The tip is about 1.4 mm thick. Its vertical outer corner follows the wall's rounded inner corner, 0.2 mm clear.
   - **Snap bump:** each tab carries a bump on its side-wall face, about 0.4 mm high with 30° ramps on both faces, centred
     1 mm below the lid. It works as a detent rather than a hook: a firm lever pops it out without bending the tab much. The
-    dents in the side walls sit level with the bumps, 1 mm below the lid's underside. At the header end that's above the
-    ribbon-plug recess, where the wall is full thickness.
+    dents in the side walls sit level with the bumps, 1 mm below the lid's underside.
   - Bump height and angle, dent fit, tab length and drop, wedge thicknesses and the root fillet go into named constants, so
     they can be tuned after a test print.
 - **LED:** the power LED (board X 0.3–1.6, Y 17.4–19.1) stays covered by the solid frame. Cells cut into the frame over
@@ -281,9 +279,8 @@ These are automated checks, run against the vendor STEP:
   - The 73 mm case of the first draft fails this check; that is why the case is 75 mm long.
   - If no such motion exists with the margins in 5.2, stop and report back. Don't open up the cable-wall holes without
     asking.
-- A ribbon-plug block (55.9 × 9 × 9 mm, seated on the header body, centred on it) fits with at least 0.5 mm clearance to
-  the base walls. With the lid on, there's at least 1.3 mm between the top of the block and the lid underside for the
-  ribbon.
+- With the lid on, there's at least 1.3 mm between the top of a ribbon-plug block (55.9 × 9 × 9 mm, seated on the
+  header body) and the lid underside for the ribbon.
 - Lid on: the tabs, bumps and grille don't touch the board, its parts, the SMA envelope, the ribbon-plug block or the
   ribbon path (X 2.1–52.9, from the top of the block up into the header slot).
 - Each board-screw nut circle (Ø6.5 on top of the board around the mounting hole, 2.5 mm tall) is free of board parts.
