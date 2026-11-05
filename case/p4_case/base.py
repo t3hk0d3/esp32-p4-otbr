@@ -160,6 +160,16 @@ def _buttons() -> Part:
         cuts.append(
             x_cylinder(yc, zc, P.BUTTON_HOLE_D, P.OUTER[0] - 1, P.INNER[0] + EPS)
         )
+        depth = (
+            P.BUTTON_FUNNEL_D - P.BUTTON_HOLE_D
+        ) / 2  # 90 degrees: depth equals the radius step
+        funnel = Cone(
+            P.BUTTON_FUNNEL_D / 2,
+            P.BUTTON_HOLE_D / 2,
+            depth + EPS,
+            align=(Align.CENTER, Align.CENTER, Align.MIN),
+        )
+        cuts.append(Pos(P.OUTER[0] - EPS, yc, zc) * Rot(0, 90, 0) * funnel)
     return Part() + cuts
 
 

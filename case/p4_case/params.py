@@ -29,7 +29,9 @@ HEADER_GAP = 2.5
 INNER = (-GAP, PCB_X1 + GAP, -GAP, PCB_Y1 + HEADER_GAP)  # x0, x1, y0, y1
 # the SMA side wall is twice as thick: the antenna levers on it (print feedback); it grows outward, the board is inside
 SMA_WALL = 4.0
-OUTER = (INNER[0] - WALL, INNER[1] + SMA_WALL, INNER[2] - WALL, INNER[3] + WALL)
+# the button side wall too: thin side walls flexed and let the lid's detents slip (print feedback)
+BUTTON_WALL = 4.0
+OUTER = (INNER[0] - BUTTON_WALL, INNER[1] + SMA_WALL, INNER[2] - WALL, INNER[3] + WALL)
 INNER_R = 2.0 + GAP  # board corner radius 2 + gap
 OUTER_R = 2.5  # outer vertical edges
 PLATE_T = 2.0  # case Z 0-2
@@ -83,6 +85,7 @@ HEADER_BODY_TOP = 2.5  # board Z where a plug seats (top of the header's plastic
 
 # --- buttons (5.2) ---
 BUTTON_HOLE_D = 2.5
+BUTTON_FUNNEL_D = 4.5  # 90-degree countersink at the outer face guides a pencil tip into the 4 mm-deep hole
 BUTTON_RECESS_X = -1.0  # left wall's inner face pulled back to here around the buttons
 BUTTON_RECESS_MARGIN = 0.5
 
