@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 #include "unity.h"
 #include "unity_test_runner.h"
@@ -85,7 +86,7 @@ TEST_CASE("On any input: families in the catalogue's order", "[metrics]")
     with_sample();
     char *out = render();
     const char *order[] = {"# TYPE br_info ", "# TYPE br_uptime_seconds ", "# TYPE br_mode ", "# TYPE br_cpu_seconds_total ",
-                           "# TYPE br_heap_free_bytes ", "# TYPE br_ot_lock_acquisitions_total ", "# TYPE br_storage_ok ",
+                           "# TYPE br_heap_free_bytes ", "# TYPE br_chip_temperature_celsius ", "# TYPE br_ot_lock_acquisitions_total ", "# TYPE br_storage_ok ",
                            "# TYPE br_scrape_partial ", "# TYPE br_thread_role ", "# TYPE br_mac_tx_frames_total ",
                            "# TYPE br_border_routing_state ", "# TYPE br_srp_hosts ", "# TYPE br_trel_enabled ",
                            "# TYPE br_trel_tx_failures_total ", "# TYPE br_thread_collect_age_seconds ",
@@ -154,6 +155,53 @@ TEST_CASE("Device family: lock and heap figures with their labels", "[metrics]")
     free(out);
 }
 
+TEST_CASE("On a valid chip temperature: br_chip_temperature_celsius with HELP, TYPE gauge and one decimal", "[metrics]")
+{
+    with_sample();
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "# HELP br_chip_temperature_celsius Chip (die) temperature."));
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE br_chip_temperature_celsius gauge"));
+    TEST_ASSERT_TRUE(has_line(out, "br_chip_temperature_celsius 47.3"));
+    TEST_ASSERT_TRUE(strstr(out, "br_heap_largest_free_block_bytes{") < strstr(out, "# TYPE br_chip_temperature_celsius"));
+    free(out);
+}
+
+TEST_CASE("On a chip temperature below zero or rounding to zero: the sign is written once, never -0.0", "[metrics]")
+{
+    with_sample();
+    s_in.diag.chip_temperature_c = -3.04f;
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "br_chip_temperature_celsius -3.0"));
+    free(out);
+    s_in.diag.chip_temperature_c = -0.04f;
+    out = render();
+    TEST_ASSERT_TRUE(has_line(out, "br_chip_temperature_celsius 0.0"));
+    free(out);
+}
+
+TEST_CASE("On an invalid chip temperature: no family, br_scrape_partial 0", "[metrics]")
+{
+    with_sample();
+    s_in.diag.chip_temperature_valid = false;
+    char *out = render();
+
+    TEST_ASSERT_NULL(strstr(out, "br_chip_temperature_celsius"));
+    TEST_ASSERT_TRUE(has_line(out, "br_scrape_partial 0"));
+    free(out);
+}
+
+TEST_CASE("On a non-finite chip temperature: no family", "[metrics]")
+{
+    with_sample();
+    s_in.diag.chip_temperature_c = NAN;
+    char *out = render();
+
+    TEST_ASSERT_NULL(strstr(out, "br_chip_temperature_celsius"));
+    free(out);
+}
+
 TEST_CASE("On two tasks with the same name: the second is labelled <name>#2", "[metrics]")
 {
     with_sample();
@@ -195,6 +243,7 @@ TEST_CASE("On a NULL diag view: diag families left out, br_scrape_partial 1", "[
     TEST_ASSERT_NULL(strstr(out, "br_uptime_seconds"));
     TEST_ASSERT_NULL(strstr(out, "br_cpu_seconds_total"));
     TEST_ASSERT_NULL(strstr(out, "br_heap_"));
+    TEST_ASSERT_NULL(strstr(out, "br_chip_temperature_celsius"));
     TEST_ASSERT_NULL(strstr(out, "br_ot_lock_"));
     TEST_ASSERT_TRUE(has_line(out, "br_mode{mode=\"BR_RUNNING\"} 1"));
     TEST_ASSERT_TRUE(has_line(out, "br_scrape_partial 1"));

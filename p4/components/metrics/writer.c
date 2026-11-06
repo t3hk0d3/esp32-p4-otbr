@@ -65,6 +65,19 @@ void metrics_writer_usec(metrics_writer_t *w, uint64_t usec)
     put(w, frac, sizeof(frac));
 }
 
+void metrics_writer_tenths(metrics_writer_t *w, int32_t tenths)
+{
+    const int64_t wide = tenths;
+    const uint64_t magnitude = (uint64_t)(wide < 0 ? -wide : wide);
+
+    if (tenths < 0) {
+        put(w, "-", 1);
+    }
+    metrics_writer_u64(w, magnitude / 10);
+    put(w, ".", 1);
+    metrics_writer_u64(w, magnitude % 10);
+}
+
 void metrics_writer_label_value(metrics_writer_t *w, const char *text)
 {
     while (*text) {

@@ -56,6 +56,24 @@ TEST_CASE("usec and u64: microseconds as seconds with six decimals, integers in 
     free(out);
 }
 
+static void tenths_values(metrics_writer_t *w)
+{
+    const int32_t values[] = {473, -5, 0, -473, 5, 1000, INT32_MIN};
+
+    for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
+        metrics_writer_tenths(w, values[i]);
+        metrics_writer_raw(w, " ");
+    }
+}
+
+TEST_CASE("tenths: one decimal, the sign once, -0.5 keeps its zero", "[metrics]")
+{
+    char *out = write_with(128, tenths_values);
+
+    TEST_ASSERT_EQUAL_STRING("47.3 -0.5 0.0 -47.3 0.5 100.0 -214748364.8 ", out);
+    free(out);
+}
+
 static void escapes(metrics_writer_t *w)
 {
     metrics_writer_label_value(w, "back\\slash \"quote\" new\nline");
