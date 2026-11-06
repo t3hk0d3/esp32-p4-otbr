@@ -21,7 +21,8 @@ extern "C" {
  * SPINEL_STATUS_FAILURE (1) for any other reply, or a negative ZIGBEE_SPINEL_ERR_*: a local refusal, a timeout (which
  * also requests a channel reset), or an abort through zigbee_spinel_abort_wait (no reset requested). Only a refusal
  * (> 0) is the RCP's answer; after a negative code a call stops and changes no stored state it has not already
- * committed. One property request runs at a time.
+ * committed (except a source-match add, which stores its entry: zigbee_spinel_src_match_add_short). One property
+ * request runs at a time.
  *
  * Transmit returns at once; its answer comes through the sink. An energy scan's three property requests are
  * synchronous like the others; only its result comes through the sink. One transmit may be in flight while a property
@@ -195,7 +196,12 @@ int zigbee_spinel_set_promiscuous(zigbee_spinel_t *s, bool promiscuous);
 
 /** Clears the stored copy, then both source-match tables on the RCP (stopping at a timeout or an abort). */
 void zigbee_spinel_src_match_clear(zigbee_spinel_t *s);
-/** Adds one entry. Nonzero when the RCP refuses it; a refused entry is not stored, so it is never replayed. */
+/**
+ * Adds one entry. Nonzero when the RCP refuses it; a refused entry (> 0) is not stored, so it is never replayed. An add
+ * that did not get the RCP's answer (a negative code: aborted by a RESET or GONE, timed out, or not sent) still stores
+ * the entry and returns that code: the next attach replays it (and prunes it if the RCP refuses it then), so the RCP's
+ * table is not left without it until the next edit.
+ */
 int zigbee_spinel_src_match_add_short(zigbee_spinel_t *s, uint16_t address);
 int zigbee_spinel_src_match_add_ext(zigbee_spinel_t *s, const uint8_t ext[8]);
 

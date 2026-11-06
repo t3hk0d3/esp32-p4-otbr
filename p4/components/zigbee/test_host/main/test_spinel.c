@@ -2178,3 +2178,127 @@ TEST_CASE("unsolicited reset status while a property request waits: the request 
     TEST_ASSERT_EQUAL(1, got.ready_count);
     TEST_ASSERT_EQUAL(0, rcp.resets_requested);
 }
+
+/* -- source-match adds a RESET, GONE or timeout cut short -- */
+
+/* How many times the short address `address` was inserted. */
+static size_t short_inserts(uint16_t address)
+{
+    size_t n = 0;
+
+    for (size_t i = 0; i < rcp.sent_count; i++) {
+        req_t r = sent(i);
+        uint16_t a = 0;
+
+        if (r.cmd == SPINEL_CMD_PROP_VALUE_INSERT && r.key == SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES &&
+                spinel_datatype_unpack(r.data, r.len, "S", &a) > 0 && a == address) {
+            n++;
+        }
+    }
+    return n;
+}
+
+/* How many times EXT_A was inserted. */
+static size_t ext_a_inserts(void)
+{
+    size_t n = 0;
+
+    for (size_t i = 0; i < rcp.sent_count; i++) {
+        req_t r = sent(i);
+
+        if (r.cmd == SPINEL_CMD_PROP_VALUE_INSERT && r.key == SPINEL_PROP_MAC_SRC_MATCH_EXTENDED_ADDRESSES &&
+                r.len == 8 && memcmp(r.data, EXT_A_REVERSED, 8) == 0) {
+            n++;
+        }
+    }
+    return n;
+}
+
+TEST_CASE("src_match_add_short aborted by a reset: returns nonzero and the attach replays the entry", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.event_key = SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES;
+    rcp.event = EVENT_RESET;
+    TEST_ASSERT_LESS_THAN(0, zigbee_spinel_src_match_add_short(&client, 0x1234));
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_EQUAL(2, short_inserts(0x1234)); // the aborted add, then the replay's
+}
+
+TEST_CASE("src_match_add_ext aborted by a reset: returns nonzero and the attach replays the entry", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.event_key = SPINEL_PROP_MAC_SRC_MATCH_EXTENDED_ADDRESSES;
+    rcp.event = EVENT_RESET;
+    TEST_ASSERT_LESS_THAN(0, zigbee_spinel_src_match_add_ext(&client, EXT_A));
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_EQUAL(2, ext_a_inserts());
+}
+
+TEST_CASE("src_match_add_short aborted by gone: returns nonzero and the next attach replays the entry", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.event_key = SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES;
+    rcp.event = EVENT_GONE;
+    TEST_ASSERT_LESS_THAN(0, zigbee_spinel_src_match_add_short(&client, 0x1234));
+    forget();
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_EQUAL(1, short_inserts(0x1234));
+}
+
+TEST_CASE("src_match_add_ext aborted by gone: returns nonzero and the next attach replays the entry", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.event_key = SPINEL_PROP_MAC_SRC_MATCH_EXTENDED_ADDRESSES;
+    rcp.event = EVENT_GONE;
+    TEST_ASSERT_LESS_THAN(0, zigbee_spinel_src_match_add_ext(&client, EXT_A));
+    forget();
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_EQUAL(1, ext_a_inserts());
+}
+
+TEST_CASE("src_match_add_short timed out: returns ZIGBEE_SPINEL_ERR_TIMEOUT and the reset's attach replays the entry",
+          "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.silent_key = SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES;
+    rcp.silent_cmd = SPINEL_CMD_PROP_VALUE_INSERT;
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_TIMEOUT, zigbee_spinel_src_match_add_short(&client, 0x1234));
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+    rcp.silent_key = UINT32_MAX;
+    forget();
+    zigbee_spinel_on_reset(&client); // the mux's answer to the requested reset
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_EQUAL(1, short_inserts(0x1234));
+}
+
+TEST_CASE("src_match_add_ext timed out: returns ZIGBEE_SPINEL_ERR_TIMEOUT and the reset's attach replays the entry",
+          "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.silent_key = SPINEL_PROP_MAC_SRC_MATCH_EXTENDED_ADDRESSES;
+    rcp.silent_cmd = SPINEL_CMD_PROP_VALUE_INSERT;
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_TIMEOUT, zigbee_spinel_src_match_add_ext(&client, EXT_A));
+    rcp.silent_key = UINT32_MAX;
+    forget();
+    zigbee_spinel_on_reset(&client);
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_EQUAL(1, ext_a_inserts());
+}
+
+TEST_CASE("src_match add the RCP refuses: not stored, so the next attach does not replay it", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.short_limit = 1;
+    rcp.ext_limit = 1;
+    zigbee_spinel_src_match_clear(&client);
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_src_match_add_short(&client, 0x0001));
+    TEST_ASSERT_GREATER_THAN(0, zigbee_spinel_src_match_add_short(&client, 0x1234));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_src_match_add_ext(&client, EXT_B));
+    TEST_ASSERT_GREATER_THAN(0, zigbee_spinel_src_match_add_ext(&client, EXT_A));
+    forget();
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(0, short_inserts(0x1234));
+    TEST_ASSERT_EQUAL(0, ext_a_inserts());
+}

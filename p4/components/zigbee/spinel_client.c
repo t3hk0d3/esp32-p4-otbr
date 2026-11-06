@@ -646,16 +646,14 @@ int zigbee_spinel_src_match_add_short(zigbee_spinel_t *s, uint16_t address)
         return ZIGBEE_SPINEL_ERR_LOCAL;
     }
     enter(s);
-    if (s->attached) {
-        int rc = send_src_short(s, address);
-        if (rc != 0) {
-            return leave(s, rc);
-        }
-    }
-    if (!stored) {
+    int rc = s->attached ? send_src_short(s, address) : 0;
+
+    // A refusal (> 0) is the RCP's answer: not stored. Without an answer the entry is stored before leave(), whose
+    // attach (after a RESET) replays it at once.
+    if (!stored && rc <= 0) {
         s->src_short[s->src_short_count++] = address;
     }
-    return leave(s, 0);
+    return leave(s, rc);
 }
 
 int zigbee_spinel_src_match_add_ext(zigbee_spinel_t *s, const uint8_t ext[8])
@@ -666,16 +664,14 @@ int zigbee_spinel_src_match_add_ext(zigbee_spinel_t *s, const uint8_t ext[8])
         return ZIGBEE_SPINEL_ERR_LOCAL;
     }
     enter(s);
-    if (s->attached) {
-        int rc = send_src_ext(s, ext);
-        if (rc != 0) {
-            return leave(s, rc);
-        }
-    }
-    if (!stored) {
+    int rc = s->attached ? send_src_ext(s, ext) : 0;
+
+    // A refusal (> 0) is the RCP's answer: not stored. Without an answer the entry is stored before leave(), whose
+    // attach (after a RESET) replays it at once.
+    if (!stored && rc <= 0) {
         memcpy(s->src_ext[s->src_ext_count++], ext, 8);
     }
-    return leave(s, 0);
+    return leave(s, rc);
 }
 
 /*
