@@ -201,9 +201,68 @@ class TestDefaultBase:
 
     def test_has_four_6_mm_standoffs_5_mm_tall_on_the_hole_axes(self, base):
         for hx, hy in P.SCREW_HOLES:
-            assert solid(base, hx + 2.7, hy, 6.5)
-            assert not solid(base, hx + 3.3, hy, 6.5)
-            assert not solid(base, hx + 2.7, hy, 7.2)
+            d = 1 if hx < 27.5 else -1  # toward the middle; the wall side is a web
+            assert solid(base, hx + d * 2.7, hy, 6.5)
+            assert not solid(base, hx + d * 3.3, hy, 6.5)
+            assert not solid(base, hx + d * 2.7, hy, 7.2)
+            assert not solid(base, hx, hy + 3.3, 6.5)  # Ø6 across the case's length too
+
+    def test_joins_each_standoff_to_its_side_wall(self, base):
+        r = P.STANDOFF_D / 2
+        web_top = P.STANDOFF_TOP - P.STANDOFF_WEB_DROP
+        for hx, hy in P.SCREW_HOLES:
+            wall = P.INNER[0] if hx < 27.5 else P.INNER[1]
+            d = 1 if hx < 27.5 else -1
+            x = wall + d * 0.3  # between the wall and the post
+            for y in (hy, hy + r - 0.2, hy - r + 0.2):
+                assert solid(base, x, y, web_top - 0.1)
+            assert not solid(base, x, hy + r + 0.2, web_top - 0.1)  # web is Ø6 wide
+
+    def test_lets_the_board_bear_only_on_the_round_pad(self, base):
+        assert P.STANDOFF_WEB_DROP == pytest.approx(0.5)
+        web_top = P.STANDOFF_TOP - P.STANDOFF_WEB_DROP
+        for hx, hy in P.SCREW_HOLES:
+            wall = P.INNER[0] if hx < 27.5 else P.INNER[1]
+            d = 1 if hx < 27.5 else -1
+            assert not solid(base, wall + d * 0.3, hy, web_top + 0.1)  # below the board
+            assert solid(base, hx - d * 2.7, hy, P.STANDOFF_TOP - 0.1)  # pad, wall side
+
+    def test_chamfers_the_outer_bottom_edge_against_elephants_foot(self, base):
+        c = P.OUTER_BOTTOM_CHAMFER
+        assert c == pytest.approx(0.5)
+        x0, x1, y0, y1 = P.OUTER
+        for x, y in (
+            (x0 + 0.1, 40.0),
+            (x1 - 0.1, 40.0),
+            (27.5, y0 + 0.1),
+            (27.5, y1 - 0.1),
+        ):
+            assert not solid(base, x, y, 0.1)  # cut back at the bed
+            assert solid(base, x, y, c + 0.1)  # full outline above it
+
+    def test_flares_the_standoff_webs_into_the_plate_too(self, base):
+        c, r = P.STANDOFF_ROOT_CHAMFER, P.STANDOFF_D / 2
+        for hx, hy in P.SCREW_HOLES:
+            wall = P.INNER[0] if hx < 27.5 else P.INNER[1]
+            x = (wall + hx) / 2
+            y = hy + r + c / 2
+            assert solid(base, x, y, P.PLATE_T + c / 2 - 0.2)
+            assert not solid(base, x, y, P.PLATE_T + c / 2 + 0.2)
+
+    def test_chamfers_the_floor_into_all_four_walls_at_45_degrees(self, base):
+        c = P.WALL_ROOT_CHAMFER
+        assert c == pytest.approx(2.5)
+        ix0, ix1, iy0, iy1 = P.INNER
+        z_in, z_out = P.PLATE_T + c / 2 - 0.2, P.PLATE_T + c / 2 + 0.2
+        for x, y in (
+            (ix0 + c / 2, 40.0),
+            (ix1 - c / 2, 40.0),
+            (27.5, iy0 + c / 2),
+            (27.5, iy1 - c / 2),
+        ):
+            assert solid(base, x, y, z_in), (x, y)
+            assert not solid(base, x, y, z_out), (x, y)
+        assert not solid(base, ix0 + c + 0.1, 40.0, P.PLATE_T + 0.05)  # ends c out
 
     def test_flares_each_standoff_into_the_plate_at_45_degrees(self, base):
         c = P.STANDOFF_ROOT_CHAMFER

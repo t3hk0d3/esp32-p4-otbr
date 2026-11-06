@@ -34,6 +34,9 @@ BUTTON_WALL = 4.0
 OUTER = (INNER[0] - BUTTON_WALL, INNER[1] + SMA_WALL, INNER[2] - WALL, INNER[3] + WALL)
 INNER_R = 2.0 + GAP  # board corner radius 2 + gap
 OUTER_R = 2.5  # outer vertical edges
+# 45° on the outer bottom edge, which prints on the bed: no elephant's-foot lip around the case. Small, so the first
+# layer keeps nearly all its area and the 45° face prints without support
+OUTER_BOTTOM_CHAMFER = 0.5
 PLATE_T = 2.0  # case Z 0-2
 STANDOFF_TOP = 7.0  # case Z (board underside)
 LID_UNDERSIDE = 25.6  # case Z of the lid body's underside
@@ -45,6 +48,12 @@ REBATE_W = WALL / 2  # 5.2: the rebate takes the inner half of the wall
 STANDOFF_D = 6.0
 # 45° flare where each standoff meets the plate: no sharp root corner, a stronger joint
 STANDOFF_ROOT_CHAMFER = 2.5  # 1.5 left a sub-0.8 mm strand; 2.0-3.0 all clear the board
+# each standoff is joined to its side wall by a web as wide as the post (all four sit 1 mm from a wall; the board's
+# underside is clear there), so post and wall are one piece. The web stops this far below the post top: the board
+# bears only on the round pad around its mounting hole
+STANDOFF_WEB_DROP = 0.5
+# 45° chamfer along the floor's edge into all four walls: no sharp root corner where the walls bend
+WALL_ROOT_CHAMFER = 2.5
 SCREW_HOLE_D = 2.2  # pilot hole: an M2.5 screw cuts its own thread in the standoff
 CSK_D = 5.4  # countersink diameter at the back face: M2.5 flat head (Ø5.0) sunk 0.2 below flush
 CSK_ANGLE = 90.0

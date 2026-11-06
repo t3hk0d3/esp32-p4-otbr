@@ -13,8 +13,10 @@ from build123d import (
     Plane,
     Polygon,
     Pos,
+    Rectangle,
     RectangleRounded,
     Rot,
+    Sketch,
     SlotCenterToCenter,
     extrude,
     offset,
@@ -65,27 +67,59 @@ def _shell() -> Part:
         top + 1,
         P.INNER_R + w,
     )
-    return outer - cavity - rebate
+    # outer bottom edge: a ring cut away, from OUTER_BOTTOM_CHAMFER in at the bed back to the outline that high
+    c = P.OUTER_BOTTOM_CHAMFER
+    outline = Pos((ox0 + ox1) / 2, (oy0 + oy1) / 2) * RectangleRounded(
+        ox1 - ox0, oy1 - oy0, P.OUTER_R
+    )
+    keep = extrude(offset(outline, -c, kind=Kind.ARC), c + EPS, taper=-45)
+    ring = extrude(offset(outline, 1.0, kind=Kind.ARC), c) - keep
+    return outer - cavity - rebate - Pos(0, 0, board_z(0.0)) * ring
+
+
+def standoff_footprint(x: float, y: float) -> Sketch:
+    """Plan of one standoff: the Ø STANDOFF_D post plus a web as wide as the post, out to its side wall."""
+    return Pos(x, y) * Circle(P.STANDOFF_D / 2) + standoff_web(x, y)
+
+
+def standoff_web(x: float, y: float) -> Sketch:
+    """Plan of the web joining a standoff to its side wall (reaching EPS into the wall)."""
+    r = P.STANDOFF_D / 2
+    wall = P.INNER[0] if x < (P.INNER[0] + P.INNER[1]) / 2 else P.INNER[1]
+    x0, x1 = sorted((x, wall - (EPS if wall < x else -EPS)))
+    return Pos((x0 + x1) / 2, y) * Rectangle(x1 - x0, 2 * r)
 
 
 def _standoffs() -> Part:
-    h = P.STANDOFF_TOP - P.PLATE_T
-    posts = [
-        Pos(x, y, board_z(P.PLATE_T) - EPS)
-        * Cylinder(
-            P.STANDOFF_D / 2, h + EPS, align=(Align.CENTER, Align.CENTER, Align.MIN)
-        )
-        for x, y in P.SCREW_HOLES
-    ]
-    # 45° flare at the root: the post widens by STANDOFF_ROOT_CHAMFER into the plate
+    z = board_z(P.PLATE_T) - EPS
+    h = P.STANDOFF_TOP - P.PLATE_T + EPS
     c = P.STANDOFF_ROOT_CHAMFER
-    r = P.STANDOFF_D / 2
-    flares = [
-        Pos(x, y, board_z(P.PLATE_T) - EPS)
-        * Cone(r + c + EPS, r, c + EPS, align=(Align.CENTER, Align.CENTER, Align.MIN))
-        for x, y in P.SCREW_HOLES
-    ]
-    return Part() + posts + flares
+    parts = []
+    for x, y in P.SCREW_HOLES:
+        # the round post reaches the board; the web stops STANDOFF_WEB_DROP lower, so the board only bears on the pad
+        parts.append(Pos(x, y, z) * extrude(Circle(P.STANDOFF_D / 2), h))
+        parts.append(
+            Pos(0, 0, z) * extrude(standoff_web(x, y), h - P.STANDOFF_WEB_DROP)
+        )
+        # 45° flare at the root: the footprint grown by c at the plate, tapering back to it c higher
+        flare = offset(standoff_footprint(x, y), c + EPS, kind=Kind.ARC)
+        parts.append(Pos(0, 0, z) * extrude(flare, c + EPS, taper=45))
+    return Part() + parts
+
+
+def _wall_root_chamfer() -> Part:
+    """A 45° fillet-like chamfer along the floor's edge into all four walls, WALL_ROOT_CHAMFER wide and tall."""
+    ix0, ix1, iy0, iy1 = P.INNER
+    c = P.WALL_ROOT_CHAMFER
+    z = board_z(P.PLATE_T) - EPS
+    cavity = Pos((ix0 + ix1) / 2, (iy0 + iy1) / 2) * RectangleRounded(
+        ix1 - ix0 + 2 * EPS, iy1 - iy0 + 2 * EPS, P.INNER_R + EPS
+    )
+    # the open floor: the cavity shrunk by c, growing back to the cavity outline c higher
+    floor = offset(cavity, -(c + EPS), kind=Kind.ARC)
+    return Pos(0, 0, z) * (
+        extrude(cavity, c + EPS) - extrude(floor, c + EPS, taper=-45)
+    )
 
 
 def _screw_holes() -> Part:
@@ -264,7 +298,7 @@ def _dents() -> Part:
 
 def build_base() -> Part:
     """The base as one solid in the board frame (back face at case Z 0)."""
-    part = _shell() + _standoffs()
+    part = _shell() + _wall_root_chamfer() + _standoffs()
     part -= _screw_holes()
     part -= _keyholes()
     part -= _cable_wall_openings()

@@ -65,7 +65,8 @@ make case-test    # the model's tests (about 2.5 min)
 - 0.4 mm nozzle and 0.2 mm layers. The detent bumps sit on a layer centre at 0.2 mm layers.
 - No supports, no brim needed.
 - Turn on your slicer's elephant's-foot (first-layer) compensation if it has one. The keyholes and the lid's top edge
-  are chamfered on the bed side, so a little squish won't narrow them.
+  are chamfered on the bed side, so a little squish won't narrow them, and the base's outer bottom edge is chamfered so
+  it won't leave a lip.
 - **Base:** back plate on the bed. The only bridge is the top of the microSD slot (12 mm). The SMA hole has a pointed
   45° top, so it needs no support either.
 - **Lid:** top face on the bed, the tabs and the cable-end lintel pointing up. Give it solid (100 %) infill, or at
@@ -86,7 +87,8 @@ make case-test    # the model's tests (about 2.5 min)
 1. **Board:** lower the board flat into the base, pushed toward the header end (there's 2 mm of room there). Lift it
    slightly and slide it toward the cable wall so the USB and RJ45 go into their holes, then let it settle onto the
    standoffs. Drive the four M2.5 screws from the top through the board into the standoffs. Go gently on the first
-   turn: the screw cuts its own thread in the plastic.
+   turn: the screw cuts its own thread in the plastic. Snug it down and stop: the thread in the plastic strips if you
+   keep turning.
 2. **SMA (optional):** the D-hole in the right wall is closed on the outside by a thin knock-out skin, so the case
    stays closed when you use an in-case antenna. To fit an SMA antenna, cut the skin (two lines thick) out along the
    hole's edge with a craft knife. Clip the pigtail onto the board's antenna socket, turn the bulkhead so its flat is
