@@ -147,7 +147,7 @@ static int wait_reply(zigbee_spinel_t *s)
     s->wait_state = ZIGBEE_SPINEL_WAIT_IDLE;
     s->wait_for_reset = false;
     if (rc == ZIGBEE_SPINEL_ERR_TIMEOUT) {
-        s->ops.request_reset(s->ops.ctx);
+        (void)s->ops.request_reset(s->ops.ctx); // refused: the call has failed already, nothing stays open
     }
     return rc;
 }
@@ -901,19 +901,29 @@ void zigbee_spinel_on_tick(zigbee_spinel_t *s)
 {
     int64_t t = now(s);
 
+    // A timed-out transmit or scan stays open until the requested RESET fails it. When the channel cannot be reset now
+    // (the mux refuses, e.g. during a C6 firmware job) no RESET comes, so it fails here: the next one can go.
     if (s->tx_in_flight && t >= s->tx_deadline_us) {
-        s->tx_deadline_us = NEVER; // the transmit stays in flight until the RESET fails it
-        s->ops.request_reset(s->ops.ctx);
+        s->tx_deadline_us = NEVER;
+        if (s->ops.request_reset(s->ops.ctx) != 0) {
+            free_tid(s, s->tx_tid);
+            s->tx_tid = 0;
+            s->tx_in_flight = false;
+            s->sink.tx_done(s->sink.ctx, ZIGBEE_TX_FAILED);
+        }
     }
     if (s->rearm_tid != 0 && t >= s->rearm_deadline_us) {
         free_tid(s, s->rearm_tid);
         s->rearm_tid = 0;
         s->rearm_deadline_us = NEVER;
-        s->ops.request_reset(s->ops.ctx);
+        (void)s->ops.request_reset(s->ops.ctx);
     }
     if (s->scanning && t >= s->scan_deadline_us) {
-        s->scan_deadline_us = NEVER; // the scan stays in progress until the RESET fails it
-        s->ops.request_reset(s->ops.ctx);
+        s->scan_deadline_us = NEVER;
+        if (s->ops.request_reset(s->ops.ctx) != 0) {
+            s->scanning = false;
+            s->sink.scan_done(s->sink.ctx, ZIGBEE_SPINEL_SCAN_FAILED_RSSI);
+        }
     }
 }
 

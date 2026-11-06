@@ -79,8 +79,11 @@ typedef enum {
 typedef struct {
     /** Hands one bare spinel frame to the channel (the callee copies it). 0 on success. */
     int (*send)(void *ctx, const uint8_t *frame, size_t len);
-    /** Asks for a channel reset (answered later by the mux's RESET: zigbee_spinel_on_reset, or GONE). */
-    void (*request_reset)(void *ctx);
+    /**
+     * Asks for a channel reset (answered later by the mux's RESET: zigbee_spinel_on_reset, or GONE). 0 when the
+     * request was taken; nonzero when the channel cannot be reset now (no RESET will come for it).
+     */
+    int (*request_reset)(void *ctx);
     /** Monotonic microseconds. */
     int64_t (*now_us)(void *ctx);
     /**
@@ -223,7 +226,8 @@ void zigbee_spinel_on_frame(zigbee_spinel_t *s, const uint8_t *frame, size_t len
 
 /**
  * Checks the transmit, re-arm and energy-scan deadlines; a missed one requests a channel reset. A timed-out transmit or
- * scan stays open until the RESET that answers the request completes it as failed.
+ * scan stays open until the RESET that answers the request completes it as failed; when ops->request_reset refuses
+ * (no RESET will come), it completes as failed at once, so the next one can go.
  */
 void zigbee_spinel_on_tick(zigbee_spinel_t *s);
 

@@ -66,6 +66,7 @@ static struct {
     int64_t step_us; // clock advance per delivered frame
     int send_result;
     int resets_requested;
+    int reset_result; // what request_reset returns: nonzero when the channel cannot be reset now
 } rcp;
 
 static struct {
@@ -233,10 +234,11 @@ static int fake_send(void *ctx, const uint8_t *frame, size_t len)
     return 0;
 }
 
-static void fake_request_reset(void *ctx)
+static int fake_request_reset(void *ctx)
 {
     (void)ctx;
     rcp.resets_requested++;
+    return rcp.reset_result;
 }
 
 static int64_t fake_now(void *ctx)
@@ -2301,4 +2303,68 @@ TEST_CASE("src_match add the RCP refuses: not stored, so the next attach does no
     zigbee_spinel_attach(&client);
     TEST_ASSERT_EQUAL(0, short_inserts(0x1234));
     TEST_ASSERT_EQUAL(0, ext_a_inserts());
+}
+
+/* -- a deadline passes while the channel cannot be reset -- */
+
+TEST_CASE("transmit timed out and the reset request refused: the transmit fails at once", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    transmitting();
+    rcp.reset_result = 1;
+    rcp.now += ZIGBEE_SPINEL_TX_TIMEOUT_US;
+    zigbee_spinel_on_tick(&client);
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+    TEST_ASSERT_EQUAL(1, got.tx_count);
+    TEST_ASSERT_EQUAL(ZIGBEE_TX_FAILED, got.tx);
+}
+
+TEST_CASE("transmit timed out and the reset request refused: the next transmit is sent", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    transmitting();
+    rcp.reset_result = 1;
+    rcp.now += ZIGBEE_SPINEL_TX_TIMEOUT_US;
+    zigbee_spinel_on_tick(&client);
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(2, rcp.sent_count);
+}
+
+TEST_CASE("transmit timed out and the reset request refused: a late answer to it is not reported", "[zigbee]")
+{
+    uint8_t buf[96];
+
+    attached(FRAMES_C6_RADIO_CAPS);
+    transmitting();
+    uint8_t tid = sent_tid(0);
+    rcp.reset_result = 1;
+    rcp.now += ZIGBEE_SPINEL_TX_TIMEOUT_US;
+    zigbee_spinel_on_tick(&client);
+    deliver(buf, frames_tx_done(buf, sizeof(buf), tid, SPINEL_STATUS_OK));
+    TEST_ASSERT_EQUAL(1, got.tx_count);
+    TEST_ASSERT_EQUAL(ZIGBEE_TX_FAILED, got.tx);
+}
+
+TEST_CASE("transmit timed out and the reset request accepted: the transmit stays in flight until the reset",
+          "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    transmitting();
+    rcp.now += ZIGBEE_SPINEL_TX_TIMEOUT_US;
+    zigbee_spinel_on_tick(&client);
+    TEST_ASSERT_EQUAL(0, got.tx_count);
+    TEST_ASSERT_NOT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+}
+
+TEST_CASE("energy scan timed out and the reset request refused: the scan fails at once and the next one is accepted",
+          "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    scanning();
+    rcp.reset_result = 1;
+    rcp.now += 250 * 1000LL + ZIGBEE_SPINEL_SCAN_GRACE_US;
+    zigbee_spinel_on_tick(&client);
+    TEST_ASSERT_EQUAL(1, got.scan_count);
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_SCAN_FAILED_RSSI, got.scan_rssi);
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_energy_scan(&client, 17, 250));
 }

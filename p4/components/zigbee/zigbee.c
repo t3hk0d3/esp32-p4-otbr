@@ -171,13 +171,14 @@ static int op_send(void *ctx, const uint8_t *frame, size_t len)
     return radio_mux_tx(atomic_load(&g_zigbee.ch), frame, len) == ESP_OK ? 0 : -1;
 }
 
-static void op_request_reset(void *ctx)
+static int op_request_reset(void *ctx)
 {
     const esp_err_t err = radio_mux_reset(atomic_load(&g_zigbee.ch));
 
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "channel reset not possible: %s", esp_err_to_name(err));
     }
+    return err == ESP_OK ? 0 : 1;
 }
 
 static int64_t op_now_us(void *ctx)
