@@ -8,6 +8,8 @@ set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../common/rcp_sync_proto" "$
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/../tools/version.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/../tools/test_build.cmake)
+# OpenThread reaches its radio through the radio mux: a generated copy of IDF's openthread component (EXTRA_COMPONENT_DIRS).
+include(${CMAKE_CURRENT_LIST_DIR}/../tools/ot_radio_port.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/../tools/c6_updater_images.cmake)
 # Trim the build to main and what it depends on; later tasks add components to main's REQUIRES.
 idf_build_set_property(MINIMAL_BUILD ON)

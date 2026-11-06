@@ -348,6 +348,32 @@ waiting for the leader (upstream); a sniffer started in that window completes th
 Host tests: `test_host/` (decision table) and `tests/test_rest.c` (dispatcher, run with `tools/run_vendored_rest_tests.sh`);
 target tests: `p4/pytest/test_rest_guard.py`, `test_br_boot.py::test_radio_fault_web_gui_api_answers_503`.
 
+## Generated ESP-IDF copies
+
+`tools/ot_radio_port.cmake` (radio channel mux, Task 7) generates `p4/build/ot_port_components/openthread` at every
+configure, and that component overrides ESP-IDF's `openthread` (`EXTRA_COMPONENT_DIRS`). It holds symlinks to IDF's
+`components/openthread` (v6.1), a real `src/port` and `include` with symlinks to IDF's files plus the project's
+`p4/ot_port/mux_spinel_interface.cpp`, `mux_spinel_interface.hpp` and `esp_openthread_mux.h`, and two patched copies.
+Each replaced text is looked up with `string(FIND)` first; a text that is not there any more (an IDF update) stops the
+configure with a `FATAL_ERROR` naming the IDF file. Kconfig stays `CONFIG_OPENTHREAD_RADIO_SPINEL_SPI`; the IDF tree is
+not touched. Upstream path: a runtime "custom spinel interface" radio mode with per-interface caps (spec section 5).
+
+- `src/port/esp_openthread_radio_spinel.cpp`:
+  1. After `#include "esp_spi_spinel_interface.hpp"`: `#include "mux_spinel_interface.hpp"`.
+  2. `using esp::openthread::SpiSpinelInterface;` and `static SpinelInterfaceAdapter<SpiSpinelInterface>
+     s_spinel_interface;` become the same with `MuxSpinelInterface`. The concrete-only calls of the port (`Enable` with
+     the SPI config, `AfterRadioInit`, `Disable`, `RegisterRcpFailureHandler`) exist on `MuxSpinelInterface` with the
+     same signatures (the SPI config is ignored: the channel comes from `esp_openthread_mux_set`), so no call site
+     changes.
+  3. The `s_radio_caps` initializer (energy scan, rx-on-when-idle under `CONFIG_OPENTHREAD_RX_ON_WHEN_IDLE`, tx
+     security, rx timing, tx timing, ack timeout, sleep-to-tx, CSMA backoff, tx retries) becomes the caps required from
+     the RCP by the Global Constraints: ack timeout, tx retries, CSMA backoff, tx security, tx timing (the ot-br-posix
+     set for Thread 1.2+). The C6 RCP passes as before; a CC2652P RCP (Koenkk 2025.3.1, caps 0x7f: no rx timing, no
+     rx-on-when-idle) now passes. OpenThread still uses every cap the RCP reports (`otPlatRadioGetCaps`).
+- `CMakeLists.txt`: the `git rev-parse` for `IDF_VERSION_FOR_OPENTHREAD_PACKAGE` runs in IDF's component directory
+  instead of `${CMAKE_CURRENT_SOURCE_DIR}` (the generated directory lies in this repository, so the package version
+  would show this repository's commit).
+
 ## Known upstream behaviour (not patches)
 
 - **`GET /api/node` and `/api/devices` can report a stale node** (`state: "disabled"`, `networkName: "OpenThread"`,
