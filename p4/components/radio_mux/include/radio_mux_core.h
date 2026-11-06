@@ -27,6 +27,9 @@ typedef enum {
     RADIO_MUX_MODE_INVALID,
 } radio_mux_mode_t;
 
+// One bit per mode, for a set of modes (radio_mux_available_modes).
+#define RADIO_MUX_MODE_BIT(mode) (1u << (unsigned)(mode))
+
 typedef enum {
     RADIO_MUX_FW_UNKNOWN,
     RADIO_MUX_FW_SPINEL,
@@ -193,6 +196,10 @@ radio_mux_mode_t radio_mux_mode_parse(const char *name);
 const char *radio_mux_mode_name(radio_mux_mode_t mode);
 // "unknown", "spinel", "ziggurat", "znp", "ezsp".
 const char *radio_mux_fw_name(radio_mux_fw_t fw);
+
+// The modes the API offers: off always, plus every mode a rule registers (otbr, ziggurat, rcp-proxy). A set of
+// RADIO_MUX_MODE_BIT; never unavailable or invalid.
+uint32_t radio_mux_available_modes(const radio_mux_rules_t *rules);
 
 // Whether firmware of this type can run the mode. otbr needs spinel; off and rcp-proxy fit anything; a registered mode
 // uses the type its registration declares; any other mode fits nothing.

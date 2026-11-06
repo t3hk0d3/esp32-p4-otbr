@@ -85,6 +85,53 @@ TEST_CASE("On a serial that would exceed 47 characters: truncates the serial so 
     TEST_ASSERT_EQUAL_STRING("usb-303a-1001-0123456789abcdefghijklmnopqrstuvw", id);
 }
 
+/* ---- radio_mux_available_modes ---- */
+
+TEST_CASE("On no rules: only off is available", "[radio_mux]")
+{
+    const radio_mux_rules_t rules = {0};
+
+    TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF), radio_mux_available_modes(&rules));
+}
+
+TEST_CASE("On rules for otbr and rcp-proxy: off, otbr and rcp-proxy are available, ziggurat is not", "[radio_mux]")
+{
+    radio_mux_rules_t rules = {0};
+
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_OTBR
+    };
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_RCP_PROXY
+    };
+    TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF) | RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OTBR) |
+                             RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_RCP_PROXY),
+                             radio_mux_available_modes(&rules));
+}
+
+TEST_CASE("On a ziggurat rule too: ziggurat is available", "[radio_mux]")
+{
+    radio_mux_rules_t rules = {0};
+
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_ZIGGURAT
+    };
+    TEST_ASSERT_TRUE(radio_mux_available_modes(&rules) & RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_ZIGGURAT));
+}
+
+TEST_CASE("On a rule for a non-mode (unavailable, invalid): it is ignored", "[radio_mux]")
+{
+    radio_mux_rules_t rules = {0};
+
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_UNAVAILABLE
+    };
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_INVALID
+    };
+    TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF), radio_mux_available_modes(&rules));
+}
+
 /* ---- radio_mux_mode_parse / radio_mux_mode_name ---- */
 
 TEST_CASE("On each wire name: round-trips unavailable, off, otbr, ziggurat, rcp-proxy", "[radio_mux]")

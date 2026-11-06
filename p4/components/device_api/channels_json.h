@@ -22,7 +22,9 @@ extern "C" {
 #define DEVICE_API_CHANNEL_PUT_MAX 512
 
 /**
- * The GET /device/channels body: {"channels":[<channel>...]} in snapshot order. A channel is
+ * The GET /device/channels body: {"available_modes":["off",...],"channels":[<channel>...]}; available_modes lists the
+ * modes in the snapshot's set (off, otbr, ziggurat, rcp-proxy: enum order; unavailable and invalid never), channels
+ * are in snapshot order. A channel is
  * {"id","kind","label","mode","stored_mode","state","error","line":{"baud","flow_control"},
  *  "usb":{"vid","pid","serial","driver"}|null,"caps":{"firmware_update","hw_reset","flow_control"},
  *  "rcp_proxy":{"direction","adapter","port","host","framing","state","peer"}|null,

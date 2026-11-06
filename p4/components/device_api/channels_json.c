@@ -157,7 +157,17 @@ int device_api_channels_json(char *buf, size_t cap, const radio_mux_snapshot_t *
     json_out_t w;
 
     json_out_init(&w, buf, cap);
-    json_out_raw(&w, "{\"channels\":[");
+    json_out_raw(&w, "{\"available_modes\":[");
+    bool first = true;
+
+    for (radio_mux_mode_t m = RADIO_MUX_MODE_OFF; m < RADIO_MUX_MODE_INVALID; m++) {
+        if (s->available_modes & RADIO_MUX_MODE_BIT(m)) {
+            json_out_raw(&w, first ? "" : ",");
+            json_out_str(&w, radio_mux_mode_name(m));
+            first = false;
+        }
+    }
+    json_out_raw(&w, "],\"channels\":[");
     for (size_t i = 0; i < s->n && i < RADIO_MUX_CHANNELS_MAX; i++) {
         if (i > 0) {
             json_out_raw(&w, ",");

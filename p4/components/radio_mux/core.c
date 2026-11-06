@@ -106,6 +106,20 @@ const char *radio_mux_fw_name(radio_mux_fw_t fw)
     return (fw >= RADIO_MUX_FW_UNKNOWN && fw <= RADIO_MUX_FW_EZSP) ? fw_names[fw] : fw_names[RADIO_MUX_FW_UNKNOWN];
 }
 
+uint32_t radio_mux_available_modes(const radio_mux_rules_t *rules)
+{
+    uint32_t set = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF);
+
+    for (size_t i = 0; i < rules->n && i < RADIO_MUX_RULES_MAX; i++) {
+        const radio_mux_mode_t m = rules->rules[i].mode;
+
+        if (m == RADIO_MUX_MODE_OTBR || m == RADIO_MUX_MODE_ZIGGURAT || m == RADIO_MUX_MODE_RCP_PROXY) {
+            set |= RADIO_MUX_MODE_BIT(m);
+        }
+    }
+    return set;
+}
+
 bool radio_mux_fits(const radio_mux_rules_t *rules, radio_mux_mode_t mode, radio_mux_fw_t fw)
 {
     if (mode == RADIO_MUX_MODE_OFF || mode == RADIO_MUX_MODE_RCP_PROXY) {

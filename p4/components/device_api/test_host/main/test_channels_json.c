@@ -9,6 +9,10 @@
 
 static char body[DEVICE_API_CHANNELS_BODY_MAX];
 
+// off, otbr and rcp-proxy: what a build without Zigbee registers.
+#define MODES_BUILT_IN (RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF) | RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OTBR) | \
+                        RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_RCP_PROXY))
+
 /* The C6 in otbr, running, with a probed firmware record. */
 static radio_mux_chan_info_t c6_chan(void)
 {
@@ -69,6 +73,7 @@ static int render_one(const radio_mux_chan_info_t *c)
     static radio_mux_snapshot_t s;
 
     memset(&s, 0, sizeof(s));
+    s.available_modes = MODES_BUILT_IN;
     s.n = 1;
     s.chans[0] = *c;
     return device_api_channels_json(body, sizeof(body), &s);
@@ -82,7 +87,7 @@ TEST_CASE("On the registry snapshot: the C6 has the spec's fields in order, usb 
 
     TEST_ASSERT_GREATER_THAN(0, render_one(&c));
     TEST_ASSERT_EQUAL_STRING(
-        "{\"channels\":[{\"id\":\"c6\",\"kind\":\"c6\",\"label\":\"ESP32-C6 (on board)\",\"mode\":\"otbr\","
+        "{\"available_modes\":[\"off\",\"otbr\",\"rcp-proxy\"],\"channels\":[{\"id\":\"c6\",\"kind\":\"c6\",\"label\":\"ESP32-C6 (on board)\",\"mode\":\"otbr\","
         "\"stored_mode\":\"otbr\",\"state\":\"running\",\"error\":null,"
         "\"line\":{\"baud\":460800,\"flow_control\":false},\"usb\":null,"
         "\"caps\":{\"firmware_update\":true,\"hw_reset\":true,\"flow_control\":false},"
@@ -101,7 +106,7 @@ TEST_CASE("On the registry snapshot: a dongle in rcp-proxy has usb, the proxy's 
 
     TEST_ASSERT_GREATER_THAN(0, render_one(&c));
     TEST_ASSERT_EQUAL_STRING(
-        "{\"channels\":[{\"id\":\"usb-10c4-ea60-abc123\",\"kind\":\"usb\",\"label\":\"Sonoff Zigbee 3.0 USB Dongle Plus\","
+        "{\"available_modes\":[\"off\",\"otbr\",\"rcp-proxy\"],\"channels\":[{\"id\":\"usb-10c4-ea60-abc123\",\"kind\":\"usb\",\"label\":\"Sonoff Zigbee 3.0 USB Dongle Plus\","
         "\"mode\":\"rcp-proxy\",\"stored_mode\":\"rcp-proxy\",\"state\":\"running\",\"error\":null,"
         "\"line\":{\"baud\":115200,\"flow_control\":true},"
         "\"usb\":{\"vid\":\"10c4\",\"pid\":\"ea60\",\"serial\":\"abc123\",\"driver\":\"cp210x\"},"
@@ -137,7 +142,39 @@ TEST_CASE("On no channel (before the mux starts): an empty list", "[device_api]"
 
     memset(&s, 0, sizeof(s));
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
-    TEST_ASSERT_EQUAL_STRING("{\"channels\":[]}", body);
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[],\"channels\":[]}", body);
+}
+
+TEST_CASE("On a build with every consumer: available_modes lists off, otbr, ziggurat, rcp-proxy in enum order",
+          "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+
+    memset(&s, 0, sizeof(s));
+    s.available_modes = MODES_BUILT_IN | RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_ZIGGURAT);
+    TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\",\"otbr\",\"ziggurat\",\"rcp-proxy\"],\"channels\":[]}", body);
+}
+
+TEST_CASE("On only off set: available_modes renders [\"off\"]", "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+
+    memset(&s, 0, sizeof(s));
+    s.available_modes = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF);
+    TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\"],\"channels\":[]}", body);
+}
+
+TEST_CASE("On unavailable and invalid bits set: they are never listed", "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+
+    memset(&s, 0, sizeof(s));
+    s.available_modes = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF) | RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_UNAVAILABLE) |
+                        RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_INVALID);
+    TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\"],\"channels\":[]}", body);
 }
 
 TEST_CASE("On an unplugged dongle: mode unavailable, stored_mode the mode it returns to", "[device_api]")
@@ -255,6 +292,7 @@ TEST_CASE("On the largest snapshot (8 channels, every text at its longest): fits
     static radio_mux_snapshot_t s;
 
     memset(&s, 0, sizeof(s));
+    s.available_modes = MODES_BUILT_IN | RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_ZIGGURAT);
     s.n = RADIO_MUX_CHANNELS_MAX;
     for (size_t i = 0; i < RADIO_MUX_CHANNELS_MAX; i++) {
         radio_mux_chan_info_t c = usb_chan();

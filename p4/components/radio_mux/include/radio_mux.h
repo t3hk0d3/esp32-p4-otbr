@@ -186,6 +186,7 @@ typedef struct {
 } radio_mux_chan_info_t;
 
 typedef struct {
+    uint32_t available_modes; // RADIO_MUX_MODE_BIT set: off, plus every mode with a registered consumer
     size_t n;
     radio_mux_chan_info_t chans[RADIO_MUX_CHANNELS_MAX]; // c6 first, then USB channels in the order first seen
 } radio_mux_snapshot_t;
