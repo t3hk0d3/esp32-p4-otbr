@@ -1,7 +1,7 @@
 """p4_case.build (BDD: p4_case.build (CLI)). Builds the real parts once per module (slow)."""
 
 import pytest
-from conftest import BOARD_STEP
+from conftest import BOARD_STEP, REPO
 from p4_case import build
 from p4_case.results import CheckResult
 
@@ -73,3 +73,16 @@ class TestMainMissingBoard:
         )
         assert code == 2
         assert "make case-board" in capsys.readouterr().err
+
+
+class TestCommittedModels:
+    """build.main: The print STLs committed under docs/models"""
+
+    @pytest.mark.parametrize("name", ["p4_case_base.stl", "p4_case_lid.stl"])
+    def test_match_a_fresh_build(self, built, name):
+        out, _, _ = built
+        committed = REPO / "docs" / "models" / name
+        assert committed.is_file(), f"{committed} missing: run make case"
+        assert committed.read_bytes() == (out / name).read_bytes(), (
+            f"{committed} is stale: run make case and commit docs/models/"
+        )
