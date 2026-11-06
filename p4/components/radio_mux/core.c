@@ -454,3 +454,16 @@ bool radio_mux_proxy_ok(const radio_mux_proxy_settings_t *s)
     }
     return s->dir != RADIO_MUX_PROXY_CONNECT || host_len > 0;
 }
+
+#define TX_BITS_PER_BYTE 10 // 8N1: start, 8 data, stop
+#define TX_MARGIN 2
+#define TX_SLOWEST_BAUD 38400
+#define MS_PER_S 1000
+
+uint32_t radio_mux_tx_timeout_ms(size_t n, uint32_t baud)
+{
+    const uint64_t b = baud ? baud : TX_SLOWEST_BAUD;
+    const uint64_t bits_ms = (uint64_t)n * TX_BITS_PER_BYTE * TX_MARGIN * MS_PER_S;
+
+    return RADIO_MUX_TX_BASE_MS + (uint32_t)((bits_ms + b - 1) / b);
+}

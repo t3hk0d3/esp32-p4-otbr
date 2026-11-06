@@ -496,3 +496,36 @@ TEST_CASE("rcp_proxy host without its NUL: invalid", "[radio_mux]")
     memset(s.host, 'a', sizeof(s.host));
     TEST_ASSERT_FALSE(radio_mux_proxy_ok(&s));
 }
+
+/* ---- TX timeout ---- */
+
+TEST_CASE("TX timeout of a small write: the base", "[radio_mux]")
+{
+    // 1 byte at 460800: 2 * 10 bits / 460800 is well under a millisecond, rounded up to 1.
+    TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_TX_BASE_MS + 1, radio_mux_tx_timeout_ms(1, 460800));
+}
+
+TEST_CASE("TX timeout of a long frame at 115200: covers twice its wire time", "[radio_mux]")
+{
+    // 1300 bytes: 13000 bits, 112.85 ms on the wire; twice that, rounded up: 226 ms.
+    const uint32_t t = radio_mux_tx_timeout_ms(1300, 115200);
+
+    TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_TX_BASE_MS + 226, t);
+    TEST_ASSERT_GREATER_THAN_UINT32(113, t);
+}
+
+TEST_CASE("TX timeout of the largest HDLC frame at 38400: over two seconds", "[radio_mux]")
+{
+    // RADIO_MUX_HDLC_ENCODED_MAX(2048) = 4102 bytes: 41020 bits, 1068.2 ms on the wire; twice: 2137 ms.
+    TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_TX_BASE_MS + 2137, radio_mux_tx_timeout_ms(4102, 38400));
+}
+
+TEST_CASE("TX timeout with an unknown baud: counted at 38400", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL_UINT32(radio_mux_tx_timeout_ms(500, 38400), radio_mux_tx_timeout_ms(500, 0));
+}
+
+TEST_CASE("TX timeout of nothing: the base", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_TX_BASE_MS, radio_mux_tx_timeout_ms(0, 115200));
+}

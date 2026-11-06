@@ -11,6 +11,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_private/cdc_host_common.h" // cdc_dev_t: the USB device a VCP open picked
 #include "radio_mux_priv.h"
 #include "usb/cdc_acm_host.h"
 #include "usb/usb_host.h"
@@ -26,7 +27,6 @@ static const char *TAG = "radio_mux";
 #define CDC_TASK_STACK 4096
 #define LIB_POLL_MS 50
 #define OPEN_TIMEOUT_MS 1000
-#define TX_TIMEOUT_MS 100
 #define USB_BUF_SIZE 512
 #define MAX_INTERFACES 16
 #define MAX_ADDRS 8
@@ -39,6 +39,7 @@ static const char *TAG = "radio_mux";
 static bool s_host_up;          // owner only
 static cdc_acm_dev_hdl_t s_hdl; // written by the owner only (under the port's tx_lock), read by senders under it
 static radio_mux_driver_t s_driver;
+static uint32_t s_baud; // the line speed set on the open device (sizes the TX timeout)
 
 /* ---- callbacks (USB host / CDC driver task context) ---- */
 
@@ -126,6 +127,7 @@ static void event_cb(const cdc_acm_host_dev_event_data_t *event, void *ctx)
         const mux_msg_t m = {.type = MUX_MSG_GONE, .hdl = event->data.cdc_hdl};
 
         atomic_store(&p->tx_ok, false); // senders fail at once from here on, before the owner gets to the message
+        atomic_store(&p->dev_gone, true); // the owner's presence check closes the device if the message is lost
         if (!mux_post(&m)) {
             ESP_LOGE(TAG, "unplug event lost: queue full");
         }
@@ -186,6 +188,18 @@ esp_err_t usb_transport_start(void)
 
 /* ---- the device ---- */
 
+// Address of the USB device under a CDC handle; 0 (never a device address) when unknown.
+static uint8_t opened_addr(cdc_acm_dev_hdl_t hdl)
+{
+    const cdc_dev_t *cdc = (const cdc_dev_t *)hdl;
+    usb_device_info_t info;
+
+    if (!cdc || !cdc->dev_hdl || usb_host_device_info(cdc->dev_hdl, &info) != ESP_OK) {
+        return 0;
+    }
+    return info.dev_addr;
+}
+
 static const char *driver_label(radio_mux_driver_t d)
 {
     const char *name = radio_mux_driver_name(d);
@@ -219,6 +233,7 @@ static esp_err_t serial_setup(mux_port_t *p, uint32_t baud, bool flow, char *err
             return ESP_ERR_INVALID_RESPONSE;
         }
     }
+    s_baud = baud;
     if (s_driver == RADIO_MUX_DRV_CP210X) {
         uint8_t payload[RADIO_MUX_CP210X_FLOW_LEN];
 
@@ -252,6 +267,7 @@ esp_err_t usb_transport_open(mux_port_t *p, const mux_usb_dev_t *dev, uint32_t b
     cdc_acm_dev_hdl_t hdl = NULL;
     esp_err_t ret;
 
+    atomic_store(&p->dev_gone, false);
     switch (dev->driver) {
     case RADIO_MUX_DRV_CP210X:
         ret = cp210x_vcp_open(dev->pid, DATA_INTERFACE, &cfg, &hdl);
@@ -284,6 +300,16 @@ esp_err_t usb_transport_open(mux_port_t *p, const mux_usb_dev_t *dev, uint32_t b
         snprintf(err, cap, "open failed: %s", esp_err_to_name(ret));
         ESP_LOGW(TAG, "%04x:%04x %s", dev->vid, dev->pid, err);
         return ret;
+    }
+    // The VCP drivers open the first device with the VID/PID (any address): with two identical bridges that can be
+    // the other one. Only the detected device may be opened.
+    const uint8_t addr = opened_addr(hdl);
+
+    if (addr != dev->addr) {
+        snprintf(err, cap, "an identical device at address %u answered the open (one at a time)", addr);
+        ESP_LOGW(TAG, "%04x:%04x at %u: %s", dev->vid, dev->pid, dev->addr, err);
+        cdc_acm_host_close(hdl);
+        return ESP_ERR_INVALID_STATE;
     }
     xSemaphoreTake(p->tx_lock, portMAX_DELAY);
     s_hdl = hdl;
@@ -321,6 +347,7 @@ void usb_transport_close(mux_port_t *p)
 
     s_hdl = NULL;
     s_driver = RADIO_MUX_DRV_NONE;
+    s_baud = 0;
     xSemaphoreGive(p->tx_lock);
     const esp_err_t err = cdc_acm_host_close(hdl);
 
@@ -344,7 +371,7 @@ esp_err_t usb_transport_write(const uint8_t *data, size_t n)
     if (!s_hdl) {
         return ESP_ERR_INVALID_STATE;
     }
-    return cdc_acm_host_data_tx_blocking(s_hdl, data, n, TX_TIMEOUT_MS);
+    return cdc_acm_host_data_tx_blocking(s_hdl, data, n, radio_mux_tx_timeout_ms(n, s_baud));
 }
 
 bool usb_transport_dev_attached(uint8_t addr)

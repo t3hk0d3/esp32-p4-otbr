@@ -222,6 +222,7 @@ static void do_attach(mux_port_t *p)
     xSemaphoreTake(p->rx_lock, portMAX_DELAY);
     p->bound = NULL;
     xSemaphoreGive(p->rx_lock);
+    atomic_store(&p->evq_chan, ch); // from here on the queue, ring and TX are this channel's consumer's
     p->consumer = c;
     p->tx_frames = c->frames;
     mux_set_rx(p, c->frames ? MUX_RX_FRAMES : MUX_RX_RAW);
@@ -545,12 +546,27 @@ static void drop_unopened(mux_port_t *p, const mux_usb_dev_t *dev)
     }
 }
 
+// An open device whose disconnect message never reached the owner (its queue was full): the transport flagged it,
+// or its address left the bus. Unplugged here, so a lost message is never fatal; a late message then finds its
+// handle closed and is ignored.
+static void heal_lost_unplug(mux_port_t *p)
+{
+    if (!usb_transport_is_open()) {
+        return;
+    }
+    if (atomic_load(&p->dev_gone) || !usb_transport_dev_attached(p->dev.addr)) {
+        ESP_LOGW(TAG, "%s: disconnected (found by the presence check)", p->chan ? p->chan->id : "USB device");
+        feed(p, RADIO_MUX_AEV_UNPLUG);
+    }
+}
+
 static void on_new_dev(const mux_usb_dev_t *dev)
 {
     mux_port_t *p = &g_mux.usb;
 
     ESP_LOGI(TAG, "USB device %04x:%04x at %u, driver %s", dev->vid, dev->pid, dev->addr,
              dev->driver == RADIO_MUX_DRV_NONE ? "none (unsupported)" : radio_mux_driver_name(dev->driver));
+    heal_lost_unplug(p); // a new device while the old one still looks open: its unplug may have been lost
     drop_unopened(p, dev);
     if (dev->driver == RADIO_MUX_DRV_NONE) {
         list_unsupported(dev);
@@ -572,7 +588,7 @@ static void on_gone(const void *hdl)
     }
 }
 
-// Devices that are not open send no disconnect event: look them up now and then.
+// Devices that are not open send no disconnect event: look them up now and then. Open ones are checked too.
 static void check_presence(mux_port_t *p)
 {
     const int64_t now = esp_timer_get_time();
@@ -595,6 +611,7 @@ static void check_presence(mux_port_t *p)
     if (p->att.state == RADIO_MUX_AS_IDLE && !usb_transport_is_open() && !usb_transport_dev_attached(p->dev.addr)) {
         feed(p, RADIO_MUX_AEV_UNPLUG);
     }
+    heal_lost_unplug(p);
 }
 
 static radio_mux_verdict_t check_req(const struct radio_mux_chan *ch, const radio_mux_set_req_t *req,
@@ -768,6 +785,10 @@ static void handle_reset(struct radio_mux_chan *ch)
 
 static void handle_note_fw(struct radio_mux_chan *ch, const radio_mux_fw_record_t *fw)
 {
+    if (ch->port->chan != ch || ch->port->att.state != RADIO_MUX_AS_ATTACHED) {
+        ESP_LOGW(TAG, "%s: firmware note from a consumer no longer attached: ignored", ch->id);
+        return;
+    }
     mux_lock();
     const uint32_t baud = ch->fw.rec.baud;
 

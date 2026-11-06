@@ -54,6 +54,12 @@ typedef struct mux_port {
     uint32_t det_baud;
     int64_t presence_check_us;
 
+    // The channel whose consumer the queue, eventfd, ring and TX belong to: set at attach, kept through detach and
+    // close (so the old consumer can still take its GONE), replaced at the next attach. Calls through any other
+    // handle get false, 0 or ESP_ERR_INVALID_STATE.
+    _Atomic(struct radio_mux_chan *) evq_chan;
+    atomic_bool dev_gone; // the transport saw the device disconnect (set by its callback, cleared by the open)
+
     // Delivery. Changed by the owner with rx_lock held, read by the transport with rx_lock held.
     QueueHandle_t evq;   // the channel's own queue (consumers without a bound queue)
     QueueHandle_t bound; // the consumer's queue, NULL = evq + eventfd

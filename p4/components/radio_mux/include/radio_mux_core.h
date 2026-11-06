@@ -243,6 +243,11 @@ radio_mux_post_t radio_mux_post_rx(bool queue_full, size_t len, radio_mux_counte
 // hash of the id.
 void radio_mux_nvs_key(const char *id, char out[16]);
 
+// How long a USB write of n bytes may take: RADIO_MUX_TX_BASE_MS plus twice its time on the wire (10 bits a byte) at
+// `baud`, rounded up. A baud of 0 (unknown) counts as the slowest accepted one, 38400.
+#define RADIO_MUX_TX_BASE_MS 100
+uint32_t radio_mux_tx_timeout_ms(size_t n, uint32_t baud);
+
 // "idle", "starting", "running", "fault", "busy"; NULL for anything else.
 const char *radio_mux_state_name(radio_mux_state_t state);
 // "probe", "passive"; NULL for NONE.

@@ -92,13 +92,16 @@ esp_err_t radio_mux_bind_queue(radio_mux_chan_t *ch, QueueHandle_t q);
 // bytes. The value means nothing; radio_mux_poll and radio_mux_read_raw clear it. -1 when the mux is not started.
 int radio_mux_eventfd(radio_mux_chan_t *ch);
 // Takes the next event of the channel's own queue without waiting; false when there is none (it then clears the
-// eventfd, so take events until it returns false before waiting again).
+// eventfd, so take events until it returns false before waiting again). Until another consumer attaches to the
+// transport, the detached consumer can still take what it was sent (its GONE); afterwards its handle gets false here
+// and in radio_mux_read_raw, and ESP_ERR_INVALID_STATE from radio_mux_tx and radio_mux_bind_queue.
 bool radio_mux_poll(radio_mux_chan_t *ch, radio_mux_ev_t *ev);
 // Gives back the slot of an RX_FRAME event: the `slot` pointer the event carried. Allowed after GONE and detach.
 void radio_mux_release(radio_mux_chan_t *ch, uint8_t *slot);
 // Sends one spinel frame (frame consumers; HDLC-encoded on USB) or bytes (raw consumers). The data is copied before
 // the call returns. ESP_ERR_INVALID_STATE at once when the channel is not attached (gone, closed, reopening);
-// ESP_ERR_INVALID_SIZE for a frame above RADIO_MUX_FRAME_MAX. Blocks at most about 100 ms on a stalled device.
+// ESP_ERR_INVALID_SIZE for a frame above RADIO_MUX_FRAME_MAX. Blocks at most radio_mux_tx_timeout_ms (100 ms plus
+// twice the write's wire time at the channel's baud) on a stalled device.
 esp_err_t radio_mux_tx(radio_mux_chan_t *ch, const uint8_t *data, size_t n);
 // Asks for a reset: a dongle is closed and reopened over USB (never DTR/RTS pulses, never VBUS), the C6 gets its reset
 // GPIO pulse (Task 6). RESET is posted when the radio is back; GONE when it did not come back. Does not wait.

@@ -42,6 +42,7 @@ esp_err_t radio_mux_bind_queue(radio_mux_chan_t *ch, QueueHandle_t q)
     mux_port_t *p = ch->port;
     radio_mux_ev_t ev;
 
+    ESP_RETURN_ON_FALSE(atomic_load(&p->evq_chan) == ch, ESP_ERR_INVALID_STATE, TAG, "%s is not attached", ch->id);
     xSemaphoreTake(p->rx_lock, portMAX_DELAY);
     p->bound = q;
     // What arrived between the start of the receive path and this call moves over, in order.
@@ -69,6 +70,9 @@ bool radio_mux_poll(radio_mux_chan_t *ch, radio_mux_ev_t *ev)
     }
     mux_port_t *p = ch->port;
 
+    if (atomic_load(&p->evq_chan) != ch) {
+        return false; // a stale handle: the queue belongs to the consumer of another channel now
+    }
     if (xQueueReceive(p->evq, ev, 0) == pdTRUE) {
         return true;
     }
@@ -90,7 +94,7 @@ esp_err_t radio_mux_tx(radio_mux_chan_t *ch, const uint8_t *data, size_t n)
     }
     mux_port_t *p = ch->port;
 
-    if (!atomic_load(&p->tx_ok) || p->chan != ch) {
+    if (!atomic_load(&p->tx_ok) || atomic_load(&p->evq_chan) != ch) {
         return ESP_ERR_INVALID_STATE;
     }
     if (!data || n == 0 || (p->tx_frames && n > RADIO_MUX_FRAME_MAX)) {
@@ -102,7 +106,7 @@ esp_err_t radio_mux_tx(radio_mux_chan_t *ch, const uint8_t *data, size_t n)
     esp_err_t err;
 
     xSemaphoreTake(p->tx_lock, portMAX_DELAY);
-    if (!atomic_load(&p->tx_ok)) {
+    if (!atomic_load(&p->tx_ok) || atomic_load(&p->evq_chan) != ch) {
         err = ESP_ERR_INVALID_STATE;
     } else if (p->tx_frames) {
         const size_t len = radio_mux_hdlc_encode(data, n, p->tx_buf, p->tx_cap);
@@ -135,6 +139,10 @@ size_t radio_mux_read_raw(radio_mux_chan_t *ch, uint8_t *out, size_t cap)
         return 0;
     }
     mux_port_t *p = ch->port;
+
+    if (atomic_load(&p->evq_chan) != ch) {
+        return 0; // a stale handle: the ring belongs to the consumer of another channel now
+    }
     const size_t n = mux_ring_take(p, out, cap);
 
     if (n == 0) {
