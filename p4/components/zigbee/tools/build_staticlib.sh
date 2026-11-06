@@ -94,19 +94,34 @@ cp "$work/crates/ziggurat-ot/include/ziggurat.h" "$out/ziggurat.h"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-while read -r member; do
-    "$ar" p "$lib" "$member" >"$tmp/m.o"
-    if "$readelf" -h "$tmp/m.o" | grep -q "soft-float ABI"; then
-        "$ar" d "$lib" "$member"
-        echo "dropped soft-float $member"
-    fi
-done < <("$ar" t "$lib" | grep '\.o$')
 
-# Nothing soft-float may be left, whatever the deletion above missed.
-while read -r member; do
-    "$ar" p "$lib" "$member" >"$tmp/m.o"
-    ! "$readelf" -h "$tmp/m.o" | grep -q "soft-float ABI" || die "soft-float member left in the archive: $member"
-done < <("$ar" t "$lib" | grep '\.o$')
+# Deletes the soft-float members of the archive $1, then scans every member again and dies if one is left. Members are
+# found by name (ar p, ar d), so a duplicate name would hide one from both: it is fatal. A member readelf cannot read is
+# fatal too, as is anything that is not an ELF object.
+drop_soft_float() {
+    local lib="$1" member names
+    names="$("$ar" t "$lib")"
+    [[ -z "$(sort <<<"$names" | uniq -d)" ]] || die "archive members share a name: $(sort <<<"$names" | uniq -d | tr '\n' ' ')"
+    while read -r member; do
+        if is_soft_float "$lib" "$member"; then
+            "$ar" d "$lib" "$member"
+            echo "dropped soft-float $member"
+        fi
+    done <<<"$names"
+    while read -r member; do
+        ! is_soft_float "$lib" "$member" || die "soft-float member left in the archive: $member"
+    done < <("$ar" t "$lib")
+}
+
+# Whether member $2 of archive $1 is compiled for the soft-float ABI; dies when its ELF header cannot be read.
+is_soft_float() {
+    local header
+    "$ar" p "$1" "$2" >"$tmp/m.o" || die "cannot extract archive member $2"
+    header="$("$readelf" -h "$tmp/m.o")" || die "readelf cannot read archive member $2"
+    grep -q "soft-float ABI" <<<"$header"
+}
+
+drop_soft_float "$lib"
 
 "$objcopy" --redefine-sym heap_caps_aligned_alloc=zigbee_heap_aligned_alloc \
     --redefine-sym heap_caps_realloc=zigbee_heap_realloc \
