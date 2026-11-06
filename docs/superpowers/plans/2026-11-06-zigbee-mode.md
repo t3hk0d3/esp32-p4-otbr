@@ -463,10 +463,19 @@ mockup (`2026-11-06-zigbee-page-mockup.html`): Running, Waiting for Home Assista
 ### Task 8: Test device for the rig
 
 **Files:** Create `tools/zigbee_test_device/` (IDF project for `esp32c6`: esp-zigbee-sdk's on/off light as a router,
-`idf_component.yml` pinning `espressif/esp-zigbee-lib` and `esp-zboss-lib`; a console command `factory_reset` that
-leaves the network and starts joining; on/off state printed on change), `p4/pytest/zigbee_device.py` (open the aux C6
-by its by-id path `usb-1a86_USB_Single_Serial_5B61094735-if00` after `fuser -v` shows it free; flash with esptool when
-its app description is not this project's; `factory_reset()`, `wait_joined()`, `light_state()`). Modify `Makefile`
+`idf_component.yml` pinning `espressif/esp-zigbee-lib`, `esp-zboss-lib` and `espressif/led_strip`). *(The user's
+call, 2026-11-06.)* The light **is the devkit's on-board RGB LED**: the On/Off cluster drives it (on = white, off = dark;
+the WS2812 on GPIO8 of the ESP32-C6-DevKitC, confirm the aux board's LED pin from its silkscreen or schematic before
+writing the driver), and the device prints `light: on` / `light: off` on the serial console on every change, which is
+what the tests read. A console command `factory_reset` leaves the network and starts joining; `state` prints the
+light and the join state. `p4/pytest/zigbee_device.py` opens the aux C6 by its by-id path
+`usb-1a86_USB_Single_Serial_5B61094735-if00` after `fuser -v` shows it free, flashes it with esptool when its app
+description is not this project's, and offers `factory_reset()`, `wait_joined()`, `light_state()` (from the console
+lines).
+
+**The aux C6 is shared:** on 2026-11-06 it was busy for another project. This task only builds the firmware and writes
+the helper; nothing here opens the port or flashes it. Flashing it happens in Task 10 and only after the user says the
+aux C6 is free. Modify `Makefile`
 (`zigbee-test-device` target building it), `p4/pytest/requirements.txt` (zigpy-ziggurat 1.2.1, pyserial),
 `p4/pytest/pytest.ini` (marker `zigbee_device`).
 
@@ -485,7 +494,8 @@ its app description is not this project's; `factory_reset()`, `wait_joined()`, `
   present, marker `usb_dongle` from the mux plan):
   `test_switch_to_ziggurat_and_back` (PUT mode, reboot, `/device/zigbee` running, Thread menu hidden; back to `otbr`,
   same dataset), `test_form_and_energy_scan`, `test_device_joins_and_toggles` (marker `zigbee_device`: join, interview,
-  on/off from zigpy changes `light_state()`, a report reaches zigpy), `test_reconnect_gets_hello_within_5s`,
+  on/off from zigpy turns the aux C6's LED on and off, read back by `light_state()`; toggling it from the device's
+  console reaches zigpy as an attribute report), `test_reconnect_gets_hello_within_5s`,
   `test_second_client_takes_over`, `test_radio_reset_survived` (C6 `rcp_glitch`; dongle: the mux's consumer reset;
   `rcp_resets` +1, client still connected, device answers), `test_radio_gone_and_back` (C6 `rcp_kill` then `c6_hold
   0` and the mux's re-attach; dongle: manual unplug prompt; `no_radio`, `uptime_s` keeps growing, device answers after
@@ -500,7 +510,8 @@ its app description is not this project's; `factory_reset()`, `wait_joined()`, `
 
 **[sync] Step 0:** ask the mux session whether its hardware pass (its Task 11) is running or planned; agree an order so
 the two never share the board at once. Get the user's OK for the flash budget: one P4 app flash over the network, the
-aux C6 flashed once with the test device.
+aux C6 flashed once with the test device. Ask the user whether the aux C6 is free from its other project before
+touching it, and check `fuser -v` on its port; note what it ran before, so it can be put back afterwards.
 
 - [ ] Read `/device/status` `app.version` in its own step; compare with the last build put on the board; stop and ask
   if it differs.
@@ -512,6 +523,6 @@ aux C6 flashed once with the test device.
   a client that stops reading for 60 s.
 - [ ] Manual acceptance with the user: Home Assistant's ZHA against the board, a real device paired from ZHA and
   controlled, a ZHA restart, a board reboot.
-- [ ] Put the C6 back to `otbr` (the ha-thread-bbc1 network rejoined) and restore `ot_cli` on the aux C6 if a Thread
-  suite needs it next. Record results in the session's memory notes and the PR description; tell the mux session the
+- [ ] Put the C6 back to `otbr` (the ha-thread-bbc1 network rejoined) and put back on the aux C6 whatever it ran
+  before (the other project's firmware, or `ot_cli` if a Thread suite needs it next), as the user decides. Record results in the session's memory notes and the PR description; tell the mux session the
   board is free.

@@ -279,7 +279,7 @@ From the spike and its on-board runs (2026-11-06):
   - `hello` capture and replay, client takeover, queue-full backpressure and the ready signal.
   Test seams only where a host test needs them (STYLEGUIDE); the mux consumer API is the natural seam for the client.
 - **Target tests** (`p4/pytest/test_zigbee.py`), with zigpy-ziggurat pinned in the target test environment and the
-  rig's aux C6 devkit as the Zigbee test device (the user's call, 2026-11-06: it is free for testing). The suite
+  rig's aux C6 devkit as the Zigbee test device (the user's call, 2026-11-06), its on-board RGB LED being the light. The suite
   flashes it with Espressif's Zigbee on/off light example (esp-zigbee-sdk) when it is not already running it, and
   factory-resets it over its serial port so it joins on command. Thread suites that need the aux C6 as their `ot_cli`
   peer flash that back the same way; neither suite assumes what the other left on it. Run once with the C6 channel and
