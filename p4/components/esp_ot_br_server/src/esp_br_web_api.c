@@ -3815,11 +3815,11 @@ void esp_br_thread_rest_request(const esp_br_thread_rest_request_t *request, esp
     esp_openthread_lock_acquire(portMAX_DELAY);
     /* Patch 2: the mode is checked with the lock held; mode changes take the same lock, so a write either runs
      * completely before the sniffer starts or is refused here. */
-    const int refused =
-        esp_br_guard_status(ESP_BR_GUARD_REST_CLASS(request->method), br_core_get_mode(), esp_br_web_openthread_ready());
+    const br_core_mode_t mode = br_core_get_mode();
+    const int refused = esp_br_guard_status(ESP_BR_GUARD_REST_CLASS(request->method), mode, esp_br_web_openthread_ready());
     if (refused) {
         response->status = refused;
-        response->detail = esp_br_guard_detail(refused);
+        response->detail = esp_br_guard_detail(refused, mode);
         goto exit;
     }
     otInstance *instance = esp_openthread_get_instance();

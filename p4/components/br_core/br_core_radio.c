@@ -64,6 +64,8 @@ static const esp_openthread_mux_ops_t s_mux_ops;
 static bool s_move_probe;   // br_radio: the next probe is a move's (its verdict answers the waiting PUT)
 static bool s_start_failed; // br_radio: the last start on the attached channel failed (RADIO_FAULT from it)
 static atomic_bool s_booting; // the C6's boot job runs: br_radio stays out until its end attaches the C6
+static atomic_bool s_retry;   // br_core_retry_otbr: try the failed start on the attached channel again
+static void (*_Atomic s_move_done)(void); // br_core_set_move_done_cb
 static char s_no_radio_reason[96]; // br_radio: why the mode is NO_RADIO
 static bool s_lost;                // br_radio: OpenThread's channel was lost, not detached by a deliberate change
 // Owned by the task that starts and stops OpenThread (br_radio, or a radio job while push_busy):
@@ -553,7 +555,9 @@ static void reconcile(void)
         s_lost = false;
         after_channel_op();
     }
-    if (!s_ot_chan && att && gen != s_tried_gen) {
+    const bool retry = atomic_exchange(&s_retry, false) && s_start_failed; // a PUT of mode otbr (device_api)
+
+    if (!s_ot_chan && att && (gen != s_tried_gen || retry)) {
         s_tried_gen = gen;
         s_probe_err[0] = '\0';
         ESP_LOGI(TAG, "%s: starting OpenThread", radio_mux_chan_id(att));
@@ -561,6 +565,18 @@ static void reconcile(void)
         s_start_failed = br_core_get_mode() == BR_MODE_RADIO_FAULT;
         after_channel_op();
     }
+}
+
+// The end of a move: its accepter (a PUT that got ESP_OK from br_core_move_otbr) hears of it first, then the next
+// move may start.
+static void move_finished(void)
+{
+    void (*done)(void) = atomic_load(&s_move_done);
+
+    if (done && atomic_load(&s_move.state) == MOVE_SIGNALLED && s_move.result == ESP_OK) {
+        done();
+    }
+    atomic_store(&s_move.running, false);
 }
 
 static void run_move(void)
@@ -599,7 +615,7 @@ static void run_move(void)
         core_set_reason(err);
         core_schedule_reboot();
     }
-    atomic_store(&s_move.running, false);
+    move_finished();
 }
 
 static void radio_task(void *arg)
@@ -739,6 +755,17 @@ esp_err_t br_core_move_otbr(const char *from, const char *to, char *reason, size
 bool br_core_move_running(void)
 {
     return atomic_load(&s_move.running);
+}
+
+void br_core_set_move_done_cb(void (*done)(void))
+{
+    atomic_store(&s_move_done, done);
+}
+
+void br_core_retry_otbr(void)
+{
+    atomic_store(&s_retry, true);
+    core_radio_notify();
 }
 
 // OpenThread on the C6 again after a job: the mux attached it at the job's end when it answers. Probe and start, as

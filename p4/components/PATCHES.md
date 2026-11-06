@@ -318,13 +318,26 @@ reason, spec reference.
 25. Applied (USB serial proxy, Task 4). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 27 -> 29.
    `device_api` adds `GET`/`PUT /device/usb_serial`: 27 routes plus the catch-all, one slot of headroom.
    (docs/superpowers/specs/2026-11-05-usb-serial-proxy-design.md)
+26. Applied (radio channel mux, Task 8). `esp_ot_br_server`: the board mode `NO_RADIO` (no radio channel in otbr is
+   present) in the REST guard. `src/esp_br_guard.c`: `READ` and `THREAD_OP` answer 503 in `NO_RADIO` whatever the
+   ready flag says (it may lag while OpenThread is torn down after an unplug); `esp_br_guard_detail(status, mode)`
+   takes the mode and says `no radio in OTBR mode` for 503 in `NO_RADIO` (`radio not available` otherwise, as before).
+   Call sites: `src/esp_br_web.c` (the Thread REST dispatcher reads the mode once for the check and the detail;
+   `guard_refuse_gui` and `guard_refuse_resource` use the guard's detail, the resource format no longer hard-codes
+   it) and `src/esp_br_web_api.c` (`esp_br_thread_rest_request`). `EXTRA_HANDLER_SLOTS` 29 -> 30: `device_api` drops
+   `GET`/`PUT /device/usb_serial` (patch 25) and adds `GET /device/channels`, `PUT` and `DELETE /device/channels/*`:
+   28 routes (the console WebSocket included) plus the catch-all, one slot of headroom. The console WebSocket
+   (`device_api`, not vendored) answers its handshake with 503 `no radio in OTBR mode` in `NO_RADIO` as well. Host
+   tests: `test_host/` (NO_RADIO cases) and `tests/test_rest.c` `test_guard_no_radio`.
+   (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md, sections Board mode and API)
 
 ### REST guard classification (patches 2 and 9)
 
 Classes: `NONE` no OpenThread access, always served. `READ` reads OpenThread state: 200 while OpenThread runs (patch 9
 ready flag), 503 otherwise (RADIO_FAULT/STARTING before OpenThread is up, SNIFFER: `br_core` switches the flag off while
 Thread is stopped, so Thread state reads answer 503 there). `THREAD_OP` changes Thread/dataset state or needs the radio:
-only in BR_RUNNING with OpenThread ready; SNIFFER 409, RADIO_FAULT/STARTING 503. THREAD_OP is checked twice: lock-free
+only in BR_RUNNING with OpenThread ready; SNIFFER 409, RADIO_FAULT/STARTING 503. NO_RADIO (patch 26): every `READ`
+and `THREAD_OP` endpoint below answers 503 `no radio in OTBR mode`, as in the RADIO_FAULT / STARTING column. THREAD_OP is checked twice: lock-free
 first (no lock exists before OpenThread is up), then while holding the OpenThread lock where the OpenThread call
 happens.
 

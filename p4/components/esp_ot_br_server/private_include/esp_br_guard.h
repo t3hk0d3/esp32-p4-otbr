@@ -24,12 +24,16 @@ typedef enum {
 /**
  * HTTP status for a request of class `cls` in `mode`; `ot_ready` is esp_br_web_openthread_ready().
  * 0 = allowed, 409 = sniffer active (THREAD_OP only), 503 = radio not available (OpenThread not running, or
- * THREAD_OP outside BR_RUNNING). THREAD_OP in SNIFFER is 409 whatever `ot_ready` says.
+ * THREAD_OP outside BR_RUNNING). THREAD_OP in SNIFFER is 409 whatever `ot_ready` says. Patch 26: READ and THREAD_OP
+ * in NO_RADIO are 503 whatever `ot_ready` says.
  */
 int esp_br_guard_status(esp_br_guard_class_t cls, br_core_mode_t mode, bool ot_ready);
 
-/** Human readable reason for a refusal status (409, 503); NULL for 0 or any other value. */
-const char *esp_br_guard_detail(int status);
+/**
+ * Human readable reason for a refusal status (409, 503) in `mode`: "sniffer active", "radio not available", and
+ * "no radio in OTBR mode" for 503 in NO_RADIO (patch 26); NULL for 0 or any other value.
+ */
+const char *esp_br_guard_detail(int status, br_core_mode_t mode);
 
 #ifdef __cplusplus
 }

@@ -1152,8 +1152,8 @@ static esp_err_t run_c6_job(const rcp_fw_source_t *source, char *err_detail, siz
 }
 
 // A C6 job inside radio_mux_c6_job_begin/_end, then the C6's boot steps (the status reads the result).
-// `affects_mode`: OpenThread runs on the C6 (core_c6_boot_steps). ESP_ERR_INVALID_STATE (c6_busy: rcp-proxy on the C6 has a
-// peer) or ESP_ERR_TIMEOUT (the mux did not answer) when nothing ran (*ran false). *steps: what core_c6_boot_steps returned.
+// `affects_mode`: OpenThread runs on the C6 (core_c6_boot_steps). RCP_SYNC_ERR_C6_BUSY (rcp-proxy on the C6 has a peer)
+// or ESP_ERR_TIMEOUT (the mux did not answer) when nothing ran (*ran false). *steps: what core_c6_boot_steps returned.
 static esp_err_t c6_job_window(const rcp_fw_source_t *source, char *err_detail, size_t err_cap, bool affects_mode,
                                bool *base_only, esp_err_t *steps, bool *ran)
 {
@@ -1167,7 +1167,7 @@ static esp_err_t c6_job_window(const rcp_fw_source_t *source, char *err_detail, 
             strlcpy(err_detail, begin == ESP_ERR_INVALID_STATE ? "c6_busy: rcp-proxy on the C6 has a peer" :
                     "the radio mux did not answer", err_cap);
         }
-        return begin == ESP_ERR_INVALID_STATE ? ESP_ERR_INVALID_STATE : ESP_ERR_TIMEOUT;
+        return begin == ESP_ERR_INVALID_STATE ? RCP_SYNC_ERR_C6_BUSY : ESP_ERR_TIMEOUT;
     }
     const esp_err_t err = run_c6_job(source, err_detail, err_cap, base_only);
 

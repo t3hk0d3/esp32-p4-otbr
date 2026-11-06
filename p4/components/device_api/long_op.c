@@ -1,7 +1,8 @@
 #include <stdatomic.h>
 #include "device_api_priv.h"
 
-// OTA and the firmware push share one slot (they must not overlap); a pcap stream has its own.
+// OTA, the firmware push, the ROM recovery and a move of OpenThread share one slot (they must not overlap); a pcap
+// stream has its own.
 static _Atomic int s_long_op = -1; // device_api_op_t holding the shared slot, -1 = free
 static atomic_bool s_pcap;
 
@@ -37,6 +38,8 @@ const char *device_api_op_busy_detail(device_api_op_t op)
         return "a radio firmware push is running";
     case DEVICE_API_OP_ROM_RECOVER:
         return "a ROM recovery is running";
+    case DEVICE_API_OP_RADIO_MOVE:
+        return "OpenThread is being moved to another radio";
     default:
         return "another long operation is running";
     }
