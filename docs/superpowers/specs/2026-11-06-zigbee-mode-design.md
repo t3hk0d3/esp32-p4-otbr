@@ -102,7 +102,10 @@ From the spike and its on-board runs (2026-11-06):
   for a channel reset (C6: GPIO reset; dongle: USB close and reopen), answered by RESET. Per-channel counters,
   including frame-pool drops, are readable by the consumer. A consumer attaches when its channel is present and in its
   mode. Spinel-level RCP reboots are not turned into RESET; the consumer sees them in its own parsing. In a build
-  without the `zigbee` component, the mux refuses `ziggurat` (409 `not_available`) and does not offer it. Every stick
+  where no component has registered a `ziggurat` consumer, the mux refuses the reserved mode name (409
+  `not_available`) and does not offer it. The mux has no Zigbee rules of its own: it enforces what the registered
+  consumer declares (section 3, "Mux registration"). Zigbee is not part of the mux implementation; this work owns all
+  of it (the user's scope, 2026-11-06). Every stick
   that appears starts `off`; the mux probes its firmware (spinel, ZNP, EZSP; a Ziggurat-on-stick firmware is told apart
   by its vendor property and fits only `rcp-proxy`), resets it, and switches it to its stored mode only if the firmware
   fits (`ziggurat` needs spinel); a PUT of a mode that does not fit gets 409 `incompatible`. So a Ziggurat consumer only
@@ -144,9 +147,10 @@ From the spike and its on-board runs (2026-11-06):
 
 - The channel's mode is the mux's setting and API; this design adds no stack or radio setting of its own.
 - `GET /device/zigbee`: read-only status (the page's content) when a channel runs Ziggurat; 409 otherwise.
-- `/device/status` gains `zigbee_channel` (the channel id or null), next to the mux design's `otbr_channel`.
+- `/device/status` gains `zigbee_channel` (the channel id or null), next to the mux design's `otbr_channel`; this
+  design adds it.
 - The channel API itself (`GET /device/channels`, `PUT /device/channels/{id}` with `mode` `ziggurat`, the reply's
-  `"reboot": true`, 409 `ziggurat_taken` and `hybrid_not_supported`) is the mux design's
+  `"reboot": true`, 409 `mode_taken` and `hybrid_not_supported`) is the mux design's
   (`2026-11-06-radio-channel-mux-design.md`).
 - `/metrics` gains Zigbee counters with a `zigbee_` prefix, only while a channel runs Ziggurat.
 
@@ -160,6 +164,10 @@ From the spike and its on-board runs (2026-11-06):
 
 ### Board side: `zigbee` component
 
+- **Mux registration.** At startup the `zigbee` component registers the mux's consumer for the mode `ziggurat`,
+  declaring: firmware type `spinel`; at most one channel; entering or leaving the mode reboots; GONE reboots (capped,
+  below); and its attach and detach, with its event queue handed over at attach. The mux enforces these; a second
+  `ziggurat` channel gets the mux's 409 `mode_taken`.
 - New component `p4/components/zigbee`, prefix `zigbee_` (the staticlib owns `ziggurat_*`). It contains the platform
   layer, the spinel client, the WebSocket transport, the status, the heap shim and the prebuilt staticlib. The spike's
   `zigbee.c` is the reference for the platform functions that are not about the radio.
@@ -280,6 +288,10 @@ From the spike and its on-board runs (2026-11-06):
 
 ```
 zigbee
+    registration
+        At startup
+            - registers the mux consumer for mode ziggurat: firmware spinel, one channel, reboot on enter and leave,
+              reboot on GONE, with attach and detach
     start
         At boot with a channel in Ziggurat mode
             - attaches to the channel through the mux with its own event queue
