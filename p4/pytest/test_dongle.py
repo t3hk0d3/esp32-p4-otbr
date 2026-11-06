@@ -6,11 +6,12 @@ the spinel firmware, and a person at the board: the unplug and replug steps ask 
 The board starts with Thread on the C6. Every test puts the modes back (C6 in `otbr`, the dongle `off`, default proxy
 settings) afterwards. Optional: PROXY_HOST_IF is not needed; the proxy peers run on this host and reach the board by
 its address. Environment:
-  PROXY_SOAK_S   seconds the back-off socket count is watched (default 600)
+  PROXY_SOAK_S   seconds the refused-connect soak runs (default 600)
   PROXY_PORT     host port the connect tests listen on (default 16638)
 """
 
 import contextlib
+import itertools
 import os
 import select
 import shutil
@@ -46,7 +47,11 @@ LATENCY_BUDGET_MS = 15.0
 LISTEN_PORT = int(os.environ.get("PROXY_PORT", "16638"))
 SOAK_S = int(os.environ.get("PROXY_SOAK_S", "600"))
 BACKOFF_STEPS_S = (1, 2, 4, 8, 16, 30)
-SOCKET_SLACK = 2
+GROWING_GAPS = 2
+GAP_GROWTH = 1.5
+GAP_TOLERANCE_S = 5
+BACKOFF_CAP_S = 30
+HTTP_BURST = 30
 HDLC_FLAG = 0x7E
 HDLC_ESCAPE = 0x7D
 HDLC_XOR = 0x20
@@ -91,9 +96,20 @@ def dongle(base_url):
 def reset_modes(base_url, channel_id):
     """C6 back to `otbr` with Thread running, the dongle `off`, default proxy settings."""
     with contextlib.suppress(requests.RequestException):
+        wait_no_move(base_url)
         put_channel(base_url, {"mode": "off", "rcp_proxy": PROXY_DEFAULTS}, channel_id)
         put_channel(base_url, {"mode": "otbr", "rcp_proxy": PROXY_DEFAULTS}, "c6")
         wait_mode(base_url, "BR_RUNNING", MOVE_TIMEOUT_S)
+
+
+def wait_no_move(base_url, timeout=MOVE_TIMEOUT_S):
+    """Wait until no channel is `starting` (a move that was accepted has settled), so a PUT is not refused as busy."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if all(c["state"] != "starting" for c in get_channels(base_url)["channels"]):
+            return
+        time.sleep(1)
+    pytest.fail("a move never settled")
 
 
 def wait_channel(base_url, channel_id, state, timeout=MOVE_TIMEOUT_S):
@@ -221,23 +237,14 @@ def wait_proxy_state(base_url, channel_id, wanted, timeout):
     pytest.fail(f"proxy state is {state!r}, expected {wanted!r}")
 
 
-def diag_sockets(base_url):
-    """Open sockets as /device/diag counts them (the field is read by name, `sockets` or `lwip.sockets`)."""
-    body = requests.get(f"{base_url}/device/diag", timeout=10).json()
-    for source in (body, body.get("lwip", {})):
-        for key in ("sockets", "sockets_used", "open_sockets"):
-            if isinstance(source.get(key), int):
-                return source[key]
-    pytest.skip("/device/diag has no socket count")
-
-
 def test_detect_ollyzig_spinel(base_url, dongle):
     # Plug-in detection, On the OllyZig with the OpenThread RCP firmware: type spinel, chip CC13XX_CC26XX, 460800 baud.
     channel = wait_firmware(base_url, dongle)
     assert channel["firmware"]["type"] == "spinel"
     assert channel["firmware"]["chip"] == CHIP
     assert channel["firmware"]["baud"] == SPINEL_BAUD
-    assert channel["firmware"]["source"] == "probe"
+    # "probe" after a plug-in, "passive" when the channel has run otbr since (the handshake records it again).
+    assert channel["firmware"]["source"] in ("probe", "passive")
     assert channel["firmware"]["version"]
     assert channel["kind"] == "usb"
     assert channel["usb"]["driver"] in ("ch34x", "cp210x", "cdc_acm")
@@ -293,12 +300,19 @@ def test_move_refusals(dut, base_url, dongle):
     busy = put_channel(base_url, {"mode": "rcp-proxy"}, dongle)
     assert busy.status_code == 409, busy.text
     assert busy.json()["error"] == "busy"
+    deadline = time.monotonic() + MOVE_TIMEOUT_S
+    while (
+        get_status(base_url)["otbr_channel"] != dongle
+    ):  # not BR_RUNNING: the board is still on the C6 mid-move
+        assert time.monotonic() < deadline, "the move never finished"
+        time.sleep(1)
     wait_mode(base_url, "BR_RUNNING")
 
 
-def test_unplug_under_otbr(dut, base_url, dongle):
-    # Unplug of the OTBR dongle: NO_RADIO at once, no reboot (uptime keeps growing), the channel unavailable with its
+def test_unplug_and_replug_under_otbr(dut, base_url, dongle):
+    # Unplug and replug of the OTBR dongle: NO_RADIO at once, no reboot (uptime keeps growing), the channel unavailable with its
     # stored mode kept, Thread REST 503.
+    identity = network_identity(dut)
     move_thread(base_url, dongle)
     uptime = requests.get(f"{base_url}/device/diag", timeout=10).json()["uptime_s"]
     ask(f"Unplug the dongle ({dongle}) from the board's USB-A port.")
@@ -314,11 +328,8 @@ def test_unplug_under_otbr(dut, base_url, dongle):
     time.sleep(5)
     later = requests.get(f"{base_url}/device/diag", timeout=10).json()["uptime_s"]
     assert later > uptime, "the board rebooted"
-
-
-def test_replug_restores_thread(dut, base_url):
-    # Replug after test_unplug_under_otbr: detected again, Thread starts on it with the same network (the mode is kept).
-    # Run right after test_unplug_under_otbr in the same session: it leaves the dongle unplugged with `otbr` stored.
+    # Replug, in the same test (the fixture's teardown must find the dongle attached): detected again, Thread starts on
+    # it with the same network, because the stored mode stayed otbr.
     ask("Plug the dongle back into the board's USB-A port.")
     wait_mode(base_url, "BR_RUNNING", STATUS_TIMEOUT_S)
     channel = find_dongle(base_url)
@@ -326,8 +337,8 @@ def test_replug_restores_thread(dut, base_url):
     assert channel["mode"] == "otbr"
     assert get_status(base_url)["otbr_channel"] == channel["id"]
     wait_ot_state(dut, {"leader", "router", "child"}, THREAD_TIMEOUT_S)
+    assert network_identity(dut) == identity
     assert channel["firmware"]["type"] == "spinel"
-    reset_modes(base_url, channel["id"])
 
 
 def test_forget_unplugged_dongle(base_url, dongle):
@@ -432,9 +443,21 @@ def test_proxy_listen_tcp_latency(base_url, board_ip, dongle):
     assert counters["frames_out"] >= LATENCY_ROUNDS or counters["bytes_out"] > 0
 
 
+def accept_and_close(listener, stop, times):
+    """Accept connections on the host listener and close each at once; record when each arrived."""
+    listener.settimeout(1)
+    while not stop.is_set():
+        try:
+            peer, _ = listener.accept()
+        except OSError:
+            continue
+        times.append(time.monotonic())
+        peer.close()
+
+
 def test_proxy_connect_backoff(base_url, board_ip, dongle):
-    # rcp-proxy connecting over TCP, On a host listener that stops and starts: the board connects, waits with back-off
-    # after the listener goes (1, 2, 4 s ... between attempts), and connects again when it returns.
+    # rcp-proxy connecting over TCP, On a host listener that drops every connection: the gap between the board's
+    # attempts grows (1, 2, 4, 8 s ... toward 30 s), and it connects and stays when the listener keeps a connection.
     host = host_address_towards(board_ip)
     settings = {
         "direction": "connect",
@@ -446,36 +469,45 @@ def test_proxy_connect_backoff(base_url, board_ip, dongle):
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     listener.bind(("", LISTEN_PORT))
     listener.listen(1)
+    times = []
+    stop = threading.Event()
+    watcher = threading.Thread(
+        target=accept_and_close, args=(listener, stop, times), daemon=True
+    )
     try:
+        watcher.start()
         assert (
             put_channel(
                 base_url, {"mode": "rcp-proxy", "rcp_proxy": settings}, dongle
             ).status_code
             == 200
         )
-        listener.settimeout(PROXY_PEER_WAIT_S)
-        peer, _ = listener.accept()
+        time.sleep(sum(BACKOFF_STEPS_S[:5]) + BACKOFF_STEPS_S[5] + PROXY_PEER_WAIT_S)
+    finally:
+        stop.set()
+        watcher.join(timeout=5)
+    gaps = [b - a for a, b in itertools.pairwise(times)]
+    assert len(gaps) >= GROWING_GAPS + 1, f"only {len(times)} attempts: {times}"
+    rises = sum(1 for a, b in itertools.pairwise(gaps) if b > a * GAP_GROWTH)
+    assert rises >= GROWING_GAPS, (
+        f"the retry gap does not grow: {[round(g, 1) for g in gaps]}"
+    )
+    assert max(gaps) < BACKOFF_CAP_S + GAP_TOLERANCE_S, gaps
+    listener.listen(1)
+    listener.settimeout(BACKOFF_CAP_S + PROXY_PEER_WAIT_S)
+    try:
+        peer, _ = listener.accept()  # the board returns; this one is kept
         wait_proxy_state(base_url, dongle, "connected", PROXY_PEER_WAIT_S)
         peer.close()
-        listener.close()
-        wait_proxy_state(base_url, dongle, "backoff", PROXY_PEER_WAIT_S)
-        time.sleep(sum(BACKOFF_STEPS_S[:3]))  # three failed attempts at 1, 2 and 4 s
-        assert proxy_state(base_url, dongle)["state"] in ("backoff", "connecting")
-        listener = socket.socket()
-        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        listener.bind(("", LISTEN_PORT))
-        listener.listen(1)
-        listener.settimeout(BACKOFF_STEPS_S[3] + BACKOFF_STEPS_S[4] + PROXY_PEER_WAIT_S)
-        peer, _ = listener.accept()
-        peer.close()
-        wait_proxy_state(base_url, dongle, "connected", PROXY_PEER_WAIT_S)
     finally:
         listener.close()
 
 
-def test_proxy_connect_socket_count_while_refused(base_url, board_ip, dongle):
-    # Task 11 (rcp_proxy): connect to a refusing address for PROXY_SOAK_S seconds (10 minutes by default): the board's
-    # open socket count in /device/diag stays flat and the channel keeps retrying (state backoff or connecting).
+def test_proxy_connect_refused_soak(base_url, board_ip, dongle):
+    # Task 11 (rcp_proxy): connect to a refusing address for PROXY_SOAK_S seconds (10 minutes by default), then check
+    # the board is not out of sockets: a burst of concurrent HTTP requests is all served, and the proxy, switched to
+    # listen/tcp, accepts a client. /device/diag has no socket count, so a slow leak that stays below the budget is not
+    # seen by this check (see docs/radios.md).
     host = host_address_towards(board_ip)
     settings = {
         "direction": "connect",
@@ -489,17 +521,40 @@ def test_proxy_connect_socket_count_while_refused(base_url, board_ip, dongle):
         ).status_code
         == 200
     )
-    time.sleep(BACKOFF_STEPS_S[0] + BACKOFF_STEPS_S[1])
-    baseline = diag_sockets(base_url)
-    highest = baseline
     deadline = time.monotonic() + SOAK_S
     while time.monotonic() < deadline:
         time.sleep(5)
-        highest = max(highest, diag_sockets(base_url))
         assert proxy_state(base_url, dongle)["state"] in ("backoff", "connecting")
-    assert highest <= baseline + SOCKET_SLACK, (
-        f"sockets grew from {baseline} to {highest}"
+    # LWIP_MAX_SOCKETS is 24 and RCP_PROXY_SOCKETS 6, so 30 simultaneous connections cannot all be open unless sockets
+    # were freed: a leaked socket or two would show as refused or timed-out requests.
+    results = []
+
+    def fetch():
+        try:
+            results.append(
+                requests.get(f"{base_url}/device/status", timeout=30).status_code
+            )
+        except requests.RequestException as error:
+            results.append(type(error).__name__)
+
+    burst = [threading.Thread(target=fetch) for _ in range(HTTP_BURST)]
+    for thread in burst:
+        thread.start()
+    for thread in burst:
+        thread.join(timeout=60)
+    assert results.count(requests.codes.ok) == HTTP_BURST, results
+    assert (
+        put_channel(
+            base_url,
+            {"rcp_proxy": {"direction": "listen", "adapter": "tcp", "host": ""}},
+            dongle,
+        ).status_code
+        == 200
     )
+    wait_proxy_state(base_url, dongle, "listening", PROXY_PEER_WAIT_S)
+    port = proxy_state(base_url, dongle)["port"]
+    with connect(board_ip, port):
+        wait_proxy_state(base_url, dongle, "connected", PROXY_PEER_WAIT_S)
 
 
 def test_proxy_udp_hdlc_roundtrip(base_url, board_ip, dongle):

@@ -173,6 +173,9 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
 - **Gap under load** (C6): an RCP-heavy session for 10 minutes (proxy peer streaming, an energy scan) leaves `rx_errors`
   at or near 0; with a logic analyser on CS and INT, no CS fall comes less than 100 µs after the previous rise (if
   errors appear, raise `C6_GAP_US`).
+- **Refused connects** (`test_proxy_connect_refused_soak`, 10 minutes by default): afterwards the board still serves a burst
+  of 30 concurrent HTTP requests and the proxy still accepts a client. `/device/diag` has no socket count, so this sees
+  exhaustion, not a slow leak below the socket budget; compare the log's back-off schedule (1 to 30 s) by eye.
 - **Pool exhaustion**: a proxy peer that does not read: drops are counted and the RCP keeps answering.
 - **Reset timing**: from a new peer's connect to the first valid header from the C6 takes 300-500 ms.
 - **Quick replug** (under 1 s): one close, then a normal detection; Thread starts once.

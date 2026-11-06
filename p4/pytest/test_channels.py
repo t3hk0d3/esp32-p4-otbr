@@ -254,9 +254,14 @@ def test_put_reply_is_the_channel(base_url, c6_in_otbr):
     assert get_channel(base_url)["mode"] == "otbr"
 
 
-def test_c6_off_and_back(dut, base_url, stored_dataset, c6_in_otbr):
+def test_c6_off_and_back(dut, base_url, c6_in_otbr):
     # PUT /device/channels/c6 off and back, On the C6 only: Thread stops, NO_RADIO, and the same dataset after it returns.
     wait_mode(base_url, "BR_RUNNING")
+    # The board's own network, whatever it is: never form a throwaway one.
+    before = ot(dut, "dataset active -x")
+    if not before or not before[-1].isalnum():
+        pytest.skip("the board has no active dataset")
+    dataset = before[-1]
     off = put_channel(base_url, {"mode": "off"})
     assert off.status_code in (200, 202), off.text
     status = wait_mode(base_url, "NO_RADIO")
@@ -271,7 +276,7 @@ def test_c6_off_and_back(dut, base_url, stored_dataset, c6_in_otbr):
     assert status["otbr_channel"] == "c6"
     assert get_channel(base_url)["state"] == "running"
     wait_ot_state(dut, {"leader", "router", "child"}, THREAD_TIMEOUT_S)
-    assert ot(dut, "dataset active -x")[-1] == stored_dataset
+    assert ot(dut, "dataset active -x")[-1] == dataset
 
 
 def test_ziggurat_not_available(base_url):
@@ -285,8 +290,11 @@ def test_ziggurat_not_available(base_url):
     assert get_channel(base_url)["stored_mode"] == before["stored_mode"]
 
 
-def test_rest_503_in_no_radio(dut, base_url, stored_dataset, c6_in_otbr):
+def test_rest_503_in_no_radio(base_url, c6_in_otbr):
     # Thread REST, Web GUI and console WebSocket, On NO_RADIO: 503 with the detail "no radio in OTBR mode".
+    console_was = requests.get(f"{base_url}/device/console", timeout=10).json()[
+        "enabled"
+    ]
     requests.put(f"{base_url}/device/console", json={"enabled": True}, timeout=10)
     try:
         assert put_channel(base_url, {"mode": "off"}).status_code in (200, 202)
@@ -309,4 +317,6 @@ def test_rest_503_in_no_radio(dut, base_url, stored_dataset, c6_in_otbr):
         assert requests.get(f"{base_url}/index.html", timeout=10).status_code == 200
         assert get_status(base_url)["mode"] == "NO_RADIO"
     finally:
-        requests.put(f"{base_url}/device/console", json={"enabled": False}, timeout=10)
+        requests.put(
+            f"{base_url}/device/console", json={"enabled": console_was}, timeout=10
+        )
