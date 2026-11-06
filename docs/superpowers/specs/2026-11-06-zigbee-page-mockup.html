@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Radios and Zigbee pages (mockup)</title>
+    <title>Zigbee page (mockup)</title>
     <!-- Copy of p4/components/esp_ot_br_server/frontend/static/style.css as of 2026-11-06, inlined so the file opens anywhere. -->
     <style>
 /*
@@ -858,71 +858,31 @@ tr:hover td { background: var(--primary-light); }
 .mk-note { font-size: 12px; color: #8a4700; background: var(--warn-bg, #fff8e1); border: 1px dashed #f0c36d;
     border-radius: 6px; padding: 6px 10px; margin: 8px 0 16px; }
 .nav { top: 46px; }
-.ch-card { padding: 18px 20px; }
-.ch-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
-.ch-title { font-size: 17px; font-weight: 700; }
-.ch-id { font-family: 'Courier New', Consolas, monospace; font-size: 12px; color: var(--text-light); margin-left: 8px; }
-.ch-modes { margin-top: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
-.ch-modes .seg button[disabled] { color: #aaa; cursor: not-allowed; }
 .ch-why { font-size: 13px; color: var(--text-light); }
-.ch-off { opacity: 0.65; }
-.ch-sub { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 12px; display: flex; flex-wrap: wrap;
-    gap: 10px 24px; font-size: 13px; color: #4a4a4a; align-items: center; }
-.ch-sub select, .ch-sub input { min-height: 34px; padding: 4px 8px; border: 1px solid #c9c9c9; border-radius: 6px; font: inherit; }
 .zha-path { font-family: 'Courier New', Consolas, monospace; font-size: 15px; background: var(--muted-bg, #eef0f3);
-    border-radius: 6px; padding: 8px 12px; display: inline-block; margin: 6px 0; }
+    border-radius: 6px; padding: 8px 12px; display: inline-block; margin: 6px 0; overflow-wrap: anywhere; }
 .big-num { font-size: 22px; font-weight: 700; }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 20px; font-size: 14px; }
 .kv dt { color: var(--text-light); }
-.kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+.kv dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .mono { font-family: 'Courier New', Consolas, monospace; }
-.view { display: none; }
-.view.on { display: block; }
-.mk-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 300; display: none; align-items: center;
-    justify-content: center; padding: 16px; }
-.mk-modal-bg.on { display: flex; }
-.mk-modal { background: var(--card); border-radius: 10px; max-width: 520px; padding: 22px 24px; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
-.mk-modal h3 { font-size: 18px; margin-bottom: 10px; }
-.mk-modal ul { margin: 8px 0 0 20px; font-size: 14px; color: #4a4a4a; }
-.mk-modal .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 </style>
 </head>
 <body class="device-page">
 
 <div class="mk-bar">
-    <span><b>MOCKUP</b> Radios and Zigbee pages</span>
-    <span>Page <span class="seg" id="mk-view">
-        <button type="button" data-v="radios" aria-pressed="true">Device &gt; Radios</button>
-        <button type="button" data-v="zigbee" aria-pressed="false">Zigbee</button>
-    </span></span>
+    <span><b>MOCKUP</b> Zigbee page</span>
     <span>Board <span class="seg" id="mk-state">
-        <button type="button" data-s="thread" aria-pressed="true">Today: Thread on the C6</button>
-        <button type="button" data-s="zigbee" aria-pressed="false">Zigbee on the C6</button>
-        <button type="button" data-s="gone" aria-pressed="false">Zigbee dongle unplugged</button>
+        <button type="button" data-s="none" aria-pressed="false">No Zigbee radio</button>
+        <button type="button" data-s="running" aria-pressed="true">Running on the C6</button>
+        <button type="button" data-s="noclient" aria-pressed="false">Running, ZHA not connected</button>
+        <button type="button" data-s="gone" aria-pressed="false">Dongle unplugged</button>
     </span></span>
 </div>
 
 <nav class="nav" id="nav"></nav>
 
 <div class="container">
-
-<!-- ======================================== Radios ======================================== -->
-<div class="view on" id="v-radios">
-    <div class="page-head">
-        <div>
-            <h1 class="page-title">Radios</h1>
-            <p class="page-desc">Every 802.15.4 radio the board can use: the on-board C6 and RCP sticks on the USB port.
-                Each radio runs one thing: a Thread border router, a Zigbee coordinator, or a pass-through to software
-                elsewhere on your network.</p>
-        </div>
-    </div>
-    <div class="mk-note">Owned by the radio channel mux design; the Zigbee parts are the "Ziggurat" choice, its reboot
-        warning and the link to the Zigbee page. Line and proxy settings are sketched loosely.</div>
-    <div id="radios"></div>
-</div>
-
-<!-- ======================================== Zigbee ======================================== -->
-<div class="view" id="v-zigbee">
     <div class="page-head">
         <div>
             <h1 class="page-title">Zigbee</h1>
@@ -930,118 +890,39 @@ tr:hover td { background: var(--primary-light); }
                 and automations live there. This page shows the radio side.</p>
         </div>
     </div>
+    <div class="mk-note">Which radio runs Zigbee is chosen on the Radios page (another agent's work); this page only
+        reads it.</div>
     <div id="zigbee"></div>
-</div>
-
-</div>
-
-<div class="mk-modal-bg" id="mk-modal">
-    <div class="mk-modal" role="dialog" aria-modal="true" aria-labelledby="mk-modal-title">
-        <h3 id="mk-modal-title">Make the C6 a Zigbee coordinator?</h3>
-        <p>The board restarts to switch the C6 to Zigbee (about 20 seconds).</p>
-        <ul>
-            <li>Thread devices lose this border router. Your Thread network stays saved on the board, so switching back
-                later rejoins it.</li>
-            <li>No radio is left for Thread, so the Thread pages go away until you set a radio to Thread again.</li>
-            <li>Then add ZHA in Home Assistant with radio type <b>Ziggurat</b> and the path shown on the Zigbee page.</li>
-        </ul>
-        <div class="modal-actions">
-            <button class="btn btn-secondary" type="button" id="mk-cancel">Cancel</button>
-            <button class="btn btn-primary" type="button" id="mk-ok">Switch and restart</button>
-        </div>
-    </div>
 </div>
 
 <script>
 (function () {
-    var state = 'thread', view = 'radios';
-
-    var channels = {
-        c6: { title: 'On-board C6', id: 'c6', fw: 'OpenThread RCP 20261105T114737Z-56eca79 · ESP32-C6 · SPI' },
-        stick: { title: 'Sonoff ZBDongle-P (CC2652P)', id: 'usb-10c4-ea60-a4c13896', fw: 'OpenThread RCP (Koenkk) 2025-07 · CC2652P · 460800' }
-    };
-
-    function modeOf(ch) {
-        if (ch === 'c6') return state === 'thread' ? 'otbr' : (state === 'zigbee' ? 'ziggurat' : 'otbr');
-        return state === 'gone' ? 'ziggurat' : 'rcp-proxy';
-    }
-
-    function seg(ch, mode, lock) {
-        var opts = [['off', 'Off'], ['otbr', 'Thread (OTBR)'], ['ziggurat', 'Zigbee (Ziggurat)'], ['rcp-proxy', 'RCP proxy']];
-        return '<span class="seg">' + opts.map(function (o) {
-            var dis = lock || (o[0] === 'otbr' && otherHas(ch, 'ziggurat')) || (o[0] === 'ziggurat' && otherHas(ch, 'otbr'))
-                || (o[0] === 'ziggurat' && otherHas(ch, 'ziggurat'));
-            return '<button type="button" data-ch="' + ch + '" data-m="' + o[0] + '" aria-pressed="' + (o[0] === mode) + '"'
-                + (dis && o[0] !== mode ? ' disabled title="' + why(ch, o[0]) + '"' : '') + '>' + o[1] + '</button>';
-        }).join('') + '</span>';
-    }
-    function otherHas(ch, m) { return modeOf(ch === 'c6' ? 'stick' : 'c6') === m && !(ch === 'c6' && state === 'thread' && m === 'otbr'); }
-    function why(ch, m) {
-        if (m === 'ziggurat' && otherHas(ch, 'ziggurat')) return 'Only one radio can be the Zigbee coordinator';
-        return 'Thread and Zigbee at the same time is not supported yet';
-    }
-
-    function radiosHtml() {
-        var c6m = modeOf('c6'), stm = modeOf('stick');
-        var h = '';
-        // C6
-        h += '<section class="card ch-card"><div class="ch-head"><div><span class="ch-title">' + channels.c6.title
-            + '</span><span class="ch-id">c6</span></div>'
-            + (c6m === 'otbr' ? '<span class="chip chip-ok">Thread border router · running</span>'
-                : '<span class="chip chip-ok">Zigbee coordinator · running</span>') + '</div>'
-            + '<dl class="facts"><dt>Firmware</dt><dd>' + channels.c6.fw + '</dd>'
-            + (c6m === 'ziggurat' ? '<dt>Zigbee</dt><dd><a href="#" data-goto="zigbee">Channel 15 · ZHA connected →</a></dd>'
-                : '<dt>Thread</dt><dd>ha-thread-bbc1 · router</dd>') + '</dl>'
-            + '<div class="ch-modes">' + seg('c6', c6m) + '<span class="ch-why">'
-            + (c6m === 'otbr' ? 'Switching to or from Zigbee restarts the board.' : 'Leaving Zigbee restarts the board.')
-            + '</span></div></section>';
-        // Stick
-        if (state === 'gone') {
-            h += '<section class="card ch-card ch-off"><div class="ch-head"><div><span class="ch-title">' + channels.stick.title
-                + '</span><span class="ch-id">' + channels.stick.id + '</span></div><span class="chip chip-warn">Not detected</span></div>'
-                + '<dl class="facts"><dt>Mode when back</dt><dd>Zigbee coordinator</dd><dt>Last seen</dt><dd>today 14:02 · '
-                + channels.stick.fw + '</dd></dl>'
-                + '<div class="ch-modes"><span class="ch-why">Plug the stick back in and it carries on as the Zigbee coordinator,'
-                + ' no restart. The Zigbee page shows "No radio" meanwhile.</span>'
-                + '<button class="btn btn-secondary btn-sm" type="button">Forget this stick</button></div></section>';
-        } else {
-            h += '<section class="card ch-card"><div class="ch-head"><div><span class="ch-title">' + channels.stick.title
-                + '</span><span class="ch-id">' + channels.stick.id + '</span></div><span class="chip chip-ok">RCP proxy · client 192.168.1.20</span></div>'
-                + '<dl class="facts"><dt>Firmware</dt><dd>' + channels.stick.fw + ' <span class="chip">detected</span></dd></dl>'
-                + '<div class="ch-modes">' + seg('stick', stm) + '</div>'
-                + '<div class="ch-sub"><label>Direction <select><option>listen</option><option>connect</option></select></label>'
-                + '<label>Adapter <select><option>tcp</option><option>udp</option></select></label>'
-                + '<label>Port <input size="6" value="6638"></label><label>Baud <select><option>460800</option><option>115200</option></select></label></div>'
-                + '</section>';
-        }
-        // A ZNP stick, for contrast
-        h += '<section class="card ch-card ch-off"><div class="ch-head"><div><span class="ch-title">ZigStar OllyZig (CC2652)</span>'
-            + '<span class="ch-id">usb-1a86-7523</span></div><span class="chip">Off</span></div>'
-            + '<dl class="facts"><dt>Firmware</dt><dd>Z-Stack ZNP · 115200</dd></dl>'
-            + '<div class="ch-modes"><span class="seg"><button aria-pressed="true">Off</button><button disabled title="Needs OpenThread RCP firmware">Thread (OTBR)</button>'
-            + '<button disabled title="Needs OpenThread RCP firmware">Zigbee (Ziggurat)</button><button aria-pressed="false">RCP proxy</button></span>'
-            + '<span class="ch-why">Thread and Zigbee need OpenThread RCP firmware; this stick runs Z-Stack. The RCP proxy works with any firmware.</span></div></section>';
-        return h;
-    }
+    var state = 'running';
 
     function zigbeeHtml() {
-        if (state === 'thread') {
+        if (state === 'none') {
             return '<section class="card hero hero-info"><div class="hero-main"><span class="hero-dot"></span><div>'
-                + '<div class="hero-title">No radio is a Zigbee coordinator</div><p class="hero-text">Set a radio to Zigbee on the '
-                + '<a href="#" data-goto="radios">Radios</a> page. The board restarts once to switch.</p></div></div></section>'
-                + '<div class="mk-note">In Thread-only mode this page is not in the navigation; opened directly it shows just this.</div>';
+                + '<div class="hero-title">No radio is a Zigbee coordinator</div><p class="hero-text">Set a radio to Zigbee on '
+                + 'the Radios page (Device menu). The board restarts once to switch.</p></div></div></section>'
+                + '<div class="mk-note">With no Zigbee radio this page is not in the navigation; opened directly it shows just this.</div>';
         }
-        var gone = state === 'gone';
-        var radio = gone ? 'Sonoff ZBDongle-P (CC2652P)' : 'On-board C6';
-        var h = '';
-        h += '<section class="card hero ' + (gone ? 'hero-fault' : 'hero-ok') + '"><div class="hero-main"><span class="hero-dot"></span><div>'
-            + (gone ? '<div class="hero-title">No radio</div><p class="hero-text">The ' + radio + ' was unplugged at 14:02. '
-                + 'The coordinator keeps the network in memory and ZHA stays connected, but nothing is sent or received. '
-                + 'Plug the stick back in and it carries on, no restart, no re-pairing.</p>'
-                : '<div class="hero-title">Coordinator running</div><p class="hero-text">Channel 15 on the '
-                + radio.replace('On-board', 'on-board') + '. ZHA is connected.</p>')
-            + '</div></div><dl class="facts hero-facts"><dt>Radio</dt><dd>' + radio + '</dd><dt>Running since</dt><dd>today 09:41</dd>'
-            + '<dt>Radio resets</dt><dd>' + (gone ? '1' : '0') + '</dd></dl></section>';
+        var gone = state === 'gone', client = state !== 'noclient';
+        var radio = gone ? 'Sonoff ZBDongle-P (CC2652P)' : 'on-board C6';
+        var hero;
+        if (gone) {
+            hero = ['hero-fault', 'No radio', 'The ' + radio + ' was unplugged at 14:02. The coordinator keeps the network in '
+                + 'memory and ZHA stays connected, but nothing is sent or received. Plug the stick back in and it carries on: '
+                + 'no restart, no re-pairing.'];
+        } else if (!client) {
+            hero = ['hero-info', 'Waiting for Home Assistant', 'The coordinator runs on the ' + radio + ' and keeps the '
+                + 'network going (routing, sleepy devices), but nothing controls it until ZHA connects.'];
+        } else {
+            hero = ['hero-ok', 'Coordinator running', 'Channel 15 on the ' + radio + '. ZHA is connected.'];
+        }
+        var h = '<section class="card hero ' + hero[0] + '"><div class="hero-main"><span class="hero-dot"></span><div>'
+            + '<div class="hero-title">' + hero[1] + '</div><p class="hero-text">' + hero[2] + '</p></div></div>'
+            + '<dl class="facts hero-facts"><dt>Radio</dt><dd>' + (gone ? radio + ' (not detected)' : radio.charAt(0).toUpperCase() + radio.slice(1))
+            + '</dd><dt>Running since</dt><dd>today 09:41</dd><dt>Radio resets</dt><dd>' + (gone ? '1' : '0') + '</dd></dl></section>';
 
         h += '<div class="tile-grid">';
         h += '<section class="card"><div class="tile-head"><h2>Connect Home Assistant</h2></div>'
@@ -1050,9 +931,11 @@ tr:hover td { background: var(--primary-light); }
             + '<p class="ch-why mt-8">One client at a time; a new connection takes over. No login: anyone on your network can reach it.</p></section>';
 
         h += '<section class="card"><div class="tile-head"><h2>Client</h2>'
-            + (gone ? '<span class="chip chip-ok">connected</span>' : '<span class="chip chip-ok">connected</span>') + '</div>'
-            + '<dl class="kv"><dt>Address</dt><dd class="mono">192.168.1.10</dd><dt>Connected since</dt><dd>today 09:42</dd>'
-            + '<dt>Frames in / out</dt><dd>18 204 / 21 877</dd></dl></section>';
+            + (client ? '<span class="chip chip-ok">connected</span>' : '<span class="chip">not connected</span>') + '</div>'
+            + (client ? '<dl class="kv"><dt>Address</dt><dd class="mono">192.168.1.10</dd><dt>Connected since</dt><dd>today 09:42</dd>'
+                + '<dt>Frames in / out</dt><dd>18 204 / 21 877</dd></dl>'
+                : '<dl class="kv"><dt>Last client</dt><dd class="mono">192.168.1.10</dd><dt>Left</dt><dd>today 13:15</dd></dl>')
+            + '</section>';
 
         h += '<section class="card"><div class="tile-head"><h2>Network</h2><span class="ch-why">as ZHA set it</span></div>'
             + '<dl class="kv"><dt>Channel</dt><dd>15</dd><dt>PAN ID</dt><dd class="mono">0x28F4</dd>'
@@ -1077,43 +960,31 @@ tr:hover td { background: var(--primary-light); }
     }
 
     function navHtml() {
-        var thread = state === 'thread', zig = state !== 'thread';
+        var zig = state !== 'none';
         var pages = [['Dashboard']];
-        if (zig) pages.push(['Zigbee', 'zigbee']);
-        if (thread) pages.push(['Management ▾'], ['Topology']);
-        pages.push(['Device ▾ : Radios · Ethernet' + (thread ? ' · Routing' : '') + ' · Firmware' + (thread ? ' · Packet capture' : '')
-            + ' · Diagnostics', 'radios']);
-        pages.push(['About']);
+        if (zig) pages.push(['Zigbee', true]);
+        else pages.push(['Management ▾'], ['Topology']);
+        pages.push(['Device ▾'], ['About']);
         return '<a href="#" class="nav-brand"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="22" height="22" alt=""> '
-            + (thread ? 'Thread Border Router' : 'Zigbee Coordinator') + '</a><ul class="nav-links">'
+            + (zig ? 'Zigbee Coordinator' : 'Thread Border Router') + '</a><ul class="nav-links">'
             + pages.map(function (p) {
-                var act = (p[1] && p[1] === view) ? ' class="active"' : '';
-                return '<li><a href="#"' + act + (p[1] ? ' data-goto="' + p[1] + '"' : '') + '>' + p[0] + '</a></li>';
+                return '<li><a href="#"' + (p[1] ? ' class="active"' : '') + '>' + p[0] + '</a></li>';
             }).join('') + '</ul>';
     }
 
     function render() {
         document.getElementById('nav').innerHTML = navHtml();
-        document.getElementById('radios').innerHTML = radiosHtml();
         document.getElementById('zigbee').innerHTML = zigbeeHtml();
-        document.getElementById('v-radios').className = 'view' + (view === 'radios' ? ' on' : '');
-        document.getElementById('v-zigbee').className = 'view' + (view === 'zigbee' ? ' on' : '');
-        ['mk-view', 'mk-state'].forEach(function (id) {
-            Array.prototype.forEach.call(document.getElementById(id).children, function (b) {
-                b.setAttribute('aria-pressed', String(b.dataset.v === view || b.dataset.s === state));
-            });
+        Array.prototype.forEach.call(document.getElementById('mk-state').children, function (b) {
+            b.setAttribute('aria-pressed', String(b.dataset.s === state));
         });
     }
 
     document.addEventListener('click', function (e) {
         var b = e.target.closest('button, a');
         if (!b) return;
-        if (b.dataset.v) { view = b.dataset.v; render(); }
-        else if (b.dataset.s) { state = b.dataset.s; render(); }
-        else if (b.dataset.goto) { e.preventDefault(); view = b.dataset.goto; render(); }
-        else if (b.dataset.ch === 'c6' && b.dataset.m === 'ziggurat' && state === 'thread') { document.getElementById('mk-modal').classList.add('on'); }
-        else if (b.id === 'mk-cancel') { document.getElementById('mk-modal').classList.remove('on'); }
-        else if (b.id === 'mk-ok') { document.getElementById('mk-modal').classList.remove('on'); state = 'zigbee'; view = 'zigbee'; render(); }
+        if (b.dataset.s) { state = b.dataset.s; render(); }
+        else if (b.tagName === 'A') e.preventDefault();
     });
     render();
 })();
