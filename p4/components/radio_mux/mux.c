@@ -133,6 +133,13 @@ static void refresh(mux_port_t *p)
         mux_unlock();
         return;
     }
+    if (p->leased) { // OpenThread is being started on it (a move): its stored mode changes only once that runs
+        ch->eff_mode = RADIO_MUX_MODE_OTBR;
+        ch->state = RADIO_MUX_STATE_STARTING;
+        ch->reason[0] = '\0';
+        mux_unlock();
+        return;
+    }
     switch (p->att.state) {
     case RADIO_MUX_AS_PROBING:
     case RADIO_MUX_AS_REOPENING:
@@ -285,6 +292,10 @@ static void close_device(mux_port_t *p)
     struct radio_mux_chan *ch = p->chan;
 
     atomic_store(&p->tx_ok, false);
+    if (p->leased) { // the lease holder takes its GONE from the channel's own queue
+        p->leased = false;
+        mux_post_ctl(p, RADIO_MUX_EV_GONE);
+    }
     mux_set_rx(p, MUX_RX_DISCARD);
     if (p->kind == RADIO_MUX_KIND_USB) {
         usb_transport_close(p);
@@ -562,8 +573,8 @@ static void c6_apply(bool reattach)
     mux_port_t *p = &g_mux.c6;
     char msg[RADIO_MUX_REASON_MAX];
 
-    if (p->busy) {
-        refresh(p); // the job owns the C6 and its pins
+    if (p->busy || p->leased) {
+        refresh(p); // the job owns the C6 and its pins, or OpenThread is being started on it (a lease)
         return;
     }
     if (p->att.state == RADIO_MUX_AS_ABSENT) { // unavailable: nothing to attach, but off still holds it in reset
@@ -621,8 +632,10 @@ static void handle_c6_job_begin(mux_call_t *call)
     taskENTER_CRITICAL(&p->lock);
     peer = p->busy_peer;
     taskEXIT_CRITICAL(&p->lock);
-    if (p->busy || radio_mux_c6_job_refused(p->chan->mode, p->att.state == RADIO_MUX_AS_ATTACHED, peer)) {
-        ESP_LOGW(TAG, "c6: job refused: %s", p->busy ? "another job holds the C6" : "rcp-proxy has a peer");
+    if (p->busy || p->leased ||
+            radio_mux_c6_job_refused(p->chan->mode, p->att.state == RADIO_MUX_AS_ATTACHED, peer)) {
+        ESP_LOGW(TAG, "c6: job refused: %s", p->busy ? "another job holds the C6" :
+                 p->leased ? "OpenThread is being moved to it" : "rcp-proxy has a peer");
         call->err = ESP_ERR_INVALID_STATE;
         return;
     }
@@ -658,6 +671,149 @@ static void handle_c6_job_end(mux_call_t *call)
     c6_list(present, why);
     c6_apply(false);
     ESP_LOGI(TAG, "c6: the job ended (%s)", present ? "present" : why);
+}
+
+/* ---- owner: the OTBR lease (a move, R9) ---- */
+
+// Takes a present channel with no consumer for OTBR before its mode is stored: frames go to its own queue and
+// eventfd, TX takes frames. The C6 is opened (out of reset); a USB device is open already (IDLE).
+static void handle_lease(mux_call_t *call)
+{
+    struct radio_mux_chan *ch = find_chan(call->id);
+    mux_port_t *p = ch ? ch->port : NULL;
+    const char *why = NULL;
+    char msg[RADIO_MUX_REASON_MAX];
+
+    call->chan = NULL;
+    if (!ch) {
+        call->err = ESP_ERR_NOT_FOUND;
+        snprintf(call->reason, sizeof(call->reason), "no channel %s", call->id);
+        return;
+    }
+    if (p->chan != ch || !ch->present || !ch->supported) {
+        why = "not detected";
+    } else if (p->busy) {
+        why = C6_BUSY_REASON;
+    } else if (p->leased) {
+        why = "OpenThread is already being moved to it";
+    } else if (p->att.state == RADIO_MUX_AS_ATTACHED || p->consumer) {
+        why = ch->mode == RADIO_MUX_MODE_RCP_PROXY ? "rcp-proxy runs on it: set it off first" : "in use";
+    } else if (p->att.state != RADIO_MUX_AS_IDLE || (p->kind == RADIO_MUX_KIND_USB && !usb_transport_is_open())) {
+        why = p->fault[0] ? p->fault : "not open";
+    } else if (!radio_mux_fits(&g_mux.rules, RADIO_MUX_MODE_OTBR, ch->fw.rec.type)) {
+        why = "its firmware is not spinel";
+    }
+    if (why) {
+        call->err = ESP_ERR_INVALID_STATE;
+        snprintf(call->reason, sizeof(call->reason), "%s", why);
+        return;
+    }
+    if (p->kind == RADIO_MUX_KIND_C6 && c6_transport_open(msg, sizeof(msg)) != ESP_OK) {
+        call->err = ESP_FAIL;
+        snprintf(call->reason, sizeof(call->reason), "%s", msg);
+        return;
+    }
+    mux_drain_evq(p);
+    xSemaphoreTake(p->rx_lock, portMAX_DELAY);
+    p->bound = NULL;
+    xSemaphoreGive(p->rx_lock);
+    atomic_store(&p->evq_chan, ch);
+    p->consumer = NULL;
+    p->tx_frames = true;
+    mux_set_rx(p, MUX_RX_FRAMES);
+    atomic_store(&p->tx_ok, true);
+    p->leased = true;
+    p->fault[0] = '\0';
+    refresh(p);
+    call->chan = ch;
+    call->err = ESP_OK;
+    ESP_LOGI(TAG, "%s: leased for OTBR", ch->id);
+}
+
+// Gives a leased channel back: delivery stops, the C6 returns to what its stored mode wants (off: reset). A fault
+// text stays as the channel's reason (state fault) until its next mode change, plug-in or C6 job.
+static void handle_lease_end(mux_call_t *call)
+{
+    struct radio_mux_chan *ch = call->chan;
+    mux_port_t *p = ch->port;
+
+    call->err = ESP_OK;
+    if (!p->leased || p->chan != ch) {
+        return; // committed, or the device went away (GONE ended the lease)
+    }
+    p->leased = false;
+    atomic_store(&p->tx_ok, false);
+    mux_set_rx(p, MUX_RX_DISCARD);
+    mux_drain_evq(p);
+    if (p->kind == RADIO_MUX_KIND_C6) {
+        c6_apply(false);
+    }
+    snprintf(p->fault, sizeof(p->fault), "%s", call->reason);
+    refresh(p);
+    ESP_LOGI(TAG, "%s: lease ended%s%s", ch->id, call->reason[0] ? ": " : "", call->reason);
+}
+
+// The end of a move: `to` (leased, OpenThread runs on it) is stored in otbr and `from` in off, in that order of
+// effect: `from`'s consumer is detached (GONE), then the lease becomes the otbr consumer's attach (no GONE, no reopen).
+static void handle_commit_otbr(mux_call_t *call)
+{
+    struct radio_mux_chan *to = find_chan(call->id);
+    struct radio_mux_chan *from = call->from[0] ? find_chan(call->from) : NULL;
+    const radio_mux_consumer_t *c = mux_find_consumer(RADIO_MUX_MODE_OTBR);
+
+    if (!to || !to->port->leased || to->port->chan != to || !c) {
+        call->err = ESP_ERR_INVALID_STATE;
+        return;
+    }
+    const radio_mux_mode_t to_old = to->mode;
+    const radio_mux_mode_t from_old = from ? from->mode : RADIO_MUX_MODE_OFF;
+
+    mux_lock();
+    to->mode = RADIO_MUX_MODE_OTBR;
+    if (from && from != to) {
+        from->mode = RADIO_MUX_MODE_OFF;
+    }
+    mux_unlock();
+    call->err = mux_store_chan(to);
+    if (call->err == ESP_OK && from && from != to) {
+        call->err = mux_store_chan(from);
+    }
+    if (call->err != ESP_OK) {
+        mux_lock();
+        to->mode = to_old;
+        if (from && from != to) {
+            from->mode = from_old;
+        }
+        mux_unlock();
+        mux_store_chan(to); // best effort: back to what was stored
+        return;
+    }
+    if (from && from != to) {
+        mux_port_t *fp = from->port;
+
+        if (fp->kind == RADIO_MUX_KIND_C6) {
+            c6_apply(false); // otbr detached (GONE), the C6 held in reset (off)
+        } else if (fp->chan == from) {
+            feed(fp, RADIO_MUX_AEV_MODE_SET);
+        }
+    }
+    mux_port_t *p = to->port;
+
+    p->leased = false;
+    p->consumer = c;
+    p->att.state = RADIO_MUX_AS_ATTACHED;
+    const esp_err_t err = c->attach((radio_mux_chan_t *)to, c->ctx);
+
+    if (err != ESP_OK) {
+        atomic_store(&p->tx_ok, false);
+        mux_set_rx(p, MUX_RX_DISCARD);
+        mux_drain_evq(p);
+        p->consumer = NULL;
+        snprintf(p->fault, sizeof(p->fault), "otbr attach failed: %s", esp_err_to_name(err));
+        p->att.state = RADIO_MUX_AS_IDLE;
+    }
+    refresh(p);
+    ESP_LOGI(TAG, "otbr moved%s%s to %s", from ? " from " : "", from ? from->id : "", to->id);
 }
 
 /* ---- owner: messages ---- */
@@ -839,6 +995,10 @@ static void handle_set(mux_call_t *call)
     call->from[0] = '\0';
     if (!ch) {
         call->verdict = RADIO_MUX_REFUSE_UNKNOWN_CHANNEL;
+        return;
+    }
+    if (ch->port->leased && ch->port->chan == ch) {
+        call->verdict = RADIO_MUX_REFUSE_BUSY; // OpenThread is being moved to it
         return;
     }
     radio_mux_verdict_t v = check_req(ch, req, &proxy);
@@ -1036,6 +1196,30 @@ static void handle(const mux_msg_t *m)
         xSemaphoreGive(m->call->done);
         mux_call_put(m->call);
         break;
+    case MUX_MSG_LEASE_END:
+        handle_lease_end(m->call);
+        xSemaphoreGive(m->call->done);
+        mux_call_put(m->call);
+        break;
+    case MUX_MSG_LEASE:
+    case MUX_MSG_COMMIT_OTBR: {
+        int pending = MUX_CALL_PENDING;
+
+        // A lease or commit whose caller gave up does not run: nobody would end the lease, and the caller has already
+        // gone back to the source (it then ends the lease, which always runs).
+        if (atomic_compare_exchange_strong(&m->call->claim, &pending, MUX_CALL_TAKEN)) {
+            if (m->type == MUX_MSG_LEASE) {
+                handle_lease(m->call);
+            } else {
+                handle_commit_otbr(m->call);
+            }
+        } else {
+            ESP_LOGW(TAG, "%s: lease call given up by its caller: skipped", m->call->id);
+        }
+        xSemaphoreGive(m->call->done);
+        mux_call_put(m->call);
+        break;
+    }
     }
 }
 

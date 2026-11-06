@@ -54,6 +54,9 @@ typedef struct mux_port {
     uint32_t det_baud;
     int64_t presence_check_us;
     bool busy; // owner, C6: a C6 job (radio_mux_c6_job_begin) holds the radio
+    // owner: the channel on this port is leased for OTBR (radio_mux_lease): frames to its own queue and eventfd, no
+    // consumer, until radio_mux_lease_end or radio_mux_commit_otbr; an unplug posts GONE and ends it
+    bool leased;
 
     // The channel whose consumer the queue, eventfd, ring and TX belong to: set at attach, kept through detach and
     // close (so the old consumer can still take its GONE), replaced at the next attach. Calls through any other
@@ -99,6 +102,9 @@ typedef enum {
     MUX_MSG_NOTE_FW,  // radio_mux_note_firmware
     MUX_MSG_C6_JOB_BEGIN, // radio_mux_c6_job_begin
     MUX_MSG_C6_JOB_END,   // radio_mux_c6_job_end
+    MUX_MSG_LEASE,        // radio_mux_lease
+    MUX_MSG_LEASE_END,    // radio_mux_lease_end
+    MUX_MSG_COMMIT_OTBR,  // radio_mux_commit_otbr
 } mux_msg_type_t;
 
 typedef struct mux_call mux_call_t;
@@ -108,7 +114,7 @@ typedef struct {
     union {
         mux_usb_dev_t dev;        // NEW_DEV
         const void *hdl;          // GONE: the CDC handle that went away
-        mux_call_t *call;         // SET, FORGET, C6_JOB_BEGIN, C6_JOB_END
+        mux_call_t *call;         // SET, FORGET, C6_JOB_BEGIN, C6_JOB_END, LEASE, LEASE_END, COMMIT_OTBR
         struct radio_mux_chan *ch; // RESET
         struct {
             struct radio_mux_chan *ch;
@@ -151,7 +157,9 @@ struct mux_call {
     atomic_int claim; // C6_JOB_BEGIN: MUX_CALL_PENDING until the owner takes it (TAKEN) or the caller gives up
     radio_mux_verdict_t verdict;
     esp_err_t err;
-    char from[RADIO_MUX_ID_MAX];
+    char from[RADIO_MUX_ID_MAX];         // SET: the source of a MOVE; COMMIT_OTBR: the channel that leaves otbr
+    struct radio_mux_chan *chan;         // LEASE: the leased channel; LEASE_END: the channel to give back
+    char reason[RADIO_MUX_REASON_MAX];   // LEASE: why it was refused; LEASE_END: the fault to show ("" none)
 };
 
 // mux_call_t.claim (calloc: PENDING).
@@ -172,7 +180,7 @@ typedef struct {
     size_t n_consumers;
     radio_mux_rules_t rules;
     atomic_bool started;
-    esp_err_t (*_Atomic mover)(const char *from, const char *to);
+    esp_err_t (*_Atomic mover)(const char *from, const char *to, char *reason, size_t cap);
 } mux_t;
 
 extern mux_t g_mux;

@@ -196,10 +196,15 @@ void radio_mux_get_snapshot(radio_mux_snapshot_t *out);
 // Validates, stores in NVS and applies a change (attach, detach, re-attach; line settings reconfigure an open device).
 // Settings for an unavailable channel are stored and apply on its return; a mode on it is refused. A refused change
 // stores nothing. APPLY_REBOOT stores only: the caller reboots. MOVE (otbr while another channel has it) calls the
-// mover set by radio_mux_set_otbr_mover from the calling task and stores nothing itself (the move stores both modes);
-// with no mover, or when the mover fails, it is refused: RADIO_MUX_REFUSE_NOT_AVAILABLE. On MOVE, moved_from gets
-// the id the move came from (may be NULL). Waits for the owner task (up to 5 s); RADIO_MUX_REFUSE_FAILED when it can't.
-radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req, char *moved_from, size_t cap);
+// mover set by radio_mux_set_otbr_mover from the calling task and stores nothing itself (the move stores both modes
+// once OpenThread runs on the target): MOVE means the target's probe passed and the rest of the move runs as a long
+// operation (the target shows state starting, then running, or fault with the reason). With no mover:
+// REFUSE_NOT_AVAILABLE. The mover's refusals: REFUSE_PROBE_FAILED (409 probe_failed), REFUSE_BUSY (a move or radio job
+// runs, OpenThread starting or sniffing), REFUSE_FAILED (anything else); `reason` (may be NULL) then gets the mover's
+// text, "" otherwise. A channel being moved to (leased) refuses every change with REFUSE_BUSY. On MOVE, moved_from gets
+// the id the move came from (may be NULL). Waits for the owner task (up to 5 s); REFUSE_FAILED when it can't.
+radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req, char *moved_from, size_t cap,
+                                  char *reason, size_t reason_cap);
 
 // Forgets an unplugged USB channel: erases its settings and removes it from the list. ESP_ERR_INVALID_STATE for the
 // C6 or a present channel, ESP_ERR_NOT_FOUND for an unknown id.
@@ -208,8 +213,31 @@ esp_err_t radio_mux_forget(const char *id);
 // Id of the channel whose stored mode is otbr (present or not), NULL when none.
 const char *radio_mux_otbr_channel(void);
 
-// br_core: runs a move of OpenThread from channel `from` to `to` (Task 7: probe synchronously, then the long op).
-void radio_mux_set_otbr_mover(esp_err_t (*move)(const char *from, const char *to));
+// br_core: the mover of OpenThread from channel `from` to `to`, called by radio_mux_set on the caller's task. It probes
+// `to` (radio_mux_lease) before it returns: ESP_OK when the move was accepted (the rest runs on br_core's task),
+// ESP_ERR_INVALID_RESPONSE when the probe failed, ESP_ERR_INVALID_STATE when busy; `reason` gets a short text then.
+void radio_mux_set_otbr_mover(esp_err_t (*move)(const char *from, const char *to, char *reason, size_t cap));
+
+/* ---- the OTBR lease (br_core, a move: R9) ---- */
+
+// Takes the present channel `id` for OpenThread before its stored mode is otbr: the probe and the start of a move run
+// on it while OpenThread may still run elsewhere. It must have no consumer attached (rcp-proxy on it: refused, "set it
+// off first"), detected spinel firmware, no C6 job; the C6 is opened (out of reset, no reset pulse). Frames then go to
+// the channel's own queue and eventfd (radio_mux_poll, radio_mux_eventfd, radio_mux_release), radio_mux_tx takes
+// frames; radio_mux_reset does nothing on it. The channel shows otbr, state starting. An unplug posts GONE and ends the
+// lease. *out gets the handle; ESP_ERR_NOT_FOUND (unknown id), ESP_ERR_INVALID_STATE (not leasable), ESP_FAIL (the C6
+// did not open), ESP_ERR_TIMEOUT (the owner did not answer; nothing was leased), with `err` (may be NULL) saying why.
+// Not from the owner task.
+esp_err_t radio_mux_lease(const char *id, radio_mux_chan_t **out, char *err, size_t cap);
+// Gives a leased channel back (no-op once committed or gone): delivery stops, the C6 returns to its stored mode (off:
+// held in reset). `fault` (NULL or "" for none, e.g. after a refused probe) stays as the channel's reason, state fault,
+// until its next mode change, plug-in or C6 job (drain_timeout, a start failure after the 202). Waits for the owner.
+void radio_mux_lease_end(radio_mux_chan_t *ch, const char *fault);
+// The end of a move, once OpenThread runs on the leased channel `to`: stores `to` in otbr and `from` (may be NULL or
+// "", e.g. forgotten) in off, then detaches `from`'s otbr consumer (GONE) and turns the lease into the otbr consumer's
+// attach on `to` (its attach callback runs; no GONE, no reopen, frames keep flowing). ESP_ERR_INVALID_STATE when `to`
+// is not leased (unplugged meanwhile), the NVS error (nothing stored), ESP_ERR_TIMEOUT (nothing ran).
+esp_err_t radio_mux_commit_otbr(const char *from, const char *to);
 
 /* ---- C6 jobs (br_core: firmware push, ROM recovery, the probe) ---- */
 

@@ -298,12 +298,16 @@ static mux_call_t *call_new(const char *id)
     return call;
 }
 
-radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req, char *moved_from, size_t cap)
+radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req, char *moved_from, size_t cap,
+                                  char *reason, size_t reason_cap)
 {
+    if (reason && reason_cap > 0) {
+        reason[0] = '\0';
+    }
     if (!id || !req || !atomic_load(&g_mux.started)) {
         return RADIO_MUX_REFUSE_FAILED;
     }
-    esp_err_t (*mover)(const char *, const char *) = atomic_load(&g_mux.mover);
+    esp_err_t (*mover)(const char *, const char *, char *, size_t) = atomic_load(&g_mux.mover);
     mux_call_t *call = call_new(id);
 
     if (!call) {
@@ -324,12 +328,18 @@ radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req
     if (v != RADIO_MUX_MOVE) {
         return v;
     }
-    // The move runs on the caller's task, never the owner's: its probe goes through the mux.
-    const esp_err_t err = mover(from, id);
+    // The mover is called on the caller's task, never the owner's: its probe goes through the mux. It answers once the
+    // probe is done; the rest of the move runs on br_core's task (a long operation).
+    char why[RADIO_MUX_REASON_MAX] = "";
+    const esp_err_t err = mover(from, id, why, sizeof(why));
 
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "moving otbr from %s to %s: %s", from, id, esp_err_to_name(err));
-        return RADIO_MUX_REFUSE_NOT_AVAILABLE;
+        ESP_LOGW(TAG, "moving otbr from %s to %s: %s (%s)", from, id, esp_err_to_name(err), why);
+        if (reason && reason_cap > 0) {
+            snprintf(reason, reason_cap, "%s", why);
+        }
+        return err == ESP_ERR_INVALID_RESPONSE ? RADIO_MUX_REFUSE_PROBE_FAILED :
+               err == ESP_ERR_INVALID_STATE ? RADIO_MUX_REFUSE_BUSY : RADIO_MUX_REFUSE_FAILED;
     }
     if (moved_from && cap > 0) {
         snprintf(moved_from, cap, "%s", from);
@@ -339,7 +349,7 @@ radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req
 
     rest.has_mode = false;
     if (rest.has_baud || rest.has_flow || rest.has_proxy) {
-        const radio_mux_verdict_t r = radio_mux_set(id, &rest, NULL, 0);
+        const radio_mux_verdict_t r = radio_mux_set(id, &rest, NULL, 0, NULL, 0);
 
         if (r != RADIO_MUX_APPLY) {
             ESP_LOGW(TAG, "%s: line settings after the move: verdict %d", id, (int)r);
@@ -426,9 +436,79 @@ const char *radio_mux_otbr_channel(void)
     return id;
 }
 
-void radio_mux_set_otbr_mover(esp_err_t (*move)(const char *from, const char *to))
+void radio_mux_set_otbr_mover(esp_err_t (*move)(const char *from, const char *to, char *reason, size_t cap))
 {
     atomic_store(&g_mux.mover, move);
+}
+
+// A call the owner may skip when its caller gave up (LEASE, COMMIT_OTBR): ESP_ERR_TIMEOUT then means nothing ran.
+static esp_err_t call_owner_claimed(mux_msg_type_t type, mux_call_t *call)
+{
+    esp_err_t err = call_owner(type, call);
+
+    if (err == ESP_ERR_TIMEOUT) {
+        int pending = MUX_CALL_PENDING;
+
+        if (atomic_compare_exchange_strong(&call->claim, &pending, MUX_CALL_ABANDONED)) {
+            return ESP_ERR_TIMEOUT;
+        }
+        xSemaphoreTake(call->done, portMAX_DELAY); // the owner took it just now: it runs to the end
+        err = ESP_OK;
+    }
+    return err == ESP_OK ? call->err : err;
+}
+
+esp_err_t radio_mux_lease(const char *id, radio_mux_chan_t **out, char *err, size_t cap)
+{
+    if (err && cap > 0) {
+        err[0] = '\0';
+    }
+    ESP_RETURN_ON_FALSE(id && out && atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "not started");
+    *out = NULL;
+    mux_call_t *call = call_new(id);
+
+    ESP_RETURN_ON_FALSE(call, ESP_ERR_NO_MEM, TAG, "call");
+    const esp_err_t ret = call_owner_claimed(MUX_MSG_LEASE, call);
+
+    if (ret == ESP_OK) {
+        *out = (radio_mux_chan_t *)call->chan;
+    } else if (err && cap > 0) {
+        snprintf(err, cap, "%s", ret == ESP_ERR_TIMEOUT ? "the radio mux did not answer" : call->reason);
+    }
+    mux_call_put(call);
+    return ret;
+}
+
+void radio_mux_lease_end(radio_mux_chan_t *ch, const char *fault)
+{
+    if (!ch || !atomic_load(&g_mux.started)) {
+        return;
+    }
+    mux_call_t *call = call_new(ch->id);
+
+    if (!call) {
+        ESP_LOGE(TAG, "%s: lease end lost: no memory", ch->id);
+        return;
+    }
+    call->chan = ch;
+    snprintf(call->reason, sizeof(call->reason), "%s", fault ? fault : "");
+    if (call_owner(MUX_MSG_LEASE_END, call) != ESP_OK) {
+        ESP_LOGW(TAG, "%s: lease end: the owner task did not answer in time", ch->id);
+    }
+    mux_call_put(call);
+}
+
+esp_err_t radio_mux_commit_otbr(const char *from, const char *to)
+{
+    ESP_RETURN_ON_FALSE(to && atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "not started");
+    mux_call_t *call = call_new(to);
+
+    ESP_RETURN_ON_FALSE(call, ESP_ERR_NO_MEM, TAG, "call");
+    snprintf(call->from, sizeof(call->from), "%s", from ? from : "");
+    const esp_err_t ret = call_owner_claimed(MUX_MSG_COMMIT_OTBR, call);
+
+    mux_call_put(call);
+    return ret;
 }
 
 void mux_call_put(mux_call_t *call)
