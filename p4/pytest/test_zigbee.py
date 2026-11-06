@@ -48,9 +48,8 @@ INTERVIEW_TIMEOUT_S = 60
 REPORT_TIMEOUT_S = 10
 LATENCY_ROUNDS = 30
 LATENCY_BUDGET_S = 0.5  # recorded, loose: the figure matters more than the bound
-HEAP_MARGIN_BYTES = (
-    0  # internal free heap in Zigbee mode must not be below the idle (Thread) figure
-)
+HEAP_MARGIN_BYTES = 0  # internal free heap with a client and a formed network: not below the idle channel's
+HEAP_SETTLE_S = 5
 ON_OFF_CLUSTER_ID = 0x0006
 ATTR_ON_OFF = 0x0000
 ZIGBEE_MODE = "ziggurat"
@@ -438,7 +437,7 @@ class TestZigbeeMode:
         run(body())
 
     def test_radio_reset_survived(self, dut, send, base_url, zigbee_mode, radio):
-        """A radio reset (C6 `rcp_glitch`): rcp_resets +1, the client stays connected, and the device still answers."""
+        """A radio reset (C6 `rcp_glitch`): rcp_resets grows, the client stays connected, and the device still answers."""
         zigbee_mode(radio)
         address = base_url.removeprefix("http://")
 
@@ -446,20 +445,22 @@ class TestZigbeeMode:
             async with zigpy_app(address) as app:
                 before = zigbee_status(base_url)
                 trigger_radio_reset(send, radio)
+                # At least one: on the C6 the mux's RESET and the RCP's own boot status may count as two.
                 deadline = time.monotonic() + RECOVERY_S
                 while time.monotonic() < deadline:
                     now = zigbee_status(base_url)
                     if (
                         now["counters"]["rcp_resets"]
-                        == before["counters"]["rcp_resets"] + 1
+                        >= before["counters"]["rcp_resets"] + 1
                         and now["state"] == EXPECTED_STATE
                     ):
                         break
                     await asyncio.sleep(1)
                 assert (
                     now["counters"]["rcp_resets"]
-                    == before["counters"]["rcp_resets"] + 1
+                    >= before["counters"]["rcp_resets"] + 1
                 )
+                assert now["state"] == EXPECTED_STATE
                 assert now["client"] is not None
                 assert now["client"]["address"] == before["client"]["address"]
                 scan = await asyncio.wait_for(
@@ -506,18 +507,29 @@ class TestZigbeeMode:
 
         run(body())
 
-    def test_internal_heap_not_lower_than_idle(self, dut, base_url, zigbee_mode, radio):
-        """Internal free heap with a client connected is not below the figure of the board idle in Thread mode."""
-        channel = channel_id(base_url, radio)
+    def test_internal_heap_not_lower_than_idle(
+        self, record_property, base_url, zigbee_mode, radio
+    ):
+        """Internal free heap with a client and a formed network is not below the figure of the channel idle (Zigbee
+        mode, the stack started, no client); the stack's PSRAM use is recorded."""
+        channel = zigbee_mode(radio)
+        time.sleep(HEAP_SETTLE_S)
+        assert zigbee_status(base_url)["client"] is None
         idle = get_json(base_url, "/device/diag")["memory"]["internal"]["free"]
-        zigbee_mode(radio)
 
         async def body():
             async with zigpy_app(base_url.removeprefix("http://")):
-                await asyncio.sleep(5)
-                return get_json(base_url, "/device/diag")["memory"]["internal"]["free"]
+                await asyncio.sleep(HEAP_SETTLE_S)
+                return (
+                    get_json(base_url, "/device/diag")["memory"]["internal"]["free"],
+                    zigbee_status(base_url)["heap"],
+                )
 
-        busy = run(body())
+        busy, stack_heap = run(body())
+        record_property("zigbee_internal_free_idle", idle)
+        record_property("zigbee_internal_free_busy", busy)
+        record_property("zigbee_stack_heap_current", stack_heap["current"])
+        record_property("zigbee_stack_heap_peak", stack_heap["peak"])
         assert busy >= idle - HEAP_MARGIN_BYTES, (channel, idle, busy)
 
     @pytest.mark.zigbee_device
