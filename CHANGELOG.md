@@ -9,6 +9,9 @@ release's `versions.txt`.
 
 ### Added
 
+- 3D-printable case for the board (`case/`, `make case`): a one-piece base with keyholes for two wall screws and a
+  honeycomb lid on snap-in corner tabs, checked against the vendor 3D model for fit and printability. See
+  `docs/case.md`.
 - Update from GitHub: the board checks the latest release (`versions.txt`) and installs it, the bundle first, then the
   radio firmware when it differs, then one reboot. New `GET`/`POST /device/update` (`check=true`, `force=1`; see
   `docs/api.md`) and an "Updates" card on the Firmware page that checks when the page opens, never in the background.

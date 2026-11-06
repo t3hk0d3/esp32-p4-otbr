@@ -18,6 +18,8 @@ no-wires first install through ESP-Hosted).
 - `tools/`: the scripts behind the Makefile (`build_all.sh`, `run_host_tests.sh`, `run_vendored_rest_tests.sh`,
   `package_release.sh`, `make_bundle.py`), `version.cmake`, `base_version.cmake`, `test_build.cmake`,
   `c6_updater_images.cmake`, `otbr_compat.py` (python-otbr-api driver) and `tools/tests/` (tool tests).
+- `case/`: the parametric 3D-printable case (`p4_case/` package, `tests/`, throwaway `sketches/`); see
+  [case.md](case.md).
 - `docs/`: this documentation, the design spec and plan, Phase 0 results (hardware facts).
 - `IDF_VERSION`: the pinned ESP-IDF version.
 
@@ -52,6 +54,8 @@ make lint            # formatting and lint (pre-commit)
 - `python3 tools/topology_preview.py --port 8765`: serves the frontend on localhost with canned `/device/topology`
   (the test fixture's result), `/ping` and `/device/status` answers, to look at the Topology page without a board
   (needs `node`).
+- `make case-test`: the case model's tests and fit checks (downloads the vendor board model once; not part of
+  `make test` or CI).
 
 On-board tests need the board with the Thread peer (an ESP32-C6 or H2 devkit running `ot_cli` on a second serial port) and
 run against a test build, which the fixtures flash themselves:

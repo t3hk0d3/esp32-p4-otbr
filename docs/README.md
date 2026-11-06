@@ -18,6 +18,7 @@ Running it:
 - [Diagnostics](diagnostics.md): CPU, memory, tasks and OpenThread lock statistics.
 - [Prometheus metrics](metrics.md): `GET /metrics`, scrape config, the metric list and example alerts.
 - [Troubleshooting and limitations](troubleshooting.md): fault reasons, common problems, known limitations.
+- [3D-printed case](case.md): printing, parts, assembly and wall mounting of the board's case.
 
 Working on it:
 

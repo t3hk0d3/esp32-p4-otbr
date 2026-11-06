@@ -55,6 +55,7 @@ nav:
   - Setting up:
       - First install: first-install.md
       - Building and flashing: building.md
+      - 3D-printed case: case.md
   - Running it:
       - Updates: updates.md
       - Home Assistant: home-assistant.md
