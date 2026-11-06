@@ -320,7 +320,11 @@ reason, spec reference.
    (docs/superpowers/specs/2026-11-05-usb-serial-proxy-design.md)
 27. Applied (Zigbee mode, Task 5). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 29 -> 30. The
    extra-handlers callback (`app_main.c` `register_extra_handlers`) also registers the WebSocket `GET /zigbee`
-   (`zigbee_register_ws`) after the device API, before the catch-all. (docs/superpowers/specs/2026-11-06-zigbee-mode-design.md)
+   (`zigbee_register_ws`) after the device API, before the catch-all. Frontend (Task 7): new page `frontend/zigbee.html` and
+   `frontend/static/zigbee.js`; `static/api.js` adds the Zigbee nav entry after the Dashboard when `/device/status` reports
+   a `zigbee_channel`; `static/status.js` and `index.html` add the Dashboard Zigbee card; `static/device_common.js`
+   `poller` accepts a function as its period; `static/style.css` adds `.zg-*` classes. Page tests:
+   `tools/tests/test_zigbee_page.py`. (docs/superpowers/specs/2026-11-06-zigbee-mode-design.md)
 
 ### REST guard classification (patches 2 and 9)
 

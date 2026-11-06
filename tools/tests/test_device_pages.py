@@ -57,6 +57,7 @@ PAGES = {
         "capture",
         ["/device/sniffer.pcap", "/device/sniffer", "/device/status"],
     ),
+    "zigbee": ("zigbee", ["/device/zigbee"]),
 }
 
 KIT_IDS = ["trialBanner", "trialRemaining", "trialFill", "confirmBtn", "confirmMsg"]

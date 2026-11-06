@@ -840,3 +840,10 @@ tr:hover td { background: var(--primary-light); }
 .t-txt caption { text-align: left; font-size: 13px; color: var(--text-light); padding: 4px 0; }
 .t-txt td { border-bottom: 1px solid #f0f0f0; padding: 3px 8px; font-family: ui-monospace, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
 .t-txt td:first-child { color: var(--text-light); width: 160px; }
+
+/* Zigbee page */
+.zg-why { font-size: 13px; color: var(--text-light); }
+.zg-path { font-family: 'Courier New', Consolas, monospace; font-size: 15px; background: var(--muted-bg); border-radius: 6px;
+    padding: 8px 12px; display: inline-block; margin: 6px 8px 6px 0; overflow-wrap: anywhere; }
+.zg-big { font-size: 22px; font-weight: 700; }
+.zg-mono { font-family: 'Courier New', Consolas, monospace; }

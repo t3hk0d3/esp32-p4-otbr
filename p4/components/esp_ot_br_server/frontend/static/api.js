@@ -182,6 +182,29 @@ for (var i = 0; i < pages.length; i++) {
 html += '</ul>';
 nav.innerHTML = html;
 
+/*
+ * The Zigbee page is in the menu only while a radio channel runs the Zigbee coordinator. The nav is built at once
+ * from the static list above; the entry is added after the Dashboard when /device/status reports a zigbee_channel.
+ */
+if (typeof fetch === 'function' && nav.querySelector) {
+  fetch('/device/status')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(s) {
+        var links = nav.querySelector('.nav-links');
+        if (!s || !s.zigbee_channel || !links || !links.firstChild)
+          return;
+        var li = document.createElement('li');
+        var a = document.createElement('a');
+        a.setAttribute('href', '/zigbee.html');
+        a.textContent = 'Zigbee';
+        if (p === '/zigbee.html')
+          a.className = 'active';
+        li.appendChild(a);
+        links.insertBefore(li, links.firstChild.nextSibling);
+      })
+      .catch(function() {}); // no status, no entry
+}
+
 /* A tap opens a menu too (touch screens have no hover); a tap elsewhere closes it. */
 if (!nav.querySelectorAll)
   return; // the nav tests run this file against a bare object

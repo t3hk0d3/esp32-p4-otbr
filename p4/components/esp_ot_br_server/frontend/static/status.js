@@ -65,6 +65,21 @@ function heroFor(s) {
   return {tone : 'idle', title : String(s.mode), text : '', link : null};
 }
 
+/** The Dashboard card's state line for a /device/zigbee body (null when it could not be read). */
+function zigbeeStateText(z) {
+  if (!z)
+    return 'unknown';
+  if (z.state === 'running')
+    return z.client ? 'Running, ZHA connected' : 'Waiting for Home Assistant';
+  if (z.state === 'no_radio')
+    return 'No radio';
+  if (z.state === 'starting')
+    return 'Starting';
+  if (z.state === 'incompatible')
+    return 'Radio not compatible';
+  return 'Not running';
+}
+
 function snifferText(sn) {
   if (sn.active)
     return {state : 'Capturing on channel ' + sn.channel, detail : sn.frames + ' frames, ' + sn.drops + ' dropped'};
@@ -167,6 +182,7 @@ function addressRows(list) {
 return {
   heroFor : heroFor,
   snifferText : snifferText,
+  zigbeeStateText : zigbeeStateText,
   pdText : pdText,
   threadView : threadView,
   roleLine : roleLine,
@@ -193,6 +209,8 @@ var pskcShown = false;
 var lastStatus = null; // for the Home Assistant tile, which also needs /device/network
 var lastNet = null;
 var lastNames = null;
+var lastZigbee; // undefined until the first answer
+var zigbeePoll = null;
 
 function rcpText(installed) {
   if (installed === null || installed === undefined)
@@ -239,6 +257,7 @@ function render(s) {
   setText('t-sniffer-state', sn.state);
   setText('t-sniffer-detail', sn.detail);
   lastStatus = s;
+  renderZigbee(s);
   renderHa();
 }
 
@@ -273,6 +292,37 @@ function refreshNetwork() {
   }, function() {
     lastNet = null;
     renderHa();
+    return false;
+  });
+}
+
+/* ---- Zigbee card: only while a radio channel runs the Zigbee coordinator (zigbee_channel in /device/status) ---- */
+
+function renderZigbee(s) {
+  show('t-zg-card', !!s.zigbee_channel);
+  if (!s.zigbee_channel)
+    return;
+  setText('t-zg-radio', s.zigbee_channel === 'c6' ? 'on-board C6' : 'USB radio ' + s.zigbee_channel);
+  if (lastZigbee === undefined && zigbeePoll)
+    zigbeePoll.wake();
+}
+
+function renderZigbeeBody(z) {
+  lastZigbee = z;
+  setText('t-zg-state', L.zigbeeStateText(z));
+  setText('t-zg-channel', z && z.radio ? String(z.radio.channel) : '-');
+  setText('t-zg-client', z && z.client ? z.client.address : '-');
+}
+
+function refreshZigbee() {
+  if (!lastStatus || !lastStatus.zigbee_channel)
+    return Promise.resolve(true);
+  return kit.request('GET', '/device/zigbee', {timeoutMs : 5000}).then(function(r) {
+    var ok = r.status === 200 && !!r.body;
+    renderZigbeeBody(ok ? r.body : null);
+    return ok;
+  }, function() {
+    renderZigbeeBody(null);
     return false;
   });
 }
@@ -440,6 +490,7 @@ function init() {
   kit.poller(refreshDiag, 10000, 'statusSection');
   threadPoll = kit.poller(refreshThread, 10000, 'statusSection');
   kit.poller(refreshNetwork, 10000, null);
+  zigbeePoll = kit.poller(refreshZigbee, 5000, 'statusSection');
 }
 
 return {
@@ -448,6 +499,7 @@ return {
   refreshDiag : refreshDiag,
   refreshThread : refreshThread,
   refreshNetwork : refreshNetwork,
+  refreshZigbee : refreshZigbee,
   reboot : reboot,
   kit : kit
 };

@@ -325,7 +325,7 @@ function failure(r) { return L.errorMessage(r.status, r.body); }
 
 /*
  * Polling: one request at a time, backoff on failure, quiet while hidden, off screen (when `sectionId` names an
- * element to watch) or busy. `task` resolves to false on failure.
+ * element to watch) or busy. `task` resolves to false on failure. `period` may be a function returning the period.
  */
 function poller(task, period, sectionId) {
   var timer = null, inFlight = false, visible = true, failures = 0;
@@ -339,7 +339,7 @@ function poller(task, period, sectionId) {
   function done(ok) {
     inFlight = false;
     failures = ok ? 0 : failures + 1;
-    schedule(L.nextDelay(period, failures));
+    schedule(L.nextDelay(typeof period === 'function' ? period() : period, failures));
   }
   function schedule(ms) {
     if (timer === null)
