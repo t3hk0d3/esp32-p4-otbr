@@ -7,7 +7,8 @@ dongle support" work (in progress, 2026-11-06).
 ## 1. Purpose and scope
 
 The board's radios (the on-board C6, and RCP dongles on the USB OTG port) become **channels** of a radio channel mux,
-and each channel has one mode: OTBR, Serial proxy, or **Ziggurat**. This design covers the Ziggurat mode: the P4 runs
+and each channel has one mode: `off`, `otbr`, `rcp-proxy` or **`ziggurat`** (a channel whose radio is not detected or
+not compatible reports `unavailable` instead, keeping its stored mode). This design covers the `ziggurat` mode: the P4 runs
 [zigpy/ziggurat](https://github.com/zigpy/ziggurat), an open-source Zigbee stack in Rust, on one channel, with a small
 spinel client of its own that drives the channel's OpenThread RCP firmware. OpenThread is not involved. ZHA (or any
 zigpy application) connects to the board with radio type "Ziggurat" and the path `ws://<board>/zigbee`.
@@ -219,7 +220,7 @@ From the spike and its on-board runs (2026-11-06):
   client (ziggurat sends it after `hello`), and aborts (core dump, reboot). A hard reset request from the client
   reboots the board.
 - **Access.** Same trust model as the rest of the HTTP API: no login, anyone who reaches the board's web port can use
-  the endpoint. The docs say so, as for the USB serial proxy.
+  the endpoint. The docs say so, as for the RCP proxy.
 
 ### Building ziggurat
 
@@ -287,6 +288,9 @@ zigbee
         With the Ziggurat channel's dongle absent at boot
             - does not start the stack
             - starts it when the mux attaches the channel
+        With the Ziggurat channel reported unavailable (radio not detected or not compatible)
+            - does not start the stack
+            - reports the channel as unavailable on the page and in /device/zigbee
     spinel client
         configure
             - sends channel, TX power, PAN ID, short and extended address, promiscuous, source-match enable and receive
