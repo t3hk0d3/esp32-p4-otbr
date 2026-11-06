@@ -962,7 +962,7 @@ tr:hover td { background: var(--primary-light); }
     function navHtml() {
         var zig = state !== 'none';
         var pages = [['Dashboard']];
-        if (!zig) pages.push(['Thread ▾']); // Network, Topology, Routing, Commissioner, Addresses, Packet capture, Tools, Console; hidden with no OTBR radio
+        if (!zig) pages.push(['Thread ▾']); // Network, Topology, Routing, Commissioner, Addresses, Tools, Console; hidden with no OTBR radio
         if (zig) pages.push(['Zigbee', true]);
         pages.push(['Device ▾'], ['About']);
         return '<a href="#" class="nav-brand"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="22" height="22" alt=""> '
