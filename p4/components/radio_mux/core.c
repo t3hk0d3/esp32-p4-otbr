@@ -288,3 +288,169 @@ void radio_mux_cp210x_flow(bool on, uint8_t out[RADIO_MUX_CP210X_FLOW_LEN])
     put_le32(&out[8], CP210X_FLOW_LIMIT);
     put_le32(&out[12], CP210X_FLOW_LIMIT);
 }
+
+/* ---- the attach state machine ---- */
+
+radio_mux_attach_act_t radio_mux_attach_next(radio_mux_attach_t *a, radio_mux_attach_ev_t ev, bool attach_wanted)
+{
+    switch (a->state) {
+    case RADIO_MUX_AS_ABSENT:
+        if (ev == RADIO_MUX_AEV_PLUG) {
+            a->state = RADIO_MUX_AS_PROBING;
+            return RADIO_MUX_ACT_PROBE;
+        }
+        break;
+    case RADIO_MUX_AS_PROBING:
+        if (ev == RADIO_MUX_AEV_DETECT_DONE) {
+            a->state = RADIO_MUX_AS_REOPENING;
+            return RADIO_MUX_ACT_REOPEN;
+        }
+        if (ev == RADIO_MUX_AEV_UNPLUG) {
+            a->state = RADIO_MUX_AS_CLOSING;
+            return RADIO_MUX_ACT_CLOSE;
+        }
+        break;
+    case RADIO_MUX_AS_REOPENING:
+        if (ev == RADIO_MUX_AEV_REOPENED) {
+            a->state = attach_wanted ? RADIO_MUX_AS_ATTACHED : RADIO_MUX_AS_IDLE;
+            return attach_wanted ? RADIO_MUX_ACT_ATTACH : RADIO_MUX_ACT_NONE;
+        }
+        if (ev == RADIO_MUX_AEV_UNPLUG) {
+            a->state = RADIO_MUX_AS_CLOSING;
+            return RADIO_MUX_ACT_CLOSE;
+        }
+        break;
+    case RADIO_MUX_AS_IDLE:
+        if (ev == RADIO_MUX_AEV_MODE_SET && attach_wanted) {
+            a->state = RADIO_MUX_AS_ATTACHED;
+            return RADIO_MUX_ACT_ATTACH;
+        }
+        if (ev == RADIO_MUX_AEV_UNPLUG) {
+            a->state = RADIO_MUX_AS_CLOSING;
+            return RADIO_MUX_ACT_CLOSE;
+        }
+        break;
+    case RADIO_MUX_AS_ATTACHED:
+        if (ev == RADIO_MUX_AEV_MODE_SET) {
+            a->state = attach_wanted ? RADIO_MUX_AS_ATTACHED : RADIO_MUX_AS_IDLE;
+            return attach_wanted ? RADIO_MUX_ACT_REATTACH : RADIO_MUX_ACT_DETACH;
+        }
+        if (ev == RADIO_MUX_AEV_ATTACH_FAILED) {
+            a->state = RADIO_MUX_AS_IDLE;
+            return RADIO_MUX_ACT_NONE;
+        }
+        if (ev == RADIO_MUX_AEV_UNPLUG) {
+            a->state = RADIO_MUX_AS_CLOSING;
+            return RADIO_MUX_ACT_GONE_CLOSE;
+        }
+        break;
+    case RADIO_MUX_AS_CLOSING:
+        if (ev == RADIO_MUX_AEV_PLUG) {
+            a->plug_pending = true;
+            return RADIO_MUX_ACT_DEFER;
+        }
+        if (ev == RADIO_MUX_AEV_UNPLUG) { // the deferred device left again
+            a->plug_pending = false;
+            return RADIO_MUX_ACT_NONE;
+        }
+        if (ev == RADIO_MUX_AEV_CLOSED) {
+            const bool pending = a->plug_pending;
+
+            a->plug_pending = false;
+            a->state = pending ? RADIO_MUX_AS_PROBING : RADIO_MUX_AS_ABSENT;
+            return pending ? RADIO_MUX_ACT_PROBE : RADIO_MUX_ACT_NONE;
+        }
+        break;
+    }
+    return RADIO_MUX_ACT_NONE;
+}
+
+bool radio_mux_attach_wanted(const radio_mux_rules_t *rules, const radio_mux_chan_view_t *ch,
+                             bool consumer_registered)
+{
+    if (!ch->present || !ch->supported || !consumer_registered) {
+        return false;
+    }
+    if (ch->mode == RADIO_MUX_MODE_OFF || ch->mode == RADIO_MUX_MODE_UNAVAILABLE ||
+            ch->mode == RADIO_MUX_MODE_INVALID) {
+        return false;
+    }
+    return radio_mux_fits(rules, ch->mode, ch->fw);
+}
+
+radio_mux_post_t radio_mux_post_rx(bool queue_full, size_t len, radio_mux_counters_t *c)
+{
+    if (queue_full) {
+        c->drops++;
+        return RADIO_MUX_DROPPED;
+    }
+    c->frames_in++;
+    c->bytes_in += len;
+    return RADIO_MUX_POSTED;
+}
+
+#define FNV_OFFSET 0x811C9DC5u
+#define FNV_PRIME 0x01000193u
+
+void radio_mux_nvs_key(const char *id, char out[16])
+{
+    uint32_t h = FNV_OFFSET;
+
+    if (strcmp(id, "c6") == 0) {
+        snprintf(out, 16, "c6");
+        return;
+    }
+    for (size_t i = 0; id[i] != '\0'; i++) {
+        h ^= (uint8_t)id[i];
+        h *= FNV_PRIME;
+    }
+    snprintf(out, 16, "u%08lx", (unsigned long)h);
+}
+
+const char *radio_mux_state_name(radio_mux_state_t state)
+{
+    switch (state) {
+    case RADIO_MUX_STATE_IDLE:
+        return "idle";
+    case RADIO_MUX_STATE_STARTING:
+        return "starting";
+    case RADIO_MUX_STATE_RUNNING:
+        return "running";
+    case RADIO_MUX_STATE_FAULT:
+        return "fault";
+    case RADIO_MUX_STATE_BUSY:
+        return "busy";
+    default:
+        return NULL;
+    }
+}
+
+const char *radio_mux_fw_source_name(radio_mux_fw_source_t src)
+{
+    switch (src) {
+    case RADIO_MUX_FW_SRC_PROBE:
+        return "probe";
+    case RADIO_MUX_FW_SRC_PASSIVE:
+        return "passive";
+    default:
+        return NULL;
+    }
+}
+
+#define PORT_HTTP 80
+#define PORT_BGP 179
+
+bool radio_mux_proxy_ok(const radio_mux_proxy_settings_t *s)
+{
+    const size_t host_len = strnlen(s->host, sizeof(s->host));
+
+    if ((s->dir != RADIO_MUX_PROXY_LISTEN && s->dir != RADIO_MUX_PROXY_CONNECT) ||
+            (s->adapter != RADIO_MUX_PROXY_TCP && s->adapter != RADIO_MUX_PROXY_UDP) ||
+            (s->framing != RADIO_MUX_PROXY_HDLC && s->framing != RADIO_MUX_PROXY_RAW)) {
+        return false;
+    }
+    if (s->port == 0 || s->port == PORT_HTTP || s->port == PORT_BGP || host_len == sizeof(s->host)) {
+        return false;
+    }
+    return s->dir != RADIO_MUX_PROXY_CONNECT || host_len > 0;
+}

@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include "esp_err.h"
 #include "esp_netif.h"
+#include "sdkconfig.h"
 #include "openthread/link_raw.h"
 #include "br_core_leader.h"
 #include "br_core_mode.h"
@@ -13,6 +14,14 @@
 
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+// Eventfds OpenThread uses: the spinel SPI endpoint, one each for the netif, the task queue and the border router, and
+// one for TREL reception. app_main registers the eventfd VFS with these plus the mux's (RADIO_MUX_EVENTFD_COUNT).
+#if CONFIG_OPENTHREAD_RADIO_TREL
+#define BR_CORE_EVENTFD_COUNT 5
+#else
+#define BR_CORE_EVENTFD_COUNT 4
 #endif
 
 typedef struct {
