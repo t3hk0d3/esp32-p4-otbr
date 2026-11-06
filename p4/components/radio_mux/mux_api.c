@@ -404,18 +404,7 @@ radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req
     if (moved_from && cap > 0) {
         snprintf(moved_from, cap, "%s", from);
     }
-    // The line and rcp_proxy parts of the request apply like any other change; the move stores the modes.
-    radio_mux_set_req_t rest = *req;
-
-    rest.has_mode = false;
-    if (rest.has_baud || rest.has_flow || rest.has_proxy) {
-        const radio_mux_verdict_t r = radio_mux_set(id, &rest, NULL, 0, NULL, 0);
-
-        if (r != RADIO_MUX_APPLY) {
-            ESP_LOGW(TAG, "%s: line settings after the move: verdict %d", id, (int)r);
-        }
-    }
-    return RADIO_MUX_MOVE;
+    return RADIO_MUX_MOVE; // the move stores the modes; it carries no line or rcp_proxy settings (handle_set)
 }
 
 bool radio_mux_started(void)

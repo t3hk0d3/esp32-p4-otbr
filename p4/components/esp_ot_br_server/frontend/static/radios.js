@@ -172,8 +172,8 @@ function proxyOf(ch) {
 
 /*
  * What Save sends for `draft` = {pick, touched, direction, adapter, framing, host, port, baud, flow}: {error} or
- * {requests: [body, ...], move}. The settings go first and the mode alone after them: the API refuses a move of
- * Thread that carries settings. Thread onto a radio that runs rcp-proxy sets it off first (the API refuses otbr while
+ * {requests: [body, ...], move}. The settings go first and the mode alone after them: the API refuses a start, move
+ * or stop of Thread that carries settings. Thread onto a radio that runs rcp-proxy sets it off first (the API refuses otbr while
  * the proxy runs on it).
  */
 function plan(ch, snapshot, draft, status) {

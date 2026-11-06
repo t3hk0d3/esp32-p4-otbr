@@ -135,14 +135,14 @@ OpenThread on its radio, e.g. after an unplug) and cannot carry baud, flow contr
 separate request.
 
 A **start** (`otbr` on a channel while no channel has it) and a **stop** (another mode on the channel that has `otbr`)
-work the same way, as long operations with **202**:
+work the same way, as long operations with **202**, and cannot carry baud, flow control or proxy settings either
+(400 `bad_value`): send the new mode's proxy settings in a request of their own, before or after it.
 
 - Start: `{"moving": true, "moved_from": null}`. The target is probed first (409 `probe_failed`, nothing changed), then
   OpenThread starts on it; its mode is stored only once it runs. If it does not start, the target shows `fault` with
   the reason and the board stays `NO_RADIO`.
 - Stop: `{"moving": true, "moved_from": "<the channel itself>"}`. Open sessions are given up to 45 s to end, OpenThread
-  stops, and only then the new mode (`off` or `rcp-proxy`, with any proxy settings of the same request) is stored and
-  applied; the board becomes `NO_RADIO`. If the sessions do not end, nothing changes: the channel keeps running `otbr`
+  stops, and only then the new mode (`off` or `rcp-proxy`) is stored and applied; the board becomes `NO_RADIO`. If the sessions do not end, nothing changes: the channel keeps running `otbr`
   with `error` `drain_timeout`, and Thread runs on.
 - A channel that runs `rcp-proxy` cannot take `otbr` directly (409 `probe_failed`, "set it off first"): set it `off`
   first. The Radios page does that by itself.

@@ -1747,6 +1747,12 @@ static esp_err_t channel_apply(httpd_req_t *req, radio_mux_snapshot_t *s, const 
     if (bad) {
         return send_error(req, 400, "bad_value", bad, false);
     }
+    otbr_channel_id(otbr);
+    const char *mixed = device_api_channel_move_refusal(set, id, otbr[0] ? otbr : NULL);
+
+    if (mixed) { // before port_taken: settings that go with a start, move or stop are never stored
+        return send_error(req, 400, "bad_value", mixed, false);
+    }
     const char *taken_by = device_api_channel_port_conflict(s, id, set);
 
     if (taken_by) {
@@ -1756,12 +1762,6 @@ static esp_err_t channel_apply(httpd_req_t *req, radio_mux_snapshot_t *s, const 
 
         snprintf(detail, sizeof(detail), "rcp_proxy.port %u is taken: %s listens on it", (unsigned)port, taken_by);
         return send_error(req, 409, "port_taken", detail, false);
-    }
-    otbr_channel_id(otbr);
-    const char *mixed = device_api_channel_move_refusal(set, id, otbr[0] ? otbr : NULL);
-
-    if (mixed) {
-        return send_error(req, 400, "bad_value", mixed, false);
     }
     const char *moving = device_api_channel_move_busy(set, br_core_move_running() ||
                                                       device_api_op_holds(DEVICE_API_OP_RADIO_MOVE));

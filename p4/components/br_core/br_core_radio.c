@@ -501,7 +501,12 @@ esp_err_t core_radio_store_otbr(const char *from, const char *to)
     const esp_err_t err = radio_mux_commit_otbr(from, to);
 
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "storing otbr on %s (off on %s): %s", to, from, esp_err_to_name(err));
+        if (!to || !to[0]) { // a stop: `from` leaves otbr for the mode its PUT asked for
+            ESP_LOGE(TAG, "storing the stop of otbr on %s: %s", from ? from : "", esp_err_to_name(err));
+        } else {
+            ESP_LOGE(TAG, "storing otbr on %s (off on %s): %s", to, from && from[0] ? from : "none",
+                     esp_err_to_name(err));
+        }
         return err;
     }
     s_lease = NULL; // now the otbr consumer's attach

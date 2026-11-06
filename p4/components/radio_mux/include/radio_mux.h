@@ -228,9 +228,9 @@ void radio_mux_get_snapshot(radio_mux_snapshot_t *out);
 // REFUSE_NOT_AVAILABLE. The mover's refusals: REFUSE_PROBE_FAILED (409 probe_failed), REFUSE_BUSY (a move or radio job
 // runs, OpenThread starting or sniffing), REFUSE_FAILED (anything else); `reason` (may be NULL) then gets the mover's
 // text, "" otherwise. A channel being moved to (leased) refuses every change with REFUSE_BUSY. On MOVE, moved_from gets
-// the id OpenThread leaves ("" for a start, `id` itself for a stop; may be NULL). Line and rcp_proxy settings in the
-// same request are applied as usual (stored at once; a stop's channel takes them with its new mode). Waits for the
-// owner task (up to 5 s); REFUSE_FAILED when it can't.
+// the id OpenThread leaves ("" for a start, `id` itself for a stop; may be NULL). A start, move or stop goes alone:
+// with line or rcp_proxy settings in the same request it is refused (REFUSE_BAD_VALUE, nothing stored, the mover not
+// called). Waits for the owner task (up to 5 s); REFUSE_FAILED when it can't.
 radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req, char *moved_from, size_t cap,
                                   char *reason, size_t reason_cap);
 

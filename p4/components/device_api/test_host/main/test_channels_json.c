@@ -810,7 +810,7 @@ TEST_CASE("On a move of Thread that also carries line or proxy settings: 400, no
     for (size_t i = 0; i < sizeof(bodies) / sizeof(bodies[0]); i++) {
         const radio_mux_set_req_t req = proxy_req(bodies[i]);
 
-        TEST_ASSERT_EQUAL_STRING_MESSAGE("send line or proxy settings in a separate request from moving Thread",
+        TEST_ASSERT_EQUAL_STRING_MESSAGE("send line or proxy settings in a separate request from starting, moving or stopping Thread",
                                          device_api_channel_move_refusal(&req, "usb-1", "c6"), bodies[i]);
     }
 }
@@ -823,15 +823,43 @@ TEST_CASE("On a move of Thread alone, or settings with otbr that is no move: acc
     req = proxy_req("{\"mode\":\"otbr\",\"baud\":460800}");
     TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "c6", "c6"));  // already there: no move
     req = proxy_req("{\"mode\":\"rcp-proxy\",\"rcp_proxy\":{\"port\":7000}}");
-    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "c6"));
-    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "c6", "c6")); // a stop takes its new mode's settings
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "c6")); // another channel's mode: no move
+}
+
+TEST_CASE("On a stop of Thread that also carries line or proxy settings: 400, nothing to claim", "[device_api]")
+{
+    static const char *const bodies[] = {
+        "{\"mode\":\"rcp-proxy\",\"rcp_proxy\":{\"port\":7000}}",
+        "{\"mode\":\"rcp-proxy\",\"rcp_proxy\":{\"kick\":true}}",
+        "{\"mode\":\"off\",\"baud\":115200}",
+        "{\"mode\":\"off\",\"flow_control\":true}",
+    };
+
+    for (size_t i = 0; i < sizeof(bodies) / sizeof(bodies[0]); i++) {
+        const radio_mux_set_req_t req = proxy_req(bodies[i]);
+
+        TEST_ASSERT_EQUAL_STRING_MESSAGE("send line or proxy settings in a separate request from starting, moving or "
+                                         "stopping Thread", device_api_channel_move_refusal(&req, "usb-1", "usb-1"),
+                                         bodies[i]);
+    }
+}
+
+TEST_CASE("On a stop of Thread alone, or settings without a mode on the Thread channel: accepted", "[device_api]")
+{
+    radio_mux_set_req_t req = proxy_req("{\"mode\":\"off\"}");
+
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "usb-1"));
+    req = proxy_req("{\"rcp_proxy\":{\"port\":7000}}");
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "usb-1"));
+    req = proxy_req("{\"baud\":115200}");
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "usb-1"));
 }
 
 TEST_CASE("On a start of Thread (no channel has it) that also carries line or proxy settings: 400", "[device_api]")
 {
     const radio_mux_set_req_t req = proxy_req("{\"mode\":\"otbr\",\"baud\":460800}");
 
-    TEST_ASSERT_EQUAL_STRING("send line or proxy settings in a separate request from moving Thread",
+    TEST_ASSERT_EQUAL_STRING("send line or proxy settings in a separate request from starting, moving or stopping Thread",
                              device_api_channel_move_refusal(&req, "usb-1", NULL));
 }
 

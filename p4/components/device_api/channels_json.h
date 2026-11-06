@@ -93,10 +93,10 @@ device_api_error_t device_api_channel_forget_error(esp_err_t err, bool mux_start
 bool device_api_channel_is_move(const radio_mux_set_req_t *req, const char *id, const char *otbr_id);
 
 /**
- * A move or start of Thread (otbr on a channel that does not have it) goes alone: with baud, flow_control or any
- * rcp_proxy setting (kick included) the PUT is refused, 400 bad_value with the returned detail, before anything is
- * claimed or stored (the mux would refuse them on the leased target after the 202). A stop may carry them (they are
- * the new mode's). NULL when the PUT may go on.
+ * A start, move or stop of Thread (device_api_channel_is_move) goes alone: with baud, flow_control or any rcp_proxy
+ * setting (kick included) the PUT is refused, 400 bad_value with the returned detail, before anything is claimed or
+ * stored (the mux refuses them with a move too: they would not be stored). The settings go in a request of their own,
+ * before or after it. NULL when the PUT may go on.
  */
 const char *device_api_channel_move_refusal(const radio_mux_set_req_t *req, const char *id, const char *otbr_id);
 

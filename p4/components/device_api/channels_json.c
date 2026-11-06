@@ -576,8 +576,8 @@ const char *device_api_channel_move_refusal(const radio_mux_set_req_t *req, cons
 {
     const bool more = req->has_baud || req->has_flow || req->has_proxy || req->kick;
 
-    return more && moves_to(req, id, otbr_id)
-           ? "send line or proxy settings in a separate request from moving Thread" : NULL;
+    return more && device_api_channel_is_move(req, id, otbr_id)
+           ? "send line or proxy settings in a separate request from starting, moving or stopping Thread" : NULL;
 }
 
 const char *device_api_channel_move_busy(const radio_mux_set_req_t *req, bool move_running)
