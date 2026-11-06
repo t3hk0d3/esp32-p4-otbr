@@ -207,8 +207,12 @@ radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req
                                   char *reason, size_t reason_cap);
 
 // Forgets an unplugged USB channel: erases its settings and removes it from the list. ESP_ERR_INVALID_STATE for the
-// C6 or a present channel, ESP_ERR_NOT_FOUND for an unknown id.
+// C6 or a present channel (and before radio_mux_start: radio_mux_started tells them apart), ESP_ERR_NOT_FOUND for an
+// unknown id.
 esp_err_t radio_mux_forget(const char *id);
+
+// Whether radio_mux_start has run (the API calls answer). Any task.
+bool radio_mux_started(void);
 
 // Id of the channel whose stored mode is otbr (present or not), NULL when none.
 const char *radio_mux_otbr_channel(void);

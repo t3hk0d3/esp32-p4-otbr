@@ -271,9 +271,14 @@ TEST_CASE("On the largest snapshot (8 channels, every text at its longest): fits
         c.proxy.host[sizeof(c.proxy.host) - 1] = '\0';
         memset(c.proxy_peer, 'p', sizeof(c.proxy_peer) - 1);
         c.proxy_peer[sizeof(c.proxy_peer) - 1] = '\0';
-        memset(c.firmware.rec.version, '"', sizeof(c.firmware.rec.version) - 1);
+        // Device text is printable ASCII (detect.c filters it): '"' and '\\' are the worst, 2 bytes each escaped.
+        for (size_t k = 0; k + 1 < sizeof(c.firmware.rec.version); k++) {
+            c.firmware.rec.version[k] = k % 2 ? '\\' : '"';
+        }
         c.firmware.rec.version[sizeof(c.firmware.rec.version) - 1] = '\0';
-        memset(c.firmware.rec.chip, '"', sizeof(c.firmware.rec.chip) - 1);
+        for (size_t k = 0; k + 1 < sizeof(c.firmware.rec.chip); k++) {
+            c.firmware.rec.chip[k] = k % 2 ? '"' : '\\';
+        }
         c.firmware.rec.chip[sizeof(c.firmware.rec.chip) - 1] = '\0';
         c.firmware.at = INT64_MAX;
         c.counters = (radio_mux_counters_t) {
@@ -691,19 +696,69 @@ TEST_CASE("On a C6 push or recovery while rcp-proxy on the C6 has a peer: 409 c6
 
 TEST_CASE("On a forget: 204, 404 unknown channel, 409 for the C6 or a present channel, 500 otherwise", "[device_api]")
 {
-    TEST_ASSERT_EQUAL(204, device_api_channel_forget_error(ESP_OK).http_status);
-    device_api_error_t e = device_api_channel_forget_error(ESP_ERR_NOT_FOUND);
+    TEST_ASSERT_EQUAL(204, device_api_channel_forget_error(ESP_OK, true).http_status);
+    device_api_error_t e = device_api_channel_forget_error(ESP_ERR_NOT_FOUND, true);
 
     TEST_ASSERT_EQUAL(404, e.http_status);
     TEST_ASSERT_EQUAL_STRING("unknown_channel", e.code);
-    e = device_api_channel_forget_error(ESP_ERR_INVALID_STATE);
+    e = device_api_channel_forget_error(ESP_ERR_INVALID_STATE, true);
     TEST_ASSERT_EQUAL(409, e.http_status);
     TEST_ASSERT_EQUAL_STRING("in_use", e.code);
     TEST_ASSERT_NOT_NULL(e.detail);
-    e = device_api_channel_forget_error(ESP_FAIL);
+    e = device_api_channel_forget_error(ESP_FAIL, true);
     TEST_ASSERT_EQUAL(500, e.http_status);
     TEST_ASSERT_EQUAL_STRING("failed", e.code);
     TEST_ASSERT_EQUAL_STRING("204 No Content", device_api_status_line(204));
+}
+
+TEST_CASE("On a forget while the radio mux is not running: 503 not_started, not in_use", "[device_api]")
+{
+    const device_api_error_t e = device_api_channel_forget_error(ESP_ERR_INVALID_STATE, false);
+
+    TEST_ASSERT_EQUAL(503, e.http_status);
+    TEST_ASSERT_EQUAL_STRING("not_started", e.code);
+    TEST_ASSERT_NOT_NULL(strstr(e.detail, "not running"));
+}
+
+/* ---- device_api_channel_move_refusal, device_api_channel_move_busy ---- */
+
+TEST_CASE("On a move of Thread that also carries line or proxy settings: 400, nothing to claim", "[device_api]")
+{
+    static const char *const bodies[] = {
+        "{\"mode\":\"otbr\",\"baud\":460800}",
+        "{\"mode\":\"otbr\",\"flow_control\":false}",
+        "{\"mode\":\"otbr\",\"rcp_proxy\":{\"port\":7000}}",
+        "{\"mode\":\"otbr\",\"rcp_proxy\":{\"kick\":true}}",
+    };
+
+    for (size_t i = 0; i < sizeof(bodies) / sizeof(bodies[0]); i++) {
+        const radio_mux_set_req_t req = proxy_req(bodies[i]);
+
+        TEST_ASSERT_EQUAL_STRING_MESSAGE("send line or proxy settings in a separate request from moving Thread",
+                                         device_api_channel_move_refusal(&req, "usb-1", "c6"), bodies[i]);
+    }
+}
+
+TEST_CASE("On a move of Thread alone, or settings with otbr that is no move: accepted", "[device_api]")
+{
+    radio_mux_set_req_t req = proxy_req("{\"mode\":\"otbr\"}");
+
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "c6"));
+    req = proxy_req("{\"mode\":\"otbr\",\"baud\":460800}");
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "c6", "c6"));  // already there: no move
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", NULL)); // nothing has it: no move
+    req = proxy_req("{\"mode\":\"rcp-proxy\",\"rcp_proxy\":{\"port\":7000}}");
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "c6"));
+}
+
+TEST_CASE("On a mode PUT while a move of Thread runs: 409 busy on any channel", "[device_api]")
+{
+    radio_mux_set_req_t req = proxy_req("{\"mode\":\"off\"}");
+
+    TEST_ASSERT_EQUAL_STRING("OpenThread is being moved to another radio", device_api_channel_move_busy(&req, true));
+    TEST_ASSERT_NULL(device_api_channel_move_busy(&req, false));
+    req = proxy_req("{\"baud\":115200}"); // not a mode change
+    TEST_ASSERT_NULL(device_api_channel_move_busy(&req, true));
 }
 
 /* ---- device_api_channel_is_move, device_api_channel_retry_otbr ---- */

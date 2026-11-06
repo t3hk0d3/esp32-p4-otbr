@@ -68,16 +68,30 @@ void device_api_channel_refusal(radio_mux_verdict_t v, int *status, const char *
 const char *device_api_channel_refusal_detail(radio_mux_verdict_t v);
 
 /**
- * Reply of DELETE /device/channels/{id} from radio_mux_forget: ESP_OK 204; ESP_ERR_NOT_FOUND 404 unknown_channel;
- * ESP_ERR_INVALID_STATE 409 in_use (the C6, or a radio that is plugged in); anything else 500 failed.
+ * Reply of DELETE /device/channels/{id} from radio_mux_forget and radio_mux_started: ESP_OK 204; ESP_ERR_NOT_FOUND 404
+ * unknown_channel; ESP_ERR_INVALID_STATE 409 in_use (the C6, or a radio that is plugged in), or 503 not_started when
+ * the mux is not running; anything else 500 failed.
  */
-device_api_error_t device_api_channel_forget_error(esp_err_t err);
+device_api_error_t device_api_channel_forget_error(esp_err_t err, bool mux_started);
 
 /**
  * Whether the PUT moves OpenThread (and so takes the long-operation slot first): it sets mode otbr on `id` while
  * another channel (`otbr_id`, radio_mux_otbr_channel) has it.
  */
 bool device_api_channel_is_move(const radio_mux_set_req_t *req, const char *id, const char *otbr_id);
+
+/**
+ * A move of Thread (device_api_channel_is_move) goes alone: with baud, flow_control or any rcp_proxy setting (kick
+ * included) the PUT is refused, 400 bad_value with the returned detail, before anything is claimed or stored (the
+ * mux would refuse them on the leased target after the 202). NULL when the PUT may go on.
+ */
+const char *device_api_channel_move_refusal(const radio_mux_set_req_t *req, const char *id, const char *otbr_id);
+
+/**
+ * While a move of Thread runs (`move_running`: br_core_move_running, or the long-operation slot held by RADIO_MOVE), a
+ * mode PUT on any channel is refused, 409 busy with the returned detail. NULL when the PUT may go on.
+ */
+const char *device_api_channel_move_busy(const radio_mux_set_req_t *req, bool move_running);
 
 /**
  * Whether the PUT retries OpenThread's failed start (br_core_retry_otbr): an accepted (APPLY) PUT of mode otbr on the

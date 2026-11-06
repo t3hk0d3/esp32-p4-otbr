@@ -149,31 +149,32 @@ void radio_mux_detect_start(radio_mux_detect_t *d, int64_t now_ms)
     d->start_ms = now_ms;
 }
 
-static const char *skip_space(const char *p, const char *end)
+// Device text kept in a record: printable ASCII (0x20-0x7E) only. Control bytes and bytes of 0x80 and above are
+// dropped, so the API's JSON escapes at most 2 bytes per character (its worst-case body size relies on it).
+static bool printable(char c)
 {
-    while (p < end && (*p == ' ' || *p == '\t')) {
-        p++;
-    }
-    return p;
+    return (unsigned char)c >= 0x20 && (unsigned char)c <= 0x7e;
 }
 
-// Copies [b, e) trimmed and cut to cap - 1 characters.
+// Copies the printable characters of [b, e), trimmed of spaces at both ends, cut to cap - 1 characters.
 static void copy_trim(char *dst, size_t cap, const char *b, const char *e)
 {
-    size_t n;
+    size_t n = 0;
 
-    b = skip_space(b, e);
-    while (e > b && (e[-1] == ' ' || e[-1] == '\t')) {
-        e--;
-    }
-    n = (size_t)(e - b);
     if (cap == 0) {
         return;
     }
-    if (n > cap - 1) {
-        n = cap - 1;
+    while (b < e && (!printable(*b) || *b == ' ')) {
+        b++;
     }
-    memcpy(dst, b, n);
+    while (e > b && (!printable(e[-1]) || e[-1] == ' ')) {
+        e--;
+    }
+    for (; b < e && n < cap - 1; b++) {
+        if (printable(*b)) {
+            dst[n++] = *b;
+        }
+    }
     dst[n] = '\0';
 }
 

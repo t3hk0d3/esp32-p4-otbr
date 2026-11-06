@@ -461,8 +461,13 @@ const char *device_api_channel_refusal_detail(radio_mux_verdict_t v)
     return verdict_reply(v).detail;
 }
 
-device_api_error_t device_api_channel_forget_error(esp_err_t err)
+device_api_error_t device_api_channel_forget_error(esp_err_t err, bool mux_started)
 {
+    if (err == ESP_ERR_INVALID_STATE && !mux_started) {
+        return (device_api_error_t) {
+            503, "not_started", "the radio mux is not running"
+        };
+    }
     switch (err) {
     case ESP_OK:
         return (device_api_error_t) {
@@ -493,6 +498,19 @@ static bool sets_otbr(const radio_mux_set_req_t *req)
 bool device_api_channel_is_move(const radio_mux_set_req_t *req, const char *id, const char *otbr_id)
 {
     return sets_otbr(req) && otbr_id && strcmp(otbr_id, id) != 0;
+}
+
+const char *device_api_channel_move_refusal(const radio_mux_set_req_t *req, const char *id, const char *otbr_id)
+{
+    const bool more = req->has_baud || req->has_flow || req->has_proxy || req->kick;
+
+    return more && device_api_channel_is_move(req, id, otbr_id)
+           ? "send line or proxy settings in a separate request from moving Thread" : NULL;
+}
+
+const char *device_api_channel_move_busy(const radio_mux_set_req_t *req, bool move_running)
+{
+    return req->has_mode && move_running ? "OpenThread is being moved to another radio" : NULL;
 }
 
 bool device_api_channel_retry_otbr(const radio_mux_set_req_t *req, radio_mux_verdict_t v, const char *id,

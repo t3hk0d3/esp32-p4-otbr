@@ -121,6 +121,8 @@ typedef enum {
 bool device_api_op_try_begin(device_api_op_t op);
 /** True while an OTA, a firmware push, a ROM recovery or a move holds the shared slot (a successful OTA keeps it until the reboot). */
 bool device_api_op_long_running(void);
+/** True while `op` (not PCAP) holds the shared slot (a read). */
+bool device_api_op_holds(device_api_op_t op);
 /** True while a capture stream holds the pcap slot (a read: the slot is not taken). */
 bool device_api_op_pcap_running(void);
 /** Release the operation. An OTA that succeeded is deliberately never released: the update waits for its reboot. */

@@ -358,6 +358,11 @@ radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req
     return RADIO_MUX_MOVE;
 }
 
+bool radio_mux_started(void)
+{
+    return atomic_load(&g_mux.started);
+}
+
 esp_err_t radio_mux_forget(const char *id)
 {
     ESP_RETURN_ON_FALSE(id && atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "not started");

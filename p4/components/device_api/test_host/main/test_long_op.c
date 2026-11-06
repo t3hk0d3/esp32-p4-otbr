@@ -189,3 +189,16 @@ TEST_CASE("On the end of a move: the slot is free again; an end by another holde
     TEST_ASSERT_TRUE(device_api_op_long_running());
     release_all();
 }
+
+TEST_CASE("On a move holding the shared slot: device_api_op_holds says so, and only for the move", "[device_api]")
+{
+    release_all();
+    TEST_ASSERT_FALSE(device_api_op_holds(DEVICE_API_OP_RADIO_MOVE));
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_RADIO_MOVE));
+    TEST_ASSERT_TRUE(device_api_op_holds(DEVICE_API_OP_RADIO_MOVE));
+    TEST_ASSERT_FALSE(device_api_op_holds(DEVICE_API_OP_OTA));
+    release_all();
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_OTA));
+    TEST_ASSERT_FALSE(device_api_op_holds(DEVICE_API_OP_RADIO_MOVE));
+    release_all();
+}
