@@ -110,6 +110,8 @@ function stateView(ch) {
     return {text : 'Busy', tone : 'chip-warn'};
   if (ch.state === 'running') {
     var ps = ch.mode === 'rcp-proxy' && ch.rcp_proxy && ch.rcp_proxy.state;
+    if (ps === 'backoff') // the listener or the connection failed: it is tried again, the reason says why
+      return {text : 'Backoff' + (ch.rcp_proxy.last_error ? ': ' + ch.rcp_proxy.last_error : ''), tone : 'chip-warn'};
     return {text : ps ? capitalize(ps) : 'Running', tone : 'chip-ok'};
   }
   return {text : capitalize(ch.state || 'idle'), tone : ''};
@@ -226,6 +228,7 @@ var CODE_TEXT = {
   hybrid_not_supported : 'Thread and Zigbee cannot run at once.',
   c6_busy : 'The on-board radio is busy: a firmware job runs, or a client is connected to its proxy.',
   drain_timeout : 'The previous radio did not stop in time, so Thread did not move.',
+  port_taken : 'Another radio\'s proxy already listens on this port.',
   unknown_channel : 'This radio is no longer known to the board.',
   in_use : 'This radio is in use. Only an unplugged radio can be forgotten.',
   not_started : 'The radio service is not running yet. Try again in a moment.'
@@ -241,6 +244,8 @@ function errorText(status, body) {
     return 'The board is busy' + (detail ? ': ' + detail : '') + '. Try again in a moment.';
   if (code === 'bad_value')
     return 'Refused' + (detail ? ': ' + detail : ' (a value is not accepted)') + '.';
+  if (code === 'port_taken')
+    return CODE_TEXT.port_taken + (detail ? ' (' + detail + ')' : '');
   if (code === 'failed')
     return 'The change failed on the board' + (detail ? ' (' + detail + ')' : '') + '.';
   if (CODE_TEXT[code])

@@ -5,6 +5,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,6 +59,7 @@ typedef struct {
     bool active;
     proxy_state_t state;
     char peer[RADIO_MUX_PEER_MAX];
+    char last_error[RADIO_MUX_PROXY_ERROR_MAX];
 } pub_t;
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -179,11 +181,13 @@ esp_err_t rcp_proxy_resolve(proxy_t *p, int socktype)
 
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "%s: %s does not resolve", p->id, p->set.host);
+        rcp_proxy_note_error(p, "%s does not resolve", p->set.host);
         return err;
     }
     // One rule for both adapters: the connect target is judged like a UDP source (the mesh is refused).
     if (!netcfg_peer_allowed((const struct sockaddr *)&p->dst, NETCFG_SVC_RCP_PROXY)) {
         ESP_LOGW(TAG, "%s: %s is not allowed by the network access rules", p->id, p->set.host);
+        rcp_proxy_note_error(p, "%s: refused by the access rules", p->set.host);
         return ESP_ERR_NOT_ALLOWED;
     }
     return ESP_OK;
@@ -254,11 +258,23 @@ static esp_err_t alloc_bufs(proxy_t *p)
     return ESP_OK;
 }
 
+void rcp_proxy_note_error(proxy_t *p, const char *fmt, ...)
+{
+    va_list ap;
+
+    va_start(ap, fmt);
+    vsnprintf(p->last_error, sizeof(p->last_error), fmt, ap);
+    va_end(ap);
+}
+
 void rcp_proxy_retry(proxy_t *p, const char *why)
 {
     const int64_t now = rcp_proxy_now_ms();
     const int64_t lasted = p->state == PROXY_CONNECTED ? now - p->up_ms : 0;
 
+    if (p->state != PROXY_CONNECTED && p->last_error[0] == '\0') {
+        rcp_proxy_note_error(p, "%s", why); // a failed open or connect; a lost connection is no error of the setup
+    }
     p->ad->close(p);
     p->backoff_s = rcp_proxy_backoff_next(p->backoff_s, lasted);
     p->retry_ms = now + (int64_t)p->backoff_s * 1000;
@@ -268,8 +284,11 @@ void rcp_proxy_retry(proxy_t *p, const char *why)
     ESP_LOGW(TAG, "%s: %s; again in %lu s", p->id, why, (unsigned long)p->backoff_s);
 }
 
+// One try to open the session's adapter; its failure (the adapter's own text, else the error's name) stays in
+// last_error until a try works.
 static void open_adapter(proxy_t *p)
 {
+    p->last_error[0] = '\0';
     if (alloc_bufs(p) != ESP_OK) {
         rcp_proxy_retry(p, "out of memory for the session buffers");
         return;
@@ -277,7 +296,7 @@ static void open_adapter(proxy_t *p)
     const esp_err_t err = p->ad->open(p);
 
     if (err != ESP_OK) {
-        rcp_proxy_retry(p, esp_err_to_name(err));
+        rcp_proxy_retry(p, p->last_error[0] ? p->last_error : esp_err_to_name(err));
     }
 }
 
@@ -321,6 +340,7 @@ void rcp_proxy_peer_up(proxy_t *p, const struct sockaddr *peer, bool new_session
 {
     peer_text(peer, p->peer, sizeof(p->peer));
     p->state = PROXY_CONNECTED;
+    p->last_error[0] = '\0';
     radio_mux_set_busy_peer(p->ch, true); // a C6 job is refused while a peer is connected (409 c6_busy)
     p->up_ms = rcp_proxy_now_ms();
     if (p->ring_buf) {
@@ -537,6 +557,7 @@ static void publish(void)
         s_pub[i].active = p->ch != NULL;
         s_pub[i].state = p->state;
         memcpy(s_pub[i].peer, p->peer, sizeof(s_pub[i].peer));
+        memcpy(s_pub[i].last_error, p->last_error, sizeof(s_pub[i].last_error));
         taskEXIT_CRITICAL(&s_lock);
     }
 }
@@ -756,9 +777,11 @@ esp_err_t rcp_proxy_get_status(const char *channel_id, rcp_proxy_status_t *out)
         if (pub->active && pub->gen == w->gen && state_name(pub->state)) {
             out->state = state_name(pub->state);
             memcpy(out->peer, pub->peer, sizeof(out->peer));
+            memcpy(out->last_error, pub->last_error, sizeof(out->last_error));
         } else { // attached, the task has not opened it yet
             out->state = w->set.dir == RADIO_MUX_PROXY_CONNECT ? "connecting" : "listening";
             out->peer[0] = '\0';
+            out->last_error[0] = '\0';
         }
         err = ESP_OK;
         break;

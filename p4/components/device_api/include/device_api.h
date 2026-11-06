@@ -35,8 +35,8 @@ extern "C" {
  * - /device/channels (radio channel mux spec, section API): GET lists every known radio channel; PUT /device/channels/{id}
  *   changes mode, line settings or rcp_proxy settings (200 with the channel, "reboot": true when the change reboots;
  *   202 {"moving":true,"moved_from":...} when OpenThread moves, a long operation); 400 bad_value, 404 unknown_channel,
- *   409 unavailable, incompatible, mode_taken, not_available, hybrid_not_supported, probe_failed, busy; DELETE forgets
- *   an unplugged USB radio (204; 409 in_use for the C6 or a plugged-in one). POST /device/radio/firmware and
+ *   409 unavailable, incompatible, mode_taken, not_available, hybrid_not_supported, probe_failed, port_taken, busy;
+ *   DELETE forgets an unplugged USB radio (204; 409 in_use for the C6 or a plugged-in one). POST /device/radio/firmware and
  *   /device/radio/recover answer 409 c6_busy while rcp-proxy on the C6 has a peer. In NO_RADIO the console WebSocket
  *   handshake answers 503 "no radio in OTBR mode".
  *

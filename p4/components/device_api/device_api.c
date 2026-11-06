@@ -1645,6 +1645,7 @@ static void fill_channels(radio_mux_snapshot_t *s)
         if (c->mode == RADIO_MUX_MODE_RCP_PROXY && rcp_proxy_get_status(c->id, &ps) == ESP_OK) {
             c->proxy_state = ps.state; // a static string
             strlcpy(c->proxy_peer, ps.peer, sizeof(c->proxy_peer));
+            strlcpy(c->proxy_last_error, ps.last_error, sizeof(c->proxy_last_error));
         }
     }
     if (mode == BR_MODE_RADIO_FAULT) {
@@ -1741,6 +1742,16 @@ static esp_err_t channel_apply(httpd_req_t *req, radio_mux_snapshot_t *s, const 
 
     if (bad) {
         return send_error(req, 400, "bad_value", bad, false);
+    }
+    const char *taken_by = device_api_channel_port_conflict(s, id, set);
+
+    if (taken_by) {
+        char detail[RADIO_MUX_REASON_MAX + RADIO_MUX_ID_MAX];
+        const radio_mux_proxy_settings_t *p = &c->proxy;
+        const uint16_t port = set->has_proxy && (set->proxy_fields & RADIO_MUX_PROXY_F_PORT) ? set->proxy.port : p->port;
+
+        snprintf(detail, sizeof(detail), "rcp_proxy.port %u is taken: %s listens on it", (unsigned)port, taken_by);
+        return send_error(req, 409, "port_taken", detail, false);
     }
     otbr_channel_id(otbr);
     const char *mixed = device_api_channel_move_refusal(set, id, otbr[0] ? otbr : NULL);

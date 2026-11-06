@@ -23,6 +23,9 @@ extern "C" {
 typedef struct {
     const char *state;           // "listening", "connecting", "backoff" or "connected" (static strings)
     char peer[RADIO_MUX_PEER_MAX]; // "ip:port" ("[ip]:port" for IPv6) while connected, else empty
+    // Why the session's last try to open (listen, bind) or connect failed ("tcp port 6638: Address already in use",
+    // "host.local does not resolve", "connect timed out"); empty once a try worked, and while the session is new.
+    char last_error[RADIO_MUX_PROXY_ERROR_MAX];
 } rcp_proxy_status_t;
 
 // Registers the rcp-proxy consumer with the mux (any firmware, no channel limit, no reboot; raw bytes on USB

@@ -27,11 +27,12 @@ extern "C" {
  * are in snapshot order. A channel is
  * {"id","kind","label","mode","stored_mode","state","error","line":{"baud","flow_control"},
  *  "usb":{"vid","pid","serial","driver"}|null,"caps":{"firmware_update","hw_reset","flow_control"},
- *  "rcp_proxy":{"direction","adapter","port","host","framing","state","peer"}|null,
+ *  "rcp_proxy":{"direction","adapter","port","host","framing","state","peer","last_error"}|null,
  *  "firmware":{"type","version","chip","baud","source","at"}|null,
  *  "counters":{"frames_in","frames_out","bytes_in","bytes_out","drops","resets","rx_errors"}}.
- * kind "c6" or "usb"; error, usb.serial, usb.driver, rcp_proxy.state and .peer, firmware.version, .chip, .baud (0)
- * and .at (0: the clock was not set) are null when empty; usb.vid and .pid are 4 lowercase hex digits; usb is null for
+ * kind "c6" or "usb"; error, usb.serial, usb.driver, rcp_proxy.state, .peer and .last_error, firmware.version, .chip,
+ * .baud (0) and .at (0: the clock was not set) are null when empty; error is the channel's reason, or, when it has none
+ * and its proxy is in backoff, the proxy's last_error; usb.vid and .pid are 4 lowercase hex digits; usb is null for
  * the C6; rcp_proxy (the stored settings) is null for a USB device without a driver, where no mode runs; firmware is
  * null without a record. Returns the length, or -1 when `cap` is too small.
  */
@@ -58,6 +59,14 @@ esp_err_t device_api_channel_put_parse(const char *body, radio_mux_set_req_t *ou
  * the merged settings pass, else the field to name in the 400 ("rcp_proxy.port", "rcp_proxy.host").
  */
 const char *device_api_channel_proxy_refusal(const radio_mux_proxy_settings_t *stored, const radio_mux_set_req_t *req);
+
+/**
+ * The channel (in snapshot `s`) whose stored rcp-proxy settings listen on the adapter and port that channel `id` would
+ * listen on after the PUT `req` (its stored settings with the request's over them; the request's mode, else its stored
+ * one): another channel stored in rcp-proxy (present or not), direction listen, the same adapter and port. NULL when
+ * there is none, or `id` would not listen in rcp-proxy (or is not in `s`). The PUT is then refused, 409 port_taken.
+ */
+const char *device_api_channel_port_conflict(const radio_mux_snapshot_t *s, const char *id, const radio_mux_set_req_t *req);
 
 /**
  * HTTP status and error code of a radio_mux_set verdict: APPLY and APPLY_REBOOT 200, MOVE 202 (code NULL); 400

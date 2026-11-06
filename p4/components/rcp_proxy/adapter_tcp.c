@@ -31,7 +31,8 @@ static bool connecting(const proxy_t *p)
     return p->state == PROXY_CONNECTING && p->fd >= 0;
 }
 
-static int listen_on(uint16_t port)
+// A listener on `port`; -1 with the reason in p's last_error.
+static int listen_on(proxy_t *p, uint16_t port)
 {
     const int fd = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
     const int one = 1;
@@ -39,6 +40,7 @@ static int listen_on(uint16_t port)
 
     if (fd < 0) {
         ESP_LOGE(TAG, "socket: errno %d", errno);
+        rcp_proxy_note_error(p, "tcp socket: %s", strerror(errno));
         return -1;
     }
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
@@ -50,7 +52,10 @@ static int listen_on(uint16_t port)
     };
 
     if (bind(fd, (struct sockaddr *)&sa, sizeof(sa)) != 0 || listen(fd, LISTEN_BACKLOG) != 0) {
-        ESP_LOGE(TAG, "listening on TCP port %u: errno %d", port, errno);
+        const int err = errno;
+
+        ESP_LOGE(TAG, "listening on TCP port %u: errno %d", port, err);
+        rcp_proxy_note_error(p, "tcp port %u: %s", port, strerror(err));
         close(fd);
         return -1;
     }
@@ -105,7 +110,7 @@ static esp_err_t tcp_open(proxy_t *p)
     p->lfd = -1;
     p->fd = -1;
     if (p->set.dir == RADIO_MUX_PROXY_LISTEN) {
-        p->lfd = listen_on(p->set.port);
+        p->lfd = listen_on(p, p->set.port);
         if (p->lfd < 0) {
             return ESP_FAIL;
         }
@@ -122,6 +127,7 @@ static esp_err_t tcp_open(proxy_t *p)
     p->fd = socket(p->dst.ss_family, SOCK_STREAM, IPPROTO_TCP);
     if (p->fd < 0) {
         ESP_LOGE(TAG, "socket: errno %d", errno);
+        rcp_proxy_note_error(p, "tcp socket: %s", strerror(errno));
         return ESP_FAIL;
     }
     peer_setup(p->fd);
@@ -130,7 +136,10 @@ static esp_err_t tcp_open(proxy_t *p)
         return ESP_OK;
     }
     if (errno != EINPROGRESS) {
-        ESP_LOGW(TAG, "%s: connect to %s:%u: errno %d", p->id, p->set.host, p->set.port, errno);
+        const int err = errno;
+
+        ESP_LOGW(TAG, "%s: connect to %s:%u: errno %d", p->id, p->set.host, p->set.port, err);
+        rcp_proxy_note_error(p, "connect: %s", strerror(err));
         return ESP_FAIL;
     }
     p->conn_deadline_ms = rcp_proxy_now_ms() + CONNECT_TIMEOUT_MS;
@@ -203,9 +212,9 @@ static void connect_done(proxy_t *p)
     socklen_t len = sizeof(err);
 
     if (getsockopt(p->fd, SOL_SOCKET, SO_ERROR, &err, &len) != 0 || err != 0) {
-        char why[48];
+        char why[RADIO_MUX_PROXY_ERROR_MAX];
 
-        snprintf(why, sizeof(why), "connect failed (errno %d)", err);
+        snprintf(why, sizeof(why), "connect: %s", err ? strerror(err) : "failed");
         rcp_proxy_retry(p, why);
         return;
     }

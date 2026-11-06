@@ -64,7 +64,18 @@ static void proxy_json(json_out_t *w, const radio_mux_chan_info_t *c)
     str_or_null(w, c->proxy_state);
     json_out_raw(w, ",\"peer\":");
     str_or_null(w, c->proxy_peer);
+    json_out_raw(w, ",\"last_error\":");
+    str_or_null(w, c->proxy_last_error);
     json_out_raw(w, "}");
+}
+
+// The channel's error: its own reason, else, while its proxy backs off after a failed open or connect, why it failed.
+static const char *channel_error(const radio_mux_chan_info_t *c)
+{
+    if (c->reason[0] == '\0' && c->proxy_state && strcmp(c->proxy_state, "backoff") == 0) {
+        return c->proxy_last_error;
+    }
+    return c->reason;
 }
 
 static void firmware_json(json_out_t *w, const radio_mux_firmware_t *f)
@@ -131,7 +142,7 @@ static void channel_fields(json_out_t *w, const radio_mux_chan_info_t *c)
     json_out_raw(w, ",\"state\":");
     json_out_str(w, radio_mux_state_name(c->state));
     json_out_raw(w, ",\"error\":");
-    str_or_null(w, c->reason);
+    str_or_null(w, channel_error(c));
     json_out_raw(w, ",\"line\":{\"baud\":");
     json_out_uint(w, c->line.baud);
     json_out_raw(w, ",\"flow_control\":");
@@ -359,13 +370,11 @@ esp_err_t device_api_channel_put_parse(const char *body, radio_mux_set_req_t *ou
     return ESP_OK;
 }
 
-const char *device_api_channel_proxy_refusal(const radio_mux_proxy_settings_t *stored, const radio_mux_set_req_t *req)
+// `stored` with the settings the request gives over it.
+static radio_mux_proxy_settings_t merged_proxy(const radio_mux_proxy_settings_t *stored, const radio_mux_set_req_t *req)
 {
-    if (!req->has_proxy) {
-        return NULL;
-    }
     radio_mux_proxy_settings_t m = *stored;
-    const uint8_t f = req->proxy_fields;
+    const uint8_t f = req->has_proxy ? req->proxy_fields : 0;
 
     if (f & RADIO_MUX_PROXY_F_DIR) {
         m.dir = req->proxy.dir;
@@ -382,6 +391,16 @@ const char *device_api_channel_proxy_refusal(const radio_mux_proxy_settings_t *s
     if (f & RADIO_MUX_PROXY_F_FRAMING) {
         m.framing = req->proxy.framing;
     }
+    return m;
+}
+
+const char *device_api_channel_proxy_refusal(const radio_mux_proxy_settings_t *stored, const radio_mux_set_req_t *req)
+{
+    if (!req->has_proxy) {
+        return NULL;
+    }
+    const radio_mux_proxy_settings_t m = merged_proxy(stored, req);
+
     switch (rcp_proxy_settings_check(&m)) {
     case RCP_PROXY_OK:
         return NULL;
@@ -392,6 +411,41 @@ const char *device_api_channel_proxy_refusal(const radio_mux_proxy_settings_t *s
     default:
         return "rcp_proxy.host";
     }
+}
+
+static bool listens_on(radio_mux_mode_t mode, const radio_mux_proxy_settings_t *p, radio_mux_proxy_adapter_t adapter,
+                       uint16_t port)
+{
+    return mode == RADIO_MUX_MODE_RCP_PROXY && p->dir == RADIO_MUX_PROXY_LISTEN && p->adapter == adapter &&
+           p->port == port;
+}
+
+const char *device_api_channel_port_conflict(const radio_mux_snapshot_t *s, const char *id, const radio_mux_set_req_t *req)
+{
+    const radio_mux_chan_info_t *self = NULL;
+
+    for (size_t i = 0; i < s->n && i < RADIO_MUX_CHANNELS_MAX; i++) {
+        if (strcmp(s->chans[i].id, id) == 0) {
+            self = &s->chans[i];
+        }
+    }
+    if (!self) {
+        return NULL;
+    }
+    const radio_mux_mode_t mode = req->has_mode ? req->mode : self->stored_mode;
+    const radio_mux_proxy_settings_t want = merged_proxy(&self->proxy, req);
+
+    if (!listens_on(mode, &want, want.adapter, want.port)) {
+        return NULL;
+    }
+    for (size_t i = 0; i < s->n && i < RADIO_MUX_CHANNELS_MAX; i++) {
+        const radio_mux_chan_info_t *c = &s->chans[i];
+
+        if (c != self && listens_on(c->stored_mode, &c->proxy, want.adapter, want.port)) {
+            return c->id;
+        }
+    }
+    return NULL;
 }
 
 /* ---- replies ---- */

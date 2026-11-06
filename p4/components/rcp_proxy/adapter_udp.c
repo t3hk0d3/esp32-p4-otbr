@@ -29,7 +29,8 @@ static proxy_state_t waiting_state(const proxy_t *p)
     return is_listen(p) ? PROXY_LISTENING : PROXY_CONNECTING;
 }
 
-static int bind_listen(uint16_t port)
+// A socket bound to `port`; -1 with the reason in p's last_error.
+static int bind_listen(proxy_t *p, uint16_t port)
 {
     const int fd = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
     const int one = 1;
@@ -37,6 +38,7 @@ static int bind_listen(uint16_t port)
 
     if (fd < 0) {
         ESP_LOGE(TAG, "socket: errno %d", errno);
+        rcp_proxy_note_error(p, "udp socket: %s", strerror(errno));
         return -1;
     }
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
@@ -48,7 +50,10 @@ static int bind_listen(uint16_t port)
     };
 
     if (bind(fd, (struct sockaddr *)&sa, sizeof(sa)) != 0) {
-        ESP_LOGE(TAG, "binding UDP port %u: errno %d", port, errno);
+        const int err = errno;
+
+        ESP_LOGE(TAG, "binding UDP port %u: errno %d", port, err);
+        rcp_proxy_note_error(p, "udp port %u: %s", port, strerror(err));
         close(fd);
         return -1;
     }
@@ -63,7 +68,7 @@ static esp_err_t udp_open(proxy_t *p)
     rcp_proxy_peer_memo_init(&p->memo); // a new socket session: the next peer is new
     p->state = waiting_state(p);
     if (is_listen(p)) {
-        p->fd = bind_listen(p->set.port);
+        p->fd = bind_listen(p, p->set.port);
         if (p->fd < 0) {
             return ESP_FAIL;
         }
@@ -78,6 +83,7 @@ static esp_err_t udp_open(proxy_t *p)
     p->fd = socket(p->dst.ss_family, SOCK_DGRAM, IPPROTO_UDP);
     if (p->fd < 0) {
         ESP_LOGE(TAG, "socket: errno %d", errno);
+        rcp_proxy_note_error(p, "udp socket: %s", strerror(errno));
         return ESP_FAIL;
     }
     rcp_proxy_set_nonblocking(p->fd);

@@ -24,6 +24,7 @@ C6 = {
         "framing": "hdlc",
         "state": None,
         "peer": None,
+        "last_error": None,
     },
     "firmware": {
         "type": "spinel",
@@ -63,6 +64,7 @@ OLLY = {
         "framing": "raw",
         "state": "connected",
         "peer": "192.168.1.20:9999",
+        "last_error": None,
     },
     "firmware": {
         "type": "spinel",
@@ -93,6 +95,7 @@ SLZB = {
         "framing": "hdlc",
         "state": None,
         "peer": None,
+        "last_error": None,
     },
     "firmware": {
         "type": "znp",
@@ -123,6 +126,7 @@ EZSP = {
         "framing": "hdlc",
         "state": None,
         "peer": None,
+        "last_error": None,
     },
     "firmware": {
         "type": "ezsp",
@@ -284,6 +288,42 @@ class TestTable:
         assert "Running" in r[0]
         assert "Unplugged" in r[1]
         assert "Fault" in r[2] and "drain_timeout" in r[2]
+
+    def test_backoff_is_a_warning_with_the_last_error(self):
+        # On a proxy in backoff whose listener failed: the chip warns (not ok) and says why.
+        stuck = {
+            **OLLY,
+            "error": "tcp port 6638: Address already in use",
+            "rcp_proxy": {
+                **OLLY["rcp_proxy"],
+                "state": "backoff",
+                "peer": None,
+                "last_error": "tcp port 6638: Address already in use",
+            },
+        }
+        r = scenario(
+            setup({"channels": [stuck]})
+            + f"const chip = {rows_js()}[0].children[3].children[0]; return [chip.textContent, chip.className];"
+        )
+        assert r[0] == "Backoff: tcp port 6638: Address already in use"
+        assert "chip-warn" in r[1] and "chip-ok" not in r[1]
+
+    def test_backoff_without_a_reason_still_warns(self):
+        # On backoff with last_error null: "Backoff", warning tone.
+        stuck = {
+            **OLLY,
+            "rcp_proxy": {
+                **OLLY["rcp_proxy"],
+                "state": "backoff",
+                "peer": None,
+                "last_error": None,
+            },
+        }
+        r = scenario(
+            setup({"channels": [stuck]})
+            + f"const chip = {rows_js()}[0].children[3].children[0]; return [chip.textContent, chip.className];"
+        )
+        assert r == ["Backoff", "chip chip-warn"]
 
     def test_activity_names_the_peer_or_the_frames(self):
         # On the connected OllyZig: the peer; on the C6: the frames in and the drops.
@@ -646,6 +686,7 @@ class TestSave:
             (409, "c6_busy", "busy"),
             (409, "busy", "busy"),
             (409, "drain_timeout", "did not stop in time"),
+            (409, "port_taken", "already listens on this port"),
             (404, "unknown_channel", "no longer"),
             (500, "failed", "failed"),
         ],

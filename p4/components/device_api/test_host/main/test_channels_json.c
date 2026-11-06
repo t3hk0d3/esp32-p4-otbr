@@ -92,7 +92,7 @@ TEST_CASE("On the registry snapshot: the C6 has the spec's fields in order, usb 
         "\"line\":{\"baud\":460800,\"flow_control\":false},\"usb\":null,"
         "\"caps\":{\"firmware_update\":true,\"hw_reset\":true,\"flow_control\":false},"
         "\"rcp_proxy\":{\"direction\":\"listen\",\"adapter\":\"tcp\",\"port\":6638,\"host\":\"\",\"framing\":\"hdlc\","
-        "\"state\":null,\"peer\":null},"
+        "\"state\":null,\"peer\":null,\"last_error\":null},"
         "\"firmware\":{\"type\":\"spinel\",\"version\":\"1.4.0\",\"chip\":\"esp32c6\",\"baud\":null,\"source\":\"passive\","
         "\"at\":1762430000},"
         "\"counters\":{\"frames_in\":10,\"frames_out\":9,\"bytes_in\":1000,\"bytes_out\":900,\"drops\":1,\"resets\":2,"
@@ -112,7 +112,7 @@ TEST_CASE("On the registry snapshot: a dongle in rcp-proxy has usb, the proxy's 
         "\"usb\":{\"vid\":\"10c4\",\"pid\":\"ea60\",\"serial\":\"abc123\",\"driver\":\"cp210x\"},"
         "\"caps\":{\"firmware_update\":false,\"hw_reset\":false,\"flow_control\":true},"
         "\"rcp_proxy\":{\"direction\":\"connect\",\"adapter\":\"udp\",\"port\":9999,\"host\":\"host.local\",\"framing\":\"raw\","
-        "\"state\":\"connected\",\"peer\":\"192.168.1.20:9999\"},"
+        "\"state\":\"connected\",\"peer\":\"192.168.1.20:9999\",\"last_error\":null},"
         "\"firmware\":{\"type\":\"znp\",\"version\":\"20240710\",\"chip\":null,\"baud\":115200,\"source\":\"probe\",\"at\":null},"
         "\"counters\":{\"frames_in\":0,\"frames_out\":0,\"bytes_in\":0,\"bytes_out\":0,\"drops\":0,\"resets\":0,"
         "\"rx_errors\":0}}]}",
@@ -204,7 +204,8 @@ TEST_CASE("On a channel not in rcp-proxy: rcp_proxy holds the stored settings, s
     c.proxy_peer[0] = '\0';
     TEST_ASSERT_GREATER_THAN(0, render_one(&c));
     TEST_ASSERT_NOT_NULL(strstr(body, "\"rcp_proxy\":{\"direction\":\"connect\",\"adapter\":\"udp\",\"port\":9999,"
-                                "\"host\":\"host.local\",\"framing\":\"raw\",\"state\":null,\"peer\":null}"));
+                                "\"host\":\"host.local\",\"framing\":\"raw\",\"state\":null,\"peer\":null,"
+                                "\"last_error\":null}"));
 }
 
 TEST_CASE("On a proxy without a peer: state written, peer null", "[device_api]")
@@ -214,7 +215,42 @@ TEST_CASE("On a proxy without a peer: state written, peer null", "[device_api]")
     c.proxy_state = "listening";
     c.proxy_peer[0] = '\0';
     TEST_ASSERT_GREATER_THAN(0, render_one(&c));
-    TEST_ASSERT_NOT_NULL(strstr(body, "\"state\":\"listening\",\"peer\":null}"));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"state\":\"listening\",\"peer\":null,\"last_error\":null}"));
+}
+
+TEST_CASE("On a proxy in backoff after a failed open: last_error says why and is the channel's error", "[device_api]")
+{
+    radio_mux_chan_info_t c = usb_chan();
+
+    c.proxy_state = "backoff";
+    c.proxy_peer[0] = '\0';
+    strcpy(c.proxy_last_error, "tcp port 6638: Address already in use");
+    TEST_ASSERT_GREATER_THAN(0, render_one(&c));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"state\":\"running\",\"error\":\"tcp port 6638: Address already in use\","));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"state\":\"backoff\",\"peer\":null,"
+                                "\"last_error\":\"tcp port 6638: Address already in use\"}"));
+}
+
+TEST_CASE("On a proxy that is not in backoff: last_error is shown, the channel's error stays its own", "[device_api]")
+{
+    radio_mux_chan_info_t c = usb_chan();
+
+    c.proxy_state = "connecting";
+    strcpy(c.proxy_last_error, "host.local does not resolve");
+    TEST_ASSERT_GREATER_THAN(0, render_one(&c));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"state\":\"running\",\"error\":null,"));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"last_error\":\"host.local does not resolve\"}"));
+}
+
+TEST_CASE("On a proxy in backoff while the channel has a reason of its own: the reason stays the error", "[device_api]")
+{
+    radio_mux_chan_info_t c = usb_chan();
+
+    c.proxy_state = "backoff";
+    strcpy(c.proxy_last_error, "connect timed out");
+    strcpy(c.reason, "flow control not supported");
+    TEST_ASSERT_GREATER_THAN(0, render_one(&c));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"error\":\"flow control not supported\","));
 }
 
 TEST_CASE("On a USB device without a driver: rcp_proxy and firmware null, usb driver null", "[device_api]")
@@ -309,6 +345,8 @@ TEST_CASE("On the largest snapshot (8 channels, every text at its longest): fits
         c.proxy.host[sizeof(c.proxy.host) - 1] = '\0';
         memset(c.proxy_peer, 'p', sizeof(c.proxy_peer) - 1);
         c.proxy_peer[sizeof(c.proxy_peer) - 1] = '\0';
+        memset(c.proxy_last_error, '"', sizeof(c.proxy_last_error) - 1);
+        c.proxy_last_error[sizeof(c.proxy_last_error) - 1] = '\0';
         // Device text is printable ASCII (detect.c filters it): '"' and '\\' are the worst, 2 bytes each escaped.
         for (size_t k = 0; k + 1 < sizeof(c.firmware.rec.version); k++) {
             c.firmware.rec.version[k] = k % 2 ? '\\' : '"';
@@ -797,6 +835,98 @@ TEST_CASE("On a mode PUT while a move of Thread runs: 409 busy on any channel", 
     TEST_ASSERT_NULL(device_api_channel_move_busy(&req, false));
     req = proxy_req("{\"baud\":115200}"); // not a mode change
     TEST_ASSERT_NULL(device_api_channel_move_busy(&req, true));
+}
+
+/* ---- device_api_channel_port_conflict ---- */
+
+/* Two channels: the C6 stored in rcp-proxy listening on tcp/6638, a dongle stored off with the same stored settings. */
+static void port_snapshot(radio_mux_snapshot_t *s)
+{
+    memset(s, 0, sizeof(*s));
+    s->n = 2;
+    s->chans[0] = c6_chan();
+    s->chans[0].mode = s->chans[0].stored_mode = RADIO_MUX_MODE_RCP_PROXY;
+    s->chans[1] = usb_chan();
+    s->chans[1].mode = s->chans[1].stored_mode = RADIO_MUX_MODE_OFF;
+    radio_mux_proxy_defaults(&s->chans[1].proxy);
+}
+
+TEST_CASE("On rcp-proxy for a channel that would listen where another channel in rcp-proxy listens: names it",
+          "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+    radio_mux_set_req_t req = proxy_req("{\"mode\":\"rcp-proxy\"}");
+
+    port_snapshot(&s);
+    TEST_ASSERT_EQUAL_STRING("c6", device_api_channel_port_conflict(&s, s.chans[1].id, &req));
+}
+
+TEST_CASE("On a port change of a channel in rcp-proxy to a port another one listens on: names it", "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+    radio_mux_set_req_t req = proxy_req("{\"rcp_proxy\":{\"port\":6638}}");
+
+    port_snapshot(&s);
+    s.chans[1].stored_mode = RADIO_MUX_MODE_RCP_PROXY;
+    s.chans[1].proxy.port = 7000;
+    TEST_ASSERT_EQUAL_STRING("c6", device_api_channel_port_conflict(&s, s.chans[1].id, &req));
+}
+
+TEST_CASE("On another port, adapter or direction: no conflict", "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+    radio_mux_set_req_t req = proxy_req("{\"mode\":\"rcp-proxy\",\"rcp_proxy\":{\"port\":6639}}");
+
+    port_snapshot(&s);
+    TEST_ASSERT_NULL(device_api_channel_port_conflict(&s, s.chans[1].id, &req));
+    req = proxy_req("{\"mode\":\"rcp-proxy\",\"rcp_proxy\":{\"adapter\":\"udp\"}}");
+    TEST_ASSERT_NULL(device_api_channel_port_conflict(&s, s.chans[1].id, &req));
+    req = proxy_req("{\"mode\":\"rcp-proxy\",\"rcp_proxy\":{\"direction\":\"connect\",\"host\":\"h.local\"}}");
+    TEST_ASSERT_NULL(device_api_channel_port_conflict(&s, s.chans[1].id, &req));
+    req = proxy_req("{\"mode\":\"rcp-proxy\"}");
+    s.chans[0].proxy.dir = RADIO_MUX_PROXY_CONNECT; // the other one dials out
+    TEST_ASSERT_NULL(device_api_channel_port_conflict(&s, s.chans[1].id, &req));
+}
+
+TEST_CASE("On another channel that only stores the port (not in rcp-proxy): no conflict", "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+    radio_mux_set_req_t req = proxy_req("{\"mode\":\"rcp-proxy\"}");
+
+    port_snapshot(&s);
+    s.chans[0].stored_mode = RADIO_MUX_MODE_OTBR;
+    TEST_ASSERT_NULL(device_api_channel_port_conflict(&s, s.chans[1].id, &req));
+}
+
+TEST_CASE("On an unplugged channel stored in rcp-proxy on the port: a conflict (it listens again on return)",
+          "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+    radio_mux_set_req_t req = proxy_req("{\"mode\":\"rcp-proxy\"}");
+
+    port_snapshot(&s);
+    s.chans[1].stored_mode = RADIO_MUX_MODE_RCP_PROXY;
+    s.chans[1].mode = RADIO_MUX_MODE_UNAVAILABLE;
+    s.chans[1].present = false;
+    TEST_ASSERT_EQUAL_STRING(s.chans[1].id, device_api_channel_port_conflict(&s, "c6", &req));
+}
+
+TEST_CASE("On a PUT that leaves rcp-proxy, no change of mode or port, or the channel alone: no conflict",
+          "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+    radio_mux_set_req_t req = proxy_req("{\"mode\":\"off\"}");
+
+    port_snapshot(&s);
+    s.chans[1].stored_mode = RADIO_MUX_MODE_RCP_PROXY;
+    TEST_ASSERT_NULL(device_api_channel_port_conflict(&s, s.chans[1].id, &req));
+    req = proxy_req("{\"baud\":115200}");
+    s.chans[1].stored_mode = RADIO_MUX_MODE_OFF;
+    TEST_ASSERT_NULL(device_api_channel_port_conflict(&s, s.chans[1].id, &req)); // stays off
+    req = proxy_req("{\"mode\":\"rcp-proxy\"}");
+    s.n = 1;
+    TEST_ASSERT_NULL(device_api_channel_port_conflict(&s, "c6", &req)); // itself only
+    TEST_ASSERT_NULL(device_api_channel_port_conflict(&s, "usb-unknown", &req)); // not in the list
 }
 
 /* ---- device_api_channel_is_move, device_api_channel_retry_otbr ---- */
