@@ -31,6 +31,19 @@ extern "C" {
  * result (scan_done) that arrives while a property request waits is delivered then. That is safe for ziggurat: its
  * ziggurat_radio_rx / _tx_done / _energy_scan_done only push into critical-section channels (deliver_* in
  * ziggurat-phy-otlink). The sink must not call back into this client.
+ *
+ * Radio resets and loss (the mux's RESET, GONE and attach events; the board passes them in, also from inside
+ * ops->wait):
+ *  - RESET (zigbee_spinel_on_reset, or an unsolicited LAST_STATUS in the reset range from the RCP): a transmit in
+ *    flight completes as failed and an energy scan in progress completes with ZIGBEE_SPINEL_SCAN_FAILED_RSSI, then the
+ *    attach sequence runs again and replays the stored configuration and source-match table.
+ *  - GONE (zigbee_spinel_on_gone): the open operations fail the same way and the client has no radio: transmit and
+ *    energy_scan return nonzero at once, configuration and source-match edits are stored (for the replay) and return
+ *    0 without sending. The next zigbee_spinel_attach is the radio coming back: attach sequence and replay.
+ *  - An event that arrives inside ops->wait ends that wait (the call returns ZIGBEE_SPINEL_ERR_ABORTED, no channel
+ *    reset requested), and every later request of that call fails the same way without sending, so the call unwinds.
+ *    The attach sequence then runs once that outermost client call has unwound, before it returns (so sink.ready may
+ *    be reported from the end of any client call). A RESET inside the attach sequence restarts it from CMD_RESET.
  */
 
 /** Timeout of one property request (RadioSpinel kMaxWaitTime). */
@@ -49,6 +62,8 @@ extern "C" {
 #define ZIGBEE_SPINEL_ERR_LOCAL (-1)   // refused locally: busy, no TID, the frame did not fit, or send failed
 #define ZIGBEE_SPINEL_ERR_TIMEOUT (-2) // no reply in ZIGBEE_SPINEL_REQUEST_TIMEOUT_US; a channel reset was requested
 #define ZIGBEE_SPINEL_ERR_ABORTED (-3) // zigbee_spinel_abort_wait ended the wait
+/** The peak RSSI reported through sink.scan_done for a scan the radio's reset or loss ended (OT_RADIO_RSSI_INVALID). */
+#define ZIGBEE_SPINEL_SCAN_FAILED_RSSI 127
 /** Largest spinel frame the client builds or keeps a reply value of. */
 #define ZIGBEE_SPINEL_FRAME_MAX 256
 
@@ -63,14 +78,14 @@ typedef enum {
 typedef struct {
     /** Hands one bare spinel frame to the channel (the callee copies it). 0 on success. */
     int (*send)(void *ctx, const uint8_t *frame, size_t len);
-    /** Asks for a channel reset (answered later by a RESET event, Task 3). */
+    /** Asks for a channel reset (answered later by the mux's RESET: zigbee_spinel_on_reset, or GONE). */
     void (*request_reset)(void *ctx);
     /** Monotonic microseconds. */
     int64_t (*now_us)(void *ctx);
     /**
-     * Blocks until the next radio event has been passed to the client (zigbee_spinel_on_frame, and from Task 3 on
-     * the reset and gone entries) or until now_us() reaches `until_us`. 0 after an event was delivered, nonzero when
-     * the deadline passed with none. The client calls it in a loop while a property request waits.
+     * Blocks until the next radio event has been passed to the client (zigbee_spinel_on_frame, _on_reset, _on_gone,
+     * _attach) or until now_us() reaches `until_us`. 0 after an event was delivered, nonzero when the deadline passed
+     * with none. The client calls it in a loop while a property request waits.
      */
     int (*wait)(void *ctx, int64_t until_us);
     void *ctx;
@@ -108,7 +123,11 @@ typedef struct {
     zigbee_spinel_ops_t ops;
     zigbee_spinel_sink_t sink;
 
-    bool attached;      // the attach sequence enabled the PHY and the raw stream
+    bool radio;          // a channel is attached: from zigbee_spinel_attach until zigbee_spinel_on_gone
+    bool attached;       // the attach sequence enabled the PHY and the raw stream
+    bool attach_pending; // a RESET or an attach arrived: the attach sequence runs when the outermost call unwinds
+    uint8_t depth;       // nesting of client calls that may wait
+    uint32_t resets;     // RESETs handled (the mux's and the RCP's own)
     bool have_eui64;
     uint8_t eui64[8];
     uint32_t radio_caps;
@@ -138,6 +157,7 @@ typedef struct {
 
     // The energy scan in progress.
     bool scanning;
+    bool scan_starting;  // energy_scan's own requests still run: a failure is its return value, not scan_done
     int64_t scan_deadline_us;
 
     // Stored for replay.
@@ -155,10 +175,12 @@ typedef struct {
 void zigbee_spinel_init(zigbee_spinel_t *s, const zigbee_spinel_ops_t *ops, const zigbee_spinel_sink_t *sink);
 
 /**
- * Runs the attach sequence: CMD_RESET, then PROTOCOL_VERSION, NCP_VERSION, CAPS, RADIO_CAPS, HWADDR; PHY_ENABLED and
- * MAC_RAW_STREAM_ENABLED; then replays the stored configuration and source-match table. Ends with sink.ready, unless
- * a request timed out (then the channel reset is requested) or was aborted: then the sequence stops there, ready is
- * not reported and the stored configuration and table are kept as they were.
+ * The mux attached the channel (the first time, or the radio coming back after GONE). Runs the attach sequence:
+ * CMD_RESET, then PROTOCOL_VERSION, NCP_VERSION, CAPS, RADIO_CAPS, HWADDR; PHY_ENABLED and MAC_RAW_STREAM_ENABLED;
+ * then replays the stored configuration and source-match table. Ends with sink.ready, unless a request timed out
+ * (then the channel reset is requested) or was aborted: then the sequence stops there, ready is not reported and the
+ * stored configuration and table are kept as they were. A transmit or energy scan still open from before completes as
+ * failed first. Called from inside ops->wait, it ends that wait and runs once the outermost call has unwound.
  */
 void zigbee_spinel_attach(zigbee_spinel_t *s);
 
@@ -193,15 +215,38 @@ int zigbee_spinel_energy_scan(zigbee_spinel_t *s, uint8_t channel, uint16_t ms);
 /** One spinel frame from the channel, received at `rx_us` (the mux's time). The frame is not kept. */
 void zigbee_spinel_on_frame(zigbee_spinel_t *s, const uint8_t *frame, size_t len, int64_t rx_us);
 
-/** Checks the transmit, re-arm and energy-scan deadlines; a missed one requests a channel reset. */
+/**
+ * Checks the transmit, re-arm and energy-scan deadlines; a missed one requests a channel reset. A timed-out transmit or
+ * scan stays open until the RESET that answers the request completes it as failed.
+ */
 void zigbee_spinel_on_tick(zigbee_spinel_t *s);
 
 /**
- * Task 3's hook: ends the property request now waiting (called from inside ops->wait, by the board's RESET or GONE
- * handling). The waiting call returns ZIGBEE_SPINEL_ERR_ABORTED and requests no channel reset. No request waiting:
- * nothing happens.
+ * Ends the property request now waiting: the waiting call returns ZIGBEE_SPINEL_ERR_ABORTED and requests no channel
+ * reset. No request waiting: nothing happens. zigbee_spinel_on_reset / _on_gone / _attach call it themselves.
  */
 void zigbee_spinel_abort_wait(zigbee_spinel_t *s);
+
+/**
+ * The mux reset or reopened the radio (RESET); the client also calls it itself on an unsolicited LAST_STATUS in the
+ * reset range (the RCP rebooted on its own). Counts the reset, completes a transmit in flight as failed and an energy
+ * scan in progress with ZIGBEE_SPINEL_SCAN_FAILED_RSSI, then runs the attach sequence and the replay (see "Radio
+ * resets and loss" above). With no radio: nothing happens.
+ */
+void zigbee_spinel_on_reset(zigbee_spinel_t *s);
+
+/**
+ * The mux detached the channel (GONE: unplugged, a C6 job, a mode change). Completes a transmit in flight as failed
+ * and an energy scan in progress with ZIGBEE_SPINEL_SCAN_FAILED_RSSI, ends a waiting request, and leaves the client
+ * with no radio until the next zigbee_spinel_attach.
+ */
+void zigbee_spinel_on_gone(zigbee_spinel_t *s);
+
+/** A channel is attached: true from zigbee_spinel_attach until zigbee_spinel_on_gone. */
+bool zigbee_spinel_has_radio(const zigbee_spinel_t *s);
+
+/** RESETs handled since zigbee_spinel_init: the mux's and the RCP's unsolicited ones (not the attach's own reset). */
+uint32_t zigbee_spinel_resets(const zigbee_spinel_t *s);
 
 /** The RCP's EUI-64 as HWADDR reported it (RadioSpinel GetIeeeEui64). false before the first attach read it. */
 bool zigbee_spinel_eui64(const zigbee_spinel_t *s, uint8_t out[8]);

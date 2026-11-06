@@ -15,6 +15,15 @@
 #define MAX_SENT 160
 #define MAX_QUEUE 32
 #define START_US 1000000LL
+#define KEY_CMD_RESET (UINT32_MAX - 1) // event_key value: the CMD_RESET itself
+
+/* What the board passes to the client from inside wait (the mux's events). */
+typedef enum {
+    EVENT_NONE,
+    EVENT_RESET,       // zigbee_spinel_on_reset
+    EVENT_GONE,        // zigbee_spinel_on_gone
+    EVENT_GONE_ATTACH, // zigbee_spinel_on_gone, then zigbee_spinel_attach, in one wait
+} event_t;
 
 typedef struct {
     uint8_t buf[ZIGBEE_SPINEL_FRAME_MAX];
@@ -44,6 +53,12 @@ static struct {
     unsigned silent_cmd; // 0: silent for every command on silent_key
     unsigned abort_key; // a request for it gets no reply; the next wait aborts it (Task 3's RESET/GONE)
     bool abort_pending;
+    unsigned event_key;        // one-shot: a request for it gets no reply; the next wait delivers `event`
+    unsigned event_reply_key;  // one-shot: a request for it is answered, and the wait that delivers the reply
+    // delivers `event` right after it
+    event_t event, event_pending;
+    bool event_after_frame;
+    unsigned reset_status_key; // one-shot: answered with an unsolicited reset status instead of its reply
     unsigned wrong_key; // answered with VALUE_IS of another property
     size_t short_limit, ext_limit; // 0 = unlimited
     size_t short_count, ext_count;
@@ -113,9 +128,28 @@ static void respond(const uint8_t *frame, size_t len)
     uint8_t tid = header & 0x0f;
 
     if (cmd == SPINEL_CMD_RESET) {
+        if (rcp.event_key == KEY_CMD_RESET) {
+            rcp.event_key = UINT32_MAX;
+            rcp.event_pending = rcp.event;
+            return;
+        }
         if (!rcp.reset_silent) {
             queue_frame(buf, frames_reset_status(buf, sizeof(buf), rcp.reset_iid, SPINEL_STATUS_RESET_POWER_ON));
         }
+        return;
+    }
+    if (key == rcp.event_key) {
+        rcp.event_key = UINT32_MAX;
+        rcp.event_pending = rcp.event;
+        return;
+    }
+    if (key == rcp.event_reply_key) {
+        rcp.event_reply_key = UINT32_MAX;
+        rcp.event_after_frame = true; // the reply is queued below, as usual
+    }
+    if (key == rcp.reset_status_key) {
+        rcp.reset_status_key = UINT32_MAX; // the RCP rebooted on its own instead of answering
+        queue_frame(buf, frames_reset_status(buf, sizeof(buf), 0, SPINEL_STATUS_RESET_SOFTWARE));
         return;
     }
     if (key == rcp.silent_key && (rcp.silent_cmd == 0 || cmd == rcp.silent_cmd)) {
@@ -211,12 +245,31 @@ static int64_t fake_now(void *ctx)
     return rcp.now;
 }
 
+static void fire_event(void)
+{
+    event_t e = rcp.event_pending;
+
+    rcp.event_pending = EVENT_NONE;
+    if (e == EVENT_RESET) {
+        zigbee_spinel_on_reset(&client);
+    } else if (e != EVENT_NONE) {
+        zigbee_spinel_on_gone(&client);
+        if (e == EVENT_GONE_ATTACH) {
+            zigbee_spinel_attach(&client);
+        }
+    }
+}
+
 static int fake_wait(void *ctx, int64_t until_us)
 {
     (void)ctx;
     if (rcp.abort_pending) {
         rcp.abort_pending = false;
         zigbee_spinel_abort_wait(&client);
+        return 0;
+    }
+    if (rcp.event_pending != EVENT_NONE) {
+        fire_event();
         return 0;
     }
     if (rcp.q_head == rcp.q_tail) {
@@ -228,6 +281,11 @@ static int fake_wait(void *ctx, int64_t until_us)
     frame_t f = rcp.queue[rcp.q_head++ % MAX_QUEUE];
     rcp.now += rcp.step_us;
     zigbee_spinel_on_frame(&client, f.buf, f.len, rcp.now);
+    if (rcp.event_after_frame && rcp.q_head == rcp.q_tail) {
+        rcp.event_after_frame = false;
+        rcp.event_pending = rcp.event;
+        fire_event();
+    }
     return 0;
 }
 
@@ -291,6 +349,9 @@ static void setup(unsigned radio_caps)
     rcp.fail_key = UINT32_MAX;
     rcp.wrong_key = UINT32_MAX;
     rcp.abort_key = UINT32_MAX;
+    rcp.event_key = UINT32_MAX;
+    rcp.event_reply_key = UINT32_MAX;
+    rcp.reset_status_key = UINT32_MAX;
     zigbee_spinel_init(&client, &OPS, &SINK);
 }
 
@@ -1459,4 +1520,661 @@ TEST_CASE("request timeout: returns ZIGBEE_SPINEL_ERR_TIMEOUT, distinct from an 
     attached(FRAMES_C6_RADIO_CAPS);
     rcp.silent_key = SPINEL_PROP_PHY_CHAN;
     TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_TIMEOUT, zigbee_spinel_set_channel(&client, 20));
+}
+
+/* ---- radio resets and loss (Task 3) ---- */
+
+static bool is_cmd_reset(size_t i)
+{
+    static const uint8_t reset[] = {0x80, SPINEL_CMD_RESET, SPINEL_RESET_STACK};
+
+    TEST_ASSERT_TRUE_MESSAGE(i < rcp.sent_count, "no such request");
+    return rcp.sent[i].len == sizeof(reset) && memcmp(rcp.sent[i].buf, reset, sizeof(reset)) == 0;
+}
+
+static size_t count_cmd_resets(void)
+{
+    size_t n = 0;
+
+    for (size_t i = 0; i < rcp.sent_count; i++) {
+        n += is_cmd_reset(i);
+    }
+    return n;
+}
+
+/* The index of the first request of `cmd`/`key` at or after `from`; fails the test when there is none. */
+static size_t index_of(unsigned cmd, unsigned key, size_t from)
+{
+    for (size_t i = from; i < rcp.sent_count; i++) {
+        if (!is_cmd_reset(i) && sent(i).cmd == cmd && sent(i).key == key) {
+            return i;
+        }
+    }
+    TEST_FAIL_MESSAGE("request not sent");
+    return 0;
+}
+
+static void forget(void)
+{
+    rcp.sent_count = 0;
+    rcp.resets_requested = 0;
+    memset(&got, 0, sizeof(got));
+}
+
+static void transmitting(void)
+{
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+}
+
+static void scanning(void)
+{
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_energy_scan(&client, 17, 250));
+}
+
+/* Attached, with the configuration and one entry in each source-match table stored; then forgotten. */
+static void stored_config_and_table(void)
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_configure(&client, &CONFIG));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_src_match_add_short(&client, 0x0001));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_src_match_add_ext(&client, EXT_A));
+    forget();
+}
+
+static void assert_replayed_once(void)
+{
+    TEST_ASSERT_EQUAL(1, count_sent(SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_MAC_15_4_LADDR));
+    TEST_ASSERT_EQUAL(1, count_sent(SPINEL_CMD_PROP_VALUE_INSERT, SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES));
+    TEST_ASSERT_EQUAL(1, count_sent(SPINEL_CMD_PROP_VALUE_INSERT, SPINEL_PROP_MAC_SRC_MATCH_EXTENDED_ADDRESSES));
+}
+
+static void no_radio(void)
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    zigbee_spinel_on_gone(&client);
+    forget();
+}
+
+/* -- GONE -- */
+
+TEST_CASE("gone: a transmit in flight fails", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    transmitting();
+    zigbee_spinel_on_gone(&client);
+    TEST_ASSERT_EQUAL(1, got.tx_count);
+    TEST_ASSERT_EQUAL(ZIGBEE_TX_FAILED, got.tx);
+}
+
+TEST_CASE("gone: an energy scan in progress fails", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    scanning();
+    zigbee_spinel_on_gone(&client);
+    TEST_ASSERT_EQUAL(1, got.scan_count);
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_SCAN_FAILED_RSSI, got.scan_rssi);
+}
+
+TEST_CASE("gone with a transmit in flight and an energy scan in progress: fails both at once", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    transmitting();
+    scanning();
+    int64_t start = rcp.now;
+    zigbee_spinel_on_gone(&client);
+    TEST_ASSERT_EQUAL(1, got.tx_count);
+    TEST_ASSERT_EQUAL(1, got.scan_count);
+    TEST_ASSERT_EQUAL_INT64(start, rcp.now);
+}
+
+TEST_CASE("gone: enters no radio", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    TEST_ASSERT_TRUE(zigbee_spinel_has_radio(&client));
+    zigbee_spinel_on_gone(&client);
+    TEST_ASSERT_FALSE(zigbee_spinel_has_radio(&client));
+}
+
+TEST_CASE("gone: sends nothing, requests no reset and counts no reset", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    transmitting();
+    forget();
+    zigbee_spinel_on_gone(&client);
+    TEST_ASSERT_EQUAL(0, rcp.sent_count);
+    TEST_ASSERT_EQUAL(0, rcp.resets_requested);
+    TEST_ASSERT_EQUAL_UINT32(0, zigbee_spinel_resets(&client));
+}
+
+TEST_CASE("gone while a property request waits: the request returns ZIGBEE_SPINEL_ERR_ABORTED at once", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.event_key = SPINEL_PROP_PHY_CHAN;
+    rcp.event = EVENT_GONE;
+    int64_t start = rcp.now;
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_ABORTED, zigbee_spinel_set_channel(&client, 20));
+    TEST_ASSERT_TRUE(rcp.now - start < ZIGBEE_SPINEL_REQUEST_TIMEOUT_US);
+    TEST_ASSERT_EQUAL(0, rcp.resets_requested);
+    TEST_ASSERT_FALSE(zigbee_spinel_has_radio(&client));
+}
+
+TEST_CASE("gone during a configure: the call sends nothing more", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.event_key = SPINEL_PROP_PHY_TX_POWER;
+    rcp.event = EVENT_GONE;
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_ABORTED, zigbee_spinel_configure(&client, &CONFIG));
+    TEST_ASSERT_EQUAL(2, rcp.sent_count); // PHY_CHAN, PHY_TX_POWER
+}
+
+TEST_CASE("gone during attach: reports no ready and sends nothing more", "[zigbee]")
+{
+    setup(FRAMES_C6_RADIO_CAPS);
+    rcp.event_key = SPINEL_PROP_RADIO_CAPS;
+    rcp.event = EVENT_GONE;
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(0, got.ready_count);
+    TEST_ASSERT_EQUAL(5, rcp.sent_count);
+    TEST_ASSERT_EQUAL(0, rcp.resets_requested);
+    TEST_ASSERT_FALSE(zigbee_spinel_has_radio(&client));
+}
+
+TEST_CASE("gone while an energy scan starts: the call returns nonzero and no scan result is reported", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.event_key = SPINEL_PROP_MAC_SCAN_STATE;
+    rcp.event = EVENT_GONE;
+    TEST_ASSERT_NOT_EQUAL(0, zigbee_spinel_energy_scan(&client, 17, 250));
+    TEST_ASSERT_EQUAL(0, got.scan_count);
+}
+
+TEST_CASE("gone in the wait that delivers a reply: the call sends nothing more", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.event_reply_key = SPINEL_PROP_PHY_TX_POWER;
+    rcp.event = EVENT_GONE;
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_ABORTED, zigbee_spinel_configure(&client, &CONFIG));
+    TEST_ASSERT_EQUAL(2, rcp.sent_count); // PHY_CHAN, PHY_TX_POWER (answered)
+}
+
+TEST_CASE("gone in the wait that delivers the scan's last reply: the call returns nonzero, no scan result",
+          "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.event_reply_key = SPINEL_PROP_MAC_SCAN_STATE;
+    rcp.event = EVENT_GONE;
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_ABORTED, zigbee_spinel_energy_scan(&client, 17, 250));
+    TEST_ASSERT_EQUAL(0, got.scan_count);
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_LOCAL, zigbee_spinel_energy_scan(&client, 17, 250)); // no radio, not "busy"
+}
+
+/* -- with no radio -- */
+
+TEST_CASE("has_radio: false before the first attach, true after it", "[zigbee]")
+{
+    setup(FRAMES_C6_RADIO_CAPS);
+    TEST_ASSERT_FALSE(zigbee_spinel_has_radio(&client));
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_TRUE(zigbee_spinel_has_radio(&client));
+}
+
+TEST_CASE("configure with no radio: stores the configuration, sends nothing, returns 0", "[zigbee]")
+{
+    uint16_t pan = 0;
+
+    no_radio();
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_configure(&client, &CONFIG));
+    TEST_ASSERT_EQUAL(0, rcp.sent_count);
+    zigbee_spinel_attach(&client);
+    size_t i = index_of(SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_MAC_15_4_PANID, 0);
+    spinel_datatype_unpack(sent(i).data, sent(i).len, "S", &pan);
+    TEST_ASSERT_EQUAL_HEX16(0x1a62, pan);
+}
+
+TEST_CASE("set_channel and set_promiscuous with no radio: stored, nothing sent, return 0", "[zigbee]")
+{
+    uint8_t channel = 0, mode = 0;
+
+    attached(FRAMES_C6_RADIO_CAPS);
+    zigbee_spinel_configure(&client, &CONFIG);
+    zigbee_spinel_on_gone(&client);
+    forget();
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_set_channel(&client, 21));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_set_promiscuous(&client, true));
+    TEST_ASSERT_EQUAL(0, rcp.sent_count);
+    zigbee_spinel_attach(&client);
+    size_t i = index_of(SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_PHY_CHAN, 0);
+    spinel_datatype_unpack(sent(i).data, sent(i).len, "C", &channel);
+    TEST_ASSERT_EQUAL(21, channel);
+    i = index_of(SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_MAC_PROMISCUOUS_MODE, 0);
+    spinel_datatype_unpack(sent(i).data, sent(i).len, "C", &mode);
+    TEST_ASSERT_EQUAL(SPINEL_MAC_PROMISCUOUS_MODE_NETWORK, mode);
+}
+
+TEST_CASE("src_match adds with no radio: stored, nothing sent, return 0", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    zigbee_spinel_src_match_add_short(&client, 0x0001);
+    zigbee_spinel_on_gone(&client);
+    forget();
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_src_match_add_short(&client, 0x0002));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_src_match_add_ext(&client, EXT_A));
+    TEST_ASSERT_EQUAL(0, rcp.sent_count);
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(2, count_sent(SPINEL_CMD_PROP_VALUE_INSERT, SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES));
+    TEST_ASSERT_EQUAL(1, count_sent(SPINEL_CMD_PROP_VALUE_INSERT, SPINEL_PROP_MAC_SRC_MATCH_EXTENDED_ADDRESSES));
+}
+
+TEST_CASE("src_match_clear with no radio: empties the stored copy and sends nothing", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    zigbee_spinel_src_match_add_short(&client, 0x0001);
+    zigbee_spinel_on_gone(&client);
+    forget();
+    zigbee_spinel_src_match_clear(&client);
+    TEST_ASSERT_EQUAL(0, rcp.sent_count);
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(0, count_sent(SPINEL_CMD_PROP_VALUE_INSERT, SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES));
+}
+
+TEST_CASE("transmit with no radio: returns nonzero at once", "[zigbee]")
+{
+    no_radio();
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_LOCAL, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(0, rcp.sent_count);
+    TEST_ASSERT_EQUAL(0, got.tx_count);
+}
+
+TEST_CASE("energy_scan with no radio: returns nonzero at once", "[zigbee]")
+{
+    no_radio();
+    int64_t start = rcp.now;
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_LOCAL, zigbee_spinel_energy_scan(&client, 17, 250));
+    TEST_ASSERT_EQUAL(0, rcp.sent_count);
+    TEST_ASSERT_EQUAL(0, got.scan_count);
+    TEST_ASSERT_EQUAL_INT64(start, rcp.now);
+}
+
+TEST_CASE("reset with no radio: ignored", "[zigbee]")
+{
+    no_radio();
+    zigbee_spinel_on_reset(&client);
+    TEST_ASSERT_EQUAL(0, rcp.sent_count);
+    TEST_ASSERT_EQUAL(0, got.ready_count);
+    TEST_ASSERT_EQUAL_UINT32(0, zigbee_spinel_resets(&client));
+}
+
+TEST_CASE("unsolicited reset status with no radio: ignored", "[zigbee]")
+{
+    uint8_t buf[32];
+
+    no_radio();
+    deliver(buf, frames_reset_status(buf, sizeof(buf), 0, SPINEL_STATUS_RESET_SOFTWARE));
+    TEST_ASSERT_EQUAL(0, rcp.sent_count);
+    TEST_ASSERT_EQUAL_UINT32(0, zigbee_spinel_resets(&client));
+}
+
+/* -- attach after GONE -- */
+
+TEST_CASE("attach after gone: runs the attach sequence and replays the stored configuration and table", "[zigbee]")
+{
+    stored_config_and_table();
+    zigbee_spinel_on_gone(&client);
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_TRUE(is_cmd_reset(0));
+    assert_sent(1, SPINEL_CMD_PROP_VALUE_GET, SPINEL_PROP_PROTOCOL_VERSION);
+    assert_replayed_once();
+}
+
+TEST_CASE("attach after gone: reports ready and has a radio again", "[zigbee]")
+{
+    stored_config_and_table();
+    zigbee_spinel_on_gone(&client);
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_TRUE(got.compatible);
+    TEST_ASSERT_TRUE(zigbee_spinel_has_radio(&client));
+}
+
+TEST_CASE("reattach: a transmit after replay is accepted", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    transmitting();
+    zigbee_spinel_on_gone(&client);
+    zigbee_spinel_attach(&client);
+    forget();
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(1, rcp.sent_count);
+    assert_sent(0, SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_STREAM_RAW);
+}
+
+TEST_CASE("reattach: an energy scan after replay is accepted", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    scanning();
+    zigbee_spinel_on_gone(&client);
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_energy_scan(&client, 17, 250));
+}
+
+TEST_CASE("attach with a transmit that timed out: the transmit fails once and the next one is accepted", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    transmitting();
+    rcp.now += ZIGBEE_SPINEL_TX_TIMEOUT_US;
+    zigbee_spinel_on_tick(&client);
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+    TEST_ASSERT_EQUAL(0, got.tx_count);
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(1, got.tx_count);
+    TEST_ASSERT_EQUAL(ZIGBEE_TX_FAILED, got.tx);
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+}
+
+TEST_CASE("attach with an energy scan that timed out: the scan fails once and the next one is accepted", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    scanning();
+    rcp.now += 250 * 1000LL + ZIGBEE_SPINEL_SCAN_GRACE_US;
+    zigbee_spinel_on_tick(&client);
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(1, got.scan_count);
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_SCAN_FAILED_RSSI, got.scan_rssi);
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_energy_scan(&client, 17, 250));
+}
+
+TEST_CASE("attach arriving inside a wait: the waiting call returns ZIGBEE_SPINEL_ERR_ABORTED, then the attach runs",
+          "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.event_key = SPINEL_PROP_PHY_CHAN;
+    rcp.event = EVENT_GONE_ATTACH;
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_ABORTED, zigbee_spinel_set_channel(&client, 20));
+    TEST_ASSERT_TRUE(is_cmd_reset(1)); // right after the aborted PHY_CHAN
+    TEST_ASSERT_EQUAL(1, count_cmd_resets());
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_TRUE(zigbee_spinel_has_radio(&client));
+}
+
+/* -- RESET -- */
+
+TEST_CASE("reset: runs the attach sequence and replays the stored configuration and table", "[zigbee]")
+{
+    stored_config_and_table();
+    zigbee_spinel_on_reset(&client);
+    TEST_ASSERT_TRUE(is_cmd_reset(0));
+    assert_sent(1, SPINEL_CMD_PROP_VALUE_GET, SPINEL_PROP_PROTOCOL_VERSION);
+    assert_replayed_once();
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_TRUE(got.compatible);
+}
+
+TEST_CASE("reset: requests no channel reset and counts one reset", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    TEST_ASSERT_EQUAL_UINT32(0, zigbee_spinel_resets(&client));
+    zigbee_spinel_on_reset(&client);
+    TEST_ASSERT_EQUAL(0, rcp.resets_requested);
+    TEST_ASSERT_EQUAL_UINT32(1, zigbee_spinel_resets(&client));
+}
+
+TEST_CASE("reset: a transmit in flight fails", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    transmitting();
+    zigbee_spinel_on_reset(&client);
+    TEST_ASSERT_EQUAL(1, got.tx_count);
+    TEST_ASSERT_EQUAL(ZIGBEE_TX_FAILED, got.tx);
+}
+
+TEST_CASE("reset: an energy scan in progress fails", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    scanning();
+    zigbee_spinel_on_reset(&client);
+    TEST_ASSERT_EQUAL(1, got.scan_count);
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_SCAN_FAILED_RSSI, got.scan_rssi);
+}
+
+TEST_CASE("reset: a late answer to the failed transmit is not reported again", "[zigbee]")
+{
+    uint8_t buf[96];
+
+    attached(FRAMES_C6_RADIO_CAPS);
+    transmitting();
+    uint8_t tid = sent_tid(0);
+    zigbee_spinel_on_reset(&client);
+    deliver(buf, frames_tx_done(buf, sizeof(buf), tid, SPINEL_STATUS_OK));
+    TEST_ASSERT_EQUAL(1, got.tx_count);
+    TEST_ASSERT_EQUAL(ZIGBEE_TX_FAILED, got.tx);
+}
+
+TEST_CASE("reset: a transmit after replay is accepted", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    transmitting();
+    zigbee_spinel_on_reset(&client);
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+}
+
+TEST_CASE("reset after a transmit timed out: the transmit fails once", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    transmitting();
+    rcp.now += ZIGBEE_SPINEL_TX_TIMEOUT_US;
+    zigbee_spinel_on_tick(&client);
+    zigbee_spinel_on_reset(&client);
+    zigbee_spinel_on_tick(&client);
+    TEST_ASSERT_EQUAL(1, got.tx_count);
+    TEST_ASSERT_EQUAL(ZIGBEE_TX_FAILED, got.tx);
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+}
+
+TEST_CASE("reset on an RCP without rx-on-when-idle: a pending re-arm is dropped", "[zigbee]")
+{
+    attached(FRAMES_CC2652P_RADIO_CAPS);
+    rcp.silent_key = SPINEL_PROP_MAC_RAW_STREAM_ENABLED;
+    rcp.silent_cmd = SPINEL_CMD_PROP_VALUE_SET;
+    transmitting();
+    answer_tx(SPINEL_STATUS_OK); // the re-arm goes out and gets no reply
+    rcp.silent_key = UINT32_MAX;
+    zigbee_spinel_on_reset(&client);
+    rcp.now += ZIGBEE_SPINEL_REQUEST_TIMEOUT_US;
+    zigbee_spinel_on_tick(&client);
+    TEST_ASSERT_EQUAL(0, rcp.resets_requested);
+}
+
+TEST_CASE("reset after a request timed out in the replay: the attach runs again and reports ready", "[zigbee]")
+{
+    stored_three_shorts();
+    rcp.silent_key = SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES;
+    rcp.silent_cmd = SPINEL_CMD_PROP_VALUE_INSERT;
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(0, got.ready_count);
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+    rcp.silent_key = UINT32_MAX;
+    forget();
+    zigbee_spinel_on_reset(&client); // the mux's answer to the requested reset
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_EQUAL(3, count_sent(SPINEL_CMD_PROP_VALUE_INSERT, SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES));
+}
+
+TEST_CASE("reset while a property request waits: the request returns ZIGBEE_SPINEL_ERR_ABORTED at once", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.event_key = SPINEL_PROP_PHY_CHAN;
+    rcp.event = EVENT_RESET;
+    int64_t start = rcp.now;
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_ABORTED, zigbee_spinel_set_channel(&client, 20));
+    TEST_ASSERT_TRUE(rcp.now - start < ZIGBEE_SPINEL_REQUEST_TIMEOUT_US);
+    TEST_ASSERT_EQUAL(0, rcp.resets_requested);
+}
+
+TEST_CASE("reset while a property request waits: the attach runs once the call unwinds and replays", "[zigbee]")
+{
+    stored_config_and_table();
+    rcp.event_key = SPINEL_PROP_PHY_CHAN;
+    rcp.event = EVENT_RESET;
+    zigbee_spinel_set_channel(&client, 20);
+    assert_sent(0, SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_PHY_CHAN);
+    TEST_ASSERT_TRUE(is_cmd_reset(1));
+    TEST_ASSERT_EQUAL(1, count_cmd_resets());
+    assert_replayed_once();
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+}
+
+TEST_CASE("reset during a configure: the call sends nothing more before the attach", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.event_key = SPINEL_PROP_PHY_TX_POWER;
+    rcp.event = EVENT_RESET;
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_ABORTED, zigbee_spinel_configure(&client, &CONFIG));
+    assert_sent(0, SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_PHY_CHAN);
+    assert_sent(1, SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_PHY_TX_POWER);
+    TEST_ASSERT_TRUE(is_cmd_reset(2));
+    TEST_ASSERT_EQUAL(1, count_sent(SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_MAC_15_4_PANID)); // the replay's
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+}
+
+TEST_CASE("reset in the wait that delivers a reply: the call sends nothing more before the attach", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.event_reply_key = SPINEL_PROP_PHY_TX_POWER;
+    rcp.event = EVENT_RESET;
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_ABORTED, zigbee_spinel_configure(&client, &CONFIG));
+    assert_sent(1, SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_PHY_TX_POWER);
+    TEST_ASSERT_TRUE(is_cmd_reset(2));
+    TEST_ASSERT_EQUAL(1, count_sent(SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_MAC_15_4_PANID)); // the replay's
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+}
+
+TEST_CASE("reset in the wait that delivers the scan's last reply: the call returns nonzero, the next scan runs",
+          "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.event_reply_key = SPINEL_PROP_MAC_SCAN_STATE;
+    rcp.event = EVENT_RESET;
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_ABORTED, zigbee_spinel_energy_scan(&client, 17, 250));
+    TEST_ASSERT_EQUAL(0, got.scan_count);
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_energy_scan(&client, 17, 250));
+}
+
+TEST_CASE("reset during attach: the sequence restarts and replays once", "[zigbee]")
+{
+    stored_config_and_table();
+    rcp.event_key = SPINEL_PROP_RADIO_CAPS;
+    rcp.event = EVENT_RESET;
+    int64_t start = rcp.now;
+    zigbee_spinel_on_reset(&client);
+    TEST_ASSERT_EQUAL(2, count_cmd_resets());
+    TEST_ASSERT_TRUE(is_cmd_reset(0));
+    assert_sent(4, SPINEL_CMD_PROP_VALUE_GET, SPINEL_PROP_RADIO_CAPS);
+    TEST_ASSERT_TRUE(is_cmd_reset(5)); // straight after the interrupted step
+    assert_replayed_once();
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_TRUE(got.compatible);
+    TEST_ASSERT_EQUAL_UINT32(2, zigbee_spinel_resets(&client));
+    TEST_ASSERT_EQUAL(0, rcp.resets_requested);
+    TEST_ASSERT_TRUE(rcp.now - start < ZIGBEE_SPINEL_REQUEST_TIMEOUT_US); // no request waited out its timeout
+}
+
+TEST_CASE("reset during the attach's replay: the sequence restarts and the replay completes once", "[zigbee]")
+{
+    stored_config_and_table();
+    rcp.event_key = SPINEL_PROP_MAC_15_4_PANID;
+    rcp.event = EVENT_RESET;
+    zigbee_spinel_on_reset(&client);
+    TEST_ASSERT_EQUAL(2, count_cmd_resets());
+    TEST_ASSERT_EQUAL(2, count_sent(SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_MAC_15_4_PANID)); // cut short, then whole
+    assert_replayed_once();
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+}
+
+TEST_CASE("reset while waiting for the reset status: the sequence restarts from CMD_RESET", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.event_key = KEY_CMD_RESET;
+    rcp.event = EVENT_RESET;
+    int64_t start = rcp.now;
+    zigbee_spinel_on_reset(&client);
+    TEST_ASSERT_TRUE(is_cmd_reset(0));
+    TEST_ASSERT_TRUE(is_cmd_reset(1));
+    TEST_ASSERT_EQUAL(2, count_cmd_resets());
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_TRUE(rcp.now - start < ZIGBEE_SPINEL_REQUEST_TIMEOUT_US);
+}
+
+/* -- the RCP's own reset (unsolicited LAST_STATUS in the reset range) -- */
+
+TEST_CASE("unsolicited reset status: runs the attach sequence and replays, as a reset", "[zigbee]")
+{
+    uint8_t buf[32];
+
+    stored_config_and_table();
+    deliver(buf, frames_reset_status(buf, sizeof(buf), 0, SPINEL_STATUS_RESET_SOFTWARE));
+    TEST_ASSERT_TRUE(is_cmd_reset(0));
+    assert_replayed_once();
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_EQUAL_UINT32(1, zigbee_spinel_resets(&client));
+}
+
+TEST_CASE("unsolicited reset status: a transmit in flight fails", "[zigbee]")
+{
+    uint8_t buf[32];
+
+    attached(FRAMES_C6_RADIO_CAPS);
+    transmitting();
+    deliver(buf, frames_reset_status(buf, sizeof(buf), 0, SPINEL_STATUS_RESET_CRASH));
+    TEST_ASSERT_EQUAL(1, got.tx_count);
+    TEST_ASSERT_EQUAL(ZIGBEE_TX_FAILED, got.tx);
+}
+
+TEST_CASE("unsolicited reset status on the broadcast IID: handled as a reset", "[zigbee]")
+{
+    uint8_t buf[32];
+
+    attached(FRAMES_C6_RADIO_CAPS);
+    deliver(buf, frames_reset_status(buf, sizeof(buf), 3, SPINEL_STATUS_RESET_POWER_ON));
+    TEST_ASSERT_EQUAL_UINT32(1, zigbee_spinel_resets(&client));
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+}
+
+TEST_CASE("unsolicited reset status outside the reset range: ignored", "[zigbee]")
+{
+    uint8_t buf[32];
+
+    attached(FRAMES_C6_RADIO_CAPS);
+    deliver(buf, frames_reset_status(buf, sizeof(buf), 0, SPINEL_STATUS_RESET__END + 1));
+    deliver(buf, frames_reset_status(buf, sizeof(buf), 0, SPINEL_STATUS_RESET__BEGIN - 1));
+    TEST_ASSERT_EQUAL(0, rcp.sent_count);
+    TEST_ASSERT_EQUAL_UINT32(0, zigbee_spinel_resets(&client));
+}
+
+TEST_CASE("unsolicited reset status while attaching: restarts the sequence from CMD_RESET and replays once",
+          "[zigbee]")
+{
+    stored_config_and_table();
+    rcp.reset_status_key = SPINEL_PROP_CAPS;
+    int64_t start = rcp.now;
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(2, count_cmd_resets());
+    assert_sent(3, SPINEL_CMD_PROP_VALUE_GET, SPINEL_PROP_CAPS);
+    TEST_ASSERT_TRUE(is_cmd_reset(4));
+    assert_replayed_once();
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_EQUAL_UINT32(1, zigbee_spinel_resets(&client));
+    TEST_ASSERT_TRUE(rcp.now - start < ZIGBEE_SPINEL_REQUEST_TIMEOUT_US);
+}
+
+TEST_CASE("unsolicited reset status while a property request waits: the request returns "
+          "ZIGBEE_SPINEL_ERR_ABORTED, then the attach runs", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.reset_status_key = SPINEL_PROP_PHY_CHAN;
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_ABORTED, zigbee_spinel_set_channel(&client, 20));
+    TEST_ASSERT_TRUE(is_cmd_reset(1));
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_EQUAL(0, rcp.resets_requested);
 }

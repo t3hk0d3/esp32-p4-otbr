@@ -35,9 +35,32 @@
 
 #define NEVER INT64_MAX
 
+static void run_attach(zigbee_spinel_t *s);
+
 static int64_t now(const zigbee_spinel_t *s)
 {
     return s->ops.now_us(s->ops.ctx);
+}
+
+/* A RESET, GONE or attach that arrived inside a wait ended this call's work: its requests fail without sending. */
+static bool unwinding(const zigbee_spinel_t *s)
+{
+    return !s->radio || s->attach_pending;
+}
+
+/* Client calls that may wait nest (an event inside ops->wait); the outermost one runs a pending attach when it has
+ * unwound. */
+static void enter(zigbee_spinel_t *s)
+{
+    s->depth++;
+}
+
+static int leave(zigbee_spinel_t *s, int rc)
+{
+    if (--s->depth == 0 && s->attach_pending) {
+        run_attach(s);
+    }
+    return rc;
 }
 
 /* RadioSpinel::GetNextTid: TIDs 1..15 in turn, skipping the ones in use; 0 when all are taken. */
@@ -133,6 +156,9 @@ static int wait_reply(zigbee_spinel_t *s)
  * success reply that carries the value (RadioSpinel's mExpectedCommand); LAST_STATUS OK also succeeds. */
 static int request(zigbee_spinel_t *s, unsigned cmd, unsigned key, unsigned expect, const char *fmt, ...)
 {
+    if (unwinding(s)) {
+        return ZIGBEE_SPINEL_ERR_ABORTED;
+    }
     if (s->wait_state != ZIGBEE_SPINEL_WAIT_IDLE) {
         return ZIGBEE_SPINEL_ERR_LOCAL; // one property request at a time
     }
@@ -324,7 +350,7 @@ static int reset_rcp(zigbee_spinel_t *s)
                                             SPINEL_CMD_RESET, SPINEL_RESET_STACK);
 
     if (n <= 0 || (size_t)n > sizeof(s->frame) || s->wait_state != ZIGBEE_SPINEL_WAIT_IDLE) {
-        return -1;
+        return ZIGBEE_SPINEL_ERR_LOCAL;
     }
     s->wait_for_reset = true;
     s->reply_status = SPINEL_STATUS_OK;
@@ -332,7 +358,7 @@ static int reset_rcp(zigbee_spinel_t *s)
     if (s->ops.send(s->ops.ctx, s->frame, (size_t)n) != 0) {
         s->wait_for_reset = false;
         s->wait_state = ZIGBEE_SPINEL_WAIT_IDLE;
-        return -1;
+        return ZIGBEE_SPINEL_ERR_LOCAL;
     }
     return wait_reply(s);
 }
@@ -371,12 +397,42 @@ static void missing_caps(char *out, size_t size, unsigned missing)
     }
 }
 
-void zigbee_spinel_attach(zigbee_spinel_t *s)
+/*
+ * What the radio's reset or loss leaves open ends here, each through the sink once: the transmit in flight fails, the
+ * energy scan in progress reports ZIGBEE_SPINEL_SCAN_FAILED_RSSI (one still being started is energy_scan's to fail),
+ * a pending re-arm is forgotten and every TID is free again (RadioSpinel::RecoverFromRcpFailure clears its TIDs too).
+ */
+static void drop_open(zigbee_spinel_t *s)
+{
+    bool tx = s->tx_in_flight;
+    bool scan = s->scanning && !s->scan_starting;
+
+    s->tx_in_flight = false;
+    s->tx_tid = 0;
+    s->tx_deadline_us = NEVER;
+    s->rearm_tid = 0;
+    s->rearm_deadline_us = NEVER;
+    if (scan) {
+        s->scanning = false;
+        s->scan_deadline_us = NEVER;
+    }
+    s->tids_in_use = 0;
+    if (tx) {
+        s->sink.tx_done(s->sink.ctx, ZIGBEE_TX_FAILED);
+    }
+    if (scan) {
+        s->sink.scan_done(s->sink.ctx, ZIGBEE_SPINEL_SCAN_FAILED_RSSI);
+    }
+}
+
+/* The attach sequence (zigbee_spinel_attach's comment). Stops quietly when a request times out or is aborted. */
+static void attach_sequence(zigbee_spinel_t *s)
 {
     unsigned major = 0, minor = 0, radio_caps = 0;
     int rc;
 
     s->attached = false;
+    drop_open(s);
     if (reset_rcp(s) != 0) {
         return;
     }
@@ -470,6 +526,66 @@ void zigbee_spinel_attach(zigbee_spinel_t *s)
     s->sink.ready(s->sink.ctx, true, NULL);
 }
 
+/*
+ * Runs the attach sequence while one is pending. A RESET (or an attach) inside one of its waits aborts that wait,
+ * which stops the sequence, and sets attach_pending again: the loop then restarts it from CMD_RESET. A loop, not a
+ * recursion, so a reset storm costs one sequence per RESET and never stack. GONE clears both flags and ends it.
+ */
+static void run_attach(zigbee_spinel_t *s)
+{
+    s->depth++;
+    while (s->attach_pending && s->radio) {
+        s->attach_pending = false;
+        attach_sequence(s);
+    }
+    s->depth--;
+}
+
+void zigbee_spinel_attach(zigbee_spinel_t *s)
+{
+    s->radio = true;
+    s->attach_pending = true;
+    if (s->depth > 0) {
+        zigbee_spinel_abort_wait(s); // the outermost call runs it once it has unwound
+        return;
+    }
+    run_attach(s);
+}
+
+void zigbee_spinel_on_reset(zigbee_spinel_t *s)
+{
+    if (!s->radio) {
+        return; // GONE came first: the next attach brings the radio back
+    }
+    s->resets++;
+    s->attached = false;
+    drop_open(s);
+    s->attach_pending = true;
+    zigbee_spinel_abort_wait(s);
+    if (s->depth == 0) {
+        run_attach(s);
+    }
+}
+
+void zigbee_spinel_on_gone(zigbee_spinel_t *s)
+{
+    s->radio = false;
+    s->attached = false;
+    s->attach_pending = false;
+    drop_open(s);
+    zigbee_spinel_abort_wait(s);
+}
+
+bool zigbee_spinel_has_radio(const zigbee_spinel_t *s)
+{
+    return s->radio;
+}
+
+uint32_t zigbee_spinel_resets(const zigbee_spinel_t *s)
+{
+    return s->resets;
+}
+
 /* ---- public operations ---- */
 
 void zigbee_spinel_init(zigbee_spinel_t *s, const zigbee_spinel_ops_t *ops, const zigbee_spinel_sink_t *sink)
@@ -484,36 +600,42 @@ void zigbee_spinel_init(zigbee_spinel_t *s, const zigbee_spinel_ops_t *ops, cons
     s->scan_deadline_us = NEVER;
 }
 
+/* With no radio (or before the attach sequence enabled it) these store the change for the replay and return 0. */
 int zigbee_spinel_configure(zigbee_spinel_t *s, const zigbee_radio_config_t *config)
 {
+    enter(s);
     s->config = *config;
     s->have_config = true;
-    return s->attached ? send_config(s, &s->config) : 0;
+    return leave(s, s->attached ? send_config(s, &s->config) : 0);
 }
 
 int zigbee_spinel_set_channel(zigbee_spinel_t *s, uint8_t channel)
 {
+    enter(s);
     s->config.channel = channel;
-    return s->attached ? SET(s, SPINEL_PROP_PHY_CHAN, "C", channel) : 0;
+    return leave(s, s->attached ? SET(s, SPINEL_PROP_PHY_CHAN, "C", channel) : 0);
 }
 
 int zigbee_spinel_set_promiscuous(zigbee_spinel_t *s, bool promiscuous)
 {
+    enter(s);
     s->config.promiscuous = promiscuous;
     if (!s->attached) {
-        return 0;
+        return leave(s, 0);
     }
-    return SET(s, SPINEL_PROP_MAC_PROMISCUOUS_MODE, "C",
-               promiscuous ? SPINEL_MAC_PROMISCUOUS_MODE_NETWORK : SPINEL_MAC_PROMISCUOUS_MODE_OFF);
+    return leave(s, SET(s, SPINEL_PROP_MAC_PROMISCUOUS_MODE, "C",
+                        promiscuous ? SPINEL_MAC_PROMISCUOUS_MODE_NETWORK : SPINEL_MAC_PROMISCUOUS_MODE_OFF));
 }
 
 void zigbee_spinel_src_match_clear(zigbee_spinel_t *s)
 {
+    enter(s);
     s->src_short_count = 0;
     s->src_ext_count = 0;
     if (s->attached) {
         (void)send_src_clear(s);
     }
+    (void)leave(s, 0);
 }
 
 int zigbee_spinel_src_match_add_short(zigbee_spinel_t *s, uint16_t address)
@@ -521,18 +643,19 @@ int zigbee_spinel_src_match_add_short(zigbee_spinel_t *s, uint16_t address)
     bool stored = has_short(s, address);
 
     if (!stored && s->src_short_count >= ZIGBEE_SPINEL_SRC_MATCH_MAX) {
-        return -1;
+        return ZIGBEE_SPINEL_ERR_LOCAL;
     }
+    enter(s);
     if (s->attached) {
         int rc = send_src_short(s, address);
         if (rc != 0) {
-            return rc;
+            return leave(s, rc);
         }
     }
     if (!stored) {
         s->src_short[s->src_short_count++] = address;
     }
-    return 0;
+    return leave(s, 0);
 }
 
 int zigbee_spinel_src_match_add_ext(zigbee_spinel_t *s, const uint8_t ext[8])
@@ -540,18 +663,19 @@ int zigbee_spinel_src_match_add_ext(zigbee_spinel_t *s, const uint8_t ext[8])
     bool stored = has_ext(s, ext);
 
     if (!stored && s->src_ext_count >= ZIGBEE_SPINEL_SRC_MATCH_MAX) {
-        return -1;
+        return ZIGBEE_SPINEL_ERR_LOCAL;
     }
+    enter(s);
     if (s->attached) {
         int rc = send_src_ext(s, ext);
         if (rc != 0) {
-            return rc;
+            return leave(s, rc);
         }
     }
     if (!stored) {
         memcpy(s->src_ext[s->src_ext_count++], ext, 8);
     }
-    return 0;
+    return leave(s, 0);
 }
 
 /*
@@ -564,11 +688,11 @@ int zigbee_spinel_transmit(zigbee_spinel_t *s, const uint8_t *psdu, size_t len, 
                            uint8_t retries, uint8_t backoffs)
 {
     if (!s->attached || s->tx_in_flight || psdu == NULL || len + FCS_LEN > ZIGBEE_SPINEL_PSDU_MAX) {
-        return -1;
+        return ZIGBEE_SPINEL_ERR_LOCAL;
     }
     uint8_t tid = take_tid(s);
     if (tid == 0) {
-        return -1;
+        return ZIGBEE_SPINEL_ERR_LOCAL;
     }
     uint16_t crc = fcs(psdu, len);
 
@@ -579,7 +703,7 @@ int zigbee_spinel_transmit(zigbee_spinel_t *s, const uint8_t *psdu, size_t len, 
                   (uint32_t)(len + FCS_LEN), channel, backoffs, retries, csma, true, false, true, (uint32_t)0,
                   (uint32_t)0, channel, RADIO_POWER_INVALID) != 0) {
         free_tid(s, tid);
-        return -1;
+        return ZIGBEE_SPINEL_ERR_LOCAL;
     }
     s->tx_in_flight = true;
     s->tx_tid = tid;
@@ -593,22 +717,30 @@ int zigbee_spinel_energy_scan(zigbee_spinel_t *s, uint8_t channel, uint16_t ms)
     int rc;
 
     if (!s->attached || s->scanning) {
-        return -1;
+        return ZIGBEE_SPINEL_ERR_LOCAL;
     }
+    enter(s);
     if ((rc = SET(s, SPINEL_PROP_MAC_SCAN_MASK, "D", &channel, (uint32_t)1)) != 0 ||
             (rc = SET(s, SPINEL_PROP_MAC_SCAN_PERIOD, "S", ms)) != 0) {
-        return rc;
+        return leave(s, rc);
     }
+    // Scanning before the last request: its result may arrive inside that request's wait.
     s->scanning = true;
+    s->scan_starting = true;
     s->scan_deadline_us = NEVER;
-    if ((rc = SET(s, SPINEL_PROP_MAC_SCAN_STATE, "C", SPINEL_SCAN_STATE_ENERGY)) != 0) {
+    rc = SET(s, SPINEL_PROP_MAC_SCAN_STATE, "C", SPINEL_SCAN_STATE_ENERGY);
+    s->scan_starting = false;
+    if (rc == 0 && s->scanning && unwinding(s)) {
+        rc = ZIGBEE_SPINEL_ERR_ABORTED; // the radio was reset or lost before any result: this call fails it
+    }
+    if (rc != 0) {
         s->scanning = false;
-        return rc;
+        return leave(s, rc);
     }
     if (s->scanning) {
         s->scan_deadline_us = now(s) + (int64_t)ms * 1000 + ZIGBEE_SPINEL_SCAN_GRACE_US;
     }
-    return 0;
+    return leave(s, 0);
 }
 
 /* ---- received frames ---- */
@@ -717,12 +849,15 @@ static void handle_notification(zigbee_spinel_t *s, unsigned cmd, unsigned key, 
     } else if (key == SPINEL_PROP_LAST_STATUS) {
         unsigned status = 0;
 
-        if (spinel_datatype_unpack(data, len, "i", &status) > 0 && status >= SPINEL_STATUS_RESET__BEGIN &&
-                status <= SPINEL_STATUS_RESET__END && s->wait_state == ZIGBEE_SPINEL_WAIT_PENDING &&
-                s->wait_for_reset) {
-            s->wait_state = ZIGBEE_SPINEL_WAIT_OK;
+        if (spinel_datatype_unpack(data, len, "i", &status) <= 0 || status < SPINEL_STATUS_RESET__BEGIN ||
+                status > SPINEL_STATUS_RESET__END) {
+            return;
         }
-        // An unsolicited reset outside the attach is Task 3's (zigbee_spinel_on_reset).
+        if (s->wait_state == ZIGBEE_SPINEL_WAIT_PENDING && s->wait_for_reset) {
+            s->wait_state = ZIGBEE_SPINEL_WAIT_OK; // the answer to the attach's CMD_RESET
+        } else {
+            zigbee_spinel_on_reset(s); // the RCP rebooted on its own (RadioSpinel::HandleRcpUnexpectedReset)
+        }
     } else if (key == SPINEL_PROP_MAC_ENERGY_SCAN_RESULT) {
         uint8_t channel = 0;
         int8_t max_rssi = 0;
@@ -771,7 +906,7 @@ void zigbee_spinel_on_tick(zigbee_spinel_t *s)
     int64_t t = now(s);
 
     if (s->tx_in_flight && t >= s->tx_deadline_us) {
-        s->tx_deadline_us = NEVER; // the transmit stays in flight until the reset (Task 3)
+        s->tx_deadline_us = NEVER; // the transmit stays in flight until the RESET fails it
         s->ops.request_reset(s->ops.ctx);
     }
     if (s->rearm_tid != 0 && t >= s->rearm_deadline_us) {
@@ -781,7 +916,7 @@ void zigbee_spinel_on_tick(zigbee_spinel_t *s)
         s->ops.request_reset(s->ops.ctx);
     }
     if (s->scanning && t >= s->scan_deadline_us) {
-        s->scan_deadline_us = NEVER; // the scan stays in progress until the reset (Task 3)
+        s->scan_deadline_us = NEVER; // the scan stays in progress until the RESET fails it
         s->ops.request_reset(s->ops.ctx);
     }
 }
