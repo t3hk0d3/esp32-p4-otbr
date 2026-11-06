@@ -285,12 +285,10 @@ zigbee
             - reports the radio as incompatible on the page and in /device/zigbee
         With no channel in Ziggurat mode
             - does nothing
-        With the Ziggurat channel's dongle absent at boot
-            - does not start the stack
-            - starts it when the mux attaches the channel
-        With the Ziggurat channel reported unavailable (radio not detected or not compatible)
+        With the Ziggurat channel reported unavailable (stored_mode ziggurat; dongle not detected, or radio not compatible)
             - does not start the stack
             - reports the channel as unavailable on the page and in /device/zigbee
+            - starts the stack when the mux later attaches the channel (the dongle is plugged in)
     spinel client
         configure
             - sends channel, TX power, PAN ID, short and extended address, promiscuous, source-match enable and receive
