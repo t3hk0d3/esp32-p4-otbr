@@ -102,6 +102,12 @@ while read -r member; do
     fi
 done < <("$ar" t "$lib" | grep '\.o$')
 
+# Nothing soft-float may be left, whatever the deletion above missed.
+while read -r member; do
+    "$ar" p "$lib" "$member" >"$tmp/m.o"
+    ! "$readelf" -h "$tmp/m.o" | grep -q "soft-float ABI" || die "soft-float member left in the archive: $member"
+done < <("$ar" t "$lib" | grep '\.o$')
+
 "$objcopy" --redefine-sym heap_caps_aligned_alloc=zigbee_heap_aligned_alloc \
     --redefine-sym heap_caps_realloc=zigbee_heap_realloc \
     --redefine-sym heap_caps_free=zigbee_heap_free "$lib"
