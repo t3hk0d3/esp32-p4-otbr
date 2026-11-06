@@ -2,6 +2,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_vfs_eventfd.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -11,6 +12,8 @@
 #include "rcp_sync.h"
 #include "device_api.h"
 #include "ot_console.h"
+#include "radio_mux.h"
+#include "rcp_proxy.h"
 #include "diag.h"
 #include "metrics.h"
 #include "esp_br_web.h"
@@ -111,6 +114,25 @@ void app_main(void)
     err = ot_console_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "ot_console_init: %s, the Thread console is unavailable", esp_err_to_name(err));
+    }
+    // One eventfd VFS for OpenThread's eventfds, the radio mux's (one per channel it can have open) and the RCP proxy's
+    // kick eventfd, before the mux and the proxy create theirs and before net_init_task starts OpenThread.
+    err = esp_vfs_eventfd_register(&(const esp_vfs_eventfd_config_t) {
+        .max_fds = BR_CORE_EVENTFD_COUNT + RADIO_MUX_EVENTFD_COUNT + RCP_PROXY_EVENTFD_COUNT,
+    });
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_vfs_eventfd_register: %s, no radio channels and no OpenThread", esp_err_to_name(err));
+    }
+    // The rcp-proxy consumer registers before the mux starts (the mux attaches it to channels stored in rcp-proxy).
+    err = rcp_proxy_register();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "rcp_proxy_register: %s, no rcp-proxy mode", esp_err_to_name(err));
+    }
+    // The radio channel mux: the only USB host owner. Consumers register before it starts; br_core keeps its own SPI
+    // path to the C6 until the C6 transport and the otbr consumer exist.
+    err = radio_mux_start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "radio_mux_start: %s, no USB radios", esp_err_to_name(err));
     }
     err = br_core_mdns_start(netnames_hostname(), netnames_ha_name());
     if (err == ESP_OK) {

@@ -1,0 +1,208 @@
+// Radio channel mux: every radio (the on-board C6, a USB dongle) is a channel with a stored mode; the mode's consumer
+// is attached while the channel is present and its firmware fits (spec section 3). A published contract: OpenThread
+// (otbr), rcp_proxy (rcp-proxy) and the Zigbee work (ziggurat) are consumers.
+//
+// Threading: one owner task opens and closes every device and calls the consumers' attach and detach. The transports
+// never call into a consumer: they post events (a FreeRTOS queue the consumer binds, or the channel's own queue
+// signalled through an eventfd). Unless a function says otherwise it may be called from any task, never from an ISR.
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "esp_err.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "radio_mux_core.h"
+#include "radio_mux_detect.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Channels the mux knows at once: c6 plus up to 7 USB channels (attached or remembered in NVS). Only one USB device
+// is open at a time. When an 8th USB channel appears, the unplugged one seen longest ago is forgotten.
+#define RADIO_MUX_CHANNELS_MAX 8
+// Eventfds the mux creates: one per channel it can have open at once (c6, one USB). app_main adds them to the eventfd
+// VFS registration.
+#define RADIO_MUX_EVENTFD_COUNT 2
+// Frame-pool slots per transport. A consumer's bound queue should hold at least this many events plus 2, so that
+// GONE and RESET always fit behind the frames it has not taken yet.
+#define RADIO_MUX_POOL_SLOTS 8
+// Largest spinel frame a channel carries.
+#define RADIO_MUX_FRAME_MAX 2048
+#define RADIO_MUX_LABEL_MAX 48
+#define RADIO_MUX_SERIAL_MAX 32
+#define RADIO_MUX_REASON_MAX 96
+#define RADIO_MUX_PEER_MAX 64
+// RADIO_MUX_C6_ID ("c6", radio_mux_core.h): the id of the on-board C6 channel; USB channels are "usb-<vid>-<pid>[-serial]".
+
+/* ---- events ---- */
+
+typedef enum {
+    RADIO_MUX_EV_RX_FRAME, // slot: the first byte (spinel header) of one spinel frame, len its length; release it
+    RADIO_MUX_EV_RESET,    // the mux reset or reopened the radio (radio_mux_reset); slot NULL
+    RADIO_MUX_EV_GONE,     // the channel is no longer yours (unplugged, failed, or its mode changed); slot NULL
+} radio_mux_ev_type_t;
+
+typedef struct {
+    radio_mux_ev_type_t type;
+    uint8_t *slot;
+    size_t len;
+    int64_t rx_us; // esp_timer time the transport received the frame (RX_FRAME), else the post time
+} radio_mux_ev_t;
+
+/* ---- consumers ---- */
+
+typedef struct radio_mux_chan radio_mux_chan_t; // a channel; the handle stays valid for the life of the firmware
+
+typedef struct {
+    radio_mux_mode_t mode;  // otbr, ziggurat or rcp-proxy
+    radio_mux_fw_t needs;   // firmware the mode needs; UNKNOWN = any (otbr always needs spinel, rcp-proxy nothing)
+    uint8_t limit;          // channels that may run the mode at once; 0 = no limit (otbr is always 1)
+    bool reboot_on_change;  // entering or leaving the mode reboots the board
+    // Byte transports (USB) only. true: spinel frames (RX_FRAME events, radio_mux_tx takes frames); false: raw bytes
+    // (radio_mux_read_raw, radio_mux_tx takes bytes). Ignored on the C6, which always delivers and takes frames: ask
+    // radio_mux_chan_frames in attach.
+    bool frames;
+    // Called from the owner task when the channel enters the mode (present, firmware fits). Bind a queue or take the
+    // eventfd here and return quickly: long work (a probe, a stack start) belongs on the consumer's own task. An error
+    // leaves the channel in fault with the error in its reason.
+    esp_err_t (*attach)(radio_mux_chan_t *ch, void *ctx);
+    // Called from the owner task after GONE was posted: stop using the channel (releases of slots already taken stay
+    // allowed). A consumer attached again later is a normal case.
+    void (*detach)(radio_mux_chan_t *ch, void *ctx);
+    void *ctx;
+} radio_mux_consumer_t;
+
+// Before radio_mux_start only. The declaration is copied. ESP_ERR_INVALID_STATE for a duplicate mode or after the
+// start, ESP_ERR_INVALID_ARG for off, unavailable or an unknown mode, ESP_ERR_NO_MEM when RADIO_MUX_RULES_MAX consumers
+// are registered.
+esp_err_t radio_mux_register_consumer(const radio_mux_consumer_t *c);
+
+// Loads the channels from NVS, lists c6, creates the eventfds (the eventfd VFS must be registered), starts the owner
+// task, which installs the USB host (its interrupt on MGMT_CORE) and attaches registered consumers to present channels.
+// Once.
+esp_err_t radio_mux_start(void);
+
+/* ---- consumer side (between attach and detach) ---- */
+
+// Events go into `q` (items of radio_mux_ev_t, posted with timeout 0; frames that don't fit are dropped and counted)
+// instead of the channel's own queue; events already waiting there move into `q`. Call it in attach. NULL goes back
+// to the channel's queue.
+esp_err_t radio_mux_bind_queue(radio_mux_chan_t *ch, QueueHandle_t q);
+// The channel's eventfd: readable when its own queue has events (consumers without a bound queue) or a raw channel has
+// bytes. The value means nothing; radio_mux_poll and radio_mux_read_raw clear it. -1 when the mux is not started.
+int radio_mux_eventfd(radio_mux_chan_t *ch);
+// Takes the next event of the channel's own queue without waiting; false when there is none (it then clears the
+// eventfd, so take events until it returns false before waiting again). Until another consumer attaches to the
+// transport, the detached consumer can still take what it was sent (its GONE); afterwards its handle gets false here
+// and in radio_mux_read_raw, and ESP_ERR_INVALID_STATE from radio_mux_tx and radio_mux_bind_queue.
+bool radio_mux_poll(radio_mux_chan_t *ch, radio_mux_ev_t *ev);
+// Gives back the slot of an RX_FRAME event: the `slot` pointer the event carried. Allowed after GONE and detach.
+void radio_mux_release(radio_mux_chan_t *ch, uint8_t *slot);
+// Sends one spinel frame (frame consumers; HDLC-encoded on USB) or bytes (raw consumers). The data is copied before
+// the call returns. ESP_ERR_INVALID_STATE at once when the channel is not attached (gone, closed, reopening);
+// ESP_ERR_INVALID_SIZE for a frame above RADIO_MUX_FRAME_MAX. Blocks at most radio_mux_tx_timeout_ms (100 ms plus
+// twice the write's wire time at the channel's baud) on a stalled device.
+esp_err_t radio_mux_tx(radio_mux_chan_t *ch, const uint8_t *data, size_t n);
+// Asks for a reset: a dongle is closed and reopened over USB (never DTR/RTS pulses, never VBUS), the C6 gets its reset
+// GPIO pulse (Task 6). RESET is posted when the radio is back; GONE when it did not come back. Does not wait.
+esp_err_t radio_mux_reset(radio_mux_chan_t *ch);
+// Raw channels: takes up to cap received bytes without waiting; 0 when there are none.
+size_t radio_mux_read_raw(radio_mux_chan_t *ch, uint8_t *out, size_t cap);
+const char *radio_mux_chan_id(const radio_mux_chan_t *ch);
+// Whether the attached consumer gets frames on this channel (RX_FRAME, radio_mux_tx of frames) rather than raw bytes:
+// always true on the C6, the consumer's `frames` on a USB channel. Valid from attach (the delivery kind is set before
+// attach is called) until the next attach on the transport.
+bool radio_mux_chan_frames(const radio_mux_chan_t *ch);
+// The channel's stored rcp_proxy settings (for the rcp-proxy consumer, read at attach: a change re-attaches it).
+void radio_mux_get_proxy(const radio_mux_chan_t *ch, radio_mux_proxy_settings_t *out);
+// Passive firmware update (a consumer saw the spinel version): stored with source passive and the time. Does not wait.
+void radio_mux_note_firmware(radio_mux_chan_t *ch, const radio_mux_fw_record_t *fw);
+
+/* ---- API side ---- */
+
+typedef struct {
+    bool has_mode;
+    radio_mux_mode_t mode;
+    bool has_baud;
+    uint32_t baud;
+    bool has_flow;
+    bool flow;
+    bool has_proxy;
+    radio_mux_proxy_settings_t proxy;
+    uint8_t proxy_fields; // RADIO_MUX_PROXY_F_* bits: which fields of `proxy` are given
+    bool kick;            // never stored; radio_mux_set ignores it (device_api kicks through rcp_proxy)
+} radio_mux_set_req_t;
+
+typedef enum {
+    RADIO_MUX_KIND_C6,
+    RADIO_MUX_KIND_USB,
+} radio_mux_kind_t;
+
+typedef struct {
+    radio_mux_fw_record_t rec;     // type, version, chip, baud that answered
+    radio_mux_fw_source_t source;  // NONE: no record (the API's null)
+    int64_t at;                    // seconds since the epoch; 0 when the board clock was not set
+} radio_mux_firmware_t;
+
+typedef struct {
+    char id[RADIO_MUX_ID_MAX];
+    radio_mux_kind_t kind;
+    char label[RADIO_MUX_LABEL_MAX]; // USB product string, or a name made from the bridge
+    bool present;                    // attached (USB) or answering (C6)
+    bool supported;                  // a driver exists (USB) / the transport exists (C6)
+    radio_mux_mode_t mode;           // the API's mode: UNAVAILABLE when not present or not supported
+    radio_mux_mode_t stored_mode;
+    radio_mux_state_t state;
+    char reason[RADIO_MUX_REASON_MAX]; // the API's error; empty when none
+    struct {
+        uint32_t baud;     // the stored baud, or 460800 when none is stored
+        bool flow_control; // the stored setting
+    } line;
+    struct {
+        uint16_t vid, pid;
+        char serial[RADIO_MUX_SERIAL_MAX];
+        radio_mux_driver_t driver;
+    } usb; // kind USB only
+    struct {
+        bool firmware_update, hw_reset, flow_control;
+    } caps;
+    radio_mux_proxy_settings_t proxy;
+    const char *proxy_state;            // left NULL here; device_api fills it from rcp_proxy
+    char proxy_peer[RADIO_MUX_PEER_MAX]; // left empty here; device_api fills it from rcp_proxy
+    radio_mux_firmware_t firmware;
+    radio_mux_counters_t counters; // since boot
+} radio_mux_chan_info_t;
+
+typedef struct {
+    size_t n;
+    radio_mux_chan_info_t chans[RADIO_MUX_CHANNELS_MAX]; // c6 first, then USB channels in the order first seen
+} radio_mux_snapshot_t;
+
+// Every known channel (about 4 KB: allocate it, don't put it on a small stack). Zero channels before the start.
+void radio_mux_get_snapshot(radio_mux_snapshot_t *out);
+
+// Validates, stores in NVS and applies a change (attach, detach, re-attach; line settings reconfigure an open device).
+// Settings for an unavailable channel are stored and apply on its return; a mode on it is refused. A refused change
+// stores nothing. APPLY_REBOOT stores only: the caller reboots. MOVE (otbr while another channel has it) calls the
+// mover set by radio_mux_set_otbr_mover from the calling task and stores nothing itself (the move stores both modes);
+// with no mover, or when the mover fails, it is refused: RADIO_MUX_REFUSE_NOT_AVAILABLE. On MOVE, moved_from gets
+// the id the move came from (may be NULL). Waits for the owner task (up to 5 s); RADIO_MUX_REFUSE_FAILED when it can't.
+radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req, char *moved_from, size_t cap);
+
+// Forgets an unplugged USB channel: erases its settings and removes it from the list. ESP_ERR_INVALID_STATE for the
+// C6 or a present channel, ESP_ERR_NOT_FOUND for an unknown id.
+esp_err_t radio_mux_forget(const char *id);
+
+// Id of the channel whose stored mode is otbr (present or not), NULL when none.
+const char *radio_mux_otbr_channel(void);
+
+// br_core: runs a move of OpenThread from channel `from` to `to` (Task 7: probe synchronously, then the long op).
+void radio_mux_set_otbr_mover(esp_err_t (*move)(const char *from, const char *to));
+
+#ifdef __cplusplus
+}
+#endif

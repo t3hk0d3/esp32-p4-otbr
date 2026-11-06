@@ -30,6 +30,8 @@ below, any of them can answer 500 `internal` or `no_memory`.
 | `GET /device/console` | Thread console setting and session: `{"enabled": bool, "session": null \| {"peer": "<address>", "since_s": <s>}}`, see [Thread console](#thread-console) | |
 | `PUT /device/console` | body `{"enabled": bool}`; stored, off by default; turning it off closes the session (4003); replies like GET | 400 `invalid_request` (`enabled` missing or not a boolean), `length_required`; 413 `payload_too_large`; 500 `storage_failed`; 503 `not_started` (the console did not start at boot) |
 | `GET /device/console/ws` | WebSocket: the board's OpenThread CLI, see [Thread console](#thread-console) | 403 on an interface that does not serve the device API |
+| `GET /device/usb_serial` | USB serial proxy setting and status, see [USB serial proxy](#usb-serial-proxy-experimental) | |
+| `PUT /device/usb_serial` | any of `enabled`, `port`, `baud`, `flow_control`, `kick` (`true` drops the client); stored, off by default; replies like GET | 400 `invalid_request` (port outside 1-65535 or 80 or 179, baud not in the list, a field of the wrong type), `length_required`; 413 `payload_too_large`; 500 `storage_failed`; 503 `not_started`; 504 `timeout` |
 | `POST /device/reboot` | reboot | 409 `busy` while an update or push runs (other reboots, such as the network trial revert, `net reset` and `DELETE /node`, wait until it ends) |
 | `GET /metrics` | device health and Thread figures in the Prometheus text format, see [metrics](metrics.md) | 500 `no_memory` |
 
@@ -239,6 +241,25 @@ websocat ws://<board>/device/console/ws
 ```
 
 <img src="images/console.png" width="640" alt="Thread Console page: connected, with the output of state and router table">
+
+### USB serial proxy (experimental)
+
+A USB serial dongle on the board's USB-A port, served byte for byte to one TCP client; see [USB serial proxy](usb-serial.md).
+Off by default. `PUT` takes any of `enabled`, `port` (1-65535, not 80 or 179; default 6638), `baud` (38400, 57600,
+115200, 230400, 460800, 921600, 1000000 or 2000000; default 115200), `flow_control` (default false) and `kick`
+(`true` closes the current client; not stored). Both routes answer with the whole body:
+
+```
+{"enabled": true, "port": 6638, "baud": 115200, "flow_control": false,
+ "dongle": {"vid": "10c4", "pid": "ea60", "driver": "cp210x", "open": true, "flow_control": false, "error": null},
+ "client": {"peer": "192.168.1.20", "since_s": 42},
+ "bytes_to_dongle": 12345, "bytes_from_dongle": 67890, "discarded_from_client": 0,
+ "overflow_disconnects": 0, "refused_connections": 0}
+```
+
+`dongle` and `client` are `null` when absent. A `400 invalid_request` answers a port outside 1-65535 or equal to 80
+or 179, a baud rate not in the list, and a field of the wrong type (`{"port": "6638"}`). Validation does not depend on
+the dongle.
 
 ## Thread REST API
 

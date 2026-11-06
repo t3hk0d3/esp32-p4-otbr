@@ -20,10 +20,25 @@ typedef enum {
     NETCFG_SVC_DEVICE_API,  /**< /device/ * */
     NETCFG_SVC_REST_READ,   /**< Thread REST GET / HEAD */
     NETCFG_SVC_REST_WRITE,  /**< every other Thread REST method */
+    NETCFG_SVC_RCP_PROXY,   /**< the RCP proxy's listen sockets and UDP sources (netcfg_socket_allowed, netcfg_peer_allowed) */
 } netcfg_service_t;
 
-/** Single mode allows everything. Split mode: mgmt allows GUI, DEVICE_API, REST_READ; thread allows REST_READ, REST_WRITE. */
+/**
+ * Single mode allows everything. Split mode: mgmt allows GUI, DEVICE_API, REST_READ, RCP_PROXY; thread allows REST_READ,
+ * REST_WRITE, RCP_PROXY.
+ */
 bool netcfg_policy_allows(netcfg_mode_t mode, netcfg_side_t side, netcfg_service_t svc);
+
+/**
+ * The decision for a non-HTTP connection or datagram source (netcfg_socket_allowed, netcfg_peer_allowed): `found` and
+ * `side` say which interface it belongs to, `on_mesh` whether it is on the OpenThread netif. The mesh is refused in every
+ * mode; otherwise single mode allows everything (also when no interface matches); split mode refuses an unknown interface
+ * and applies the policy table.
+ */
+bool netcfg_policy_conn_allowed(netcfg_mode_t mode, bool found, netcfg_side_t side, bool on_mesh, netcfg_service_t svc);
+
+/** Must a connection be refused because its local address is on the OpenThread netif (the mesh)? The same in every mode. */
+bool netcfg_mesh_refused(bool on_mesh);
 
 /** A trial is confirmed only by a request that arrived on the management side. */
 bool netcfg_confirm_allowed(netcfg_side_t side);

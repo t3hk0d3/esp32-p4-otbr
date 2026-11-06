@@ -7,6 +7,11 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+### Added
+
+- USB serial proxy (experimental): a USB serial dongle on the USB-A port served byte for byte to one TCP client (default
+  port 6638), off by default; `GET`/`PUT /device/usb_serial`. Not yet checked on a board. See `docs/usb-serial.md`.
+
 ## [0.4.0] - 2026-11-05
 
 ### Added

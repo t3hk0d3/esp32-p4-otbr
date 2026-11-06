@@ -22,7 +22,6 @@
 #include "esp_openthread_types.h"
 #include "esp_system.h"
 #include "esp_timer.h"
-#include "esp_vfs_eventfd.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -69,12 +68,6 @@ static const char *TAG = "br_core";
 #define FAULT_NO_RCP "no rcp firmware"
 #define FAULT_INCOMPATIBLE "rcp incompatible"
 #define FAULT_ROM_RECOVERY "rom recovery failed"
-// Spinel SPI endpoint, an eventfd each for the netif, the task queue and the border router, and one for TREL reception.
-#if CONFIG_OPENTHREAD_RADIO_TREL
-#define EVENTFD_COUNT 5
-#else
-#define EVENTFD_COUNT 4
-#endif
 #define TREL_SET_LOCK_MS 1000
 #define TREL_QUERY_MS 3000 // how long a peer query collects answers (esp mdns sends it about once a second)
 #define TREL_QUERY_DELAY_MS 100 // after an address event: a burst of them gets one query
@@ -462,10 +455,7 @@ static void set_vendor_sw_version(void)
 
 static esp_err_t init_openthread(void)
 {
-    esp_vfs_eventfd_config_t eventfd_config = {.max_fds = EVENTFD_COUNT};
-    esp_err_t err = esp_vfs_eventfd_register(&eventfd_config);
-    ESP_RETURN_ON_FALSE(err == ESP_OK || err == ESP_ERR_INVALID_STATE, err, TAG, "eventfd register: %s", esp_err_to_name(err));
-
+    // The eventfd VFS is registered once in app_main (BR_CORE_EVENTFD_COUNT plus the mux's), before radio_mux_start.
     esp_openthread_register_rcp_failure_handler(on_rcp_failure);
     esp_openthread_set_coprocessor_reset_failure_callback(on_coprocessor_reset_failure);
     esp_openthread_set_compatibility_error_callback(on_compatibility_error);

@@ -19,6 +19,8 @@
 extern "C" {
 #endif
 
+struct sockaddr;
+
 /**
  * Bring up the interfaces of the active (or trial) configuration on the installed, not yet started Ethernet driver:
  * loads the config from NVS namespace "otbr_net" (keys "active", "trial", "trial_boots"), creates the netif(s), installs
@@ -47,6 +49,25 @@ esp_netif_t *netcfg_mgmt_netif(void);
  * server closes the connection. In split mode a request whose local address matches no interface is refused.
  */
 bool netcfg_request_allowed(httpd_req_t *req, netcfg_service_t svc);
+
+/**
+ * Same decision for a connected non-HTTP socket (the RCP proxy's TCP listen clients): may the connection on `fd` use `svc` on the
+ * interface its local address belongs to? A local address on the OpenThread netif (the mesh) is refused in every mode,
+ * single included. Otherwise single mode allows everything (also when the interface is not found); split mode applies
+ * the policy and refuses a connection whose interface is not found. Takes the netcfg lock for at most 100 ms to look the
+ * interface up; if it cannot, logs a warning and refuses. Sends nothing on the socket: the caller closes it. Call it
+ * from a task that does not hold the netcfg lock.
+ */
+bool netcfg_socket_allowed(int fd, netcfg_service_t svc);
+
+/**
+ * The same decision for a datagram source (the RCP proxy's UDP sources): may `peer` (sockaddr_in, or sockaddr_in6 with an
+ * IPv4-mapped address on a dual-stack socket) use `svc`? Its interface is the one a reply to it leaves on (lwIP's route
+ * lookup, a short call into the tcpip task; a link-local address goes by its zone). A peer routed to the OpenThread netif is
+ * refused in every mode; otherwise as netcfg_socket_allowed (netcfg_policy_conn_allowed). Call it from a task that does not
+ * hold the netcfg lock, never from the tcpip task.
+ */
+bool netcfg_peer_allowed(const struct sockaddr *peer, netcfg_service_t svc);
 
 /**
  * Validate `cfg` and store it as the pending trial, then reboot (after a short delay, so the reply can be sent) into it.

@@ -55,10 +55,16 @@ CONFIG_LWIP_NUM_NETIF_CLIENT_DATA=0
 
 # Sockets: web server 10 (max_open_sockets 7 + listener + 2 control sockets) + mesh routing up to 7 (BGP: a listener,
 # a current and a pending connection per peer, and 2 closing after a NOTIFICATION; RIPng: one, never both methods at
-# once) + 1 HTTP client (OTA or a radio firmware URL) = 18. mDNS, OpenThread, DNS and SNTP use lwIP raw PCBs, not
-# sockets. routing/task.c fails the build below that. An existing p4/sdkconfig keeps its old value: delete it after
-# pulling (docs/development.md).
-CONFIG_LWIP_MAX_SOCKETS=18
+# once) + 1 HTTP client (OTA or a radio firmware URL) + 6 RCP proxy (two channels in rcp-proxy at once, the C6 and the
+# one open USB device, each a listener, its client and one connection being refused) = 24. mDNS, OpenThread, DNS and
+# SNTP use lwIP raw PCBs, not sockets. routing/task.c fails the build below that. An existing p4/sdkconfig keeps its old
+# value: delete it after pulling (docs/development.md).
+CONFIG_LWIP_MAX_SOCKETS=24
+# Active TCP PCBs: the 16 of before were used up by the same sockets; the RCP proxy adds per channel its client and a
+# refused connection, plus headroom for PCBs still closing (TIME_WAIT) = 22.
+CONFIG_LWIP_MAX_ACTIVE_TCP=22
+# SO_LINGER {1, 0}: the RCP proxy refuses a second TCP connection with an RST, leaving no TIME_WAIT PCB.
+CONFIG_LWIP_SO_LINGER=y
 
 # lwIP never forwards IPv4: no routing between interfaces (spec 5.13); NAT64 egress is generated locally by OpenThread.
 CONFIG_LWIP_IP_FORWARD=n
