@@ -465,11 +465,12 @@ mockup (`2026-11-06-zigbee-page-mockup.html`): Running, Waiting for Home Assista
 **Files:** Create `tools/zigbee_test_device/` (IDF project for `esp32c6`: esp-zigbee-sdk's on/off light as a router,
 `idf_component.yml` pinning `espressif/esp-zigbee-lib`, `esp-zboss-lib` and `espressif/led_strip`). *(The user's
 call, 2026-11-06.)* The light **is the devkit's on-board RGB LED**: the On/Off cluster drives it (on = white, off = dark;
-the WS2812 on GPIO8 of the ESP32-C6-DevKitC, confirm the aux board's LED pin from its silkscreen or schematic before
-writing the driver), and the device prints `light: on` / `light: off` on the serial console on every change, which is
+the aux board is a Waveshare ESP32-C6-DEV-KIT-N8: its schematic puts a WS2812B on GPIO8, net `RGB_CTRL`; driven
+with `espressif/led_strip` over RMT; docs: https://docs.waveshare.com/ESP32-C6-DEV-KIT-N8), and the device prints `light: on` / `light: off` on the serial console on every change, which is
 what the tests read. A console command `factory_reset` leaves the network and starts joining; `state` prints the
 light and the join state. `p4/pytest/zigbee_device.py` opens the aux C6 by its by-id path
-`usb-1a86_USB_Single_Serial_5B61094735-if00` after `fuser -v` shows it free, flashes it with esptool when its app
+`usb-1a86_USB_Single_Serial_5B61094735-if00` (the board's CH343 UART bridge, behind its on-board CH334 hub; the C6's
+native USB-JTAG shares the same Type-C cable as a second device) after `fuser -v` shows it free, flashes it with esptool when its app
 description is not this project's, and offers `factory_reset()`, `wait_joined()`, `light_state()` (from the console
 lines).
 
