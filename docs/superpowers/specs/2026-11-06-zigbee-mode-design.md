@@ -215,9 +215,10 @@ From the spike and its on-board runs (2026-11-06):
     replays the stored configuration and source-match table, exactly as after RESET. The stack is not started a second
     time. Children that went quiet retry and rejoin as usual. (A different stick is a different channel id, so moving
     the network to it is a mode change, which reboots by the mode rule.)
-  - C6 jobs (firmware push, ROM recovery) while the C6 is in Ziggurat mode run as the mux design defines. While the job
-    holds the C6 the stack sees GONE (or simply no frames) and runs without a radio; when the mux hands the C6 back
-    (RESET or a new attach) the client replays. No reboot is needed.
+  - C6 jobs (firmware push, ROM recovery) run in Ziggurat mode as in any mode (the mux design). During the job the
+    consumer sees GONE and runs without a radio; afterwards the mux attaches it again and the client replays. No
+    reboot. Attach is one path in the mux (boot, plug-in, return after GONE, mode change), so attach, GONE, attach
+    again on the same channel is a normal case.
 - **Memory in PSRAM.** Ziggurat's heap (its routing, child, neighbour and key tables, packet queues; everything it
   allocates) lives in PSRAM, so the network can grow to the size of a typical ZHA home (100+ devices) without taking
   internal RAM from lwIP, the HTTP server or an OTBR channel. The staticlib's `esp-idf` allocator is hard-wired to
