@@ -218,7 +218,29 @@ function threadNotice(s, kind) {
   return null;
 }
 
+/*
+ * Fills the #threadNotice element of `doc` with notice `n` (null hides it); returns n. Standalone, for pages without a
+ * DeviceKit (the Console). Missing element: nothing happens.
+ */
+function showThreadNotice(doc, n) {
+  var box = doc.getElementById('threadNotice');
+  if (!box)
+    return n;
+  while (box.firstChild)
+    box.removeChild(box.firstChild);
+  box.classList.toggle('hidden', !n);
+  if (n) {
+    box.appendChild(doc.createTextNode(n.text + ' '));
+    var a = doc.createElement('a');
+    a.textContent = n.label;
+    a.setAttribute('href', n.href);
+    box.appendChild(a);
+  }
+  return n;
+}
+
 return {
+  showThreadNotice : showThreadNotice,
   threadState : threadState,
   threadNotice : threadNotice,
   wholeNumber : wholeNumber,
@@ -450,21 +472,17 @@ function waitForBoard(msgId, giveUpText) {
 
 /* Fills #threadNotice from a /device/status body; returns the notice shown (null: none). `skipFault`: leave faults out. */
 function renderThreadNotice(s, kind, skipFault) {
-  var box = doc.getElementById('threadNotice');
-  if (!box)
-    return null;
   var n = L.threadNotice(s, kind);
   if (n && skipFault && n.fault)
     n = null;
-  clear(box);
-  box.classList.toggle('hidden', !n);
-  if (n) {
-    box.appendChild(doc.createTextNode(n.text + ' '));
-    var a = el('a', n.label);
-    a.setAttribute('href', n.href);
-    box.appendChild(a);
-  }
-  return n;
+  return L.showThreadNotice(doc, n);
+}
+
+/* Reads /device/status now and shows the notice; resolves to the notice (null: Thread is not known to be down). */
+function threadStatus(kind) {
+  return request('GET', '/device/status', {timeoutMs : 5000}).then(function(r) {
+    return r.status === 200 && r.body ? renderThreadNotice(r.body, kind, false) : null;
+  }, function() { return null; });
 }
 
 /* Polls /device/status for the notice (pages that do not read the status themselves). */
@@ -547,6 +565,7 @@ return {
   poller : poller,
   renderThreadNotice : renderThreadNotice,
   watchThread : watchThread,
+  threadStatus : threadStatus,
   setBusy : setBusy,
   runOp : runOp,
   waitForBoard : waitForBoard,

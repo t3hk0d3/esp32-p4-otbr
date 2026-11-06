@@ -18,8 +18,9 @@ var MgmtLogic = (function() {
 function modeBanner(s) {
   if (!s)
     return {text : 'No answer from the device.', href : '/', label : 'Open the Dashboard'};
-  var noRadio = typeof DeviceCommon !== 'undefined' ? DeviceCommon : require('./device_common.js');
-  var n = noRadio.threadNotice(s, null);
+  var common = typeof DeviceCommon !== 'undefined' ? DeviceCommon
+                                                    : (typeof require === 'function' ? require('./device_common.js') : null);
+  var n = common ? common.threadNotice(s, null) : null;
   if (n && !n.fault)
     return {text : n.text, href : n.href, label : n.label};
   if (s.mode === 'BR_RUNNING')

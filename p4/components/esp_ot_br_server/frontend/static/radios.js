@@ -66,8 +66,14 @@ function labelOf(snapshot, id) {
   return ch ? ch.label : String(id);
 }
 
-/* The other channel Thread is stored on (the one a move takes Thread from), or null. */
-function threadElsewhere(snapshot, ch) {
+/*
+ * The other channel Thread runs on (the one a move takes Thread from), or null. The board's `otbr_channel` of
+ * /device/status says it when it is not null; only without it (null, or no status yet) the stored modes are looked at.
+ */
+function threadElsewhere(snapshot, ch, status) {
+  var running = status ? status.otbr_channel : null;
+  if (typeof running === 'string')
+    return running === ch.id ? null : (findChannel(snapshot, running) || {id : running, label : running});
   var list = snapshot && snapshot.channels ? snapshot.channels : [];
   for (var i = 0; i < list.length; i++)
     if (list[i].id !== ch.id && list[i].stored_mode === 'otbr')
@@ -167,7 +173,7 @@ function proxyOf(ch) {
  * {requests: [body, ...], move}. The settings go first and the mode alone after them: the API refuses a move of
  * Thread that carries settings.
  */
-function plan(ch, snapshot, draft) {
+function plan(ch, snapshot, draft, status) {
   var settings = {};
   var plugged = present(ch);
   if (ch.usb) {
@@ -207,7 +213,7 @@ function plan(ch, snapshot, draft) {
   var move = false;
   if (plugged && draft.touched && draft.pick !== ch.stored_mode) {
     requests.push({mode : draft.pick});
-    move = draft.pick === 'otbr' && !!threadElsewhere(snapshot, ch);
+    move = draft.pick === 'otbr' && !!threadElsewhere(snapshot, ch, status);
   }
   return {requests : requests, move : move};
 }
@@ -270,6 +276,7 @@ var $ = kit.$, el = kit.el, clear = kit.clear, setText = kit.setText, show = kit
 var doc = env.document;
 var SVG_NS = 'http://www.w3.org/2000/svg';
 var FAST_MS = 2000;
+var MOVE_GIVE_UP_MS = 90000;
 
 var snap = null;       // last GET /device/channels
 var status = null;     // last GET /device/status
@@ -351,16 +358,27 @@ function anyStarting() {
   return !!snap && snap.channels.some(function(c) { return c.state === 'starting'; });
 }
 
-/* After a move was accepted, says how it ended once no channel is starting any more. */
+/*
+ * After a move was accepted, says how it ended. It failed only when the target was seen starting (or faulted) and
+ * then settled without Thread running on it, or when 90 s passed without either: the first answers after the 202
+ * may still show the old picture.
+ */
 function settleMove() {
-  if (!moving || anyStarting())
+  if (!moving)
     return;
   var to = L.findChannel(snap, moving.to);
-  var ok = status && status.otbr_channel === moving.to;
-  note('rMsg', ok ? 'Thread now runs on ' + L.labelOf(snap, moving.to) + '.'
-                  : 'Thread did not start on ' + L.labelOf(snap, moving.to) +
-                        (to && to.error ? ' (' + to.error + ')' : '') + '. It goes back to the previous radio if that is still there.',
-       !ok);
+  var name = L.labelOf(snap, moving.to);
+  if (to && (to.state === 'starting' || to.state === 'fault'))
+    moving.seen = true;
+  var ok = !!status && status.otbr_channel === moving.to;
+  if (ok && !anyStarting()) {
+    note('rMsg', 'Thread now runs on ' + name + '.', false);
+  } else if ((moving.seen && !anyStarting()) || env.now() - moving.at > MOVE_GIVE_UP_MS) {
+    note('rMsg', 'Thread did not start on ' + name + (to && to.error ? ' (' + to.error + ')' : '') +
+                     '. It goes back to the previous radio if that is still there.', true);
+  } else {
+    return;
+  }
   moving = null;
 }
 
@@ -446,7 +464,7 @@ function renderCards(ch) {
 }
 
 function moveText(ch) {
-  var from = L.threadElsewhere(snap, ch);
+  var from = L.threadElsewhere(snap, ch, status);
   if (!from)
     return 'Saving starts the Thread border router on this radio.';
   return 'Saving moves Thread from ' + from.label + ' to this radio. Thread devices lose the border router for a ' +
@@ -475,7 +493,7 @@ function renderDialog() {
                            : (draft.adapter === 'udp'
                                   ? 'The first address that sends becomes the peer; others are dropped until it has been silent for 30 s.'
                                   : 'The first client to connect keeps the radio until it disconnects.'));
-  setText('mSave', moveHere && L.threadElsewhere(snap, ch) ? 'Move Thread here' : 'Save');
+  setText('mSave', moveHere && L.threadElsewhere(snap, ch, status) ? 'Move Thread here' : 'Save');
 }
 
 function fillBauds(ch) {
@@ -542,27 +560,29 @@ function readDraft(ch) {
   return draft;
 }
 
-/* PUTs the bodies one after the other; resolves to the last reply, or the first refusal. */
+/* PUTs the bodies one after the other; resolves to the replies, in order. A refusal or a lost connection ends it. */
 function putAll(id, bodies) {
-  var last = null;
+  var replies = [];
   var chain = Promise.resolve();
   bodies.forEach(function(body) {
     chain = chain.then(function() {
-      if (last && last.status !== 200 && last.status !== 202)
+      if (replies.length && replies[replies.length - 1].status !== 200 && replies[replies.length - 1].status !== 202)
         return;
       return kit.request('PUT', '/device/channels/' + encodeURIComponent(id),
                          {headers : {'Content-Type' : 'application/json'}, body : JSON.stringify(body), timeoutMs : 20000})
-          .then(function(r) { last = r; });
+          .then(function(r) { replies.push(r); }, function(e) { replies.push({status : 0, body : null, message : e.message}); });
     });
   });
-  return chain.then(function() { return last; });
+  return chain.then(function() { return replies; });
 }
+
+function failedText(r) { return r.status === 0 ? r.message : L.errorText(r.status, r.body); }
 
 function save() {
   var ch = current();
   if (!ch || kit.isBusy())
     return Promise.resolve(null);
-  var p = L.plan(ch, snap, readDraft(ch));
+  var p = L.plan(ch, snap, readDraft(ch), status);
   if (p.error) {
     note('mMsg', p.error, true);
     return Promise.resolve(null);
@@ -571,28 +591,38 @@ function save() {
     closeDialog();
     return Promise.resolve(null);
   }
-  var from = L.threadElsewhere(snap, ch);
+  var from = L.threadElsewhere(snap, ch, status);
   return kit.runOp(function() {
     note('mMsg', 'Saving...', false);
-    return putAll(ch.id, p.requests).then(function(r) {
-      if (r.status !== 200 && r.status !== 202) {
-        note('mMsg', L.errorText(r.status, r.body), true);
-        return refresh().then(function() { return r; });
-      }
-      closeDialog();
-      if (r.status === 202) {
-        moving = {from : r.body && r.body.moved_from ? r.body.moved_from : (from && from.id), to : ch.id};
-        note('rMsg', 'Moving Thread from ' + L.labelOf(snap, moving.from) + ' to ' + ch.label + ': Thread devices lose ' +
-                         'the border router for a few seconds.', false);
-      } else if (r.body && r.body.reboot) {
-        note('rMsg', 'Saved. The board is rebooting to apply the change; this page reloads when it is back.', false);
-        kit.waitForBoard('rMsg');
-        return {handoff : true};
+    return putAll(ch.id, p.requests).then(function(replies) {
+      var last = replies[replies.length - 1];
+      var failed = last.status !== 200 && last.status !== 202;
+      var rebooting = replies.some(function(r) { return r.body && r.body.reboot; });
+      if (failed) {
+        // The first request of two went through: its settings are stored, only the mode change did not happen.
+        note('mMsg', replies.length > 1 ? 'The settings were saved, but the mode change failed: ' + failedText(last)
+                                        : failedText(last),
+             true);
       } else {
-        note('rMsg', 'Saved ' + ch.label + '.', false);
+        closeDialog();
+        if (last.status === 202) {
+          moving = {from : last.body && last.body.moved_from ? last.body.moved_from : (from && from.id), to : ch.id,
+                    at : env.now(), seen : false};
+          note('rMsg', 'Moving Thread' + (moving.from ? ' from ' + L.labelOf(snap, moving.from) : '') + ' to ' + ch.label +
+                           ': Thread devices lose the border router for a few seconds.', false);
+        } else if (!rebooting) {
+          note('rMsg', 'Saved ' + ch.label + '.', false);
+        }
       }
-      return refresh().then(function() { return r; });
-    }, function(e) { note('mMsg', e.message, true); });
+      return refresh().then(function() {
+        if (rebooting && !failed) {
+          note('rMsg', 'Saved. The board is rebooting to apply the change; this page reloads when it is back.', false);
+          kit.waitForBoard('rMsg');
+          return {handoff : true};
+        }
+        return last;
+      });
+    });
   });
 }
 

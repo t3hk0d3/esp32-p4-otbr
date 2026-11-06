@@ -829,3 +829,340 @@ class TestHideRule:
             assert (
                 'role="status"' in html.split('id="threadNotice"')[1].split(">")[0]
             ), name
+
+
+CONSOLE_ROUTES = """(u, o) => {
+  if (u === '/device/status') return {status: 200, body: Object.assign(H.fixture(H.STATUS), t.status || {})};
+  if (u === '/device/console') return {status: 200, body: {enabled: true, session: null}};
+  if (u === '/node') return {status: 200, body: {networkName: 'x'}};
+  return {status: 200, body: {}};
+}"""
+
+
+@needs_node
+class TestThreadPagesWithoutRadio:
+    """Console, Routing and Topology while no radio runs Thread"""
+
+    def test_console_does_not_connect_and_shows_the_notice(self):
+        # On NO_RADIO: the notice shows, no WebSocket opens, the pill says Thread is not running.
+        r = scenario(
+            page("console", CONSOLE_ROUTES)
+            + f"t.status = {json.dumps(NO_RADIO)}; t.page.init(); await t.advance(100);"
+            + "return [t.sockets.length, t.el('threadNotice').hidden(), t.el('threadNotice').allText(), t.el('con-pill').textContent];"
+        )
+        assert r[0] == 0
+        assert r[1] is False
+        assert "Open Radios" in r[2]
+        assert r[3] == "Thread not running"
+
+    def test_console_connects_when_the_radio_comes_back(self):
+        # On a radio that returns: the page tries again by itself, hides the notice and connects.
+        r = scenario(
+            page("console", CONSOLE_ROUTES)
+            + f"t.status = {json.dumps(NO_RADIO)}; t.page.init(); await t.advance(100);"
+            + f"t.status = {json.dumps(RUNNING)}; await t.advance(6000);"
+            + "return [t.sockets.length, t.el('threadNotice').hidden()];"
+        )
+        assert r == [1, True]
+
+    def test_failed_handshake_names_the_missing_radio(self):
+        # On a handshake that fails while no radio runs Thread: the notice shows and the page does not retry blindly.
+        r = scenario(
+            page("console", CONSOLE_ROUTES)
+            + f"t.status = {json.dumps(RUNNING)}; t.page.init(); await t.advance(100);"
+            + f"t.status = {json.dumps(NO_RADIO)}; t.sockets[0].drop(1006); await t.advance(100);"
+            + "return [t.sockets.length, t.el('threadNotice').hidden(), t.el('con-pill').textContent];"
+        )
+        assert r == [1, False, "Thread not running"]
+
+    def test_failed_handshake_with_thread_up_retries(self):
+        # On a handshake that fails while Thread runs: the usual reconnect.
+        r = scenario(
+            page("console", CONSOLE_ROUTES)
+            + f"t.status = {json.dumps(RUNNING)}; t.page.init(); await t.advance(100);"
+            + "t.sockets[0].drop(1006); await t.advance(100);"
+            + "return [t.el('threadNotice').hidden(), t.el('con-pill').textContent];"
+        )
+        assert r == [True, "Reconnecting"]
+
+    def test_routing_shows_the_notice_instead_of_the_raw_503(self):
+        # On a 503 from /device/routing in NO_RADIO: the notice shows and the stale line stays empty.
+        r = scenario(
+            page(
+                "routing",
+                ROUTES.replace(
+                    "if (u === '/device/channels')",
+                    "if (u === '/device/routing') return {status: 503, body: {error: 'unavailable', detail: 'no radio in OTBR mode'}};\n  if (u === '/device/channels')",
+                ),
+            )
+            + f"t.status = {json.dumps(NO_RADIO)}; t.page.init(); await t.advance(200);"
+            + "return [t.el('threadNotice').hidden(), t.el('r-stale').allText(), t.el('r-stale').hidden()];"
+        )
+        assert r[0] is False
+        assert "no radio in OTBR mode" not in r[1]
+        assert r[2] is True
+
+    def test_routing_still_shows_a_503_when_thread_is_up(self):
+        # On a 503 with Thread up: the raw error stays visible.
+        r = scenario(
+            page(
+                "routing",
+                ROUTES.replace(
+                    "if (u === '/device/channels')",
+                    "if (u === '/device/routing') return {status: 503, body: {error: 'unavailable', detail: 'starting'}};\n  if (u === '/device/channels')",
+                ),
+            )
+            + f"t.status = {json.dumps(RUNNING)}; t.page.init(); await t.advance(200);"
+            + "return t.el('r-stale').textContent;"
+        )
+        assert "could not be read" in r
+
+    def test_topology_scan_start_shows_the_notice_instead_of_the_raw_503(self):
+        # On a 503 from the scan start in NO_RADIO: the notice shows and the start note has no raw error.
+        r = scenario(
+            page(
+                "topology",
+                ROUTES.replace(
+                    "if (u === '/device/channels')",
+                    "if (u === '/device/topology') return {status: 503, body: {error: 'unavailable', detail: 'no radio in OTBR mode'}};\n  if (u === '/device/channels')",
+                ),
+            )
+            + f"t.status = {json.dumps(NO_RADIO)}; t.page.init(); await t.advance(200);"
+            + "t.el('t-load').click(); await t.advance(200);"
+            + "return [t.el('threadNotice').hidden(), t.el('t-start-note').textContent];"
+        )
+        assert r[0] is False
+        assert "no radio in OTBR mode" not in r[1]
+
+
+class TestSharedBehaviour:
+    """Thread pages in a browser-like scope"""
+
+    THREAD_PAGES = [
+        "index",
+        "network",
+        "topology",
+        "routing",
+        "commission",
+        "addresses",
+        "tools",
+        "console",
+    ]
+
+    @pytest.mark.parametrize("name", THREAD_PAGES)
+    def test_every_thread_page_has_a_notice_slot_or_the_mode_guard(self, name):
+        # On each Thread-menu page and the Dashboard: a #threadNotice live region, or MgmtPage.guard (whose banner says it).
+        html = (FRONTEND / f"{name}.html").read_text()
+        assert 'id="threadNotice"' in html or "MgmtPage.guard(" in html
+
+    @pytest.mark.parametrize("name", ["network", "commission", "addresses", "tools"])
+    @needs_node
+    def test_management_scripts_run_without_require(self, name):
+        # On the scripts a management page loads up to mgmt.js, in a scope without require: modeBanner answers NO_RADIO.
+        import re
+        import subprocess
+
+        html = (FRONTEND / f"{name}.html").read_text()
+        tags = re.findall(r'<script src="/static/([^"]+)"></script>', html)
+        upto = tags[: tags.index("mgmt.js") + 1]
+        assert "device_common.js" in upto
+        assert upto.index("device_common.js") < upto.index("mgmt.js")
+        source = (
+            "const vm = require('vm'); const fs = require('fs');"
+            "const ctx = vm.createContext({document: {getElementById: () => null}});"
+            f"for (const f of {json.dumps(upto)}) vm.runInContext(fs.readFileSync({json.dumps(str(FRONTEND / 'static'))} + '/' + f, 'utf8'), ctx);"
+            "process.stdout.write(JSON.stringify(vm.runInContext(\"[MgmtLogic.modeBanner({mode: 'NO_RADIO', otbr_channel: null}), "
+            "MgmtLogic.modeBanner({mode: 'BR_RUNNING', otbr_channel: 'c6'}), typeof MgmtPage]\", ctx)));"
+        )
+        out = subprocess.run(
+            ["node", "-e", source],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=20,
+        )
+        banner, running, kind = json.loads(out.stdout)
+        assert banner["href"] == "/radios.html"
+        assert running is None
+        assert kind == "object"
+
+
+EZ_FIRST = {"channels": [EZSP, C6, OLLY]}
+
+
+@needs_node
+class TestMoveSource:
+    """Which radio a move takes Thread from"""
+
+    def test_the_boards_otbr_channel_wins_over_stored_modes(self):
+        # On the EZSP stick (stored otbr, forced off) listed before the C6 that runs Thread: Thread comes from the C6.
+        r = scenario(
+            setup(EZ_FIRST)
+            + open_row(2)
+            + f"{card('otbr')}.click(); await t.flush(); return [t.el('mSave').textContent, t.el('otbrNote').textContent];"
+        )
+        assert r[0] == "Move Thread here"
+        assert "from ESP32-C6 (on board)" in r[1]
+        assert "Sonoff" not in r[1]
+
+    def test_the_accepted_move_names_the_boards_radio_without_moved_from(self):
+        # On a 202 without moved_from: the message names the C6, not the first stored-otbr stick.
+        r = scenario(
+            setup(EZ_FIRST)
+            + "t.put = () => ({status: 202, body: {moving: true}});"
+            + open_row(2)
+            + f"{card('otbr')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10); return t.el('rMsg').textContent;"
+        )
+        assert "from ESP32-C6 (on board)" in r
+
+    def test_stored_modes_are_the_fallback_when_no_channel_runs_thread(self):
+        # On otbr_channel null: the stick stored otbr is the source of the move.
+        r = scenario(
+            setup(EZ_FIRST, NO_RADIO)
+            + open_row(2)
+            + f"{card('otbr')}.click(); await t.flush(); return t.el('otbrNote').textContent;"
+        )
+        assert "from Sonoff ZBDongle-E" in r
+
+    def test_the_radio_that_runs_thread_has_no_source(self):
+        # On the C6 itself: Save, no move.
+        r = scenario(
+            setup(EZ_FIRST) + open_row(1) + "return t.el('mSave').textContent;"
+        )
+        assert r == "Save"
+
+
+@needs_node
+class TestTwoStepSave:
+    """Both PUTs of a save: their replies, a refused second one, a lost connection"""
+
+    def test_reboot_from_the_first_reply_counts(self):
+        # On a settings PUT that says reboot and a mode PUT that does not: the page says the board reboots.
+        r = scenario(
+            setup()
+            + "t.put = (u, b) => b.baud ? {status: 200, body: {reboot: true}} : {status: 200, body: {}};"
+            + open_row(1)
+            + f"t.el('baudSel').value = '230400'; {card('off')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10);"
+            + "return t.el('rMsg').textContent;"
+        )
+        assert "reboot" in r.lower()
+
+    def test_mode_refused_after_settings_saved_says_both(self):
+        # On a refused mode PUT after saved settings: the dialog says the settings were saved and why the mode failed.
+        r = scenario(
+            setup()
+            + "t.put = (u, b) => b.mode ? {status: 409, body: {error: 'mode_taken', detail: 'x'}} : {status: 200, body: {}};"
+            + open_row(1)
+            + f"t.el('baudSel').value = '230400'; {card('otbr')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10);"
+            + "return [t.el('dlg').open, t.el('mMsg').textContent];"
+        )
+        assert r[0] is True
+        assert "settings were saved" in r[1] and "mode change failed" in r[1]
+        assert "another radio" in r[1].lower()
+
+    def test_list_is_read_again_after_a_refused_put(self):
+        # On a refused PUT: the list is read again (the settings may have gone through).
+        r = scenario(
+            setup()
+            + "t.put = () => ({status: 409, body: {error: 'mode_taken'}});"
+            + open_row(1)
+            + f"{card('off')}.click(); await t.flush(); const n = t.calls.length; t.el('mSave').click(); await t.advance(10);"
+            + "return t.calls.slice(n).filter((c) => c.url === '/device/channels' && c.method === 'GET').length;"
+        )
+        assert r >= 1
+
+    def test_lost_connection_on_the_second_put_is_reported_and_the_list_refreshed(self):
+        # On a dropped connection during the mode PUT: the text says the settings were saved; the list is read again.
+        r = scenario(
+            setup()
+            + "t.put = (u, b) => { if (b.mode) throw new Error('drop'); return {status: 200, body: {}}; };"
+            + open_row(1)
+            + f"t.el('baudSel').value = '230400'; {card('otbr')}.click(); await t.flush(); const n = t.calls.length; t.el('mSave').click(); await t.advance(10);"
+            + "return [t.el('mMsg').textContent, t.calls.slice(n).filter((c) => c.url === '/device/channels' && c.method === 'GET').length];"
+        )
+        assert "settings were saved" in r[0]
+        assert r[1] >= 1
+
+
+@needs_node
+class TestSettleMove:
+    """When a move counts as failed"""
+
+    OLLY_STARTING = {
+        **OLLY,
+        "mode": "otbr",
+        "stored_mode": "otbr",
+        "state": "starting",
+        "id": "usb-10c4-ea60-abc123",
+    }
+
+    def accept(self, after_js=""):
+        return (
+            setup()
+            + after_js
+            + "t.put = () => ({status: 202, body: {moving: true, moved_from: 'c6'}});"
+            + open_row(1)
+            + f"{card('otbr')}.click(); await t.flush(); t.el('mSave').click();"
+        )
+
+    def test_first_refresh_after_the_202_is_never_a_failure(self):
+        # On a 202 followed at once by a list that still shows the old picture: the move is not called failed.
+        r = scenario(
+            self.accept() + "await t.advance(10); return t.el('rMsg').textContent;"
+        )
+        assert "Moving Thread" in r
+        assert "did not start" not in r
+
+    def test_target_seen_starting_then_settled_without_thread_is_a_failure(self):
+        # On a target that starts and then falls to a fault without becoming otbr_channel: the move failed.
+        starting = json.dumps({"channels": [C6, self.OLLY_STARTING]})
+        fault = json.dumps(
+            {
+                "channels": [
+                    {**C6, "mode": "otbr"},
+                    {**OLLY, "state": "fault", "error": "drain_timeout"},
+                ]
+            }
+        )
+        r = scenario(
+            self.accept(f"t.status = {json.dumps(RUNNING)};")
+            + f"await t.advance(10); t.snap = {starting}; await t.advance(2500);"
+            + f"t.snap = {fault}; await t.advance(2500); return t.el('rMsg').textContent;"
+        )
+        assert "did not start" in r and "drain_timeout" in r
+
+    def test_target_becoming_the_otbr_channel_is_success(self):
+        # On a target that starts and then becomes otbr_channel: "Thread now runs on".
+        starting = json.dumps(
+            {
+                "channels": [
+                    {**C6, "mode": "off", "stored_mode": "off"},
+                    self.OLLY_STARTING,
+                ]
+            }
+        )
+        done = json.dumps(
+            {
+                "channels": [
+                    {**C6, "mode": "off", "stored_mode": "off"},
+                    {**OLLY, "mode": "otbr", "stored_mode": "otbr"},
+                ]
+            }
+        )
+        r = scenario(
+            self.accept()
+            + f"await t.advance(10); t.snap = {starting}; await t.advance(2500);"
+            + f"t.snap = {done}; t.status = {json.dumps({'mode': 'BR_RUNNING', 'otbr_channel': 'usb-10c4-ea60-abc123'})}; await t.advance(2500);"
+            + "return t.el('rMsg').textContent;"
+        )
+        assert "Thread now runs on OllyZig CC2652P" in r
+
+    def test_nothing_after_90_seconds_is_a_failure(self):
+        # On a target never seen starting and never becoming otbr_channel: failed after 90 s, not before.
+        r = scenario(
+            self.accept()
+            + "await t.advance(60000); const early = t.el('rMsg').textContent; await t.advance(40000);"
+            + "return [early, t.el('rMsg').textContent];"
+        )
+        assert "Moving Thread" in r[0]
+        assert "did not start" in r[1]
