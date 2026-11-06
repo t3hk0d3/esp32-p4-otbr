@@ -124,6 +124,8 @@ outer vertical edges are rounded.
 ### 5.1 Base: back plate and keyholes
 
 - The plate is flat and solid apart from the keyholes.
+- The outer bottom edge (on the bed) has a 0.5 mm 45° chamfer, so elephant's foot doesn't leave a lip around the
+  case.
 - There are two keyholes: K1 under board (X 10, Y 42) and K2 under board (X 42, Y 42).
 - Each has:
   - an entry hole of Ø8;
@@ -147,14 +149,23 @@ outer vertical edges are rounded.
 
 - Under each of the four standoffs, a through-hole runs from the outer back face up through the standoff, on the axis
   of the board's mounting hole: a Ø2.2 pilot, so an M2.5 screw cuts its own thread in the plastic (no nut needed).
-- At the back face it has a 90° countersink for an ISO 10642 / DIN 7991 M2.5 head (about Ø5 at the surface), sunk
-  0.2 mm below flush so the head never stands proud against the wall.
+- At the back face it keeps a 90° countersink (Ø5.4) from the first design, which used countersunk screws from the back
+  with nuts on top. It is now the repair route: if a pilot hole strips, drill it out and use a countersunk M2.5 from the
+  back with a nut on top of the board.
 - Screw length: M2.5 × 6 from the top (1.6 mm board + about 4 mm into the standoff). The docs give it.
-- On top of the board, each nut (5 mm across flats, 2 mm tall) needs a free circle of about Ø6.5 around the hole. The
+- On top of the board, a repair nut (5 mm across flats, 2 mm tall) needs a free circle of about Ø6.5 around the hole. The
   builder checks this against the top of the board model; the nearest parts are the FPC socket near (3.5, 57.3) and the
   large capacitor near (51.5, 24.3).
-- The standoffs' top faces stay flat rings that the board rests on.
-- Each standoff flares into the plate with a 2.5 mm 45° chamfer at its root (to Ø11 at the plate): no sharp inside corner, a stronger joint.
+- The standoffs' top faces stay flat; the board rests on them.
+- All four holes sit 1 mm from a side wall (board X 3.5 and 51.5), so each standoff is joined to its wall by a web as
+  wide as the post (6 mm): post and wall are one piece, and there is no narrow slot between them. The web stops 0.5 mm
+  below the post top, so the board bears only on the round Ø6 pad around each mounting hole. The board's underside is
+  clear over the webs.
+- Each standoff and its web flare into the plate with a 2.5 mm 45° chamfer at the root (Ø11 at the plate around the
+  post): no sharp inside corner.
+- The floor meets all four walls with a 2.5 mm 45° chamfer too, so the walls have no sharp root corner where they bend
+  (the SMA lever, the lid's detents). The lowest part under the board near a wall is 4.85 mm above the back face; the
+  chamfers stay below it with more than 0.3 mm to spare.
 
 ### 5.2 Base: walls
 
