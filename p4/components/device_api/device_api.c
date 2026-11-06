@@ -40,8 +40,6 @@
 #include "console_json.h"
 #include "console_ws.h"
 #include "ot_console.h"
-#include "usb_serial.h"
-#include "usb_serial_json.h"
 #include "thread_json.h"
 #include "netnames.h"
 #include "rcp_sync.h"
@@ -1400,85 +1398,6 @@ static esp_err_t console_put_handler(httpd_req_t *req)
     return send_console(req);
 }
 
-/* ---- /device/usb_serial (USB serial proxy spec, section 3 Settings API) ---- */
-
-#define USB_SERIAL_BODY_MAX 256
-#define USB_SERIAL_REPLY_MAX 640
-#define USB_SERIAL_FIELDS_HINT "send any of enabled, port, baud, flow_control (booleans and numbers) and kick (true)"
-
-static esp_err_t send_usb_serial(httpd_req_t *req)
-{
-    usb_serial_settings_t s;
-    usb_serial_status_t st;
-    char body[USB_SERIAL_REPLY_MAX];
-
-    usb_serial_get_settings(&s);
-    usb_serial_get_status(&st);
-    if (device_api_usb_serial_json(body, sizeof(body), &s, &st) < 0) {
-        return send_error(req, 500, "internal", "the reply does not fit its buffer", false);
-    }
-    return send_json(req, body);
-}
-
-static esp_err_t usb_serial_get_handler(httpd_req_t *req)
-{
-    return send_usb_serial(req);
-}
-
-static esp_err_t usb_serial_put_handler(httpd_req_t *req)
-{
-    const int length_status = device_api_length_check(req->content_len, USB_SERIAL_BODY_MAX);
-
-    if (length_status != 0) {
-        return send_error(req, length_status, length_status == 413 ? "payload_too_large" : "length_required",
-                          USB_SERIAL_FIELDS_HINT, true);
-    }
-    char *body = read_small_body(req);
-
-    if (!body) {
-        return send_error(req, 400, "invalid_request", "the body could not be read", true);
-    }
-    usb_serial_settings_t s;
-    bool kick = false;
-
-    usb_serial_get_settings(&s);
-    const usb_serial_settings_t old = s;
-    const esp_err_t parse_err = device_api_usb_serial_parse(body, &s, &kick);
-
-    free(body);
-    if (parse_err != ESP_OK) {
-        return send_error(req, 400, "invalid_request", USB_SERIAL_FIELDS_HINT, false);
-    }
-    switch (usb_serial_settings_check(&s)) {
-    case USB_SERIAL_BAD_PORT:
-        return send_error(req, 400, "invalid_request", "port must be 1-65535 and not 80 or 179", false);
-    case USB_SERIAL_BAD_BAUD:
-        return send_error(req, 400, "invalid_request",
-                          "baud must be one of 38400, 57600, 115200, 230400, 460800, 921600, 1000000, 2000000", false);
-    case USB_SERIAL_OK:
-        break;
-    }
-    esp_err_t err = ESP_OK;
-
-    if (kick) {
-        err = usb_serial_kick();
-    }
-    if (err == ESP_OK && (s.enabled != old.enabled || s.port != old.port || s.baud != old.baud ||
-                          s.flow_control != old.flow_control)) {
-        err = usb_serial_apply(&s);
-    }
-    switch (err) {
-    case ESP_OK:
-        return send_usb_serial(req);
-    case ESP_ERR_INVALID_STATE:
-        return send_error(req, 503, "not_started", "the USB serial proxy did not start, see the log", false);
-    case ESP_ERR_TIMEOUT:
-        return send_error(req, 504, "timeout", "the USB serial proxy did not confirm the change in time", false);
-    default:
-        return send_error(req, 500, "storage_failed", "the USB serial settings could not be stored", false);
-    }
-}
-
 /* ---- /device/routing (mesh routing spec section 6) ---- */
 
 #define ROUTING_BODY_MAX 2048
@@ -1756,8 +1675,6 @@ esp_err_t device_api_register(httpd_handle_t server)
         {"/device/routing", HTTP_PUT, routing_put_handler},
         {"/device/console", HTTP_GET, console_get_handler},
         {"/device/console", HTTP_PUT, console_put_handler},
-        {"/device/usb_serial", HTTP_GET, usb_serial_get_handler},
-        {"/device/usb_serial", HTTP_PUT, usb_serial_put_handler},
         {"/metrics", HTTP_GET, metrics_get_handler},
     };
 

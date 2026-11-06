@@ -10,6 +10,8 @@
 #include "netcfg_policy.h"
 #include "netcfg_vlan.h"
 
+struct sockaddr;
+
 #define NETCFG_IFACE_NAME_MAX 12
 #define NETCFG_DHCP_NAME_MAX 32 /* esp_netif_set_hostname refuses longer names (ESP_NETIF_HOSTNAME_MAX_SIZE) */
 #define NETCFG_IP6_MAX CONFIG_LWIP_IPV6_NUM_ADDRESSES
@@ -50,6 +52,12 @@ size_t netcfg_ifaces_state(netcfg_iface_state_t out[NETCFG_MAX_IFACES]);
  * match came from the OpenThread netif (a mesh address, reported as the Thread side); it is false in every other case.
  */
 bool netcfg_ifaces_socket_side(int fd, netcfg_side_t *side, bool *on_mesh);
+/**
+ * Side of a remote address (a UDP source): the interface a reply to it leaves on, by lwIP's own route lookup (run in the
+ * tcpip task); a link-local address goes by its zone. False when no route or no interface matches. `on_mesh` is true when the
+ * route is the OpenThread netif (a mesh address, reported as the Thread side).
+ */
+bool netcfg_ifaces_peer_side(const struct sockaddr *peer, netcfg_side_t *side, bool *on_mesh);
 /** Side of the request by its local address (netcfg_ifaces_socket_side on the request's socket); false when it matches no interface. */
 bool netcfg_ifaces_request_side(httpd_req_t *req, netcfg_side_t *side);
 /**

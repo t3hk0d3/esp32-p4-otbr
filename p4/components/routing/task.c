@@ -30,7 +30,7 @@
 #include "openthread/thread.h"
 #include "publisher.h"
 #include "routing_util.h"
-#include "usb_serial.h" // USB_SERIAL_SOCKETS
+#include "rcp_proxy.h" // RCP_PROXY_SOCKETS
 
 static const char *TAG = "routing";
 
@@ -59,15 +59,15 @@ static const char *TAG = "routing";
 /*
  * lwIP sockets the image needs at once (see p4/sdkconfig.defaults): the web server (its max_open_sockets plus its
  * listener and two control sockets, esp_br_web.c), routing at worst (BGP: the listener and every connection slot;
- * RIPng is one socket and never runs with BGP), one HTTP client (OTA or a radio firmware URL) and the USB serial proxy
- * (its listener, its client and one connection being refused, usb_serial.h).
+ * RIPng is one socket and never runs with BGP), one HTTP client (OTA or a radio firmware URL) and the RCP proxy
+ * (two channels at once, each a listener, its client and one connection being refused, rcp_proxy.h).
  */
 #define WEB_SERVER_SOCKETS (ESP_BR_WEB_MAX_OPEN_SOCKETS + 3)
 #define ROUTING_SOCKETS (1 + MAX_CONNS)
 #define HTTP_CLIENT_SOCKETS 1
-#define SOCKETS_NEEDED (WEB_SERVER_SOCKETS + ROUTING_SOCKETS + HTTP_CLIENT_SOCKETS + USB_SERIAL_SOCKETS)
+#define SOCKETS_NEEDED (WEB_SERVER_SOCKETS + ROUTING_SOCKETS + HTTP_CLIENT_SOCKETS + RCP_PROXY_SOCKETS)
 #if CONFIG_LWIP_MAX_SOCKETS < SOCKETS_NEEDED
-#error "CONFIG_LWIP_MAX_SOCKETS is below what the web server, routing and the USB serial proxy need: raise it in p4/sdkconfig.defaults if ESP_BR_WEB_MAX_OPEN_SOCKETS, the routing sockets or USB_SERIAL_SOCKETS grew; else p4/sdkconfig predates p4/sdkconfig.defaults (an existing sdkconfig keeps its values): delete p4/sdkconfig and build again (docs/development.md)."
+#error "CONFIG_LWIP_MAX_SOCKETS is below what the web server, routing and the RCP proxy need: raise it in p4/sdkconfig.defaults if ESP_BR_WEB_MAX_OPEN_SOCKETS, the routing sockets or RCP_PROXY_SOCKETS grew; else p4/sdkconfig predates p4/sdkconfig.defaults (an existing sdkconfig keeps its values): delete p4/sdkconfig and build again (docs/development.md)."
 #endif
 
 typedef struct {

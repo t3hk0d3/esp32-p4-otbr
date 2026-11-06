@@ -1,8 +1,6 @@
 dependencies:
   # The USB host stack and the three serial drivers of the USB transport, at the versions already locked through
   # esp-serial-flasher (its private dependency is not relied on). Target only: the host tests cover the pure core.
-  # usb_serial (removed in Task 5) still names these components in its REQUIRES; this manifest brings them into the
-  # build for both.
   espressif/usb:
     version: "==1.6.0"
     rules:

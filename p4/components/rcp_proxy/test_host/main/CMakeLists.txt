@@ -1,3 +1,3 @@
 idf_component_register(SRCS "test_core.c"
-                       REQUIRES usb_serial unity
+                       REQUIRES rcp_proxy unity
                        WHOLE_ARCHIVE)
