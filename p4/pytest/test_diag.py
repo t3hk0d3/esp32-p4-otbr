@@ -12,6 +12,7 @@ import requests
 TOP_KEYS = {
     "uptime_s",
     "reset_reason",
+    "chip_temperature_c",
     "cpu",
     "tasks",
     "tasks_untracked",
@@ -49,6 +50,7 @@ class TestDiag:
         assert set(body) == TOP_KEYS
         assert body["uptime_s"] > 0
         assert body["reset_reason"]
+        assert 20 <= body["chip_temperature_c"] <= 100
         assert [c["core"] for c in body["cpu"]] == [0, 1]
         for core in body["cpu"]:
             assert set(core["load_pct"]) == WINDOWS
