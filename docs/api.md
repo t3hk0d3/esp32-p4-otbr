@@ -7,7 +7,7 @@ below, any of them can answer 500 `internal` or `no_memory`.
 
 | Method and path | Purpose | Notable errors |
 | --- | --- | --- |
-| `GET /device/status` | mode, app version and slot, `rcp`, `jumper`, `eth` addresses, `pd`, `routing`, `sniffer` stats, `fault_reason`, `storage_ok`, `trel` (`enabled`, `active`, `peers` (this Thread network), `peers_other` (other networks), `tx_packets`, `tx_failures`, `rx_packets`, `peer_list`: at most 8, this network's first, each `ext_address`, `ext_pan_id`, `same_network`, `preference` (`{"ieee802154": 0..255\|null, "trel": 0..255\|null}`, OpenThread's per-radio preference; `null` when the peer is not a Thread neighbour), `address`; `trel` is `null` in a build without TREL; `active`, both counts and the counters `null` when OpenThread's state could not be read) | |
+| `GET /device/status` | mode, app version and slot, `zigbee_channel` (id of the channel in Zigbee mode, `null` when none), `rcp`, `jumper`, `eth` addresses, `pd`, `routing`, `sniffer` stats, `fault_reason`, `storage_ok`, `trel` (`enabled`, `active`, `peers` (this Thread network), `peers_other` (other networks), `tx_packets`, `tx_failures`, `rx_packets`, `peer_list`: at most 8, this network's first, each `ext_address`, `ext_pan_id`, `same_network`, `preference` (`{"ieee802154": 0..255\|null, "trel": 0..255\|null}`, OpenThread's per-radio preference; `null` when the peer is not a Thread neighbour), `address`; `trel` is `null` in a build without TREL; `active`, both counts and the counters `null` when OpenThread's state could not be read) | |
 | `GET /device/sniffer.pcap?channel=&duration=` | stream a pcap capture | 400 `invalid_channel`, `invalid_duration`, `no_channel`; 409 `busy` (not `BR_RUNNING`); 503 `busy` (no channel given and OpenThread's state could not be read within 100 ms: retry); 500 `sniffer_failed` |
 | `DELETE /device/sniffer` | stop the running capture | 404 `not_found` |
 | `POST /device/ota` | upload an `otbr.bundle`, then reboot | 400 `length_required`, `invalid_bundle`; 413 `payload_too_large`; 409 `busy` |
@@ -32,6 +32,7 @@ below, any of them can answer 500 `internal` or `no_memory`.
 | `GET /device/console/ws` | WebSocket: the board's OpenThread CLI, see [Thread console](#thread-console) | 403 on an interface that does not serve the device API |
 | `GET /device/usb_serial` | USB serial proxy setting and status, see [USB serial proxy](#usb-serial-proxy-experimental) | |
 | `PUT /device/usb_serial` | any of `enabled`, `port`, `baud`, `flow_control`, `kick` (`true` drops the client); stored, off by default; replies like GET | 400 `invalid_request` (port outside 1-65535 or 80 or 179, baud not in the list, a field of the wrong type), `length_required`; 413 `payload_too_large`; 500 `storage_failed`; 503 `not_started`; 504 `timeout` |
+| `GET /device/zigbee` | Zigbee mode status, see [Zigbee coordinator](#zigbee-coordinator-experimental) | 409 `not_zigbee` (no channel runs `ziggurat`) |
 | `POST /device/reboot` | reboot | 409 `busy` while an update or push runs (other reboots, such as the network trial revert, `net reset` and `DELETE /node`, wait until it ends) |
 | `GET /metrics` | device health and Thread figures in the Prometheus text format, see [metrics](metrics.md) | 500 `no_memory` |
 
@@ -260,6 +261,27 @@ Off by default. `PUT` takes any of `enabled`, `port` (1-65535, not 80 or 179; de
 `dongle` and `client` are `null` when absent. A `400 invalid_request` answers a port outside 1-65535 or equal to 80
 or 179, a baud rate not in the list, and a field of the wrong type (`{"port": "6638"}`). Validation does not depend on
 the dongle.
+
+### Zigbee coordinator (experimental)
+
+A radio in `ziggurat` mode serves ZHA over a WebSocket at `ws://<board>/zigbee` (binary protocol of zigpy-ziggurat, one
+client, a second one takes over); see [Zigbee coordinator](zigbee.md). `GET /device/zigbee` answers:
+
+```
+{"channel": "c6", "firmware": "spinel 1.2 efr32", "state": "running", "reason": "",
+ "client": {"address": "192.168.1.20:51234", "since": 1790000000}, "last_client": null,
+ "radio": {"channel": 15, "pan_id": 6754, "short_address": 0, "extended_address": "00124b00abcdef01", "tx_power_dbm": 8},
+ "counters": {"rx": 10, "rx_dropped": 1, "tx": 9, "tx_no_ack": 2, "tx_cca": 3, "tx_failed": 4, "energy_scans": 5,
+              "rcp_resets": 6, "frames_in": 7, "frames_out": 8},
+ "heap": {"current": 1000, "peak": 2000}, "started": 1789999000}
+```
+
+`state` is `idle`, `starting`, `running`, `no_radio` or `incompatible`; `reason` says why when it is not `running`.
+`client` and `last_client` (`{"address", "since", "left"}`) are `null` when absent, `radio` while the stack has no
+network settings, and times are epoch seconds (0 when the board's clock is not set). `counters.tx` counts transmits the
+radio accepted; `tx_failed` also counts those refused before reaching it. `rx_dropped` counts frames the board dropped
+for a client that was too slow. `heap` is the memory the stack holds, in bytes. The radio's mode is set with
+`PUT /device/channels/<id>`.
 
 ## Thread REST API
 

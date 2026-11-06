@@ -105,6 +105,22 @@ text); the `br_ripng_*` series only with method `ripng`. `br_ripng_responses_dro
 packets. The counters start again from 0 when the board reboots. A peer's `br_bgp_*` counters also start again when its
 session is set up anew: the peer or its ASN changed, or the local ASN, hold time or router ID changed.
 
+## Zigbee metrics
+
+Served only while a radio is in Zigbee mode, see [Zigbee coordinator](zigbee.md).
+
+| Metric | Type | Labels |
+| --- | --- | --- |
+| `zigbee_frames_total` | counter | `dir` = rx, tx |
+| `zigbee_tx_results_total` | counter | `result` = no_ack, cca, failed |
+| `zigbee_rcp_resets_total` | counter | |
+| `zigbee_heap_bytes` | gauge | `kind` = current, peak |
+| `zigbee_client_connected` | gauge 0/1 | |
+
+`zigbee_tx_results_total` counts failed transmits only; successful ones are the difference to
+`zigbee_frames_total{dir="tx"}` less the failures that never reached the radio, so it is not exact. The counters start
+again from 0 when the board reboots.
+
 ## Example alerts
 
 ```yaml

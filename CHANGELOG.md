@@ -11,6 +11,11 @@ release's `versions.txt`.
 
 - USB serial proxy (experimental): a USB serial dongle on the USB-A port served byte for byte to one TCP client (default
   port 6638), off by default; `GET`/`PUT /device/usb_serial`. Not yet checked on a board. See `docs/usb-serial.md`.
+- Zigbee mode (experimental): a radio set to `ziggurat` runs the Ziggurat Zigbee stack and serves Home Assistant's ZHA
+  (radio type Ziggurat, `ws://<board>/zigbee`) to one client; a new **Zigbee** page, `GET /device/zigbee`,
+  `zigbee_channel` in `/device/status` and `zigbee_*` metrics. Radio resets are survived and a lost radio shows as
+  `no_radio` without a reboot. On-board tests (`p4/pytest/test_zigbee.py`) are written, not yet run. See
+  `docs/zigbee.md`.
 
 ## [0.4.0] - 2026-11-05
 
