@@ -131,7 +131,7 @@ From the spike and its on-board runs (2026-11-06):
   "no radio in OTBR mode". With a working OTBR channel too, both sets of pages are shown.
 - The **Zigbee page** shows: which channel (radio) it runs on and that channel's detected firmware (the mux's
   `firmware` type, version and chip), stack state (starting, waiting for a client, running,
-  radio resetting, radio gone), the connected client (address, connected since) or none, the radio as last configured
+  radio resetting, no radio), the connected client (address, connected since) or none, the radio as last configured
   by the stack (channel, PAN ID, coordinator IEEE address, short address, TX power), radio counters (frames received,
   dropped, sent, failed, energy scans, RCP resets), and the stack's PSRAM use (current and peak). It also shows the ZHA
   setup text: radio type "Ziggurat", path `ws://<board-name>/zigbee`.
@@ -167,8 +167,8 @@ From the spike and its on-board runs (2026-11-06):
 - **Mux registration.** At startup the `zigbee` component registers the mux's consumer for the mode `ziggurat`,
   declaring: firmware type `spinel`; at most one channel; entering or leaving the mode reboots; and its attach and
   detach, with its event queue handed over at attach. The mux enforces these; a second `ziggurat` channel gets the
-  mux's 409 `mode_taken`. The mux only delivers GONE and never reboots for it: the `zigbee` component calls the reboot
-  itself, with its own recovery cap (below).
+  mux's 409 `mode_taken`. The mux only delivers GONE and never reboots for it; the `zigbee` component falls back to
+  "no radio" (below).
 - New component `p4/components/zigbee`, prefix `zigbee_` (the staticlib owns `ziggurat_*`). It contains the platform
   layer, the spinel client, the WebSocket transport, the status, the heap shim and the prebuilt staticlib. The spike's
   `zigbee.c` is the reference for the platform functions that are not about the radio.
@@ -206,12 +206,18 @@ From the spike and its on-board runs (2026-11-06):
     uses: a GPIO reset on the C6, a reopen on a dongle) and then handles the RESET as above.
   - At boot, a stored Ziggurat channel whose dongle is not plugged in: the stack is not started until the mux attaches
     the channel when the device appears. So an unplugged dongle leaves a board waiting for it, not a reboot loop.
-  - On GONE: the board reboots after a short delay. Reboots for this reason are capped like Thread mode's recoveries
-    (`MODE_FSM_MAX_RECOVERIES` within its window, with a count that survives the reboot); past the cap the Ziggurat
-    channel stays down, the page shows "radio gone", and Ethernet, the web UI and OTA keep working. Keeping the stack
-    up through an unplug and resuming on replug is a later improvement.
-  - C6 jobs (firmware push, ROM recovery) while the C6 is in Ziggurat mode run as the mux design defines, and the board
-    reboots afterwards, which brings the Ziggurat channel back.
+  - On GONE: *(design call, the user's choice 2026-11-06)* no reboot. The stack keeps running in a "no radio" state,
+    like OTBR's `NO_RADIO`: a transmit in flight and every later one fails at once, a configure or source-match edit
+    is stored (for the replay) but not sent, and an energy scan reports failure. The client connection stays up, and the
+    network's state stays in ziggurat's memory. The page and `/device/zigbee` show "no radio". Nothing else on the
+    board is touched: Ethernet, the web UI, other channels (and an OTBR channel, once hybrid exists) keep running.
+  - When the radio comes back (the mux attaches the same channel again): the client runs its attach sequence and
+    replays the stored configuration and source-match table, exactly as after RESET. The stack is not started a second
+    time. Children that went quiet retry and rejoin as usual. (A different stick is a different channel id, so moving
+    the network to it is a mode change, which reboots by the mode rule.)
+  - C6 jobs (firmware push, ROM recovery) while the C6 is in Ziggurat mode run as the mux design defines. While the job
+    holds the C6 the stack sees GONE (or simply no frames) and runs without a radio; when the mux hands the C6 back
+    (RESET or a new attach) the client replays. No reboot is needed.
 - **Memory in PSRAM.** Ziggurat's heap (its routing, child, neighbour and key tables, packet queues; everything it
   allocates) lives in PSRAM, so the network can grow to the size of a typical ZHA home (100+ devices) without taking
   internal RAM from lwIP, the HTTP server or an OTBR channel. The staticlib's `esp-idf` allocator is hard-wired to
@@ -255,7 +261,8 @@ From the spike and its on-board runs (2026-11-06):
 - **Host tests** (Unity on the `linux` target, `p4/components/zigbee/test_host/`):
   - spinel client against recorded and hand-built spinel frames: the attach sequence, every radio operation's request
     encoding, received-frame and transmit-done decoding (FCS stripped, results mapped), energy scan, a request
-    timeout, RESET replay of configuration and source-match table, GONE;
+    timeout, RESET replay of configuration and source-match table, GONE (no-radio state: failures, stored edits),
+    re-attach after GONE (replay, no second start);
   - CCM* against published vectors (encrypt, decrypt, a wrong MIC, a zero-length payload);
   - the heap shim (PSRAM only, alignment, counters);
   - `hello` capture and replay, client takeover, queue-full backpressure and the ready signal.
@@ -276,8 +283,10 @@ From the spike and its on-board runs (2026-11-06):
   - a second client takes over from the first.
   - radio reset (the C6: `rcp_glitch`; the dongle: the consumer-requested channel reset, a USB close and reopen): the stack keeps running, the
     reset counter goes up, the client stays connected and the joined device still answers.
-  - radio gone (the C6: `rcp_kill`; the dongle: unplug or a port power cut if the rig can do it): the board reboots
-    back into Ziggurat mode; past the cap it stays up with "radio gone".
+  - radio gone (the C6: `rcp_kill`; the dongle: unplug or a port power cut if the rig can do it): no reboot; the page
+    shows "no radio", the client stays connected, Ethernet and the web UI keep working; zigpy requests fail cleanly.
+  - radio back (the dongle plugged in again, or the C6 released): the stack replays, the joined device answers again
+    without being paired again, and the board never rebooted (uptime unchanged).
   - memory: with the network formed and the test device joined, internal heap free is not lower than with the
     channel idle, and the stack's PSRAM use is reported.
   - hybrid (an OTBR channel and a Ziggurat channel at once), only if the mux release allows it.
@@ -338,8 +347,14 @@ zigbee
             - fails a transmit in flight
             - counts the reset; the stack keeps running
         On GONE
-            - reboots the board after the fault delay, counted against the recovery cap
-            - past the cap, stays down and reports "radio gone"
+            - keeps the stack running and does not reboot
+            - fails a transmit in flight and every later transmit and energy scan at once
+            - stores configure and source-match edits without sending them
+            - reports "no radio" on the page and in /device/zigbee
+        On attach after GONE (the radio is back)
+            - runs the attach sequence and replays the stored configuration and source-match table
+            - does not start the stack again
+            - reports the radio as running
     WebSocket /zigbee
         On connect while the stack runs
             - sends the kept hello first
