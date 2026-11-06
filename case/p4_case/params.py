@@ -43,6 +43,8 @@ REBATE_W = WALL / 2  # 5.2: the rebate takes the inner half of the wall
 
 # --- board screws (4, 5.1a) ---
 STANDOFF_D = 6.0
+# 45° flare where each standoff meets the plate: no sharp root corner, a stronger joint
+STANDOFF_ROOT_CHAMFER = 1.0
 SCREW_HOLE_D = 2.2  # pilot hole: an M2.5 screw cuts its own thread in the standoff
 CSK_D = 5.4  # countersink diameter at the back face: M2.5 flat head (Ø5.0) sunk 0.2 below flush
 CSK_ANGLE = 90.0

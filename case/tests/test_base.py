@@ -205,6 +205,16 @@ class TestDefaultBase:
             assert not solid(base, hx + 3.3, hy, 6.5)
             assert not solid(base, hx + 2.7, hy, 7.2)
 
+    def test_flares_each_standoff_into_the_plate_at_45_degrees(self, base):
+        c = P.STANDOFF_ROOT_CHAMFER
+        r = P.STANDOFF_D / 2
+        assert c == pytest.approx(1.0)
+        for hx, hy in P.SCREW_HOLES:
+            d = 1 if hx < 27.5 else -1  # probe toward the middle, away from the walls
+            assert solid(base, hx + d * (r + 0.5), hy, P.PLATE_T + 0.3)  # in the flare
+            assert not solid(base, hx + d * (r + 0.5), hy, P.PLATE_T + 0.7)  # above it
+            assert not solid(base, hx + d * (r + c + 0.1), hy, P.PLATE_T + 0.05)  # Ø8
+
     def test_has_a_countersunk_through_hole_under_each_standoff(self, base):
         for hx, hy in P.SCREW_HOLES:
             for cz in (0.05, 1.0, 4.0, 6.9):
