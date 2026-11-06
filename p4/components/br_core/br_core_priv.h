@@ -24,7 +24,9 @@
 typedef struct {
     StaticSemaphore_t mutex_storage;
     SemaphoreHandle_t mutex;     // guards the fields below
-    SemaphoreHandle_t boot_done; // given once OpenThread is initialised or the fault mode was entered
+    // Two waiters never share one binary semaphore: a give wakes only one of them, the other waits out its timeout.
+    SemaphoreHandle_t boot_done; // br_core_start's wait: the boot's radio is settled (NO_RADIO, a fault, br_radio's op)
+    SemaphoreHandle_t init_done; // core_radio_ot_start's wait: the OpenThread task's init ended (ready, fault, parked)
     SemaphoreHandle_t loop_done; // given by the OpenThread task when it left the main loop for a firmware push
     SemaphoreHandle_t bringup_done; // given when the border router task ended
     SemaphoreHandle_t sessions_done; // given when the last open OpenThread session closed

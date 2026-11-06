@@ -118,7 +118,8 @@ void core_enter_fault(const char *reason)
     core_set_reason(reason);
     ESP_LOGE(TAG, "radio fault: %s", reason);
     mode_fsm_set_fault(&g_fsm);
-    xSemaphoreGive(g_core.boot_done);
+    xSemaphoreGive(g_core.init_done); // a start waiting for the OpenThread task's init
+    xSemaphoreGive(g_core.boot_done); // br_core_start's wait
 }
 
 // OpenThread aborts the process when its radio callbacks return: park this task instead. The fault
@@ -173,7 +174,7 @@ static void park_gone(void)
     }
     ESP_LOGW(TAG, "the radio channel is gone: the OpenThread task stops until br_radio tears OpenThread down");
     esp_br_web_set_openthread_ready(false);
-    xSemaphoreGive(g_core.boot_done); // a start waiting for the init sees it did not finish
+    xSemaphoreGive(g_core.init_done); // a start waiting for the init sees it did not finish
     if (in_mainloop) {
         esp_openthread_lock_release();
     }
@@ -603,7 +604,7 @@ static void ot_task(void *arg)
     xSemaphoreGive(g_core.mutex);
     ESP_LOGI(TAG, "OpenThread initialised on %s", radio_mux_chan_id(core_radio_chan()));
     g_core.loop_running = true;
-    xSemaphoreGive(g_core.boot_done);
+    xSemaphoreGive(g_core.init_done); // core_radio_ot_start; br_core_start waits for br_radio's after_channel_op
 
     esp_err_t err = esp_openthread_launch_mainloop();
     g_core.loop_running = false;
@@ -692,11 +693,12 @@ esp_err_t br_core_start(esp_netif_t *backbone)
     g_core.backbone = backbone;
     g_core.mutex = xSemaphoreCreateMutexStatic(&g_core.mutex_storage);
     g_core.boot_done = xSemaphoreCreateBinary();
+    g_core.init_done = xSemaphoreCreateBinary();
     g_core.loop_done = xSemaphoreCreateBinary();
     g_core.bringup_done = xSemaphoreCreateBinary();
     g_core.sessions_done = xSemaphoreCreateBinary();
-    ESP_RETURN_ON_FALSE(g_core.boot_done && g_core.loop_done && g_core.bringup_done && g_core.sessions_done, ESP_ERR_NO_MEM,
-                        TAG, "no memory");
+    ESP_RETURN_ON_FALSE(g_core.boot_done && g_core.init_done && g_core.loop_done && g_core.bringup_done &&
+                        g_core.sessions_done, ESP_ERR_NO_MEM, TAG, "no memory");
     // Only now: the status and session calls (the HTTP server already runs) use the objects above once this is set.
     g_core.started = true;
 
