@@ -90,6 +90,7 @@ function checkStart(sn) {
 
 function render(s) {
   lastStatus = s;
+  kit.renderThreadNotice(s, 'capture', false);
   show('cap-stale', false);
   var sn = s.sniffer;
   show('cap-idle', !sn.active);

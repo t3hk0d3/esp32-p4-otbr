@@ -8,6 +8,7 @@ static void release_all(void)
     device_api_op_end(DEVICE_API_OP_OTA);
     device_api_op_end(DEVICE_API_OP_RADIO_PUSH);
     device_api_op_end(DEVICE_API_OP_ROM_RECOVER);
+    device_api_op_end(DEVICE_API_OP_RADIO_MOVE);
     device_api_op_end(DEVICE_API_OP_PCAP);
 }
 
@@ -142,5 +143,62 @@ TEST_CASE("On a capture stream: device_api_op_pcap_running is true until it is r
     TEST_ASSERT_TRUE(device_api_op_pcap_running());
     device_api_op_end(DEVICE_API_OP_PCAP);
     TEST_ASSERT_FALSE(device_api_op_pcap_running());
+    release_all();
+}
+
+TEST_CASE("On a move of OTBR while an OTA, a push or a recovery runs: it is refused", "[device_api]")
+{
+    static const device_api_op_t others[] = {DEVICE_API_OP_OTA, DEVICE_API_OP_RADIO_PUSH, DEVICE_API_OP_ROM_RECOVER};
+
+    for (size_t i = 0; i < sizeof(others) / sizeof(others[0]); i++) {
+        release_all();
+        TEST_ASSERT_TRUE(device_api_op_try_begin(others[i]));
+        TEST_ASSERT_FALSE(device_api_op_try_begin(DEVICE_API_OP_RADIO_MOVE));
+    }
+    release_all();
+}
+
+TEST_CASE("On an OTA, a push, a recovery or another move while a move runs: refused, the 409 detail names the move",
+          "[device_api]")
+{
+    static const device_api_op_t others[] = {DEVICE_API_OP_OTA, DEVICE_API_OP_RADIO_PUSH, DEVICE_API_OP_ROM_RECOVER,
+                                             DEVICE_API_OP_RADIO_MOVE
+                                            };
+
+    release_all();
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_RADIO_MOVE));
+    TEST_ASSERT_TRUE(device_api_op_long_running());
+    for (size_t i = 0; i < sizeof(others) / sizeof(others[0]); i++) {
+        TEST_ASSERT_FALSE(device_api_op_try_begin(others[i]));
+        TEST_ASSERT_NOT_NULL(strstr(device_api_op_busy_detail(others[i]), "moved"));
+    }
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_PCAP)); /* a capture has its own slot */
+    release_all();
+}
+
+TEST_CASE("On the end of a move: the slot is free again; an end by another holder leaves it", "[device_api]")
+{
+    release_all();
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_RADIO_MOVE));
+    device_api_op_end(DEVICE_API_OP_OTA);
+    TEST_ASSERT_TRUE(device_api_op_long_running());
+    device_api_op_end(DEVICE_API_OP_RADIO_MOVE);
+    TEST_ASSERT_FALSE(device_api_op_long_running());
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_OTA));
+    device_api_op_end(DEVICE_API_OP_RADIO_MOVE); /* a late move end does not free an OTA */
+    TEST_ASSERT_TRUE(device_api_op_long_running());
+    release_all();
+}
+
+TEST_CASE("On a move holding the shared slot: device_api_op_holds says so, and only for the move", "[device_api]")
+{
+    release_all();
+    TEST_ASSERT_FALSE(device_api_op_holds(DEVICE_API_OP_RADIO_MOVE));
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_RADIO_MOVE));
+    TEST_ASSERT_TRUE(device_api_op_holds(DEVICE_API_OP_RADIO_MOVE));
+    TEST_ASSERT_FALSE(device_api_op_holds(DEVICE_API_OP_OTA));
+    release_all();
+    TEST_ASSERT_TRUE(device_api_op_try_begin(DEVICE_API_OP_OTA));
+    TEST_ASSERT_FALSE(device_api_op_holds(DEVICE_API_OP_RADIO_MOVE));
     release_all();
 }

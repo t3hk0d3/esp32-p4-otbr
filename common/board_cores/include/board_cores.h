@@ -5,14 +5,18 @@
 //   NET_CORE  (0)  network path: lwIP tcpip (CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU0), EMAC RX task and ISR
 //                  (ETH_MAC_FLAG_PIN_TO_CORE, driver installed from a NET_CORE task), OpenThread task and
 //                  br_bringup, net_init, default esp_event loop (task_core_id 0 in IDF), mDNS
-//                  (CONFIG_MDNS_TASK_AFFINITY_CPU0), esp_timer task.
+//                  (CONFIG_MDNS_TASK_AFFINITY_CPU0), esp_timer task, the radio channel mux's C6 transport:
+//                  radio_mux_c6 (the OpenThread task's priority + 1), its SPI2 interrupt (spi_bus_config_t.isr_cpu_id)
+//                  and the GPIO ISR service with the C6's INT pin (installed from radio_mux_c6).
 //   MGMT_CORE (1)  management: HTTP server (httpd_config_t.core_id, patch 1), thread_rest worker (patch 11),
 //                  device_api workers (pcap_stream, ota_http, radio_fw, rom_recover), C6 log receiver,
 //                  diag sampler, console_repl (main/console.c), the rest of app_main (CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1),
 //                  routing (the BGP and RIPng sockets), the radio channel mux: radio_mux (owner task), usb_lib (USB
 //                  host daemon) and USB-CDC (CDC driver task, cdc_acm_host_driver_config_t.xCoreID); usb_host_install
 //                  is called from the radio_mux task, so the USB interrupt lands on core 1 too; rcp_proxy (the
-//                  rcp-proxy mode's sockets); zigbee_tx (the Zigbee WebSocket sender, has the HTTP server task send).
+//                  rcp-proxy mode's sockets); br_radio (br_core: OpenThread's start and stop on the OTBR channel,
+//                  moves between channels, the RCP probe); zigbee_tx (the Zigbee WebSocket sender, has the HTTP
+//                  server task send).
 //   ZIGBEE_TASK_CORE  the zigbee task (every ziggurat_* call, the spinel client): NET_CORE, at the OpenThread task's
 //                  priority (ZIGBEE_TASK_PRIORITY = CONFIG_OPENTHREAD_TASK_PRIORITY, checked in the zigbee component).
 //

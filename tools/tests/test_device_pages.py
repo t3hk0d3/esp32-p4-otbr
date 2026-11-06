@@ -15,11 +15,20 @@ WEB_API = (
 )  # Thread web GUI routes (/get_properties, ...)
 
 DEVICE_MENU = [
+    ["/radios.html", "Radios"],
     ["/ethernet.html", "Ethernet"],
-    ["/routing.html", "Routing"],
     ["/firmware.html", "Firmware"],
-    ["/capture.html", "Packet capture"],
     ["/diagnostics.html", "Diagnostics"],
+    ["/capture.html", "Packet capture"],
+]
+THREAD_MENU = [
+    ["/network.html", "Network"],
+    ["/topology.html", "Topology"],
+    ["/routing.html", "Routing"],
+    ["/commission.html", "Commissioner"],
+    ["/addresses.html", "Addresses"],
+    ["/tools.html", "Tools"],
+    ["/console.html", "Console"],
 ]
 
 # page -> (script, endpoints its script names)
@@ -27,6 +36,7 @@ DEVICE_MENU = [
 EXTRA_SCRIPTS = {"ethernet": ["names"]}
 
 PAGES = {
+    "radios": ("radios", ["/device/channels", "/device/status"]),
     "index": (
         "status",
         [
@@ -132,9 +142,96 @@ def nav_html(pathname):
     return json.loads(out.stdout)
 
 
+def nav_run(pathname, status=None, fetch_fails=False, cached=None):
+    """api.js with a fake fetch answering /device/status with `status`; return [markup, #nav-thread hidden after the
+    answer, the cache written]."""
+    source = (
+        "const vm = require('vm'); const fs = require('fs');"
+        "const nav = {innerHTML: ''}; const thread = {hidden: false}; const store = {};"
+        f"if ({json.dumps(cached)} !== null) store.navThreadHidden = {json.dumps(cached)};"
+        "const ctx = {document: {getElementById: (id) => id === 'nav' ? nav : id === 'nav-thread' ? thread : null},"
+        f" location: {{pathname: {json.dumps(pathname)}}},"
+        " sessionStorage: {getItem: (k) => k in store ? store[k] : null, setItem: (k, v) => { store[k] = String(v); }},"
+        f" fetch: () => {json.dumps(fetch_fails)} ? Promise.reject(new Error('x')) :"
+        f" Promise.resolve({{ok: true, text: () => Promise.resolve({json.dumps(json.dumps(status))})}})}};"
+        f"vm.runInNewContext(fs.readFileSync({json.dumps(str(API_JS))}, 'utf8'), ctx);"
+        "setTimeout(() => process.stdout.write(JSON.stringify([nav.innerHTML, thread.hidden, store.navThreadHidden || null])), 50);"
+    )
+    out = subprocess.run(
+        ["node", "-e", source], capture_output=True, text=True, check=True, timeout=20
+    )
+    return json.loads(out.stdout)
+
+
 @needs_node
 class TestNav:
     """api.js nav"""
+
+    def test_top_bar_order_and_the_zigbee_slot(self):
+        # On any page: Dashboard, Thread, the empty hidden Zigbee slot, Device, About, in that order.
+        html = nav_html("/index.html")
+        top = [
+            m
+            for m in re.findall(
+                r'nav-dropdown-toggle[^>]*>(\w+)</a>|<li id="(nav-slot-zigbee)" hidden></li>|<a href="/(index|about)\.html"',
+                html,
+            )
+        ]
+        names = ["".join(t) for t in top]
+        assert names == ["index", "Thread", "nav-slot-zigbee", "Device", "about"]
+        assert '<li id="nav-slot-zigbee" hidden></li>' in html
+
+    def test_thread_is_a_dropdown_with_its_pages_in_order(self):
+        # On any page: the Thread toggle is followed by Network, Topology, Routing, Commissioner, Addresses, Tools, Console.
+        html = nav_html("/index.html")
+        menu = html.split('nav-dropdown-toggle">Thread</a>', 1)[1].split("</ul>", 1)[0]
+        assert [
+            list(m) for m in re.findall(r'<a href="([^"]+)"[^>]*>([^<]+)</a>', menu)
+        ] == THREAD_MENU
+
+    @pytest.mark.parametrize("path", [p for p, _ in THREAD_MENU])
+    def test_thread_toggle_is_active_on_each_thread_page(self, path):
+        # On each Thread page path: the Thread toggle and that entry are active, the Device toggle is not.
+        html = nav_html(path)
+        assert 'nav-dropdown-toggle active">Thread</a>' in html
+        assert f'<a href="{path}" class="active">' in html
+        assert 'nav-dropdown-toggle">Device</a>' in html
+
+    def test_there_is_no_management_menu(self):
+        # On any page: no "Management" label.
+        assert "Management" not in nav_html("/index.html")
+
+    def test_thread_menu_is_hidden_when_no_channel_runs_otbr(self):
+        # On a status with otbr_channel null: #nav-thread is hidden and the choice is remembered.
+        html, hidden, cached = nav_run("/index.html", {"otbr_channel": None})
+        assert 'id="nav-thread"' in html
+        assert hidden is True
+        assert cached == "1"
+
+    def test_thread_menu_shows_when_a_channel_runs_otbr(self):
+        # On a status with otbr_channel c6 after a hidden visit: shown again, cache cleared.
+        _html, hidden, cached = nav_run(
+            "/index.html", {"otbr_channel": "c6", "mode": "NO_RADIO"}, cached="1"
+        )
+        assert hidden is False
+        assert cached == "0"
+
+    def test_thread_menu_stays_for_an_unavailable_otbr_radio(self):
+        # On NO_RADIO with a channel in otbr (unplugged, faulted): the menu stays.
+        assert (
+            nav_run("/index.html", {"otbr_channel": "u1", "mode": "NO_RADIO"})[1]
+            is False
+        )
+
+    def test_thread_menu_is_left_alone_without_an_answer(self):
+        # On a failed request and on an older board without otbr_channel: the menu keeps its state.
+        assert nav_run("/index.html", fetch_fails=True)[1] is False
+        assert nav_run("/index.html", {"mode": "BR_RUNNING"})[1] is False
+
+    def test_remembered_hidden_state_is_in_the_first_markup(self):
+        # On a page after a visit that hid the menu: the Thread item is hidden from the first paint.
+        html = nav_run("/index.html", fetch_fails=True, cached="1")[0]
+        assert '<li class="nav-dropdown" id="nav-thread" hidden>' in html
 
     def test_device_is_a_dropdown_with_its_pages_in_order(self):
         # On any page: the Device toggle is followed by its entries in order (the status is the Dashboard).

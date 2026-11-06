@@ -316,22 +316,49 @@ reason, spec reference.
    adds `GET`/`PUT /device/console` and the WebSocket `GET /device/console/ws`: 25 routes plus the catch-all, one slot
    of headroom. (docs/superpowers/specs/2026-11-04-thread-console-design.md)
 25. Applied (USB serial proxy, Task 4). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 27 -> 29.
-   `device_api` adds `GET`/`PUT /device/usb_serial`: 27 routes plus the catch-all, one slot of headroom.
+   `device_api` adds `GET`/`PUT /device/usb_serial`: 27 routes plus the catch-all, one slot of headroom (those two routes
+   are gone again in patch 26).
    (docs/superpowers/specs/2026-11-05-usb-serial-proxy-design.md)
-27. Applied (Zigbee mode, Task 5). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 29 -> 30. The
-   extra-handlers callback (`app_main.c` `register_extra_handlers`) also registers the WebSocket `GET /zigbee`
-   (`zigbee_register_ws`) after the device API, before the catch-all. Frontend (Task 7): new page `frontend/zigbee.html` and
-   `frontend/static/zigbee.js`; `static/api.js` adds the Zigbee nav entry after the Dashboard when `/device/status` reports
-   a `zigbee_channel`; `static/status.js` and `index.html` add the Dashboard Zigbee card; `static/device_common.js`
-   `poller` accepts a function as its period; `static/style.css` adds `.zg-*` classes. Page tests:
-   `tools/tests/test_zigbee_page.py`. (docs/superpowers/specs/2026-11-06-zigbee-mode-design.md)
+26. Applied (radio channel mux, Task 8). `esp_ot_br_server`: the board mode `NO_RADIO` (no radio channel in otbr is
+   present) in the REST guard. `src/esp_br_guard.c`: `READ` and `THREAD_OP` answer 503 in `NO_RADIO` whatever the
+   ready flag says (it may lag while OpenThread is torn down after an unplug); `esp_br_guard_detail(status, mode)`
+   takes the mode and says `no radio in OTBR mode` for 503 in `NO_RADIO` (`radio not available` otherwise, as before).
+   Call sites: `src/esp_br_web.c` (the Thread REST dispatcher reads the mode once for the check and the detail;
+   `guard_refuse_gui` and `guard_refuse_resource` use the guard's detail, the resource format no longer hard-codes
+   it) and `src/esp_br_web_api.c` (`esp_br_thread_rest_request`). `EXTRA_HANDLER_SLOTS` 29 -> 30: `device_api` drops
+   `GET`/`PUT /device/usb_serial` (patch 25) and adds `GET /device/channels`, `PUT` and `DELETE /device/channels/*`:
+   28 routes (the console WebSocket included) plus the catch-all, one slot of headroom. The console WebSocket
+   (`device_api`, not vendored) answers its handshake with 503 `no radio in OTBR mode` in `NO_RADIO` as well. Host
+   tests: `test_host/` (NO_RADIO cases) and `tests/test_rest.c` `test_guard_no_radio`.
+   Task 9 (web UI): new `frontend/radios.html` and `frontend/static/radios.js` (the Radios page: channel table,
+   configure dialog, mode cards, move of Thread); `frontend/static/api.js` builds the regrouped navigation (Dashboard,
+   Thread, an empty hidden `<li id="nav-slot-zigbee">`, Device with Radios first, About) and hides the Thread menu
+   while `/device/status` has `otbr_channel` null; `frontend/static/device_common.js` gains `threadState`,
+   `threadNotice` and the kit's `renderThreadNotice`/`watchThread`; `status.js` (chip "Thread runs on", notice),
+   `mgmt.js` (mode banner), `routing.js`, `topology.js`, `capture.js` and their pages (`#threadNotice`) show the
+   "no radio in OTBR mode" notice; `index.html` text and chip; `static/style.css` appends the Radios classes.
+   Final review fixes: `radios.js` shows a proxy in backoff as a warning with its `last_error`, names `port_taken`,
+   sets a radio that runs `rcp-proxy` off before it takes Thread, and follows a 202 for a start ("Starting Thread on")
+   and a stop of Thread ("Stopping Thread on", then stopped or refused with the reason); `status.js` has a
+   `NO_RADIO` hero linking the Radios page, and the `RADIO_FAULT` hero links Radios instead of Firmware while Thread's
+   radio is a dongle.
+   (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md, sections Board mode and API)
+27. Applied (Zigbee mode, Task 5). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 30 -> 32 (on top of patch
+   26: `GET /device/zigbee` and `GET /zigbee`, one slot of headroom kept). The extra-handlers callback (`app_main.c`
+   `register_extra_handlers`) also registers the WebSocket `GET /zigbee` (`zigbee_register_ws`) after the device API,
+   before the catch-all. Frontend (Task 7): new page `frontend/zigbee.html` and `frontend/static/zigbee.js`;
+   `static/api.js` fills and shows patch 26's `<li id="nav-slot-zigbee">` with the Zigbee link when `/device/status`
+   reports a `zigbee_channel`; `static/status.js` and `index.html` add the Dashboard Zigbee card;
+   `static/device_common.js` `poller` accepts a function as its period; `static/style.css` adds `.zg-*` classes. Page
+   tests: `tools/tests/test_zigbee_page.py`. (docs/superpowers/specs/2026-11-06-zigbee-mode-design.md)
 
 ### REST guard classification (patches 2 and 9)
 
 Classes: `NONE` no OpenThread access, always served. `READ` reads OpenThread state: 200 while OpenThread runs (patch 9
 ready flag), 503 otherwise (RADIO_FAULT/STARTING before OpenThread is up, SNIFFER: `br_core` switches the flag off while
 Thread is stopped, so Thread state reads answer 503 there). `THREAD_OP` changes Thread/dataset state or needs the radio:
-only in BR_RUNNING with OpenThread ready; SNIFFER 409, RADIO_FAULT/STARTING 503. THREAD_OP is checked twice: lock-free
+only in BR_RUNNING with OpenThread ready; SNIFFER 409, RADIO_FAULT/STARTING 503. NO_RADIO (patch 26): every `READ`
+and `THREAD_OP` endpoint below answers 503 `no radio in OTBR mode`, as in the RADIO_FAULT / STARTING column. THREAD_OP is checked twice: lock-free
 first (no lock exists before OpenThread is up), then while holding the OpenThread lock where the OpenThread call
 happens.
 
@@ -354,6 +381,37 @@ waiting for the leader (upstream); a sniffer started in that window completes th
 `/*` static file handler and the OPTIONS/404/405 replies of the dispatcher do not touch OpenThread and are not guarded.
 Host tests: `test_host/` (decision table) and `tests/test_rest.c` (dispatcher, run with `tools/run_vendored_rest_tests.sh`);
 target tests: `p4/pytest/test_rest_guard.py`, `test_br_boot.py::test_radio_fault_web_gui_api_answers_503`.
+
+## Generated ESP-IDF copies
+
+`tools/ot_radio_port.cmake` (radio channel mux, Task 7) generates `p4/build/ot_port_components/openthread` at every
+configure, and that component overrides ESP-IDF's `openthread` (`EXTRA_COMPONENT_DIRS`). It holds symlinks to IDF's
+`components/openthread` (v6.1), a real `src/port` and `include` with symlinks to IDF's files plus the project's
+`p4/ot_port/mux_spinel_interface.cpp`, `mux_spinel_interface.hpp`, `mux_gone_answer.{c,h}` (the answers after GONE,
+host-tested in `p4/ot_port/test_host`) and `esp_openthread_mux.h`, and two patched copies.
+Each replaced text is looked up with `string(FIND)` first; a text that is not there any more (an IDF update) stops the
+configure with a `FATAL_ERROR` naming the IDF file. Kconfig stays `CONFIG_OPENTHREAD_RADIO_SPINEL_SPI`; the IDF tree is
+not touched. Upstream path: a runtime "custom spinel interface" radio mode with per-interface caps (spec section 5).
+
+- `src/port/esp_openthread_radio_spinel.cpp`:
+  1. After `#include "esp_spi_spinel_interface.hpp"`: `#include "mux_spinel_interface.hpp"`.
+  2. `using esp::openthread::SpiSpinelInterface;` and `static SpinelInterfaceAdapter<SpiSpinelInterface>
+     s_spinel_interface;` become the same with `MuxSpinelInterface`. The concrete-only calls of the port (`Enable` with
+     the SPI config, `AfterRadioInit`, `Disable`, `RegisterRcpFailureHandler`) exist on `MuxSpinelInterface` with the
+     same signatures (the SPI config is ignored: the channel comes from `esp_openthread_mux_set`), so no call site
+     changes.
+  3. The `s_radio_caps` initializer (energy scan, rx-on-when-idle under `CONFIG_OPENTHREAD_RX_ON_WHEN_IDLE`, tx
+     security, rx timing, tx timing, ack timeout, sleep-to-tx, CSMA backoff, tx retries) becomes the caps required from
+     the RCP by the Global Constraints: ack timeout, tx retries, CSMA backoff, tx security, tx timing (the ot-br-posix
+     set for Thread 1.2+). The C6 RCP passes as before; a CC2652P RCP (Koenkk 2025.3.1, caps 0x7f: no rx timing, no
+     rx-on-when-idle) now passes. OpenThread still uses every cap the RCP reports (`otPlatRadioGetCaps`).
+  4. `otPlatRadioGetCaps`: `s_radio_caps = s_radio.GetRadioCaps(); return s_radio_caps;` becomes `return
+     s_radio.GetRadioCaps();`. Upstream assigns the running RCP's caps to the static, so the next `esp_openthread_init`
+     (OpenThread started again on another channel after a move) would require the previous RCP's caps: a move from the
+     C6 to a CC2652P would fail `CheckRadioCapabilities`.
+- `CMakeLists.txt`: the `git rev-parse` for `IDF_VERSION_FOR_OPENTHREAD_PACKAGE` runs in IDF's component directory
+  instead of `${CMAKE_CURRENT_SOURCE_DIR}` (the generated directory lies in this repository, so the package version
+  would show this repository's commit).
 
 ## Known upstream behaviour (not patches)
 

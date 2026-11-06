@@ -5,7 +5,7 @@
 #include "diag.h"
 #include "ipv6_text.h"
 
-static const char *const mode_names[] = {"STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT"};
+static const char *const mode_names[] = {"STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT", "NO_RADIO"};
 static const char *const role_names[METRICS_ROLE_COUNT] = {"disabled", "detached", "child", "router", "leader"};
 static const char *const br_state_names[] = {"uninitialized", "disabled", "stopped", "running"};
 static const char *const pd_state_names[] = {"disabled", "stopped", "running", "idle"};

@@ -36,6 +36,8 @@ extern "C" {
 #define RADIO_MUX_SERIAL_MAX 32
 #define RADIO_MUX_REASON_MAX 96
 #define RADIO_MUX_PEER_MAX 64
+// The rcp-proxy's last open or connect failure, as text (rcp_proxy fills it, device_api renders it).
+#define RADIO_MUX_PROXY_ERROR_MAX 48
 // RADIO_MUX_C6_ID ("c6", radio_mux_core.h): the id of the on-board C6 channel; USB channels are "usb-<vid>-<pid>[-serial]".
 
 /* ---- events ---- */
@@ -55,7 +57,20 @@ typedef struct {
 
 /* ---- consumers ---- */
 
-typedef struct radio_mux_chan radio_mux_chan_t; // a channel; the handle stays valid for the life of the firmware
+// A consumer's handle: one attach (or lease) of a channel, not the channel itself. The mux passes a new handle to every
+// attach (and returns one from every radio_mux_lease); detach gets the handle its attach got. The handle can be passed
+// to every call below at any time (it is never freed and never dereferenced by the consumer), but once the transport
+// has a newer attach or lease, the calls through it are refused: radio_mux_poll and radio_mux_chan_frames false,
+// radio_mux_read_raw 0, radio_mux_tx and radio_mux_bind_queue ESP_ERR_INVALID_STATE, radio_mux_set_busy_peer,
+// radio_mux_reset and radio_mux_note_firmware ignored. radio_mux_release keeps working (a slot of an earlier attach
+// goes back to its pool), as do radio_mux_chan_id, radio_mux_eventfd and radio_mux_get_proxy (they name the channel).
+//
+// For a consumer: keep the handle attach gave you and use only it until your detach; compare handles to tell your
+// attaches apart, and use radio_mux_chan_id (not the handle) to tell channels apart. Since the generations: a handle
+// no longer stays valid for the life of the firmware, two attaches of the same channel get different handles, and a
+// handle from an earlier attach can no longer take events, raw bytes or the transmit path of the attach after it (it
+// used to work until the next attach on the transport; it still does).
+typedef struct radio_mux_handle radio_mux_chan_t;
 
 typedef struct {
     radio_mux_mode_t mode;  // otbr, ziggurat or rcp-proxy
@@ -66,12 +81,13 @@ typedef struct {
     // (radio_mux_read_raw, radio_mux_tx takes bytes). Ignored on the C6, which always delivers and takes frames: ask
     // radio_mux_chan_frames in attach.
     bool frames;
-    // Called from the owner task when the channel enters the mode (present, firmware fits). Bind a queue or take the
-    // eventfd here and return quickly: long work (a probe, a stack start) belongs on the consumer's own task. An error
-    // leaves the channel in fault with the error in its reason.
+    // Called from the owner task when the channel enters the mode (present, firmware fits), with this attach's own
+    // handle. Bind a queue or take the eventfd here and return quickly: long work (a probe, a stack start) belongs on
+    // the consumer's own task. An error leaves the channel in fault with the error in its reason (the handle is then
+    // never used by the mux again).
     esp_err_t (*attach)(radio_mux_chan_t *ch, void *ctx);
-    // Called from the owner task after GONE was posted: stop using the channel (releases of slots already taken stay
-    // allowed). A consumer attached again later is a normal case.
+    // Called from the owner task after GONE was posted, with the handle attach got: stop using the channel (releases
+    // of slots already taken stay allowed). A consumer attached again later is a normal case (with a new handle).
     void (*detach)(radio_mux_chan_t *ch, void *ctx);
     void *ctx;
 } radio_mux_consumer_t;
@@ -96,19 +112,27 @@ esp_err_t radio_mux_bind_queue(radio_mux_chan_t *ch, QueueHandle_t q);
 // bytes. The value means nothing; radio_mux_poll and radio_mux_read_raw clear it. -1 when the mux is not started.
 int radio_mux_eventfd(radio_mux_chan_t *ch);
 // Takes the next event of the channel's own queue without waiting; false when there is none (it then clears the
-// eventfd, so take events until it returns false before waiting again). Until another consumer attaches to the
-// transport, the detached consumer can still take what it was sent (its GONE); afterwards its handle gets false here
-// and in radio_mux_read_raw, and ESP_ERR_INVALID_STATE from radio_mux_tx and radio_mux_bind_queue.
+// eventfd, so take events until it returns false before waiting again). Until the transport's next attach or lease, the
+// detached consumer can still take what it was sent (its GONE); from then on its handle gets false here and in
+// radio_mux_read_raw, and ESP_ERR_INVALID_STATE from radio_mux_tx and radio_mux_bind_queue. The check and the take
+// are one step against that next attach: an earlier handle never takes an event of the next consumer.
 bool radio_mux_poll(radio_mux_chan_t *ch, radio_mux_ev_t *ev);
-// Gives back the slot of an RX_FRAME event: the `slot` pointer the event carried. Allowed after GONE and detach.
+// Gives back the slot of an RX_FRAME event: the `slot` pointer the event carried. Allowed after GONE and detach, and
+// through a handle of an earlier attach (the slot goes back to the channel's pool).
 void radio_mux_release(radio_mux_chan_t *ch, uint8_t *slot);
 // Sends one spinel frame (frame consumers; HDLC-encoded on USB) or bytes (raw consumers). The data is copied before
-// the call returns. ESP_ERR_INVALID_STATE at once when the channel is not attached (gone, closed, reopening);
+// the call returns. ESP_ERR_INVALID_STATE at once when the channel is not attached (gone, closed, reopening) or the
+// handle is of an earlier attach;
 // ESP_ERR_INVALID_SIZE for a frame above RADIO_MUX_FRAME_MAX. Blocks at most radio_mux_tx_timeout_ms (100 ms plus
-// twice the write's wire time at the channel's baud) on a stalled device.
+// twice the write's wire time at the channel's baud) on a stalled device. On the C6: one SPI transaction, sent again a
+// tick apart while the RCP is busy (at most 4 times, ESP_ERR_TIMEOUT), once more 15 ms after a bad header
+// (ESP_ERR_INVALID_RESPONSE); about 60 ms at worst, plus a receive burst in progress.
 esp_err_t radio_mux_tx(radio_mux_chan_t *ch, const uint8_t *data, size_t n);
-// Asks for a reset: a dongle is closed and reopened over USB (never DTR/RTS pulses, never VBUS), the C6 gets its reset
-// GPIO pulse (Task 6). RESET is posted when the radio is back; GONE when it did not come back. Does not wait.
+// Asks for a reset (ignored through the handle of an earlier attach): a dongle is closed and reopened over USB (never
+// DTR/RTS pulses, never VBUS), RESET when it is back,
+// GONE when it did not reopen. The C6 gets a 20 ms pulse of its reset GPIO; the next SPI transaction carries the reset
+// bit, and RESET is posted on the RCP's first header with its own reset bit (before its first frame), or after 2 s
+// without one (the consumer's own timeouts then see a dead RCP). Does not wait.
 esp_err_t radio_mux_reset(radio_mux_chan_t *ch);
 // Raw channels: takes up to cap received bytes without waiting; 0 when there are none.
 size_t radio_mux_read_raw(radio_mux_chan_t *ch, uint8_t *out, size_t cap);
@@ -117,9 +141,14 @@ const char *radio_mux_chan_id(const radio_mux_chan_t *ch);
 // always true on the C6, the consumer's `frames` on a USB channel. Valid from attach (the delivery kind is set before
 // attach is called) until the next attach on the transport.
 bool radio_mux_chan_frames(const radio_mux_chan_t *ch);
+// A consumer with sessions (rcp_proxy) reports whether a peer is connected: while one is, a C6 job is refused
+// (radio_mux_c6_job_begin). Call it on every peer up and down; a call from a consumer that is not attached (true) or
+// through the handle of an earlier attach (true or false) is ignored, and a detach clears it. Never blocks.
+void radio_mux_set_busy_peer(radio_mux_chan_t *ch, bool has_peer);
 // The channel's stored rcp_proxy settings (for the rcp-proxy consumer, read at attach: a change re-attaches it).
 void radio_mux_get_proxy(const radio_mux_chan_t *ch, radio_mux_proxy_settings_t *out);
 // Passive firmware update (a consumer saw the spinel version): stored with source passive and the time. Does not wait.
+// Ignored unless the handle is of the transport's current attach.
 void radio_mux_note_firmware(radio_mux_chan_t *ch, const radio_mux_fw_record_t *fw);
 
 /* ---- API side ---- */
@@ -173,11 +202,13 @@ typedef struct {
     radio_mux_proxy_settings_t proxy;
     const char *proxy_state;            // left NULL here; device_api fills it from rcp_proxy
     char proxy_peer[RADIO_MUX_PEER_MAX]; // left empty here; device_api fills it from rcp_proxy
+    char proxy_last_error[RADIO_MUX_PROXY_ERROR_MAX]; // left empty here; device_api fills it from rcp_proxy
     radio_mux_firmware_t firmware;
     radio_mux_counters_t counters; // since boot
 } radio_mux_chan_info_t;
 
 typedef struct {
+    uint32_t available_modes; // RADIO_MUX_MODE_BIT set: off, plus every mode with a registered consumer
     size_t n;
     radio_mux_chan_info_t chans[RADIO_MUX_CHANNELS_MAX]; // c6 first, then USB channels in the order first seen
 } radio_mux_snapshot_t;
@@ -187,21 +218,80 @@ void radio_mux_get_snapshot(radio_mux_snapshot_t *out);
 
 // Validates, stores in NVS and applies a change (attach, detach, re-attach; line settings reconfigure an open device).
 // Settings for an unavailable channel are stored and apply on its return; a mode on it is refused. A refused change
-// stores nothing. APPLY_REBOOT stores only: the caller reboots. MOVE (otbr while another channel has it) calls the
-// mover set by radio_mux_set_otbr_mover from the calling task and stores nothing itself (the move stores both modes);
-// with no mover, or when the mover fails, it is refused: RADIO_MUX_REFUSE_NOT_AVAILABLE. On MOVE, moved_from gets
-// the id the move came from (may be NULL). Waits for the owner task (up to 5 s); RADIO_MUX_REFUSE_FAILED when it can't.
-radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req, char *moved_from, size_t cap);
+// stores nothing. APPLY_REBOOT stores only: the caller reboots. MOVE (every change of where OpenThread runs, see
+// radio_mux_check_set_mode: otbr while another channel has it, otbr while none has it, the otbr channel leaving otbr)
+// calls the mover set by radio_mux_set_otbr_mover from the calling task and stores no mode itself: a move or a start
+// stores the target's otbr (and the source's off) once OpenThread runs on the target, a stop stores the requested mode
+// once OpenThread stopped (radio_mux_commit_otbr). MOVE means the target's probe passed (a stop: it was accepted) and
+// the rest runs as a long operation (the target shows state starting, then running, or fault with the reason; a
+// refused stop leaves the channel running otbr). With no mover:
+// REFUSE_NOT_AVAILABLE. The mover's refusals: REFUSE_PROBE_FAILED (409 probe_failed), REFUSE_BUSY (a move or radio job
+// runs, OpenThread starting or sniffing), REFUSE_FAILED (anything else); `reason` (may be NULL) then gets the mover's
+// text, "" otherwise. A channel being moved to (leased) refuses every change with REFUSE_BUSY. On MOVE, moved_from gets
+// the id OpenThread leaves ("" for a start, `id` itself for a stop; may be NULL). Line and rcp_proxy settings in the
+// same request are applied as usual (stored at once; a stop's channel takes them with its new mode). Waits for the
+// owner task (up to 5 s); REFUSE_FAILED when it can't.
+radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req, char *moved_from, size_t cap,
+                                  char *reason, size_t reason_cap);
 
 // Forgets an unplugged USB channel: erases its settings and removes it from the list. ESP_ERR_INVALID_STATE for the
-// C6 or a present channel, ESP_ERR_NOT_FOUND for an unknown id.
+// C6 or a present channel (and before radio_mux_start: radio_mux_started tells them apart), ESP_ERR_NOT_FOUND for an
+// unknown id.
 esp_err_t radio_mux_forget(const char *id);
 
-// Id of the channel whose stored mode is otbr (present or not), NULL when none.
-const char *radio_mux_otbr_channel(void);
+// Whether radio_mux_start has run (the API calls answer). Any task.
+bool radio_mux_started(void);
 
-// br_core: runs a move of OpenThread from channel `from` to `to` (Task 7: probe synchronously, then the long op).
-void radio_mux_set_otbr_mover(esp_err_t (*move)(const char *from, const char *to));
+// Copies the id of the channel whose stored mode is otbr (present or not) into `out` (cap: RADIO_MUX_ID_MAX fits any)
+// and returns true; false with `out` "" when none (or before the start). The copy is taken under the registry's lock.
+bool radio_mux_otbr_channel(char *out, size_t cap);
+
+// br_core: the mover of OpenThread from channel `from` ("" for a start) to `to` ("" for a stop on `from`), called by
+// radio_mux_set on the caller's task. It probes `to` (radio_mux_lease) before it returns: ESP_OK when the move was
+// accepted (the rest runs on br_core's task), ESP_ERR_INVALID_RESPONSE when the probe failed, ESP_ERR_INVALID_STATE
+// when busy; `reason` gets a short text then.
+void radio_mux_set_otbr_mover(esp_err_t (*move)(const char *from, const char *to, char *reason, size_t cap));
+
+/* ---- the OTBR lease (br_core, a move: R9) ---- */
+
+// Takes the present channel `id` for OpenThread before its stored mode is otbr: the probe and the start of a move run
+// on it while OpenThread may still run elsewhere. It must have no consumer attached (rcp-proxy on it: refused, "set it
+// off first"), detected spinel firmware, no C6 job; the C6 is opened (out of reset, no reset pulse). Frames then go to
+// the channel's own queue and eventfd (radio_mux_poll, radio_mux_eventfd, radio_mux_release), radio_mux_tx takes
+// frames; radio_mux_reset does nothing on it. The channel shows otbr, state starting. An unplug posts GONE and ends the
+// lease. *out gets the lease's handle (a new generation, as an attach); ESP_ERR_NOT_FOUND (unknown id),
+// ESP_ERR_INVALID_STATE (not leasable), ESP_FAIL (the C6 did not open), ESP_ERR_TIMEOUT (the owner did not answer;
+// nothing was leased), with `err` (may be NULL) saying why.
+// Not from the owner task.
+esp_err_t radio_mux_lease(const char *id, radio_mux_chan_t **out, char *err, size_t cap);
+// Gives a leased channel back (no-op once committed or gone): delivery stops, the C6 returns to its stored mode (off:
+// held in reset). `fault` (NULL or "" for none, e.g. after a refused probe) stays as the channel's reason, state fault,
+// until its next mode change, plug-in or C6 job (drain_timeout, a start failure after the 202). Waits for the owner.
+void radio_mux_lease_end(radio_mux_chan_t *ch, const char *fault);
+// The end of a move, once OpenThread runs on the leased channel `to`: stores `to` in otbr and `from` (may be NULL or
+// "", e.g. forgotten) in off, then detaches `from`'s otbr consumer (GONE) and turns the lease into the otbr consumer's
+// attach on `to` (its attach callback runs with the lease's handle; no GONE, no reopen, frames keep flowing).
+// ESP_ERR_INVALID_STATE when `to` is not leased (unplugged meanwhile), the NVS error (nothing stored), ESP_ERR_TIMEOUT
+// (nothing ran). With `to` NULL or "" it ends a stop, once OpenThread stopped on `from`: `from` is stored in the mode
+// its radio_mux_set asked for (off or rcp-proxy), its otbr consumer detached (GONE) and that mode's attached;
+// ESP_ERR_INVALID_STATE when `from` is not in otbr (any more).
+esp_err_t radio_mux_commit_otbr(const char *from, const char *to);
+
+/* ---- C6 jobs (br_core: firmware push, ROM recovery, the probe) ---- */
+
+// Takes the C6 from the mux before a job: ESP_ERR_INVALID_STATE (409 c6_busy) while rcp-proxy on c6 has a peer or
+// another job holds it; otherwise c6's consumer gets GONE and is detached, SPI2, the INT pin and the reset GPIO are
+// released (the C6 left running) for rcp_sync, and c6 is listed busy. Waits for the owner task (up to 5 s,
+// ESP_ERR_TIMEOUT). ESP_OK before radio_mux_start (nothing holds the C6 then). Not from the owner task.
+// Every job_begin that returned ESP_OK must be followed by radio_mux_c6_job_end, also when the job failed: until then
+// c6 stays busy. ESP_ERR_TIMEOUT means nothing ran (the owner skips the abandoned begin): do not run the job, and do
+// not call job_end for it.
+esp_err_t radio_mux_c6_job_begin(void);
+// Gives the C6 back after the job: c6 is listed again from rcp_sync_get_last_probe (unavailable with the reason when
+// no RCP, the factory ESP-Hosted firmware or a failed ROM recovery), unavailable as well when !c6_ok, and its stored
+// mode's consumer attached again (SPI2 opened). Without a job it refreshes the listing of a c6 nothing is attached to.
+// Waits for the owner task (up to 5 s). No-op before radio_mux_start.
+void radio_mux_c6_job_end(bool c6_ok);
 
 #ifdef __cplusplus
 }

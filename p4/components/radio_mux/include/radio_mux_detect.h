@@ -73,7 +73,9 @@ radio_mux_probe_action_t radio_mux_detect_next(radio_mux_detect_t *d, int64_t no
 
 // "OPENTHREAD/1.4.0-Koenkk-2025.3.1; CC13XX_CC26XX; Mar 13 2025" -> version "1.4.0-Koenkk-2025.3.1", chip
 // "CC13XX_CC26XX": the text after the first '/' of the first field (the whole field when there is no '/') and the
-// second field, both trimmed and cut to fit. False only for NULL or an empty string.
+// second field, both trimmed and cut to fit. Only printable ASCII (0x20-0x7E) is kept: control bytes and bytes of 0x80
+// and above are dropped (every version and chip text of a record is printable ASCII; ZNP and ASH ones are formatted
+// from numbers). False only for NULL or an empty string.
 bool radio_mux_detect_parse_spinel_version(const char *s, char *version, size_t vcap, char *chip, size_t ccap);
 
 #ifdef __cplusplus

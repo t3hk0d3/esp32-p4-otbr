@@ -60,6 +60,38 @@ class TestStatusLogic:
         assert word in h["text"]
         assert h["link"]["href"] == "/firmware.html"
 
+    def test_fault_hero_of_a_dongle_links_the_radios_page(self):
+        # On RADIO_FAULT while Thread's radio is a dongle: the link goes to Radios, not Firmware (no update there).
+        h = st(
+            "L.heroFor({mode: 'RADIO_FAULT', fault_reason: 'spinel timeout', otbr_channel: 'usb-10c4-ea60-1', sniffer: {}})"
+        )
+        assert h["link"] == {"href": "/radios.html", "label": "Open Radios"}
+
+    def test_fault_hero_of_the_c6_still_links_firmware(self):
+        # On RADIO_FAULT with the C6 as Thread's radio: the firmware page, as before.
+        h = st(
+            "L.heroFor({mode: 'RADIO_FAULT', fault_reason: 'no rcp firmware', otbr_channel: 'c6', sniffer: {}})"
+        )
+        assert h["link"]["href"] == "/firmware.html"
+
+    def test_no_radio_hero_says_why_and_links_the_radios_page(self):
+        # On NO_RADIO: "No Thread radio", the reason, a link to Radios; never the raw mode name.
+        h = st(
+            "L.heroFor({mode: 'NO_RADIO', fault_reason: 'radio unplugged (usb-10c4-ea60-1)', otbr_channel: 'usb-10c4-ea60-1', sniffer: {}})"
+        )
+        assert h["title"] == "No Thread radio"
+        assert h["tone"] == "idle"
+        assert "radio unplugged" in h["text"]
+        assert "NO_RADIO" not in h["title"] + h["text"]
+        assert h["link"] == {"href": "/radios.html", "label": "Open Radios"}
+
+    def test_no_radio_hero_without_a_reason_still_explains(self):
+        # On NO_RADIO without a reason: a text that says Thread has no radio.
+        h = st(
+            "L.heroFor({mode: 'NO_RADIO', fault_reason: null, otbr_channel: null, sniffer: {}})"
+        )
+        assert "Thread" in h["text"] and "radio" in h["text"]
+
     def test_starting_hero_is_grey(self):
         # On STARTING: "Starting", tone idle.
         h = st("L.heroFor({mode: 'STARTING', sniffer: {}})")

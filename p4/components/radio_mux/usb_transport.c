@@ -3,10 +3,12 @@
 // or hand received bytes to the port.
 #include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "board_cores.h"
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_intr_alloc.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -249,12 +251,50 @@ static esp_err_t serial_setup(mux_port_t *p, uint32_t baud, bool flow, char *err
     return ESP_OK;
 }
 
+// The port's frame pool (DMA-capable, cache-line aligned, like the C6's), the decoder's discard buffer, the HDLC TX
+// buffer and the byte ring, allocated on the first open and kept (a consumer may hold slots past its detach; a dongle
+// that comes and goes does not churn the heap). About 39 KB that a board without a dongle never takes.
+static esp_err_t alloc_bufs(mux_port_t *p)
+{
+    if (p->pool.slots) {
+        return ESP_OK;
+    }
+    const size_t tx_cap = RADIO_MUX_HDLC_ENCODED_MAX(RADIO_MUX_FRAME_MAX);
+    uint8_t *slots = heap_caps_aligned_alloc(MUX_CACHE_LINE, (size_t)MUX_SLOT_SIZE * RADIO_MUX_POOL_SLOTS,
+                                             MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    uint8_t *discard = malloc(MUX_SLOT_SIZE);
+    uint8_t *tx = malloc(tx_cap);
+    RingbufHandle_t ring = xRingbufferCreate(MUX_RX_RING_SIZE, RINGBUF_TYPE_BYTEBUF);
+
+    if (!slots || !discard || !tx || !ring) {
+        heap_caps_free(slots);
+        free(discard);
+        free(tx);
+        if (ring) {
+            vRingbufferDelete(ring);
+        }
+        return ESP_ERR_NO_MEM;
+    }
+    p->discard = discard;
+    p->tx_buf = tx;
+    p->tx_cap = tx_cap;
+    p->ring = ring;
+    taskENTER_CRITICAL(&p->lock);
+    radio_mux_pool_init(&p->pool, slots, MUX_SLOT_SIZE, RADIO_MUX_POOL_SLOTS);
+    taskEXIT_CRITICAL(&p->lock);
+    return ESP_OK;
+}
+
 esp_err_t usb_transport_open(mux_port_t *p, const mux_usb_dev_t *dev, uint32_t baud, bool flow, char *err, size_t cap)
 {
     err[0] = '\0';
     if (!s_host_up || s_hdl) {
         snprintf(err, cap, "%s", s_host_up ? "a device is already open" : "USB host not running");
         return ESP_ERR_INVALID_STATE;
+    }
+    if (alloc_bufs(p) != ESP_OK) {
+        snprintf(err, cap, "out of memory for the USB radio buffers");
+        return ESP_ERR_NO_MEM;
     }
     const cdc_acm_host_device_config_t cfg = {
         .connection_timeout_ms = OPEN_TIMEOUT_MS,

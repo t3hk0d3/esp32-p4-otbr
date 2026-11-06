@@ -66,14 +66,35 @@ TEST_CASE("Unknown endpoint class: is refused with 503", "[br_guard]")
 
 TEST_CASE("Refusal detail for 409 and 503: names the reason", "[br_guard]")
 {
-    TEST_ASSERT_EQUAL_STRING("sniffer active", esp_br_guard_detail(409));
-    TEST_ASSERT_EQUAL_STRING("radio not available", esp_br_guard_detail(503));
+    for (size_t i = 0; i < MODE_COUNT; i++) {
+        TEST_ASSERT_EQUAL_STRING("sniffer active", esp_br_guard_detail(409, ALL_MODES[i]));
+        TEST_ASSERT_EQUAL_STRING("radio not available", esp_br_guard_detail(503, ALL_MODES[i]));
+    }
 }
 
 TEST_CASE("Refusal detail for any other status: is NULL", "[br_guard]")
 {
-    TEST_ASSERT_NULL(esp_br_guard_detail(0));
-    TEST_ASSERT_NULL(esp_br_guard_detail(200));
+    TEST_ASSERT_NULL(esp_br_guard_detail(0, BR_MODE_BR_RUNNING));
+    TEST_ASSERT_NULL(esp_br_guard_detail(200, BR_MODE_BR_RUNNING));
+    TEST_ASSERT_NULL(esp_br_guard_detail(0, BR_MODE_NO_RADIO));
+}
+
+TEST_CASE("Thread-changing endpoint on NO_RADIO: returns 503, detail no radio in OTBR mode", "[br_guard]")
+{
+    TEST_ASSERT_EQUAL(503, esp_br_guard_status(ESP_BR_GUARD_THREAD_OP, BR_MODE_NO_RADIO, false));
+    TEST_ASSERT_EQUAL(503, esp_br_guard_status(ESP_BR_GUARD_THREAD_OP, BR_MODE_NO_RADIO, true));
+    TEST_ASSERT_EQUAL_STRING("no radio in OTBR mode", esp_br_guard_detail(503, BR_MODE_NO_RADIO));
+}
+
+TEST_CASE("Read endpoint on NO_RADIO: returns 503 even while OpenThread is still being torn down", "[br_guard]")
+{
+    TEST_ASSERT_EQUAL(503, esp_br_guard_status(ESP_BR_GUARD_READ, BR_MODE_NO_RADIO, false));
+    TEST_ASSERT_EQUAL(503, esp_br_guard_status(ESP_BR_GUARD_READ, BR_MODE_NO_RADIO, true));
+}
+
+TEST_CASE("Endpoint without OpenThread access on NO_RADIO: is allowed", "[br_guard]")
+{
+    TEST_ASSERT_EQUAL(0, esp_br_guard_status(ESP_BR_GUARD_NONE, BR_MODE_NO_RADIO, false));
 }
 
 void app_main(void)

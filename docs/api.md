@@ -30,13 +30,14 @@ below, any of them can answer 500 `internal` or `no_memory`.
 | `GET /device/console` | Thread console setting and session: `{"enabled": bool, "session": null \| {"peer": "<address>", "since_s": <s>}}`, see [Thread console](#thread-console) | |
 | `PUT /device/console` | body `{"enabled": bool}`; stored, off by default; turning it off closes the session (4003); replies like GET | 400 `invalid_request` (`enabled` missing or not a boolean), `length_required`; 413 `payload_too_large`; 500 `storage_failed`; 503 `not_started` (the console did not start at boot) |
 | `GET /device/console/ws` | WebSocket: the board's OpenThread CLI, see [Thread console](#thread-console) | 403 on an interface that does not serve the device API |
-| `GET /device/usb_serial` | USB serial proxy setting and status, see [USB serial proxy](#usb-serial-proxy-experimental) | |
-| `PUT /device/usb_serial` | any of `enabled`, `port`, `baud`, `flow_control`, `kick` (`true` drops the client); stored, off by default; replies like GET | 400 `invalid_request` (port outside 1-65535 or 80 or 179, baud not in the list, a field of the wrong type), `length_required`; 413 `payload_too_large`; 500 `storage_failed`; 503 `not_started`; 504 `timeout` |
+| `GET /device/channels` | every radio channel and the modes the board offers, see [Radio channels](#radio-channels) | |
+| `PUT /device/channels/{id}` | any of `mode`, `baud`, `flow_control` and an `rcp_proxy` object; replies with the channel (`"reboot": true` when the mode's consumer reboots), or 202 `{"moving": true, "moved_from": "<id>"}` when Thread moves to this channel (also for a start, `moved_from` null, and a stop of Thread, `moved_from` the channel itself) | 400 `bad_value` (`detail` names the field), `length_required`; 404 `unknown_channel`; 409 `unavailable`, `not_available`, `incompatible`, `mode_taken`, `hybrid_not_supported`, `probe_failed`, `port_taken`, `busy`; 413 `payload_too_large` (over 512 bytes); 500 `failed` |
+| `DELETE /device/channels/{id}` | forget an unplugged radio and its settings; 204 | 404 `unknown_channel`; 409 `in_use` (the C6 or a plugged-in radio); 500 `failed`; 503 `not_started` |
 | `GET /device/zigbee` | Zigbee mode status, see [Zigbee coordinator](#zigbee-coordinator-experimental) | 409 `not_zigbee` (no channel runs `ziggurat`) |
 | `POST /device/reboot` | reboot | 409 `busy` while an update or push runs (other reboots, such as the network trial revert, `net reset` and `DELETE /node`, wait until it ends) |
 | `GET /metrics` | device health and Thread figures in the Prometheus text format, see [metrics](metrics.md) | 500 `no_memory` |
 
-`/device/status` modes: `STARTING`, `BR_RUNNING`, `SNIFFER`, `RADIO_FAULT`.
+`/device/status` modes: `STARTING`, `BR_RUNNING`, `SNIFFER`, `RADIO_FAULT`, `NO_RADIO` (no present radio channel is in `otbr`: Thread is switched off on purpose or its dongle is unplugged; the Thread REST API and the console WebSocket answer 503 `no radio in OTBR mode`). `otbr_channel` is the id of the channel OpenThread runs on, or `null`. `POST /device/radio/firmware` and `POST /device/radio/recover` also answer 409 `c6_busy` while `rcp-proxy` on the C6 has a peer.
 
 ### Service records in the topology scan
 
@@ -243,24 +244,70 @@ websocat ws://<board>/device/console/ws
 
 <img src="images/console.png" width="640" alt="Thread Console page: connected, with the output of state and router table">
 
-### USB serial proxy (experimental)
+### Radio channels
 
-A USB serial dongle on the board's USB-A port, served byte for byte to one TCP client; see [USB serial proxy](usb-serial.md).
-Off by default. `PUT` takes any of `enabled`, `port` (1-65535, not 80 or 179; default 6638), `baud` (38400, 57600,
-115200, 230400, 460800, 921600, 1000000 or 2000000; default 115200), `flow_control` (default false) and `kick`
-(`true` closes the current client; not stored). Both routes answer with the whole body:
+Every radio is a channel: the on-board C6 (`c6`) and a USB dongle (`usb-<vid>-<pid>`, plus `-<serial>` when the device
+reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /device/channels` answers
 
 ```
-{"enabled": true, "port": 6638, "baud": 115200, "flow_control": false,
- "dongle": {"vid": "10c4", "pid": "ea60", "driver": "cp210x", "open": true, "flow_control": false, "error": null},
- "client": {"peer": "192.168.1.20", "since_s": 42},
- "bytes_to_dongle": 12345, "bytes_from_dongle": 67890, "discarded_from_client": 0,
- "overflow_disconnects": 0, "refused_connections": 0}
+{"available_modes": ["off", "otbr", "rcp-proxy"],
+ "channels": [
+  {"id": "c6", "kind": "c6", "label": "ESP32-C6 (on board)", "mode": "otbr", "stored_mode": "otbr",
+   "state": "running", "error": null, "line": {"baud": 460800, "flow_control": false}, "usb": null,
+   "caps": {"firmware_update": true, "hw_reset": true, "flow_control": false},
+   "rcp_proxy": {"direction": "listen", "adapter": "tcp", "port": 6638, "host": "", "framing": "hdlc",
+                 "state": null, "peer": null, "last_error": null},
+   "firmware": {"type": "spinel", "version": "1.4.0", "chip": "esp32c6", "baud": null, "source": "passive", "at": 1762430000},
+   "counters": {"frames_in": 10, "frames_out": 9, "bytes_in": 1000, "bytes_out": 900, "drops": 1, "resets": 2, "rx_errors": 3}},
+  {"id": "usb-10c4-ea60-abc123", "kind": "usb", "label": "Sonoff Zigbee 3.0 USB Dongle Plus", "mode": "rcp-proxy",
+   "stored_mode": "rcp-proxy", "state": "running", "error": null, "line": {"baud": 115200, "flow_control": true},
+   "usb": {"vid": "10c4", "pid": "ea60", "serial": "abc123", "driver": "cp210x"},
+   "caps": {"firmware_update": false, "hw_reset": false, "flow_control": true},
+   "rcp_proxy": {"direction": "connect", "adapter": "udp", "port": 9999, "host": "host.local", "framing": "raw",
+                 "state": "connected", "peer": "192.168.1.20:9999", "last_error": null},
+   "firmware": {"type": "znp", "version": "20240710", "chip": null, "baud": 115200, "source": "probe", "at": null},
+   "counters": {"frames_in": 0, "frames_out": 0, "bytes_in": 0, "bytes_out": 0, "drops": 0, "resets": 0, "rx_errors": 0}}
+ ]}
 ```
 
-`dongle` and `client` are `null` when absent. A `400 invalid_request` answers a port outside 1-65535 or equal to 80
-or 179, a baud rate not in the list, and a field of the wrong type (`{"port": "6638"}`). Validation does not depend on
-the dongle.
+- `available_modes` are the modes the build offers; `ziggurat` is reserved and not listed.
+- `mode` is what the channel does now: `unavailable` (reported only: not detected, unplugged, no driver), `off`,
+  `otbr`, `ziggurat` (reserved) or `rcp-proxy`. `stored_mode` is the mode it returns to, also while unavailable or when
+  the firmware does not fit.
+- `state` is `idle`, `starting`, `running`, `fault` (with `error`) or `busy` (a C6 job runs). A failed start of OpenThread
+  shows as `fault` on its channel, with the board's fault reason.
+- `usb` is `null` for the C6. `rcp_proxy` always carries the stored settings; `state` (`listening`, `connecting`,
+  `backoff`, `connected`) and `peer` are set only while the channel runs `rcp-proxy`. `last_error` says why the
+  proxy's last try to listen or connect failed (`"tcp port 6638: Address already in use"`, `"host.local does not
+  resolve"`, `"connect timed out"`) and is `null` once a try worked; while the proxy is in `backoff` it is also the
+  channel's `error`.
+- `firmware` is `null` before a detection; `type` is `spinel`, `ziggurat`, `znp`, `ezsp` or `unknown`; `source` is
+  `probe` or `passive`; `version`, `chip`, `baud` and `at` are `null` when unknown.
+
+`PUT /device/channels/{id}` takes a body of at most 512 bytes with any of: `mode` (`off`, `otbr`, `ziggurat`,
+`rcp-proxy`), `baud` (38400, 57600, 115200, 230400, 460800, 921600, 1000000, 2000000; refused on the C6),
+`flow_control` (bool), and `rcp_proxy` with any of `direction` (`listen`, `connect`), `adapter` (`tcp`, `udp`), `port`
+(1-65535, not 80 or 179), `host` (up to 63 bytes, needed for `connect`), `framing` (`hdlc`, `raw`; UDP only) and
+`kick` (`true` drops the current peer or releases the UDP lock; not stored). Unknown keys are refused. Line and proxy
+settings are stored and applied at once, also for an unplugged radio.
+
+| Reply | Meaning |
+| --- | --- |
+| 200 + the channel | applied; with `"reboot": true` when the mode's consumer reboots the board on a change |
+| 202 `{"moving": true, "moved_from": "<id>"}` | `otbr` on a channel while another has it: Thread moves after the target passed a probe; the target shows `starting` until it settles, the stored modes change only when it runs. The same for a start (`otbr` while no channel has it; `moved_from` null) and a stop (another mode on the channel that has `otbr`; `moved_from` is that channel: its sessions drain, OpenThread stops, then the new mode is stored) |
+| 400 `bad_value` | wrong type or value; `detail` names the field (`mode`, `baud`, `rcp_proxy.port`, `rcp_proxy.host`, ...); `unavailable` cannot be set; a move or start may not carry `baud`, `flow_control` or `rcp_proxy` settings (a stop may: they are its new mode's) |
+| 404 `unknown_channel` | no such id |
+| 409 `unavailable`, `incompatible`, `not_available` | the radio is not usable, its detected firmware does not fit the mode, or no consumer is registered for the mode (`ziggurat`) |
+| 409 `mode_taken`, `hybrid_not_supported` | the mode is at its channel limit; OTBR and a registered `ziggurat` consumer at once |
+| 409 `probe_failed` | the target of a move or start did not answer as a spinel RCP, or runs `rcp-proxy` ("set it off first"); nothing changed |
+| 409 `port_taken` | the channel would listen in `rcp-proxy` on the adapter and port another channel stored in `rcp-proxy` listens on (also an unplugged one); `detail` names the port and that channel; nothing changed |
+| 409 `busy` | an update, a firmware push, a recovery or another move runs, a mode is changed during a move, or the board is stopping or starting OpenThread on its radio (after an unplug, a plug-in) |
+| 500 `failed` | the mux is not started, storage failed or a probe took too long |
+
+A move that fails after the 202 (the target does not start, or open Thread sessions do not end within 45 s) leaves
+Thread on the old channel and shows on the target as `"state": "fault"` with the reason in `error` (`drain_timeout`
+among them); a refused stop leaves the channel `running` in `otbr` with `error` `drain_timeout`. Poll
+`GET /device/channels` after a 202. While OpenThread starts on its channel, that channel shows `starting`.
 
 ### Zigbee coordinator (experimental)
 

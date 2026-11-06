@@ -27,6 +27,9 @@ typedef enum {
     RADIO_MUX_MODE_INVALID,
 } radio_mux_mode_t;
 
+// One bit per mode, for a set of modes (radio_mux_available_modes).
+#define RADIO_MUX_MODE_BIT(mode) (1u << (unsigned)(mode))
+
 typedef enum {
     RADIO_MUX_FW_UNKNOWN,
     RADIO_MUX_FW_SPINEL,
@@ -69,6 +72,8 @@ typedef enum {
     // radio_mux_set only, never from radio_mux_check_set_mode:
     RADIO_MUX_REFUSE_UNKNOWN_CHANNEL, // no channel with that id (404)
     RADIO_MUX_REFUSE_FAILED,          // the mux could not store or apply the change (not started, NVS, timeout: 500)
+    RADIO_MUX_REFUSE_PROBE_FAILED,    // a move of otbr: the target's RCP probe failed, nothing changed (409 probe_failed)
+    RADIO_MUX_REFUSE_BUSY,            // the channel or OpenThread is busy (a move or a radio job runs): try again (409)
 } radio_mux_verdict_t;
 
 typedef enum {
@@ -192,13 +197,20 @@ const char *radio_mux_mode_name(radio_mux_mode_t mode);
 // "unknown", "spinel", "ziggurat", "znp", "ezsp".
 const char *radio_mux_fw_name(radio_mux_fw_t fw);
 
+// The modes the API offers: off always, plus every mode a rule registers (otbr, ziggurat, rcp-proxy). A set of
+// RADIO_MUX_MODE_BIT; never unavailable or invalid.
+uint32_t radio_mux_available_modes(const radio_mux_rules_t *rules);
+
 // Whether firmware of this type can run the mode. otbr needs spinel; off and rcp-proxy fit anything; a registered mode
 // uses the type its registration declares; any other mode fits nothing.
 bool radio_mux_fits(const radio_mux_rules_t *rules, radio_mux_mode_t mode, radio_mux_fw_t fw);
 
-// Decision for setting channel `target` (index into chans[0..n)) to `want`. On RADIO_MUX_MOVE, *move_from is the index
-// of the channel that currently has otbr; move_from may be NULL. Checks run in the order of the verdicts: bad value,
-// unavailable channel, mode not registered, firmware fit, hybrid, move or limit, reboot.
+// Decision for setting channel `target` (index into chans[0..n)) to `want`. RADIO_MUX_MOVE is every change of where
+// OpenThread runs, each run by br_core as a long operation: otbr while another channel has it (a move; *move_from is
+// that channel's index), otbr while no channel has it (a start; *move_from is n), and the otbr channel leaving otbr
+// for another mode without a reboot (a stop; *move_from is target). move_from may be NULL. Checks run in the order of
+// the verdicts: bad value, unavailable channel, mode not registered, firmware fit, hybrid (otbr next to a stored
+// ziggurat only while a ziggurat consumer is registered), move or limit, start, reboot, stop.
 radio_mux_verdict_t radio_mux_check_set_mode(const radio_mux_rules_t *rules, const radio_mux_chan_view_t *chans,
                                              size_t n, size_t target, radio_mux_mode_t want, size_t *move_from);
 
@@ -262,6 +274,95 @@ const char *radio_mux_fw_source_name(radio_mux_fw_source_t src);
 // Stored rcp_proxy settings: known direction, adapter and framing; port 1..65535 except 80 and 179 (the board's own
 // listeners); connect needs a host.
 bool radio_mux_proxy_ok(const radio_mux_proxy_settings_t *s);
+
+/* ---- the C6 over SPI (OpenThread's spi_frame.hpp) ---- */
+
+// Every SPI transaction starts with a 5-byte header in both directions: the flag byte (pattern 0x02 in its low two
+// bits, the reset bit 0x80), then the accept length and the data length, both uint16 little-endian.
+#define RADIO_MUX_SPI_HDR_LEN 5
+#define RADIO_MUX_SPI_FLAG_RESET 0x80
+#define RADIO_MUX_SPI_FLAG_PATTERN 0x02
+#define RADIO_MUX_SPI_PATTERN_MASK 0x03
+// Accept length of a transaction that carries a frame of ours (as ESP-IDF's spinel SPI interface does): the frame's
+// length, at least this many bytes.
+#define RADIO_MUX_SPI_SMALL_ACCEPT 32
+// Transactions are clocked in whole cache lines: the receive buffer is DMA'd into in place, without a bounce buffer.
+#define RADIO_MUX_SPI_XFER_ALIGN 64
+
+typedef struct {
+    bool reset;          // the sender (re)started since its previous transaction
+    uint16_t accept_len; // bytes of data the sender takes in this transaction
+    uint16_t data_len;   // bytes of data the sender puts after the header
+} radio_mux_spi_hdr_t;
+
+void radio_mux_spi_hdr_encode(const radio_mux_spi_hdr_t *h, uint8_t out[RADIO_MUX_SPI_HDR_LEN]);
+// false when the flag byte's pattern bits are not 0x02 (the RCP not ready: a floating or held MISO reads 0xFF or 0x00);
+// *out is then left as it was.
+bool radio_mux_spi_hdr_decode(const uint8_t in[RADIO_MUX_SPI_HDR_LEN], radio_mux_spi_hdr_t *out);
+
+// What one full-duplex transaction gave, from the RCP's header (rx_hdr), the data length we sent (tx_len) and the
+// accept length we sent (accept).
+typedef struct {
+    bool valid;     // pattern right and both lengths at most `frame_max`; nothing else is set when false
+    bool rcp_reset; // the RCP's reset bit
+    uint16_t rx_len; // the RCP sent a frame of this many bytes after the header; 0 = none (or more than we accepted)
+    bool tx_taken;   // tx_len was 0, or the RCP accepted that much
+} radio_mux_spi_result_t;
+
+void radio_mux_spi_check(const uint8_t rx_hdr[RADIO_MUX_SPI_HDR_LEN], uint16_t tx_len, uint16_t accept,
+                         uint16_t frame_max, radio_mux_spi_result_t *out);
+
+// Bytes to clock for a transaction: the header plus the larger of tx_len and accept, rounded up to
+// RADIO_MUX_SPI_XFER_ALIGN.
+size_t radio_mux_spi_xfer_len(uint16_t tx_len, uint16_t accept);
+
+// The C6's SPI slave re-arms after each transaction: its done callback raises INT, then queues the next transaction.
+// Clocking again before that sees an unloaded slave (garbage headers, a misaligned stream). How long to wait before
+// the next transaction: 0 when at least gap_us passed since the previous one ended at last_end_us (negative: none
+// yet), else the rest of the gap. A clock that went backwards counts as "just ended" (the whole gap).
+uint32_t radio_mux_spi_gap_wait_us(int64_t now_us, int64_t last_end_us, uint32_t gap_us);
+
+// What rcp_sync's last probe of the C6 said (the fields of rcp_sync_probe_result_t the mux reads). All false: no probe
+// ran yet.
+typedef struct {
+    bool updater_reachable;
+    bool installed_valid;
+    bool esp_hosted;
+    bool rom_recovery_failed;
+} radio_mux_c6_probe_t;
+
+// Whether c6 is listed present: not when the C6 runs the factory ESP-Hosted firmware, when a ROM recovery failed and
+// the updater stayed silent, or when the updater answered with no RCP installed; `reason` (may be NULL) then names
+// which, else it is empty. No probe yet, or a silent updater without a failed recovery: present (the installed
+// firmware is tried, as br_core does).
+bool radio_mux_c6_present(const radio_mux_c6_probe_t *probe, char *reason, size_t cap);
+
+// Whether a C6 job (push, recovery, probe) is refused: only while the C6's stored mode is rcp-proxy, its consumer is
+// attached and it reported a connected peer.
+bool radio_mux_c6_job_refused(radio_mux_mode_t stored_mode, bool attached, bool has_peer);
+
+/* ---- attach handles ---- */
+
+// A consumer's handle (radio_mux_chan_t *, radio_mux.h) is one attach or lease, not the channel: the pointer value
+// packs the channel's slot (low RADIO_MUX_HANDLE_SLOT_BITS bits) and the generation of that attach (the rest). It is
+// never dereferenced. Every attach and lease takes the next generation; a transport accepts calls only through the
+// handle of its current generation.
+#define RADIO_MUX_HANDLE_SLOT_BITS 3
+#define RADIO_MUX_HANDLE_SLOTS (1u << RADIO_MUX_HANDLE_SLOT_BITS)
+// The largest generation that fits a 32-bit pointer next to the slot.
+#define RADIO_MUX_GEN_MAX (UINT32_MAX >> RADIO_MUX_HANDLE_SLOT_BITS)
+
+// The generation after `gen`: gen + 1, from RADIO_MUX_GEN_MAX (or anything above it) back to 1; never 0, which no
+// handle carries (0 = no attach yet).
+uint32_t radio_mux_gen_next(uint32_t gen);
+// The handle value of slot `slot` (< RADIO_MUX_HANDLE_SLOTS) at generation `gen` (1..RADIO_MUX_GEN_MAX); 0 when either
+// is out of range. Never 0 otherwise.
+uintptr_t radio_mux_handle_pack(size_t slot, uint32_t gen);
+// The slot and generation of handle value `h`; false (nothing set) for 0 or a generation of 0.
+bool radio_mux_handle_unpack(uintptr_t h, size_t *slot, uint32_t *gen);
+// Whether a handle of generation `gen` may use a transport whose current attach has generation `current`: equal, and
+// not 0 (nothing attached to the transport yet).
+bool radio_mux_handle_current(uint32_t gen, uint32_t current);
 
 #ifdef __cplusplus
 }

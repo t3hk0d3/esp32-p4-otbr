@@ -1,4 +1,4 @@
-"""Zigbee page, nav link and Dashboard card (BDD: ZigbeeLogic, ZigbeePage, api.js nav, StatusPage).
+"""Zigbee page, nav slot and Dashboard card (BDD: ZigbeeLogic, ZigbeePage, api.js nav, StatusPage).
 
 Runs static/zigbee.js, status.js and api.js under node.
 """
@@ -294,30 +294,26 @@ class TestZigbeePage:
 API = STATIC / "api.js"
 
 
-def nav_scenario(status_body, path="/index.html", fetch_fails=False):
-    """Run api.js with a nav stand-in and a fake fetch; return what was inserted after the Dashboard entry."""
+def nav_scenario(status_body, path="/index.html", fetch_fails=False, slot=True):
+    """Run api.js with a fake fetch answering /device/status; return the requests made and #nav-slot-zigbee after the
+    answer (null when the page has no slot)."""
     answer = (
         "Promise.reject(new Error('down'))"
         if fetch_fails
-        else f"Promise.resolve({{ok: true, json: () => Promise.resolve({json.dumps(status_body)})}})"
+        else f"Promise.resolve({{ok: true, text: () => Promise.resolve({json.dumps(json.dumps(status_body))})}})"
     )
     source = f"""
         const vm = require('vm'); const fs = require('fs');
-        const dash = {{id: 'dash', nextSibling: {{id: 'next'}}}};
-        const ul = {{firstChild: dash, inserted: [], insertBefore(li, ref) {{ this.inserted.push({{li, ref: ref && ref.id}}); return li; }}}};
-        const nav = {{innerHTML: '', querySelector: (s) => s === '.nav-links' ? ul : null}};
+        const nav = {{innerHTML: ''}}; const thread = {{hidden: false}};
+        const slot = {json.dumps(slot)} ? {{innerHTML: '', hidden: true}} : null;
         const fetched = [];
-        const el = () => ({{children: [], attrs: {{}}, textContent: '', className: '',
-                          appendChild(c) {{ this.children.push(c); return c; }},
-                          setAttribute(k, v) {{ this.attrs[k] = v; }}}});
-        const ctx = {{document: {{getElementById: (id) => id === 'nav' ? nav : null, createElement: el}},
+        const ids = {{'nav': nav, 'nav-thread': thread, 'nav-slot-zigbee': slot}};
+        const ctx = {{document: {{getElementById: (id) => ids[id] || null}},
                      location: {{pathname: {json.dumps(path)}}},
+                     sessionStorage: {{getItem: () => null, setItem: () => {{}}}},
                      fetch: (u) => {{ fetched.push(u); return {answer}; }}}};
         vm.runInNewContext(fs.readFileSync({json.dumps(str(API))}, 'utf8'), ctx);
-        setTimeout(() => {{
-          const shape = (e) => ({{cls: e.className, a: e.children.map((c) => ({{text: c.textContent, href: c.attrs.href, cls: c.className}}))}});
-          process.stdout.write(JSON.stringify({{fetched, html: nav.innerHTML, inserted: ul.inserted.map((i) => ({{ref: i.ref, ...shape(i.li)}}))}}));
-        }}, 20);
+        setTimeout(() => process.stdout.write(JSON.stringify({{fetched, html: nav.innerHTML, slot}})), 50);
     """
     import subprocess
 
@@ -329,36 +325,38 @@ def nav_scenario(status_body, path="/index.html", fetch_fails=False):
 
 @needs_node
 class TestZigbeeNav:
-    """api.js: the Zigbee entry after the Dashboard"""
+    """api.js: the Zigbee link in the nav slot"""
 
-    def test_entry_is_added_after_the_dashboard_when_a_channel_is_zigbee(self):
-        # On /device/status with zigbee_channel "c6": a Zigbee link to /zigbee.html goes in right after Dashboard.
-        r = nav_scenario({"zigbee_channel": "c6"})
+    def test_slot_gets_the_link_and_is_shown_when_a_channel_is_zigbee(self):
+        # On /device/status with zigbee_channel "c6": one status request; the slot holds a Zigbee link and is shown.
+        r = nav_scenario({"otbr_channel": None, "zigbee_channel": "c6"})
         assert r["fetched"] == ["/device/status"]
-        assert len(r["inserted"]) == 1
-        assert r["inserted"][0]["ref"] == "next"
-        assert r["inserted"][0]["a"][0]["text"] == "Zigbee"
-        assert r["inserted"][0]["a"][0]["href"] == "/zigbee.html"
+        assert r["slot"]["hidden"] is False
+        assert r["slot"]["innerHTML"] == '<a href="/zigbee.html">Zigbee</a>'
 
-    def test_entry_is_active_on_the_zigbee_page(self):
-        # On /zigbee.html: the entry is marked active.
+    def test_link_is_active_on_the_zigbee_page(self):
+        # On /zigbee.html: the link is marked active.
         r = nav_scenario({"zigbee_channel": "c6"}, "/zigbee.html")
-        assert r["inserted"][0]["a"][0]["cls"] == "active"
+        assert r["slot"]["innerHTML"] == '<a href="/zigbee.html" class="active">Zigbee</a>'
 
     @pytest.mark.parametrize("status", [{"zigbee_channel": None}, {}])
-    def test_no_entry_without_a_zigbee_channel(self, status):
-        # On a null or missing zigbee_channel: nothing is added.
-        assert nav_scenario(status)["inserted"] == []
+    def test_slot_stays_hidden_and_empty_without_a_zigbee_channel(self, status):
+        # On a null or missing zigbee_channel: the slot stays hidden and empty.
+        assert nav_scenario(status)["slot"] == {"innerHTML": "", "hidden": True}
 
-    def test_no_entry_when_the_status_cannot_be_read(self):
-        # On a failing fetch: nothing is added and nothing throws.
-        assert nav_scenario(None, fetch_fails=True)["inserted"] == []
+    def test_slot_stays_hidden_when_the_status_cannot_be_read(self):
+        # On a failing fetch: the slot stays hidden and empty, and nothing throws.
+        assert nav_scenario(None, fetch_fails=True)["slot"] == {"innerHTML": "", "hidden": True}
 
-    def test_static_menu_is_unchanged(self):
-        # On the static nav: it still lists the Dashboard first and has no Zigbee link of its own.
+    def test_no_slot_in_the_page_is_not_an_error(self):
+        # On a nav without the slot element: nothing throws.
+        assert nav_scenario({"zigbee_channel": "c6"}, slot=False)["slot"] is None
+
+    def test_static_menu_has_the_empty_hidden_slot_and_no_link(self):
+        # On the static nav: the slot is an empty hidden <li>; the Zigbee link is not in the markup.
         html = nav_scenario({"zigbee_channel": None})["html"]
-        assert html.index("Dashboard") < html.index("Management")
-        assert "zigbee" not in html.lower()
+        assert '<li id="nav-slot-zigbee" hidden></li>' in html
+        assert "zigbee.html" not in html
 
 
 STATUS_WITH_ZIGBEE = "Object.assign(H.fixture(H.STATUS), {zigbee_channel: 'c6'})"

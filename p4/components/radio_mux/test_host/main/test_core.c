@@ -85,6 +85,53 @@ TEST_CASE("On a serial that would exceed 47 characters: truncates the serial so 
     TEST_ASSERT_EQUAL_STRING("usb-303a-1001-0123456789abcdefghijklmnopqrstuvw", id);
 }
 
+/* ---- radio_mux_available_modes ---- */
+
+TEST_CASE("On no rules: only off is available", "[radio_mux]")
+{
+    const radio_mux_rules_t rules = {0};
+
+    TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF), radio_mux_available_modes(&rules));
+}
+
+TEST_CASE("On rules for otbr and rcp-proxy: off, otbr and rcp-proxy are available, ziggurat is not", "[radio_mux]")
+{
+    radio_mux_rules_t rules = {0};
+
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_OTBR
+    };
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_RCP_PROXY
+    };
+    TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF) | RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OTBR) |
+                             RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_RCP_PROXY),
+                             radio_mux_available_modes(&rules));
+}
+
+TEST_CASE("On a ziggurat rule too: ziggurat is available", "[radio_mux]")
+{
+    radio_mux_rules_t rules = {0};
+
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_ZIGGURAT
+    };
+    TEST_ASSERT_TRUE(radio_mux_available_modes(&rules) & RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_ZIGGURAT));
+}
+
+TEST_CASE("On a rule for a non-mode (unavailable, invalid): it is ignored", "[radio_mux]")
+{
+    radio_mux_rules_t rules = {0};
+
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_UNAVAILABLE
+    };
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_INVALID
+    };
+    TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF), radio_mux_available_modes(&rules));
+}
+
 /* ---- radio_mux_mode_parse / radio_mux_mode_name ---- */
 
 TEST_CASE("On each wire name: round-trips unavailable, off, otbr, ziggurat, rcp-proxy", "[radio_mux]")
@@ -284,8 +331,22 @@ TEST_CASE("On otbr while a ziggurat consumer is active, or ziggurat while otbr i
     c[0].mode = RADIO_MUX_MODE_OFF;
     c[1].mode = MODE_ZIGGURAT;
     TEST_ASSERT_EQUAL(RADIO_MUX_REFUSE_HYBRID, radio_mux_check_set_mode(&zig, c, N_CHANS, 0, RADIO_MUX_MODE_OTBR, NULL));
-    // A channel leaving ziggurat for otbr is not a hybrid: nothing else runs ziggurat.
-    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY, radio_mux_check_set_mode(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, NULL));
+    // A channel leaving ziggurat for otbr is not a hybrid: nothing else runs ziggurat (a plain start of otbr).
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_check_set_mode(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, NULL));
+}
+
+TEST_CASE("On otbr while another channel stores ziggurat but no ziggurat consumer is registered: not a hybrid",
+          "[radio_mux]")
+{
+    radio_mux_rules_t none = no_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    size_t from = 99;
+
+    three_channels(c);
+    c[0].mode = RADIO_MUX_MODE_OFF;
+    c[1].mode = MODE_ZIGGURAT; // stored by a build that had the consumer
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_check_set_mode(&none, c, N_CHANS, 0, RADIO_MUX_MODE_OTBR, &from));
+    TEST_ASSERT_EQUAL(N_CHANS, from);
 }
 
 TEST_CASE("On a mode whose registration declares reboot on enter or leave: returns RADIO_MUX_APPLY_REBOOT",
@@ -313,18 +374,55 @@ TEST_CASE("On off or rcp-proxy otherwise: returns RADIO_MUX_APPLY", "[radio_mux]
     radio_mux_chan_view_t c[N_CHANS];
 
     three_channels(c);
-    // Any firmware, including one otbr does not fit, and the otbr channel itself.
+    // Any firmware, including one otbr does not fit.
     TEST_ASSERT_EQUAL(RADIO_MUX_APPLY, radio_mux_check_set_mode(&none, c, N_CHANS, 2, RADIO_MUX_MODE_RCP_PROXY, NULL));
     TEST_ASSERT_EQUAL(RADIO_MUX_APPLY, radio_mux_check_set_mode(&none, c, N_CHANS, 2, RADIO_MUX_MODE_OFF, NULL));
-    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY, radio_mux_check_set_mode(&none, c, N_CHANS, 0, RADIO_MUX_MODE_OFF, NULL));
     // Leaving a registered mode without a reboot declaration.
     c[0].mode = RADIO_MUX_MODE_OFF;
     c[1].mode = MODE_ZIGGURAT;
     TEST_ASSERT_EQUAL(RADIO_MUX_APPLY, radio_mux_check_set_mode(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OFF, NULL));
-    // otbr onto a free spinel channel, no other otbr.
-    c[1].mode = RADIO_MUX_MODE_OFF;
+}
+
+TEST_CASE("On otbr for a channel while no channel has otbr: returns RADIO_MUX_MOVE from no source (a plain start)",
+          "[radio_mux]")
+{
+    radio_mux_rules_t none = no_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    size_t from = 99;
+
+    three_channels(c);
     c[0].mode = RADIO_MUX_MODE_OFF;
-    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY, radio_mux_check_set_mode(&none, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, NULL));
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_check_set_mode(&none, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, &from));
+    TEST_ASSERT_EQUAL(N_CHANS, from); // n: no channel to move from
+    c[1].mode = RADIO_MUX_MODE_RCP_PROXY; // from another mode the same (the lease refuses a running consumer)
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_check_set_mode(&none, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, &from));
+    TEST_ASSERT_EQUAL(N_CHANS, from);
+}
+
+TEST_CASE("On off or rcp-proxy for the channel that has otbr: returns RADIO_MUX_MOVE with itself as the source "
+          "(a plain stop)", "[radio_mux]")
+{
+    radio_mux_rules_t none = no_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    size_t from = 99;
+
+    three_channels(c);
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_check_set_mode(&none, c, N_CHANS, 0, RADIO_MUX_MODE_OFF, &from));
+    TEST_ASSERT_EQUAL(0, from);
+    from = 99;
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_check_set_mode(&none, c, N_CHANS, 0, RADIO_MUX_MODE_RCP_PROXY, &from));
+    TEST_ASSERT_EQUAL(0, from);
+}
+
+TEST_CASE("On leaving otbr for a mode whose registration reboots: returns RADIO_MUX_APPLY_REBOOT, not a stop",
+          "[radio_mux]")
+{
+    radio_mux_rules_t zig = ziggurat_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+
+    zig.rules[0].reboot_on_change = true;
+    three_channels(c);
+    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY_REBOOT, radio_mux_check_set_mode(&zig, c, N_CHANS, 0, MODE_ZIGGURAT, NULL));
 }
 
 /* ---- radio_mux_after_detect ---- */
@@ -539,6 +637,82 @@ TEST_CASE("On flow control on: writes ulControlHandshake 0x00000009, ulFlowRepla
     radio_mux_cp210x_flow(true, out);
     TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, out, sizeof(expected));
     TEST_ASSERT_EQUAL_UINT32(0x00000009, le32(&out[0]));
+}
+
+/* ---- attach handles ---- */
+
+TEST_CASE("On the next generation: returns gen + 1", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL_UINT32(1, radio_mux_gen_next(0));
+    TEST_ASSERT_EQUAL_UINT32(2, radio_mux_gen_next(1));
+    TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_GEN_MAX, radio_mux_gen_next(RADIO_MUX_GEN_MAX - 1));
+}
+
+TEST_CASE("On the next generation after RADIO_MUX_GEN_MAX: wraps to 1, never 0", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL_UINT32(1, radio_mux_gen_next(RADIO_MUX_GEN_MAX));
+    TEST_ASSERT_EQUAL_UINT32(1, radio_mux_gen_next(UINT32_MAX));
+}
+
+TEST_CASE("On a handle packed and unpacked: returns its slot and generation", "[radio_mux]")
+{
+    const size_t slots[] = {0, 1, RADIO_MUX_HANDLE_SLOTS - 1};
+    const uint32_t gens[] = {1, 2, 12345, RADIO_MUX_GEN_MAX};
+
+    for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++) {
+        for (size_t j = 0; j < sizeof(gens) / sizeof(gens[0]); j++) {
+            const uintptr_t h = radio_mux_handle_pack(slots[i], gens[j]);
+            size_t slot = 99;
+            uint32_t gen = 0;
+
+            TEST_ASSERT_NOT_EQUAL(0, h);
+            TEST_ASSERT_TRUE(h <= UINT32_MAX); // fits the board's 32-bit pointers
+            TEST_ASSERT_TRUE(radio_mux_handle_unpack(h, &slot, &gen));
+            TEST_ASSERT_EQUAL(slots[i], slot);
+            TEST_ASSERT_EQUAL_UINT32(gens[j], gen);
+        }
+    }
+}
+
+TEST_CASE("On two attaches of the same slot: returns different handles", "[radio_mux]")
+{
+    TEST_ASSERT_NOT_EQUAL(radio_mux_handle_pack(1, 7), radio_mux_handle_pack(1, radio_mux_gen_next(7)));
+    TEST_ASSERT_NOT_EQUAL(radio_mux_handle_pack(0, 7), radio_mux_handle_pack(1, 7));
+}
+
+TEST_CASE("On a slot or generation out of range: returns the handle value 0", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(0, radio_mux_handle_pack(RADIO_MUX_HANDLE_SLOTS, 1));
+    TEST_ASSERT_EQUAL(0, radio_mux_handle_pack(0, 0));
+    TEST_ASSERT_EQUAL(0, radio_mux_handle_pack(0, RADIO_MUX_GEN_MAX + 1));
+}
+
+TEST_CASE("On unpacking 0 or a generation 0: returns false and sets nothing", "[radio_mux]")
+{
+    size_t slot = 99;
+    uint32_t gen = 99;
+
+    TEST_ASSERT_FALSE(radio_mux_handle_unpack(0, &slot, &gen));
+    TEST_ASSERT_FALSE(radio_mux_handle_unpack(RADIO_MUX_HANDLE_SLOTS - 1, &slot, &gen));
+    TEST_ASSERT_EQUAL(99, slot);
+    TEST_ASSERT_EQUAL_UINT32(99, gen);
+}
+
+TEST_CASE("On a handle of the transport's current attach: returns true", "[radio_mux]")
+{
+    TEST_ASSERT_TRUE(radio_mux_handle_current(5, 5));
+}
+
+TEST_CASE("On a handle of an earlier attach: returns false", "[radio_mux]")
+{
+    TEST_ASSERT_FALSE(radio_mux_handle_current(5, radio_mux_gen_next(5)));
+    TEST_ASSERT_FALSE(radio_mux_handle_current(radio_mux_gen_next(5), 5));
+}
+
+TEST_CASE("On a transport nothing ever attached to: returns false", "[radio_mux]")
+{
+    TEST_ASSERT_FALSE(radio_mux_handle_current(0, 0));
+    TEST_ASSERT_FALSE(radio_mux_handle_current(1, 0));
 }
 
 void app_main(void)

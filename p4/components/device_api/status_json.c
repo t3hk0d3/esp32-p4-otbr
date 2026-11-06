@@ -13,6 +13,8 @@ const char *device_api_mode_name(int mode)
         return "SNIFFER";
     case BR_MODE_RADIO_FAULT:
         return "RADIO_FAULT";
+    case BR_MODE_NO_RADIO:
+        return "NO_RADIO";
     default:
         return "UNKNOWN";
     }
@@ -187,6 +189,8 @@ int device_api_status_json(char *buf, size_t cap, const device_api_status_t *s)
     json_out_bool(&w, s->storage_ok);
     json_out_raw(&w, ",\"trel\":");
     trel_json(&w, &s->trel);
+    json_out_raw(&w, ",\"otbr_channel\":");
+    str_or_null(&w, s->otbr_channel);
     json_out_raw(&w, ",\"zigbee_channel\":");
     str_or_null(&w, s->zigbee_channel);
     json_out_raw(&w, "}");

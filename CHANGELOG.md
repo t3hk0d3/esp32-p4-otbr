@@ -9,13 +9,32 @@ release's `versions.txt`.
 
 ### Added
 
-- USB serial proxy (experimental): a USB serial dongle on the USB-A port served byte for byte to one TCP client (default
-  port 6638), off by default; `GET`/`PUT /device/usb_serial`. Not yet checked on a board. See `docs/usb-serial.md`.
+- Radio channels: every radio is a channel with a stored mode. The on-board C6 and one USB dongle (cp210x, ch34x or
+  plain CDC-ACM driver) are listed; a channel runs `off`, `otbr` (Thread border router) or `rcp-proxy`; `ziggurat` is
+  Zigbee mode (below). A dongle's firmware is detected at every plug-in (spinel, Ziggurat, Z-Stack ZNP, EZSP,
+  or unknown, within 3 s). `GET /device/channels`, `PUT` and `DELETE /device/channels/{id}`; the Radios page. See
+  `docs/radios.md`. Not yet checked on a board.
+- Thread on a USB dongle: OpenThread runs on the C6 or on a spinel RCP dongle (design target: ZigStar OllyZig,
+  CC2652P), and moves between them at runtime without a reboot and with the stored network (`PUT` `otbr` on the other
+  channel answers 202; a start and a stop of Thread run the same way). Unplugging the OTBR dongle leaves the board up
+  with the new mode `NO_RADIO` (the Thread REST API and the console answer 503 `no radio in OTBR mode`); Thread starts
+  again on its return. `/device/status` gains `otbr_channel`.
+- RCP proxy: a channel's bytes (the dongle's, or the C6's spinel frames as HDLC) served over TCP or UDP, listening or
+  connecting out (back-off 1 to 30 s, `last_error` says why), with `hdlc` or `raw` framing on UDP. Two channels on one
+  listen port are refused (409 `port_taken`). Replaces the experimental USB serial proxy.
 - Zigbee mode (experimental): a radio set to `ziggurat` runs the Ziggurat Zigbee stack and serves Home Assistant's ZHA
   (radio type Ziggurat, `ws://<board>/zigbee`) to one client; a new **Zigbee** page, `GET /device/zigbee`,
   `zigbee_channel` in `/device/status` and `zigbee_*` metrics. Radio resets are survived and a lost radio shows as
   `no_radio` without a reboot. On-board tests (`p4/pytest/test_zigbee.py`) are written, not yet run. See
   `docs/zigbee.md`.
+
+### Changed
+
+- The experimental `/device/usb_serial` API (never released) is removed in favour of the channel API.
+- Navigation: Dashboard, Thread (Network, Topology, Routing, Commissioner, Addresses, Tools, Console), Device (Radios,
+  Ethernet, Firmware, Diagnostics, Packet capture), About. The Thread menu is hidden when no channel is in `otbr`.
+- OpenThread accepts any RCP with the ot-br-posix capability set (ack timeout, tx retries, CSMA backoff, tx security,
+  tx timing), not the fixed set the C6 reports.
 
 ## [0.4.0] - 2026-11-05
 

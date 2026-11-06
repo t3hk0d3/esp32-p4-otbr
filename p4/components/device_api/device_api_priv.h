@@ -54,10 +54,13 @@ device_api_error_t device_api_map_ota_error(esp_err_t err);
  */
 device_api_error_t device_api_pcap_default_channel_error(bool ot_state_valid, bool has_dataset);
 
-/** Error of br_core_push_radio_firmware. */
+/** Error of br_core_push_radio_firmware (RCP_SYNC_ERR_C6_BUSY: 409 "c6_busy"). */
 device_api_error_t device_api_map_push_error(esp_err_t err);
 
-/** Error of br_core_rom_recover: ESP_ERR_NOT_SUPPORTED (no jumper) 412, ESP_ERR_INVALID_STATE 409, anything else 502. */
+/**
+ * Error of br_core_rom_recover: ESP_ERR_NOT_SUPPORTED (no jumper) 412, RCP_SYNC_ERR_C6_BUSY 409 "c6_busy",
+ * ESP_ERR_INVALID_STATE 409, anything else 502.
+ */
 device_api_error_t device_api_map_recover_error(esp_err_t err);
 
 /**
@@ -107,13 +110,19 @@ typedef enum {
     DEVICE_API_OP_OTA,        /**< bundle update (upload or URL) */
     DEVICE_API_OP_RADIO_PUSH, /**< RCP firmware push */
     DEVICE_API_OP_ROM_RECOVER, /**< ROM recovery of the C6 base image; shares the slot with OTA and the push */
-    DEVICE_API_OP_PCAP,       /**< pcap stream; independent of the other two */
+    DEVICE_API_OP_PCAP,       /**< pcap stream; independent of the others */
+    DEVICE_API_OP_RADIO_MOVE, /**< OpenThread moving to another radio channel (PUT /device/channels 202); shared slot */
 } device_api_op_t;
 
-/** True and the operation is recorded when nothing conflicts: OTA, RADIO_PUSH and ROM_RECOVER exclude each other and themselves. */
+/**
+ * True and the operation is recorded when nothing conflicts: OTA, RADIO_PUSH, ROM_RECOVER and RADIO_MOVE exclude each
+ * other and themselves.
+ */
 bool device_api_op_try_begin(device_api_op_t op);
-/** True while an OTA or a firmware push holds the shared slot (a successful OTA keeps it until the reboot). */
+/** True while an OTA, a firmware push, a ROM recovery or a move holds the shared slot (a successful OTA keeps it until the reboot). */
 bool device_api_op_long_running(void);
+/** True while `op` (not PCAP) holds the shared slot (a read). */
+bool device_api_op_holds(device_api_op_t op);
 /** True while a capture stream holds the pcap slot (a read: the slot is not taken). */
 bool device_api_op_pcap_running(void);
 /** Release the operation. An OTA that succeeded is deliberately never released: the update waits for its reboot. */
@@ -187,10 +196,11 @@ typedef struct {
     uint8_t routing_peers_established; /**< written only with ROUTING_METHOD_BGP (null otherwise) */
     uint8_t routing_peers_configured;  /**< written only with ROUTING_METHOD_BGP (null otherwise) */
     device_api_trel_t trel;
+    const char *otbr_channel;   /**< id of the channel stored in mode otbr; NULL or "" = none (JSON null) */
     const char *zigbee_channel; /**< id of the channel in mode ziggurat; NULL or "" = none (JSON null) */
 } device_api_status_t;
 
-/** Name of a br_core_mode_t: "STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT" ("UNKNOWN" otherwise). */
+/** Name of a br_core_mode_t: "STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT", "NO_RADIO" ("UNKNOWN" otherwise). */
 const char *device_api_mode_name(int mode);
 
 /** The /device/status body. Returns its length, or -1 when `cap` is too small. */

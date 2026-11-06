@@ -55,6 +55,7 @@ struct proxy {
     const rcp_proxy_adapter_t *ad;
     proxy_state_t state;
     char peer[RADIO_MUX_PEER_MAX];
+    char last_error[RADIO_MUX_PROXY_ERROR_MAX]; // the last failed open or connect (rcp_proxy_status_t), "" none
     int64_t wake_ms;  // the adapter's next timer, -1 none
     uint32_t backoff_s;
     int64_t retry_ms; // BACKOFF: when to open again
@@ -95,8 +96,11 @@ void rcp_proxy_peer_up(proxy_t *p, const struct sockaddr *peer, bool new_session
 // The peer left: back to `st` (LISTENING or CONNECTING) without a peer.
 void rcp_proxy_peer_lost(proxy_t *p, proxy_state_t st);
 // Closes the adapter and opens it again after the back-off (connect failed, the connection was lost, a listener
-// could not be opened).
+// could not be opened). A failure to open or connect (not a lost connection) becomes the session's last_error, unless
+// the adapter noted a more precise one (rcp_proxy_note_error) for this try.
 void rcp_proxy_retry(proxy_t *p, const char *why);
+// The reason this try to open or connect failed, for the status (printf format; cut to RADIO_MUX_PROXY_ERROR_MAX).
+void rcp_proxy_note_error(proxy_t *p, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 // The peer's bytes (a stream chunk or one datagram) towards the radio.
 void rcp_proxy_from_peer(proxy_t *p, const uint8_t *d, size_t n);
 // Resolves p->set.host and p->set.port into p->dst: an IP literal or a DNS name (getaddrinfo), a .local name over mDNS

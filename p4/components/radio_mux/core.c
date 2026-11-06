@@ -106,6 +106,20 @@ const char *radio_mux_fw_name(radio_mux_fw_t fw)
     return (fw >= RADIO_MUX_FW_UNKNOWN && fw <= RADIO_MUX_FW_EZSP) ? fw_names[fw] : fw_names[RADIO_MUX_FW_UNKNOWN];
 }
 
+uint32_t radio_mux_available_modes(const radio_mux_rules_t *rules)
+{
+    uint32_t set = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF);
+
+    for (size_t i = 0; i < rules->n && i < RADIO_MUX_RULES_MAX; i++) {
+        const radio_mux_mode_t m = rules->rules[i].mode;
+
+        if (m == RADIO_MUX_MODE_OTBR || m == RADIO_MUX_MODE_ZIGGURAT || m == RADIO_MUX_MODE_RCP_PROXY) {
+            set |= RADIO_MUX_MODE_BIT(m);
+        }
+    }
+    return set;
+}
+
 bool radio_mux_fits(const radio_mux_rules_t *rules, radio_mux_mode_t mode, radio_mux_fw_t fw)
 {
     if (mode == RADIO_MUX_MODE_OFF || mode == RADIO_MUX_MODE_RCP_PROXY) {
@@ -153,8 +167,8 @@ radio_mux_verdict_t radio_mux_check_set_mode(const radio_mux_rules_t *rules, con
     if (!radio_mux_fits(rules, want, chans[target].fw)) {
         return RADIO_MUX_REFUSE_INCOMPATIBLE;
     }
-    // otbr and a registered ziggurat consumer never run together.
-    if ((want == RADIO_MUX_MODE_OTBR &&
+    // otbr and a registered ziggurat consumer never run together (a stored ziggurat without its consumer runs nothing).
+    if ((want == RADIO_MUX_MODE_OTBR && find_rule(rules, RADIO_MUX_MODE_ZIGGURAT) != NULL &&
             mode_used_by_other(chans, n, target, RADIO_MUX_MODE_ZIGGURAT, NULL, &count)) ||
             (want == RADIO_MUX_MODE_ZIGGURAT &&
              mode_used_by_other(chans, n, target, RADIO_MUX_MODE_OTBR, NULL, &count))) {
@@ -170,11 +184,25 @@ radio_mux_verdict_t radio_mux_check_set_mode(const radio_mux_rules_t *rules, con
         }
         return RADIO_MUX_REFUSE_MODE_TAKEN;
     }
+    // otbr where no channel has it: a start, run like a move from nowhere (probe, start, store once it runs).
+    if (want == RADIO_MUX_MODE_OTBR && chans[target].mode != RADIO_MUX_MODE_OTBR) {
+        if (move_from != NULL) {
+            *move_from = n;
+        }
+        return RADIO_MUX_MOVE;
+    }
     const radio_mux_rule_t *leaving = find_rule(rules, chans[target].mode);
 
     if (chans[target].mode != want && ((rule != NULL && rule->reboot_on_change) ||
                                        (leaving != NULL && leaving->reboot_on_change))) {
         return RADIO_MUX_APPLY_REBOOT;
+    }
+    // The otbr channel leaving otbr: a stop, run like a move to nowhere (drain, stop, store once it stopped).
+    if (chans[target].mode == RADIO_MUX_MODE_OTBR && want != RADIO_MUX_MODE_OTBR) {
+        if (move_from != NULL) {
+            *move_from = target;
+        }
+        return RADIO_MUX_MOVE;
     }
     return RADIO_MUX_APPLY;
 }
@@ -471,4 +499,127 @@ uint32_t radio_mux_tx_timeout_ms(size_t n, uint32_t baud)
 bool radio_mux_port_frames(bool c6_port, bool consumer_frames)
 {
     return c6_port || consumer_frames;
+}
+
+/* ---- the C6 over SPI ---- */
+
+static void put_le16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v & 0xFF);
+    p[1] = (uint8_t)(v >> 8);
+}
+
+static uint16_t get_le16(const uint8_t *p)
+{
+    return (uint16_t)(p[0] | (p[1] << 8));
+}
+
+#define SPI_IDX_FLAG 0
+#define SPI_IDX_ACCEPT 1
+#define SPI_IDX_DATA 3
+
+void radio_mux_spi_hdr_encode(const radio_mux_spi_hdr_t *h, uint8_t out[RADIO_MUX_SPI_HDR_LEN])
+{
+    out[SPI_IDX_FLAG] = RADIO_MUX_SPI_FLAG_PATTERN | (h->reset ? RADIO_MUX_SPI_FLAG_RESET : 0);
+    put_le16(&out[SPI_IDX_ACCEPT], h->accept_len);
+    put_le16(&out[SPI_IDX_DATA], h->data_len);
+}
+
+bool radio_mux_spi_hdr_decode(const uint8_t in[RADIO_MUX_SPI_HDR_LEN], radio_mux_spi_hdr_t *out)
+{
+    if ((in[SPI_IDX_FLAG] & RADIO_MUX_SPI_PATTERN_MASK) != RADIO_MUX_SPI_FLAG_PATTERN) {
+        return false;
+    }
+    out->reset = (in[SPI_IDX_FLAG] & RADIO_MUX_SPI_FLAG_RESET) != 0;
+    out->accept_len = get_le16(&in[SPI_IDX_ACCEPT]);
+    out->data_len = get_le16(&in[SPI_IDX_DATA]);
+    return true;
+}
+
+void radio_mux_spi_check(const uint8_t rx_hdr[RADIO_MUX_SPI_HDR_LEN], uint16_t tx_len, uint16_t accept,
+                         uint16_t frame_max, radio_mux_spi_result_t *out)
+{
+    radio_mux_spi_hdr_t h;
+
+    memset(out, 0, sizeof(*out));
+    if (!radio_mux_spi_hdr_decode(rx_hdr, &h) || h.accept_len > frame_max || h.data_len > frame_max) {
+        return;
+    }
+    out->valid = true;
+    out->rcp_reset = h.reset;
+    // As the RCP's own rule (ncp_spi.cpp): a frame counts as sent when its length fits the other side's accept.
+    out->rx_len = h.data_len <= accept ? h.data_len : 0;
+    out->tx_taken = tx_len == 0 || tx_len <= h.accept_len;
+}
+
+size_t radio_mux_spi_xfer_len(uint16_t tx_len, uint16_t accept)
+{
+    const size_t n = RADIO_MUX_SPI_HDR_LEN + (size_t)(tx_len > accept ? tx_len : accept);
+
+    return (n + RADIO_MUX_SPI_XFER_ALIGN - 1) / RADIO_MUX_SPI_XFER_ALIGN * RADIO_MUX_SPI_XFER_ALIGN;
+}
+
+uint32_t radio_mux_spi_gap_wait_us(int64_t now_us, int64_t last_end_us, uint32_t gap_us)
+{
+    if (last_end_us < 0) {
+        return 0;
+    }
+    if (now_us < last_end_us) {
+        return gap_us;
+    }
+    const int64_t since = now_us - last_end_us;
+
+    return since >= (int64_t)gap_us ? 0 : (uint32_t)((int64_t)gap_us - since);
+}
+
+bool radio_mux_c6_present(const radio_mux_c6_probe_t *probe, char *reason, size_t cap)
+{
+    const char *why = NULL;
+
+    if (probe->esp_hosted) {
+        why = "the C6 runs its factory ESP-Hosted firmware";
+    } else if (probe->rom_recovery_failed && !probe->updater_reachable) {
+        why = "the ROM recovery of the C6 failed";
+    } else if (probe->updater_reachable && !probe->installed_valid) {
+        why = "no RCP firmware on the C6";
+    }
+    if (reason && cap > 0) {
+        snprintf(reason, cap, "%s", why ? why : "");
+    }
+    return why == NULL;
+}
+
+bool radio_mux_c6_job_refused(radio_mux_mode_t stored_mode, bool attached, bool has_peer)
+{
+    return stored_mode == RADIO_MUX_MODE_RCP_PROXY && attached && has_peer;
+}
+
+uint32_t radio_mux_gen_next(uint32_t gen)
+{
+    return gen >= RADIO_MUX_GEN_MAX ? 1 : gen + 1;
+}
+
+uintptr_t radio_mux_handle_pack(size_t slot, uint32_t gen)
+{
+    if (slot >= RADIO_MUX_HANDLE_SLOTS || gen == 0 || gen > RADIO_MUX_GEN_MAX) {
+        return 0;
+    }
+    return ((uintptr_t)gen << RADIO_MUX_HANDLE_SLOT_BITS) | (uintptr_t)slot;
+}
+
+bool radio_mux_handle_unpack(uintptr_t h, size_t *slot, uint32_t *gen)
+{
+    const uintptr_t g = h >> RADIO_MUX_HANDLE_SLOT_BITS;
+
+    if (g == 0 || g > RADIO_MUX_GEN_MAX) {
+        return false;
+    }
+    *slot = (size_t)(h & (RADIO_MUX_HANDLE_SLOTS - 1));
+    *gen = (uint32_t)g;
+    return true;
+}
+
+bool radio_mux_handle_current(uint32_t gen, uint32_t current)
+{
+    return current != 0 && gen == current;
 }

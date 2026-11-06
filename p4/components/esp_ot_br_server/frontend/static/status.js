@@ -48,12 +48,21 @@ function heroFor(s) {
                  ' frames so far. The Thread network is stopped until the capture ends.',
       link : {href : '/capture.html', label : 'Open packet capture'}
     };
+  var dongle = !!s.otbr_channel && s.otbr_channel !== 'c6'; // Thread's radio is a USB stick: nothing to update here
   if (s.mode === 'RADIO_FAULT')
     return {
       tone : 'fault',
       title : 'Radio fault',
       text : faultText(s.fault_reason),
-      link : {href : '/firmware.html', label : 'Open firmware'}
+      link : dongle ? {href : '/radios.html', label : 'Open Radios'} : {href : '/firmware.html', label : 'Open firmware'}
+    };
+  if (s.mode === 'NO_RADIO')
+    return {
+      tone : 'idle',
+      title : 'No Thread radio',
+      text : 'No radio runs the Thread border router' + (s.fault_reason ? ' (' + s.fault_reason + ')' : '') +
+                 '. Choose or plug in its radio on the Radios page.',
+      link : {href : '/radios.html', label : 'Open Radios'}
     };
   if (s.mode === 'STARTING')
     return {
@@ -218,6 +227,37 @@ function rcpText(installed) {
   return installed === '' ? 'none (no valid RCP firmware)' : String(installed);
 }
 
+/* "Thread runs on: <label>": the label comes from /device/channels, asked once per radio the status names. */
+var channelLabels = {};
+var labelAsked = null;
+
+function renderThreadOn(s) {
+  var chip = $('h-thread-on');
+  var id = s.otbr_channel;
+  if (id === undefined) {
+    chip.classList.add('hidden');
+    return;
+  }
+  chip.classList.remove('hidden');
+  if (id === null) {
+    chip.textContent = 'Thread runs on: no radio';
+    chip.className = 'chip chip-warn';
+    return;
+  }
+  chip.textContent = 'Thread runs on: ' + (channelLabels[id] || id);
+  chip.className = 'chip chip-ok';
+  if (!channelLabels[id] && labelAsked !== id) {
+    labelAsked = id;
+    kit.request('GET', '/device/channels', {timeoutMs : 5000}).then(function(r) {
+      if (r.status !== 200 || !r.body || !r.body.channels)
+        return;
+      r.body.channels.forEach(function(c) { channelLabels[c.id] = c.label; });
+      if (lastStatus)
+        renderThreadOn(lastStatus);
+    }, function() {});
+  }
+}
+
 function render(s) {
   var wasRunning = lastMode === 'BR_RUNNING';
   lastMode = s.mode;
@@ -227,6 +267,8 @@ function render(s) {
     threadOff();
   lastSeen = env.now();
   show('s-offline', false);
+  kit.renderThreadNotice(s, null, true);
+  renderThreadOn(s);
   var h = L.heroFor(s);
   $('hero').className = 'card hero hero-' + h.tone;
   setText('h-title', h.title);

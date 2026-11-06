@@ -32,7 +32,15 @@ extern "C" {
  *   stored), 409 "busy" while an OTA or push runs, else 200 and a reboot into the trial; POST /device/network/confirm = 200, 409
  *   "no_trial", 403 "wrong_interface". In split mode every /device/ route answers 403 and closes the connection on thread_bb.
  *
- * Register the /device/ handlers (spec 5.7: status, sniffer.pcap, sniffer, ota, ota/url, radio/firmware, radio/recover, radio/log, reboot, diag, network) on
+ * - /device/channels (radio channel mux spec, section API): GET lists every known radio channel; PUT /device/channels/{id}
+ *   changes mode, line settings or rcp_proxy settings (200 with the channel, "reboot": true when the change reboots;
+ *   202 {"moving":true,"moved_from":...} when OpenThread moves, a long operation); 400 bad_value, 404 unknown_channel,
+ *   409 unavailable, incompatible, mode_taken, not_available, hybrid_not_supported, probe_failed, port_taken, busy;
+ *   DELETE forgets an unplugged USB radio (204; 409 in_use for the C6 or a plugged-in one). POST /device/radio/firmware and
+ *   /device/radio/recover answer 409 c6_busy while rcp-proxy on the C6 has a peer. In NO_RADIO the console WebSocket
+ *   handshake answers 503 "no radio in OTBR mode".
+ *
+ * Register the /device/ handlers (spec 5.7: status, sniffer.pcap, sniffer, ota, ota/url, radio/firmware, radio/recover, radio/log, reboot, diag, network, channels) on
  * `server`. Needs no OpenThread: the handlers also work in RADIO_FAULT, before OpenThread is up.
  * ESP_ERR_INVALID_ARG for NULL; otherwise the httpd_register_uri_handler error.
  */
@@ -46,7 +54,7 @@ esp_err_t device_api_register(httpd_handle_t server);
 void device_api_set_base_expected(const uint8_t *start, const uint8_t *end);
 
 /**
- * True while an OTA, a radio firmware push or a ROM recovery runs (or a committed OTA waits for its own reboot): the
+ * True while an OTA, a radio firmware push, a ROM recovery or a move of OpenThread runs (or a committed OTA waits for its own reboot): the
  * predicate of the reboot gate (reboot_gate_set_busy), so that other reboots wait for it. Safe from any task.
  */
 bool device_api_long_op_running(void);

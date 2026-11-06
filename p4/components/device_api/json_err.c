@@ -29,6 +29,8 @@ const char *device_api_status_line(int http_status)
         return "200 OK";
     case 202:
         return "202 Accepted";
+    case 204:
+        return "204 No Content";
     case 400:
         return "400 Bad Request";
     case 403:
@@ -109,8 +111,14 @@ device_api_error_t device_api_pcap_default_channel_error(bool ot_state_valid, bo
     };
 }
 
+// A C6 job refused by the radio mux: rcp-proxy on the C6 has a peer.
+static const device_api_error_t C6_BUSY = {409, "c6_busy", "rcp-proxy on the C6 has a connected peer"};
+
 device_api_error_t device_api_map_push_error(esp_err_t err)
 {
+    if (err == RCP_SYNC_ERR_C6_BUSY) {
+        return C6_BUSY;
+    }
     if (err == ESP_ERR_INVALID_STATE) {
         return (device_api_error_t) {
             409, "busy", NULL
@@ -157,6 +165,9 @@ device_api_error_t device_api_map_recover_error(esp_err_t err)
         return (device_api_error_t) {
             412, "no_jumper", "the maintenance jumper is not detected"
         };
+    }
+    if (err == RCP_SYNC_ERR_C6_BUSY) {
+        return C6_BUSY;
     }
     if (err == ESP_ERR_INVALID_STATE) {
         return (device_api_error_t) {

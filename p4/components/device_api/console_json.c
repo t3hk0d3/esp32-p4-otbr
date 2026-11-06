@@ -1,6 +1,7 @@
 // /device/console bodies (spec docs/superpowers/specs/2026-11-04-thread-console-design.md). Pure.
 #include "console_json.h"
 
+#include "br_core_mode.h"
 #include "cJSON.h"
 #include "device_api_priv.h"
 
@@ -36,4 +37,9 @@ esp_err_t device_api_console_parse(const char *body, bool *enabled)
     }
     cJSON_Delete(json);
     return ok ? ESP_OK : ESP_ERR_INVALID_ARG;
+}
+
+int device_api_console_ws_refusal(int mode)
+{
+    return mode == BR_MODE_NO_RADIO ? 503 : 0;
 }

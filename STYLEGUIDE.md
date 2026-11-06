@@ -45,7 +45,8 @@ see `.pre-commit-config.yaml`).
 ## Build mechanisms
 
 - Every project's top-level `CMakeLists.txt` includes, in this order: ESP-IDF's `project.cmake`,
-  `tools/version.cmake`, `tools/test_build.cmake`, then calls `project()`.
+  `tools/version.cmake`, `tools/test_build.cmake`, then calls `project()`. `p4` also includes
+  `tools/ot_radio_port.cmake` (the generated openthread component) after `tools/test_build.cmake`.
 - `tools/version.cmake` sets `PROJECT_VER`. The stamp is taken at CMake configure time, not at
   every build; the git HEAD files are configure dependencies, so a new commit reconfigures by itself. `-dirty` is as of
   the last configure (`make reconfigure` refreshes it).

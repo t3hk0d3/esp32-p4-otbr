@@ -818,6 +818,33 @@ TEST_CASE("On an empty or NULL string: returns false", "[radio_mux]")
     TEST_ASSERT_FALSE(radio_mux_detect_parse_spinel_version(NULL, v, sizeof(v), c, sizeof(c)));
 }
 
+TEST_CASE("On control bytes and bytes of 0x80 and above: they are dropped, printable ASCII stays", "[radio_mux]")
+{
+    char v[48], c[24];
+
+    TEST_ASSERT_TRUE(radio_mux_detect_parse_spinel_version("OPENTHREAD/\x01" "1.4\x80.0\xff\x7f; \xc3\xa9" "CC\x1b" "26\x09X2 ",
+                                                           v, sizeof(v), c, sizeof(c)));
+    TEST_ASSERT_EQUAL_STRING("1.4.0", v);
+    TEST_ASSERT_EQUAL_STRING("CC26X2", c);
+}
+
+TEST_CASE("On a spinel answer with control bytes and bytes of 0x80 and above: the record holds printable ASCII only",
+          "[radio_mux]")
+{
+    uint8_t rx[160], rz[40];
+    size_t n = ncp_version_answer("OPENTHREAD/\x01" "2.0\x80\x9b; \xfe" "EFR32\x7f", rx, sizeof(rx));
+    size_t nz = last_status_answer(rz, sizeof(rz));
+    out_t o;
+
+    begin();
+    call(T0 + 40, rx, n);
+    o = call(T0 + 60, rz, nz);
+
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_DONE, o.act);
+    TEST_ASSERT_EQUAL_STRING("2.0", o.rec.version);
+    TEST_ASSERT_EQUAL_STRING("EFR32", o.rec.chip);
+}
+
 TEST_CASE("On fields longer than the buffers: cuts them and keeps the NUL", "[radio_mux]")
 {
     char v[8], c[5];

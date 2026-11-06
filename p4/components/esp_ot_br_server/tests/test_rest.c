@@ -486,6 +486,20 @@ static void test_guard_radio_fault(void)
     release(&req, json);
     guard_enter_mode(BR_MODE_BR_RUNNING, true);
 }
+static void test_guard_no_radio(void)
+{
+    guard_enter_mode(BR_MODE_NO_RADIO, true); /* the REST flag may lag while OpenThread is torn down: still 503 */
+    httpd_req_t req;
+    cJSON *json = guard_request(&req, HTTP_PUT, "/node/dataset/active", GUARD_DATASET, 503, "no radio in OTBR mode");
+    release(&req, json);
+    json = guard_request(&req, HTTP_GET, "/node/state", NULL, 503, "no radio in OTBR mode");
+    release(&req, json);
+    assert(mock_ot_writes == 0);
+    req = request(HTTP_GET, "/.well-known/thread/br-rest", NULL, NULL, NULL);
+    json = run_request(&req, 200);
+    release(&req, json);
+    guard_enter_mode(BR_MODE_BR_RUNNING, true);
+}
 static void test_guard_br_running(void)
 {
     guard_enter_mode(BR_MODE_BR_RUNNING, true);
@@ -667,6 +681,7 @@ int main(void)
     test_guard_br_running();
     test_guard_sniffer();
     test_guard_radio_fault();
+    test_guard_no_radio();
     test_guard_mode_change_while_waiting_for_the_lock();
     test_guard_background_poll();
     test_worker_does_not_touch_the_lock_when_not_ready();
