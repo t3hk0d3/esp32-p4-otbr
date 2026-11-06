@@ -154,7 +154,7 @@ outer vertical edges are rounded.
   builder checks this against the top of the board model; the nearest parts are the FPC socket near (3.5, 57.3) and the
   large capacitor near (51.5, 24.3).
 - The standoffs' top faces stay flat rings that the board rests on.
-- Each standoff flares into the plate with a 1 mm 45° chamfer at its root: no sharp inside corner, a stronger joint.
+- Each standoff flares into the plate with a 2.5 mm 45° chamfer at its root (to Ø11 at the plate): no sharp inside corner, a stronger joint.
 
 ### 5.2 Base: walls
 
