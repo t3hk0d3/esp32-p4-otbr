@@ -58,9 +58,6 @@ static const char *TAG = "br_core";
 #define BRINGUP_TASK_STACK 6144
 #define BRINGUP_TASK_PRIORITY 4
 #define LOOP_STOP_WAIT_MS 5000
-// Longest a push waits for the open OpenThread sessions. The web server's callback waits end within ~0.25 s of the
-// REST flag going off, so this only bounds a session held by slow HTTP I/O or a stuck OpenThread call.
-#define SESSION_DRAIN_MS 45000
 #define STATUS_LOCK_MS 100
 #define LEADER_LOCK_MS 1000 // the PUT /device/thread wait for the OpenThread lock
 #define LEADER_NVS_NAMESPACE "thread"
@@ -1123,6 +1120,13 @@ static void reboot_task(void *arg)
     esp_restart();
 }
 
+void core_schedule_reboot(void)
+{
+    if (xTaskCreatePinnedToCore(reboot_task, "br_reboot", 2048, NULL, BRINGUP_TASK_PRIORITY, NULL, MGMT_CORE) != pdPASS) {
+        esp_restart();
+    }
+}
+
 // The C6 job between stopping and restarting OpenThread: push the image, or (source NULL) ROM recovery of the base image.
 // *base_only: the job leaves the C6 with its updater and no RCP (a ROM recovery, or c6_installer.bin through ESP-Hosted).
 static esp_err_t run_c6_job(const rcp_fw_source_t *source, char *err_detail, size_t err_cap, bool *base_only)
@@ -1204,7 +1208,7 @@ static esp_err_t op_radio_job(const rcp_fw_source_t *source, char *err_detail, s
         const esp_err_t abandoned_err = c6_job_window(source, err_detail, err_cap, false, &base_only, &steps, &ran);
 
         if (abandoned_err == ESP_OK) {
-            xTaskCreatePinnedToCore(reboot_task, "br_reboot", 2048, NULL, BRINGUP_TASK_PRIORITY, NULL, MGMT_CORE);
+            core_schedule_reboot();
         } else {
             ESP_LOGE(TAG, "%s failed: %s", what, esp_err_to_name(abandoned_err));
         }
@@ -1327,10 +1331,10 @@ void br_core_ot_session_end(void)
 }
 
 // After ot_ready was cleared (no new session can open): wait until the open ones are closed. False after
-// SESSION_DRAIN_MS with sessions still open.
-bool core_wait_sessions_closed(void)
+// `wait_ms` with sessions still open.
+bool core_wait_sessions_closed(uint32_t wait_ms)
 {
-    const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(SESSION_DRAIN_MS);
+    const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(wait_ms);
 
     while (true) {
         xSemaphoreTake(g_core.mutex, portMAX_DELAY);
@@ -1478,7 +1482,7 @@ static esp_err_t run_radio_job(const rcp_fw_source_t *source, char *err_detail, 
     // Tasks inside an OpenThread session may still wait for the lock or for an OpenThread callback: teardown deletes
     // the lock and the instance, so it waits for them. The main loop keeps running meanwhile, and the long waits of the
     // web server end early once the REST flag is off.
-    if (err == ESP_OK && had_openthread && !core_wait_sessions_closed()) {
+    if (err == ESP_OK && had_openthread && !core_wait_sessions_closed(SESSION_DRAIN_MS)) {
         err = ESP_ERR_INVALID_STATE; // busy: nothing was stopped
         if (err_detail && err_cap > 0) {
             strlcpy(err_detail, "OpenThread is busy, try again", err_cap);

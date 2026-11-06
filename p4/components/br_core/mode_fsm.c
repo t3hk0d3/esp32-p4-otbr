@@ -387,15 +387,26 @@ esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, 
         return MODE_FSM_ERR_DRAIN_TIMEOUT;
     }
     // 3. Start on the target; 4. store both modes only once it runs.
-    if (start_on(fsm, to) == ESP_OK) {
-        const esp_err_t store_err = ops->store_otbr(from, to);
+    const esp_err_t start_err = start_on(fsm, to);
 
-        if (store_err != ESP_OK) {
-            snprintf(err, cap, "OpenThread runs on %s, but storing the modes failed", to);
-        }
-        return store_err;
+    if (start_err == MODE_FSM_ERR_START_ABANDONED) {
+        // Nothing starts OpenThread again in this boot: the board reboots, on the source's stored mode.
+        snprintf(err, cap, "OpenThread could not start on %s: rebooting, Thread comes back on %s", to,
+                 from[0] ? from : "no radio");
+        return MODE_FSM_ERR_START_ABANDONED;
     }
-    snprintf(err, cap, "OpenThread did not start on %s", to);
+    if (start_err == ESP_OK) {
+        if (ops->store_otbr(from, to) == ESP_OK) {
+            return ESP_OK;
+        }
+        snprintf(err, cap, "storing the modes failed: OpenThread goes back to %s", from[0] ? from : "no radio");
+        if (ops->ot_stop() != ESP_OK) {
+            mode_fsm_set_fault(fsm); // still on the target, which the stored modes do not name
+            return MODE_FSM_ERR_START_FAILED;
+        }
+    } else {
+        snprintf(err, cap, "OpenThread did not start on %s", to);
+    }
     // 5. Back on the source, which keeps its stored mode.
     if (prev == BR_MODE_NO_RADIO) {
         set_mode(fsm, BR_MODE_NO_RADIO); // the source is absent: nothing to go back to

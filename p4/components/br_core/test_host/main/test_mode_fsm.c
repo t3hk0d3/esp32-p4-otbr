@@ -23,6 +23,7 @@ typedef struct {
     void (*deferred_fn)(void *ctx); /* what the defer op was given, run by run_deferred() */
     void *deferred_ctx;
     const char *start_fail_on[2]; /* channel ids whose ot_start fails */
+    esp_err_t start_fail_code;    /* what it returns then (ESP_FAIL when 0) */
     bool start_reaches_running;   /* ot_start ends like the border router start: STARTING to BR_RUNNING */
     char started_on[48];          /* the id of the last ot_start that worked */
     char stored_from[48], stored_to[48];
@@ -139,7 +140,7 @@ static esp_err_t f_ot_start(const char *id)
 
     for (int i = 0; i < 2; i++) {
         if (fake.start_fail_on[i] && strcmp(fake.start_fail_on[i], id) == 0) {
-            ret = ESP_FAIL;
+            ret = fake.start_fail_code ? fake.start_fail_code : ESP_FAIL;
         }
     }
     if (ret == ESP_OK) {
@@ -1038,6 +1039,36 @@ TEST_CASE("On a start failure on the target from an absent source: no restart th
     TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
     TEST_ASSERT_EQUAL(1, count_of("ot_start"));
     TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_fsm_get_mode(&fsm));
+}
+
+TEST_CASE("On a target start that abandoned OpenThread's init: no start on the source, nothing stored, a reboot asked",
+          "[mode_fsm]")
+{
+    char err[96] = "";
+
+    setup(BR_MODE_BR_RUNNING);
+    fake.start_fail_on[0] = DST;
+    fake.start_fail_code = MODE_FSM_ERR_START_ABANDONED;
+    TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_ABANDONED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
+    TEST_ASSERT_EQUAL(1, count_of("ot_start"));
+    TEST_ASSERT_EQUAL(0, count_of("store_otbr"));
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
+    TEST_ASSERT_NOT_NULL(strstr(err, "rebooting"));
+}
+
+TEST_CASE("On a store failure after the target runs: stops it, starts on the source, reports the failure",
+          "[mode_fsm]")
+{
+    char err[96] = "";
+
+    setup(BR_MODE_BR_RUNNING);
+    fake.fail[OP_STORE] = ESP_ERR_NO_MEM;
+    TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
+    TEST_ASSERT_EQUAL(2, count_of("ot_stop"));
+    TEST_ASSERT_EQUAL(2, count_of("ot_start"));
+    TEST_ASSERT_EQUAL_STRING(SRC, fake.started_on);
+    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
+    TEST_ASSERT_NOT_EQUAL(0, strlen(err));
 }
 
 TEST_CASE("On a drain timeout: refuses with drain_timeout", "[mode_fsm]")

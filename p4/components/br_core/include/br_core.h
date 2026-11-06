@@ -40,7 +40,7 @@ typedef struct {
     bool has_dataset;    /**< an active dataset is stored; only meaningful with ot_state_valid */
     int pd_state;        /**< otBorderRoutingDhcp6PdState; -1 while the border router is not initialised */
     char pd_prefix[48];  /**< delegated OMR prefix, "" without one */
-    char fault_reason[64]; /**< why the mode is BR_MODE_RADIO_FAULT, "" otherwise */
+    char fault_reason[64]; /**< why the mode is BR_MODE_RADIO_FAULT or BR_MODE_NO_RADIO ("radio unplugged (<id>)", "no channel in otbr", ...), "" otherwise */
     char otbr_channel[BR_CORE_CHANNEL_ID_MAX]; /**< the channel stored in mode otbr (present or not); "" for none (null) */
 } br_core_status_t;
 
@@ -63,8 +63,10 @@ esp_err_t br_core_register_otbr(void);
  * otbr while another channel has it). The target's RCP is probed first, through the mux, while OpenThread still runs on
  * `from`; this call waits for that probe (up to 10 s) and returns:
  * - ESP_OK: accepted (202). The rest runs on br_core's radio task: stop, start on `to`, store both modes once it runs.
- *   A drain timeout ("drain_timeout") or a failed start (OpenThread started on `from` again; RADIO_FAULT only when that
- *   fails too) shows as `to`'s state fault with that reason, stored modes unchanged.
+ *   A drain timeout ("drain_timeout"), a failed start or a failed store (OpenThread started on `from` again; RADIO_FAULT
+ *   only when that fails too) shows as `to`'s state fault with that reason, stored modes unchanged. A start on `to` that
+ *   abandons OpenThread's init (nothing starts OpenThread again in this boot) shows the same way, and the board reboots
+ *   1.5 s later onto the unchanged stored modes (Thread back on `from`, same network); fault_reason says so meanwhile.
  * - ESP_ERR_INVALID_RESPONSE: the probe failed (409 probe_failed); `reason` says why; nothing changed.
  * - ESP_ERR_INVALID_STATE: busy (another move, a C6 push or recovery, OpenThread starting or sniffing); `reason`.
  * - ESP_ERR_TIMEOUT: the probe did not finish in time; the move is dropped after it.

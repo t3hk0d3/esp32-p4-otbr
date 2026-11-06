@@ -23,6 +23,11 @@ extern "C" {
 #define MODE_FSM_ERR_PROBE_FAILED ESP_ERR_INVALID_RESPONSE /**< the target's probe failed; nothing changed */
 #define MODE_FSM_ERR_DRAIN_TIMEOUT ESP_ERR_TIMEOUT        /**< the OpenThread sessions did not end; nothing changed */
 #define MODE_FSM_ERR_START_FAILED ESP_FAIL               /**< the start on the target failed; nothing stored */
+/**
+ * ot_start's result when OpenThread's init was abandoned (an error inside esp_openthread_init, a park from its
+ * callbacks, a boot timeout): nothing can start OpenThread again until a reboot. mode_fsm_move_otbr returns it too.
+ */
+#define MODE_FSM_ERR_START_ABANDONED ESP_ERR_NOT_FINISHED
 /** The reason of a drain timeout (the API's error code). */
 #define MODE_FSM_DRAIN_TIMEOUT "drain_timeout"
 
@@ -63,7 +68,10 @@ typedef struct {
      * while OpenThread may still run elsewhere. ESP_OK leaves the channel ready for ot_start; otherwise `err` says why.
      */
     esp_err_t (*probe_channel)(const char *id, char *err, size_t cap);
-    /** Start OpenThread on channel `id` (probed before) and wait until it runs. A failure leaves nothing running. */
+    /**
+     * Start OpenThread on channel `id` (probed before) and wait until it runs. A failure leaves nothing running;
+     * MODE_FSM_ERR_START_ABANDONED when OpenThread's init was abandoned (only a reboot starts it again).
+     */
     esp_err_t (*ot_start)(const char *id);
     /**
      * Stop OpenThread (Thread REST off, the open sessions drained, teardown). ESP_ERR_TIMEOUT when the sessions did not
@@ -220,11 +228,13 @@ bool mode_fsm_boot(mode_fsm_t *fsm, const char *otbr_id);
  * Move OpenThread from channel `from` to `to` (spec: Moving Thread). In order: probe `to` (refused with
  * MODE_FSM_ERR_PROBE_FAILED, the reason in `err`, nothing changed); STARTING; stop OpenThread (MODE_FSM_ERR_DRAIN_TIMEOUT,
  * `err` MODE_FSM_DRAIN_TIMEOUT, the mode before the move back, nothing changed); start on `to`; store both modes only
- * then. A failed start on `to` starts OpenThread on `from` again and returns MODE_FSM_ERR_START_FAILED with nothing
- * stored; when that start fails too the mode is RADIO_FAULT. From NO_RADIO (`from` is absent) the stop does nothing and
- * a failed start leaves NO_RADIO. ESP_ERR_INVALID_STATE (nothing touched) in STARTING and SNIFFER and during a radio
- * job. A successful start ends in BR_RUNNING through mode_fsm_set_started (the border router start); a failed store
- * after it returns its error with OpenThread running on `to`. Blocks for the whole move.
+ * then. A failed start on `to`, or a failed store after it (OpenThread stopped on `to` again), starts OpenThread on
+ * `from` again and returns MODE_FSM_ERR_START_FAILED with nothing stored; when that start fails too the mode is
+ * RADIO_FAULT. From NO_RADIO (`from` is absent) the stop does nothing and a failed start leaves NO_RADIO. A start on
+ * `to` that abandoned OpenThread's init (MODE_FSM_ERR_START_ABANDONED) cannot be followed by another start: the move
+ * returns it, nothing stored, the mode stays STARTING, and the caller reboots the board (it boots on `from`).
+ * ESP_ERR_INVALID_STATE (nothing touched) in STARTING and SNIFFER and during a radio job. A successful start ends in
+ * BR_RUNNING through mode_fsm_set_started (the border router start). Blocks for the whole move.
  */
 esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, char *err, size_t cap);
 

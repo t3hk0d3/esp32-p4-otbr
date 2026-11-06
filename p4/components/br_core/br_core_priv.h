@@ -16,6 +16,9 @@
 #include "radio_mux.h"
 
 #define BOOT_WAIT_MS 180000
+// Longest a stop waits for the open OpenThread sessions. The web server's callback waits end within ~0.25 s of the
+// REST flag going off, so this only bounds a session held by slow HTTP I/O or a stuck OpenThread call.
+#define SESSION_DRAIN_MS 45000
 #define BRINGUP_WAIT_MS 60000
 
 typedef struct {
@@ -60,8 +63,10 @@ void core_set_reason(const char *reason);
 void core_enter_fault(const char *reason);
 // Stops everything OpenThread owns (main loop, border router, netif, esp_openthread_deinit). Not from the OT task.
 void core_teardown_openthread(void);
-// After ot_ready was cleared: false when sessions stay open longer than the drain time.
-bool core_wait_sessions_closed(void);
+// After ot_ready was cleared: false when sessions stay open longer than `wait_ms`.
+bool core_wait_sessions_closed(uint32_t wait_ms);
+// Reboots in 1.5 s (the caller reports first).
+void core_schedule_reboot(void);
 bool core_ot_ready_now(void);
 esp_err_t core_start_ot_task(void);
 bool core_backbone_has_ip6(void);
