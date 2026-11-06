@@ -1,0 +1,19 @@
+dependencies:
+  # The USB host stack and the three serial drivers of the USB serial proxy, at the versions already locked through
+  # esp-serial-flasher (its private dependency is not relied on). Target only: the host tests cover the pure core.
+  espressif/usb:
+    version: "==1.6.0"
+    rules:
+      - if: "target != linux"
+  espressif/usb_host_cdc_acm:
+    version: "==2.4.1"
+    rules:
+      - if: "target != linux"
+  espressif/usb_host_cp210x_vcp:
+    version: "==2.2.0"
+    rules:
+      - if: "target != linux"
+  espressif/usb_host_ch34x_vcp:
+    version: "==2.2.1"
+    rules:
+      - if: "target != linux"

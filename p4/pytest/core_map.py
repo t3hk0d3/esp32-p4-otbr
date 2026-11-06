@@ -35,6 +35,10 @@ MANAGEMENT_TASKS = {
     "radio_fw": MGMT_CORE,
     "rom_recover": MGMT_CORE,
     "console_repl": MGMT_CORE,
+    # USB serial proxy: only while it is enabled.
+    "usb_serial": MGMT_CORE,
+    "usb_lib": MGMT_CORE,
+    "USB-CDC": MGMT_CORE,
 }
 
 # Present in every BR-mode boot with the jumper fitted; the others exist only while their job or request runs.

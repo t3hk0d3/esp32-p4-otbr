@@ -11,6 +11,7 @@
 #include "rcp_sync.h"
 #include "device_api.h"
 #include "ot_console.h"
+#include "usb_serial.h"
 #include "diag.h"
 #include "metrics.h"
 #include "esp_br_web.h"
@@ -111,6 +112,11 @@ void app_main(void)
     err = ot_console_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "ot_console_init: %s, the Thread console is unavailable", esp_err_to_name(err));
+    }
+    // The USB serial proxy (off by default): its owner task starts the USB host and the listener when enabled.
+    err = usb_serial_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "usb_serial_init: %s, the USB serial proxy is unavailable", esp_err_to_name(err));
     }
     err = br_core_mdns_start(netnames_hostname(), netnames_ha_name());
     if (err == ESP_OK) {
