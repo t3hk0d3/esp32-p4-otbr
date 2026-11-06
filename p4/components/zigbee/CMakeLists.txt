@@ -18,11 +18,12 @@ if(IDF_TARGET STREQUAL "linux")
 endif()
 
 # openthread: only for spinel.c (encode/decode); nothing here calls OpenThread. lwip: the client's address and the
-# send-buffer check, on the HTTP server task (ws.c). board_cores: task placement.
+# send-buffer check, on the HTTP server task (ws.c). board_cores: task placement. reboot_gate: the client's hard reset.
+# netcfg: the WebSocket's per-interface policy.
 idf_component_register(SRCS ${pure_srcs} "zigbee.c" "platform.c" "ws.c" "status.c"
                        INCLUDE_DIRS "include"
                        REQUIRES esp_http_server
                        PRIV_REQUIRES radio_mux esp_timer esp_hw_support freertos heap log mbedtls esp_system
-                                     openthread lwip board_cores)
+                                     openthread lwip board_cores reboot_gate netcfg)
 target_include_directories(${COMPONENT_LIB} PRIVATE "${spinel_dir}")
 include(${CMAKE_CURRENT_LIST_DIR}/build_ziggurat.cmake)

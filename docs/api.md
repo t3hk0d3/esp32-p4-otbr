@@ -312,7 +312,8 @@ among them); a refused stop leaves the channel `running` in `otbr` with `error` 
 ### Zigbee coordinator (experimental)
 
 A radio in `ziggurat` mode serves ZHA over a WebSocket at `ws://<board>/zigbee` (binary protocol of zigpy-ziggurat, one
-client, a second one takes over); see [Zigbee coordinator](zigbee.md). `GET /device/zigbee` answers:
+client, a second one takes over; 403 on an interface that does not serve the device API); see
+[Zigbee coordinator](zigbee.md). `GET /device/zigbee` answers:
 
 ```
 {"channel": "c6", "firmware": "spinel 1.2 efr32", "state": "running", "reason": "",
@@ -326,8 +327,8 @@ client, a second one takes over); see [Zigbee coordinator](zigbee.md). `GET /dev
 `state` is `idle`, `starting`, `running`, `no_radio` or `incompatible`; `reason` says why when it is not `running`.
 `client` and `last_client` (`{"address", "since", "left"}`) are `null` when absent, `radio` while the stack has no
 network settings, and times are epoch seconds (0 when the board's clock is not set). `counters.tx` counts transmits the
-radio accepted; `tx_failed` also counts those refused before reaching it. `rx_dropped` counts frames the board dropped
-for a client that was too slow. `heap` is the memory the stack holds, in bytes. The radio's mode is set with
+radio accepted; `tx_failed` also counts those refused before reaching it. `rx_dropped` is the radio channel's counter: frames
+received from the radio that the board dropped because its frame pool or event queue was full. `heap` is the memory the stack holds, in bytes. The radio's mode is set with
 `PUT /device/channels/<id>`.
 
 ## Thread REST API

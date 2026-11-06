@@ -18,6 +18,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
+#include "netcfg.h"
 #include "zigbee_priv.h"
 
 static const char *TAG = "zigbee";
@@ -92,9 +93,13 @@ static void session_free(void *ctx)
     s->active = false;
 }
 
-// Before the upgrade: no stack, no client (the skeleton's "no channel running ziggurat: refused").
+// Before the upgrade: the per-interface policy, as for /device/console/ws (the device API's service), then no stack,
+// no client (the skeleton's "no channel running ziggurat: refused").
 static esp_err_t ws_handshake(httpd_req_t *req)
 {
+    if (!netcfg_request_allowed(req, NETCFG_SVC_DEVICE_API)) {
+        return ESP_FAIL; // 403 is sent; the server closes the connection without upgrading it
+    }
     if (!atomic_load(&g_zigbee.started)) {
         ESP_LOGW(TAG, "WebSocket refused: no channel runs ziggurat");
         return ESP_FAIL; // the server closes the connection without upgrading it

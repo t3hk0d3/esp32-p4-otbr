@@ -38,7 +38,9 @@ page and `GET /device/zigbee` show the current client and the last one.
 
 !!! warning "No login"
     Like the rest of the board's HTTP API, the WebSocket needs no password. Anyone who can reach the board can control
-    your Zigbee network. Keep the board off networks you do not trust.
+    your Zigbee network. Keep the board off networks you do not trust. The WebSocket follows the same per-interface
+    policy as the device API (`/device/`): on an interface where the device API is not allowed, the upgrade is refused
+    with 403.
 
 ## The Zigbee page
 
@@ -48,11 +50,13 @@ firmware. The Dashboard has a short Zigbee card. Both poll `GET /device/zigbee`.
 
 ## Radio resets and loss
 
-- **Reset.** When the radio resets (the C6 restarts, a dongle is reopened), the board brings the stack back by itself
-  and the client stays connected. ZHA may see a reset and set the radio up again. `counters.rcp_resets` counts them.
+- **Reset.** When the radio resets (the C6 restarts, a dongle is reopened), the board sets the radio up again by
+  itself (it replays the radio configuration) and the client stays connected. ZHA sees no event. A transmit that was
+  in flight fails, as a lost frame does. `counters.rcp_resets` counts them.
 - **Radio gone.** When the radio disappears (a dongle is unplugged, the C6 is held in reset or being updated) the
-  state is `no_radio` with a reason. The board does not reboot. When the radio returns, the stack starts again on it
-  and the client can reconnect.
+  state is `no_radio` with a reason. The board does not reboot, the stack keeps running and the client stays
+  connected; transmits fail meanwhile. When the radio returns, the board replays the radio configuration and the
+  state is `running` again.
 - **Firmware that does not fit.** A radio whose firmware cannot run the stack shows `incompatible` with the reason.
 
 ## Limits
