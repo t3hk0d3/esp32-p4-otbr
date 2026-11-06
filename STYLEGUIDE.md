@@ -16,7 +16,7 @@ see `.pre-commit-config.yaml`).
 
 - `snake_case` everywhere.
 - Public symbols are prefixed with their component name: `br_core_`, `rcp_sync_`, `sniffer_`,
-  `device_api_`, `diag_`, `netcfg_`, `netnames_`, `metrics_`, `rcp_sync_proto_`; `c6_hosted` uses `c6_hosted_`.
+  `device_api_`, `diag_`, `netcfg_`, `netnames_`, `metrics_`, `rcp_sync_proto_`, `zigbee_`; `c6_hosted` uses `c6_hosted_`.
 - One `static const char *TAG` per file, named after the component.
 
 ## Errors
