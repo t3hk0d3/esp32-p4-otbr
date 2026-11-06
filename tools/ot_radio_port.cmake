@@ -1,8 +1,9 @@
 # OpenThread on any radio mux channel (spec section 3, OTBR mode). A generated "openthread" component in the build
 # directory overrides ESP-IDF's: symlinks to IDF's files, the project's MuxSpinelInterface (p4/ot_port) in src/port and
 # include, and patched copies of two IDF files (PATCHES.md, "Generated ESP-IDF copies"):
-#   src/port/esp_openthread_radio_spinel.cpp: the static spinel interface is the MuxSpinelInterface, and the radio caps
-#     OpenThread requires from the RCP are the Global Constraints set (the ot-br-posix set for Thread 1.2+);
+#   src/port/esp_openthread_radio_spinel.cpp: the static spinel interface is the MuxSpinelInterface, the radio caps
+#     OpenThread requires from the RCP are the Global Constraints set (the ot-br-posix set for Thread 1.2+), and
+#     otPlatRadioGetCaps no longer overwrites that set with the running RCP's caps;
 #   CMakeLists.txt: the git hash of the package version is read from IDF's component, not from the build directory
 #     (which lies in this repository and would change it, and rebuild OpenThread, on every commit).
 # Every replaced text is looked up first; one that is not there any more stops the configure, naming the IDF file.
@@ -52,6 +53,8 @@ ot_port_link_all("${ot_idf}/src/port" "${ot_shadow}/src/port" esp_openthread_rad
 ot_port_link_all("${ot_idf}/include" "${ot_shadow}/include")
 file(CREATE_LINK "${ot_port_src}/mux_spinel_interface.cpp" "${ot_shadow}/src/port/mux_spinel_interface.cpp" SYMBOLIC)
 file(CREATE_LINK "${ot_port_src}/mux_spinel_interface.hpp" "${ot_shadow}/src/port/mux_spinel_interface.hpp" SYMBOLIC)
+file(CREATE_LINK "${ot_port_src}/mux_gone_answer.c" "${ot_shadow}/src/port/mux_gone_answer.c" SYMBOLIC)
+file(CREATE_LINK "${ot_port_src}/mux_gone_answer.h" "${ot_shadow}/src/port/mux_gone_answer.h" SYMBOLIC)
 file(CREATE_LINK "${ot_port_src}/esp_openthread_mux.h" "${ot_shadow}/include/esp_openthread_mux.h" SYMBOLIC)
 
 # --- src/port/esp_openthread_radio_spinel.cpp ---
@@ -87,6 +90,12 @@ static otRadioCaps s_radio_caps = (OT_RADIO_CAPS_ACK_TIMEOUT       |
                                    OT_RADIO_CAPS_CSMA_BACKOFF      |
                                    OT_RADIO_CAPS_TRANSMIT_SEC      |
                                    OT_RADIO_CAPS_TRANSMIT_TIMING);]=])
+ot_port_patch(ot_text "${ot_file}"
+    [=[    s_radio_caps = s_radio.GetRadioCaps();
+    return s_radio_caps;]=]
+    [=[    // ot_radio_port: s_radio_caps stays the required set; the next esp_openthread_init (another RCP after a move)
+    // must not require what the previous RCP had.
+    return s_radio.GetRadioCaps();]=])
 ot_port_write("${ot_shadow}/src/port/esp_openthread_radio_spinel.cpp" "${ot_text}")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ot_file}")
 

@@ -353,7 +353,8 @@ target tests: `p4/pytest/test_rest_guard.py`, `test_br_boot.py::test_radio_fault
 `tools/ot_radio_port.cmake` (radio channel mux, Task 7) generates `p4/build/ot_port_components/openthread` at every
 configure, and that component overrides ESP-IDF's `openthread` (`EXTRA_COMPONENT_DIRS`). It holds symlinks to IDF's
 `components/openthread` (v6.1), a real `src/port` and `include` with symlinks to IDF's files plus the project's
-`p4/ot_port/mux_spinel_interface.cpp`, `mux_spinel_interface.hpp` and `esp_openthread_mux.h`, and two patched copies.
+`p4/ot_port/mux_spinel_interface.cpp`, `mux_spinel_interface.hpp`, `mux_gone_answer.{c,h}` (the answers after GONE,
+host-tested in `p4/ot_port/test_host`) and `esp_openthread_mux.h`, and two patched copies.
 Each replaced text is looked up with `string(FIND)` first; a text that is not there any more (an IDF update) stops the
 configure with a `FATAL_ERROR` naming the IDF file. Kconfig stays `CONFIG_OPENTHREAD_RADIO_SPINEL_SPI`; the IDF tree is
 not touched. Upstream path: a runtime "custom spinel interface" radio mode with per-interface caps (spec section 5).
@@ -370,6 +371,10 @@ not touched. Upstream path: a runtime "custom spinel interface" radio mode with 
      the RCP by the Global Constraints: ack timeout, tx retries, CSMA backoff, tx security, tx timing (the ot-br-posix
      set for Thread 1.2+). The C6 RCP passes as before; a CC2652P RCP (Koenkk 2025.3.1, caps 0x7f: no rx timing, no
      rx-on-when-idle) now passes. OpenThread still uses every cap the RCP reports (`otPlatRadioGetCaps`).
+  4. `otPlatRadioGetCaps`: `s_radio_caps = s_radio.GetRadioCaps(); return s_radio_caps;` becomes `return
+     s_radio.GetRadioCaps();`. Upstream assigns the running RCP's caps to the static, so the next `esp_openthread_init`
+     (OpenThread started again on another channel after a move) would require the previous RCP's caps: a move from the
+     C6 to a CC2652P would fail `CheckRadioCapabilities`.
 - `CMakeLists.txt`: the `git rev-parse` for `IDF_VERSION_FOR_OPENTHREAD_PACKAGE` runs in IDF's component directory
   instead of `${CMAKE_CURRENT_SOURCE_DIR}` (the generated directory lies in this repository, so the package version
   would show this repository's commit).

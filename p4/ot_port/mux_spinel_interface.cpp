@@ -5,10 +5,13 @@
 //
 // A vanished radio (GONE) must not reach RadioSpinel's recovery: on a radio that is not there it ends in DieNow (an
 // abort), in whichever task made the request (the HTTP server's too). So after GONE every request OpenThread sends, and
-// every one still unanswered, gets a LAST_STATUS FAILURE answer from here: the call fails like a refusal of the RCP and
-// returns, and br_core tears OpenThread down from its own task.
+// every one still unanswered, gets the answer mux_gone_answer.h picks for its command: SETs, INSERTs and REMOVEs "work",
+// a frame to send ends with ABORT, a GET whose caller takes an error fails; the call returns, and br_core tears
+// OpenThread down from its own task (its teardown is only SETs and the transmit abort). GETs that OpenThread cannot
+// take an error for get no answer: their timeout ends in the reset-failure callback (br_core parks the OpenThread task).
 #include "mux_spinel_interface.hpp"
 
+#include <cinttypes>
 #include <string.h>
 #include <sys/select.h>
 
@@ -16,6 +19,7 @@
 #include "esp_openthread_common_macro.h"
 #include "esp_timer.h"
 #include "lib/spinel/spinel.h"
+#include "mux_gone_answer.h"
 
 namespace {
 
@@ -59,9 +63,10 @@ MuxSpinelInterface::MuxSpinelInterface(void)
     , mFd(-1)
     , mMaybeMore(false)
     , mResetSeen(false)
-    , mResetAnnounced(false)
     , mGoneLogged(false)
     , mPendingTids(0)
+    , mTxDropped(0)
+    , mHeldLength(0)
     , mReceiveFrameCallback(nullptr)
     , mReceiveFrameContext(nullptr)
     , mReceiveFrameBuffer(nullptr)
@@ -93,6 +98,7 @@ esp_err_t MuxSpinelInterface::Enable(const esp_openthread_spi_host_config_t &aUn
     }
     mMaybeMore = true; // frames may wait from before the start
     mPendingTids = 0;
+    mHeldLength = 0;
     mGoneLogged = false;
     ESP_LOGI(OT_PLAT_LOG_TAG, "spinel over the radio mux");
     return ESP_OK;
@@ -128,10 +134,13 @@ bool MuxSpinelInterface::Gone(void) const
 
 void MuxSpinelInterface::NoteSent(const uint8_t *aFrame, uint16_t aLength)
 {
-    const uint8_t tid = SPINEL_HEADER_GET_TID(aFrame[0]);
+    uint8_t tid;
+    uint32_t cmd, key;
 
-    if (aLength >= 2 && tid != 0) {
+    if (ot_mux_gone_parse(aFrame, aLength, &tid, &cmd, &key) && tid != 0) {
         mPendingTids |= static_cast<uint16_t>(1u << tid);
+        mPendingCmd[tid] = cmd;
+        mPendingKey[tid] = key;
     }
 }
 
@@ -149,12 +158,14 @@ otError MuxSpinelInterface::SendFrame(const uint8_t *aFrame, uint16_t aLength)
     }
     const esp_err_t err = mOps->tx(mCtx, aFrame, aLength);
 
-    if (err == ESP_ERR_INVALID_STATE) {
-        return OT_ERROR_NONE; // the channel went away during the call: as above
-    }
     if (err != ESP_OK) {
-        ESP_LOGW(OT_PLAT_LOG_TAG, "spinel frame not sent: %s", esp_err_to_name(err));
-        return OT_ERROR_FAILED;
+        // Dropped (GONE during the call, a stalled device, a busy RCP): an error here would assert in SubMac; the
+        // request's own timeout drives the usual recovery, and after GONE AnswerGone answers it.
+        if (err != ESP_ERR_INVALID_STATE && (mTxDropped++ % 32) == 0) {
+            ESP_LOGW(OT_PLAT_LOG_TAG, "spinel frame not sent: %s (%" PRIu32 " dropped)", esp_err_to_name(err),
+                     mTxDropped);
+        }
+        return OT_ERROR_NONE;
     }
     mInterfaceMetrics.mTxFrameCount++;
     mInterfaceMetrics.mTxFrameByteCount += aLength;
@@ -179,9 +190,6 @@ bool MuxSpinelInterface::Deliver(const uint8_t *aFrame, size_t aLength)
     if (tid != 0) {
         mPendingTids &= static_cast<uint16_t>(~(1u << tid));
     }
-    if (IsResetNotification(aFrame, aLength)) {
-        mResetAnnounced = true;
-    }
     mInterfaceMetrics.mTransferredFrameCount++;
     mInterfaceMetrics.mTransferredValidFrameCount++;
     mInterfaceMetrics.mRxFrameCount++;
@@ -190,22 +198,33 @@ bool MuxSpinelInterface::Deliver(const uint8_t *aFrame, size_t aLength)
     return true;
 }
 
-// After GONE: LAST_STATUS FAILURE for the lowest unanswered TID, as the RCP would refuse it. The two booleans after the
-// status make it a complete transmit-done answer too (frame pending, header updated: both false).
+// After GONE: the answer for the lowest unanswered TID (mux_gone_answer.h). A request that gets none is forgotten: its
+// own timeout follows.
 bool MuxSpinelInterface::AnswerGone(void)
 {
     for (uint8_t tid = 1; tid <= kTidMask; tid++) {
-        if (mPendingTids & (1u << tid)) {
-            const uint8_t answer[] = {
-                static_cast<uint8_t>(SPINEL_HEADER_FLAG | tid), SPINEL_CMD_PROP_VALUE_IS, SPINEL_PROP_LAST_STATUS,
-                SPINEL_STATUS_FAILURE, 0, 0,
-            };
-
-            mMaybeMore = true;
-            return Deliver(answer, sizeof(answer));
+        if (!(mPendingTids & (1u << tid))) {
+            continue;
         }
+        uint8_t answer[OT_MUX_GONE_FRAME_MAX];
+        const size_t len = ot_mux_gone_frame(ot_mux_gone_answer(mPendingCmd[tid], mPendingKey[tid]), tid, answer);
+
+        if (len == 0) {
+            mPendingTids &= static_cast<uint16_t>(~(1u << tid));
+            continue;
+        }
+        mMaybeMore = true;
+        return Deliver(answer, len);
     }
     return false;
+}
+
+void MuxSpinelInterface::Hold(const uint8_t *aFrame, size_t aLength)
+{
+    if (aLength <= sizeof(mHeld)) {
+        memcpy(mHeld, aFrame, aLength);
+        mHeldLength = static_cast<uint16_t>(aLength);
+    }
 }
 
 // One frame to OpenThread: the next one of the channel (RESETs are noted on the way), or after GONE an answer for an
@@ -215,6 +234,15 @@ bool MuxSpinelInterface::TakeOne(void)
     uint8_t *slot;
     size_t len;
 
+    if (mHeldLength > 0) { // the frame HardwareReset put back
+        const size_t held = mHeldLength;
+
+        mHeldLength = 0;
+        mMaybeMore = true;
+        if (Deliver(mHeld, held)) {
+            return true;
+        }
+    }
     while (mOps && mOps->poll(mCtx, &slot, &len)) {
         if (!slot) {
             mResetSeen = true;
@@ -280,7 +308,7 @@ void MuxSpinelInterface::UpdateFdSet(void *aMainloopContext)
     if (mFd < 0) {
         return;
     }
-    if (mMaybeMore || (mPendingTids != 0 && Gone())) {
+    if (mMaybeMore || mHeldLength > 0 || (mPendingTids != 0 && Gone())) {
         ctx->timeout.tv_sec = 0;
         ctx->timeout.tv_usec = 0;
     }
@@ -298,23 +326,31 @@ void MuxSpinelInterface::Process(const void *aMainloopContext)
     if (mFd < 0) {
         return;
     }
-    if (mMaybeMore || FD_ISSET(mFd, &ctx->read_fds) || (mPendingTids != 0 && Gone())) {
+    if (mMaybeMore || mHeldLength > 0 || FD_ISSET(mFd, &ctx->read_fds) || (mPendingTids != 0 && Gone())) {
         TakeOne();
     }
 }
 
 // After the channel's RESET: a C6 announces its reset by itself; a dongle reopened over USB does not, so it gets a
-// spinel software reset. Frames that arrive meanwhile go to OpenThread as usual.
+// spinel software reset. The first frame is only looked at: it is put back for OpenThread (SpinelDriver's
+// ResetCoprocessor waits for that reset notification once HardwareReset returns).
 void MuxSpinelInterface::AfterReset(void)
 {
     const int64_t deadline = NowUs() + kAnnounceWaitUs;
+    uint8_t *slot;
+    size_t len;
+    bool announced = false;
 
-    while (!mResetAnnounced && !Gone() && NowUs() < deadline) {
-        if (!TakeOne()) {
+    while (mHeldLength == 0 && !Gone() && NowUs() < deadline) {
+        if (!mOps->poll(mCtx, &slot, &len)) {
             WaitReadable(kGoneSliceUs);
+        } else if (slot) {
+            announced = IsResetNotification(slot, len);
+            Hold(slot, len);
+            mOps->release(mCtx, slot);
         }
     }
-    if (!mResetAnnounced && !Gone()) {
+    if (!announced && !Gone()) {
         const uint8_t reset[] = {SPINEL_HEADER_FLAG, SPINEL_CMD_RESET, SPINEL_RESET_STACK};
 
         ESP_LOGI(OT_PLAT_LOG_TAG, "no reset notification from the RCP: spinel software reset");
@@ -331,7 +367,7 @@ otError MuxSpinelInterface::HardwareReset(void)
         return OT_ERROR_NONE; // nothing can reset a radio that is not there: the reset fails, br_core is told
     }
     mResetSeen = false;
-    mResetAnnounced = false;
+    mHeldLength = 0;
     if (mRcpFailureHandler) {
         mRcpFailureHandler(); // br_core: its recovery ladder resets the channel (or holds it, after too many)
     } else {

@@ -18,9 +18,11 @@ public:
 
     otError Init(ReceiveFrameCallback aCallback, void *aCallbackContext, RxFrameBuffer &aFrameBuffer) override;
     void Deinit(void) override;
-    // Passes the frame to the channel. After GONE the frame is dropped and OT_ERROR_NONE returned; a request in it is
-    // then answered with LAST_STATUS FAILURE (see AnswerGone), so OpenThread sees a failed request, never a timeout
-    // that starts its RCP recovery (which ends in DieNow on a vanished radio).
+    // Passes the frame to the channel. A frame the channel does not take (GONE, a transport error) is dropped, counted
+    // and OT_ERROR_NONE returned (SubMac asserts on a transmit error; a lost request times out into the usual recovery).
+    // After GONE a request in it is answered per command (mux_gone_answer.h, see AnswerGone), so OpenThread sees the
+    // radio refuse or accept it, never the timeout that starts its RCP recovery (which ends in DieNow on a vanished
+    // radio).
     otError SendFrame(const uint8_t *aFrame, uint16_t aLength) override;
     // One frame into OpenThread's RX frame buffer, or OT_ERROR_RESPONSE_TIMEOUT; within 100 ms after GONE.
     otError WaitForFrame(uint64_t aTimeoutUs) override;
@@ -61,15 +63,21 @@ private:
     void NoteSent(const uint8_t *aFrame, uint16_t aLength);
     bool WaitReadable(uint64_t aTimeoutUs);
     void AfterReset(void);
+    void Hold(const uint8_t *aFrame, size_t aLength);
 
     const esp_openthread_mux_ops_t *mOps;
     void *mCtx;
     int mFd;
     bool mMaybeMore;        // a frame was taken: more may wait (the eventfd stays set until a poll finds none)
     bool mResetSeen;        // poll reported a RESET
-    bool mResetAnnounced;   // a spinel reset notification arrived (LAST_STATUS RESET_*, TID 0)
     bool mGoneLogged;
     uint16_t mPendingTids;  // requests sent and not answered yet (bit = spinel TID 1..15)
+    uint32_t mPendingCmd[16]; // per TID: the command and property of the request (the answer after GONE)
+    uint32_t mPendingKey[16];
+    uint32_t mTxDropped;    // frames the channel did not take
+    // One frame put back (HardwareReset looked at it): OpenThread gets it first, in Process or WaitForFrame.
+    uint16_t mHeldLength;
+    uint8_t mHeld[kMaxFrameSize];
 
     ReceiveFrameCallback mReceiveFrameCallback;
     void *mReceiveFrameContext;
