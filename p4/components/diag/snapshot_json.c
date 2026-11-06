@@ -15,6 +15,20 @@ static void put_pct(json_out_t *w, float pct)
     json_out_uint(w, tenths % 10);
 }
 
+// Signed, one decimal, rounded half away from zero; a value that rounds to zero prints "0.0", never "-0.0".
+static void put_signed_tenths(json_out_t *w, float value)
+{
+    const bool negative = value < 0.0f;
+    const uint32_t tenths = (uint32_t)((negative ? -value : value) * 10.0f + 0.5f);
+
+    if (negative && tenths > 0) {
+        json_out_raw(w, "-");
+    }
+    json_out_uint(w, tenths / 10);
+    json_out_raw(w, ".");
+    json_out_uint(w, tenths % 10);
+}
+
 static void put_pct_object(json_out_t *w, const float pct[DIAG_WINDOW_COUNT])
 {
     json_out_raw(w, "{");
@@ -65,6 +79,12 @@ int diag_snapshot_render(char *buf, size_t cap, const diag_snapshot_input_t *in)
     put_uint_field(&w, "uptime_s", in->uptime_s, true);
     json_out_raw(&w, ",\"reset_reason\":");
     json_out_str(&w, in->reset_reason);
+    json_out_raw(&w, ",\"chip_temperature_c\":");
+    if (in->chip_temperature_valid) {
+        put_signed_tenths(&w, in->chip_temperature_c);
+    } else {
+        json_out_raw(&w, "null");
+    }
 
     json_out_raw(&w, ",\"cpu\":[");
     for (int c = 0; c < DIAG_CORES; c++) {

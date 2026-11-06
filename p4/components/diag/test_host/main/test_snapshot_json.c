@@ -94,6 +94,54 @@ TEST_CASE("On a full window of tasks with worst-case names: fits DIAG_JSON_MAX_B
     free(view);
 }
 
+static void render_with_temperature(char *buf, size_t cap, bool valid, float celsius)
+{
+    diag_view_t *view = malloc(sizeof(*view));
+    diag_lock_view_t lock;
+    diag_snapshot_input_t in = sample_input(view, &lock);
+
+    in.chip_temperature_valid = valid;
+    in.chip_temperature_c = celsius;
+    TEST_ASSERT_GREATER_THAN(0, diag_snapshot_render(buf, cap, &in));
+    free(view);
+}
+
+TEST_CASE("On a valid temperature: writes chip_temperature_c after reset_reason with one decimal", "[diag]")
+{
+    char buf[4096];
+
+    render_with_temperature(buf, sizeof(buf), true, 47.25f);
+    TEST_ASSERT_NOT_NULL(strstr(buf, "\"reset_reason\":\"power-on\",\"chip_temperature_c\":47.3,\"cpu\":["));
+}
+
+TEST_CASE("On a temperature below zero: writes the sign once", "[diag]")
+{
+    char buf[4096];
+
+    render_with_temperature(buf, sizeof(buf), true, -0.5f);
+    TEST_ASSERT_NOT_NULL(strstr(buf, "\"chip_temperature_c\":-0.5,"));
+    render_with_temperature(buf, sizeof(buf), true, -3.04f);
+    TEST_ASSERT_NOT_NULL(strstr(buf, "\"chip_temperature_c\":-3.0,"));
+    render_with_temperature(buf, sizeof(buf), true, -3.06f);
+    TEST_ASSERT_NOT_NULL(strstr(buf, "\"chip_temperature_c\":-3.1,"));
+}
+
+TEST_CASE("On a temperature that rounds to zero from below: writes 0.0, not -0.0", "[diag]")
+{
+    char buf[4096];
+
+    render_with_temperature(buf, sizeof(buf), true, -0.04f);
+    TEST_ASSERT_NOT_NULL(strstr(buf, "\"chip_temperature_c\":0.0,"));
+}
+
+TEST_CASE("On an invalid temperature: writes chip_temperature_c null", "[diag]")
+{
+    char buf[4096];
+
+    render_with_temperature(buf, sizeof(buf), false, 47.0f);
+    TEST_ASSERT_NOT_NULL(strstr(buf, "\"reset_reason\":\"power-on\",\"chip_temperature_c\":null,\"cpu\":["));
+}
+
 void app_main(void)
 {
     UNITY_BEGIN();

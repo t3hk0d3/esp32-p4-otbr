@@ -297,7 +297,7 @@ function refreshStatus() {
 }
 
 function diagDashes() {
-  [ 'h-uptime', 'h-reset', 't-cpu', 't-mem-int', 't-mem-psram' ].forEach(function(id) { setText(id, '-'); });
+  [ 'h-uptime', 'h-reset', 't-cpu', 't-mem-int', 't-mem-psram', 't-chip-temp' ].forEach(function(id) { setText(id, '-'); });
   return false;
 }
 
@@ -315,6 +315,7 @@ function refreshDiag() {
     var mi = d.memory.internal;
     setText('t-mem-int', C.bytesText(mi.free) + ' (lowest ' + C.bytesText(mi.min_free) + ')');
     setText('t-mem-psram', C.bytesText(d.memory.psram.free));
+    setText('t-chip-temp', typeof d.chip_temperature_c === 'number' ? d.chip_temperature_c.toFixed(1) + ' \u00b0C' : '-');
     return true;
   }, diagDashes);
 }

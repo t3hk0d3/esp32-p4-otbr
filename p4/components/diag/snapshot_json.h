@@ -2,6 +2,7 @@
 
 // GET /device/diag body (spec 5.12). Pure: host-tested in test_host/.
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include "lock_stats.h"
@@ -20,6 +21,8 @@ typedef struct {
 typedef struct {
     uint32_t uptime_s;
     const char *reset_reason;
+    bool chip_temperature_valid; // false: the sensor has no reading, rendered as null
+    float chip_temperature_c;
     const diag_view_t *view;
     diag_heap_info_t internal;
     diag_heap_info_t psram;

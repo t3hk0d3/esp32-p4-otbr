@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "board_cores.h"
+#include "driver/temperature_sensor.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -27,11 +28,16 @@ static const char *TAG = "diag";
 #define SAMPLER_PERIOD_MS 1000
 #define TASK_HEADROOM 8      // tasks that may appear between uxTaskGetNumberOfTasks and uxTaskGetSystemState
 #define MUTEX_WAIT_MS 100
+#define TSENS_RANGE_MIN_C 20 // start range only: the driver re-picks the range from the reading
+#define TSENS_RANGE_MAX_C 100
 
 static SemaphoreHandle_t s_mutex;
 static diag_windows_t *s_windows; // guarded by s_mutex
 static diag_heap_info_t s_internal; // guarded by s_mutex
 static diag_heap_info_t s_psram;
+static bool s_chip_temperature_valid; // guarded by s_mutex
+static float s_chip_temperature_c;
+static temperature_sensor_handle_t s_tsens; // NULL: the sensor is unavailable
 static bool s_started;
 static bool s_untracked_logged; // sampler task only
 
@@ -118,10 +124,15 @@ static void sample_once(sample_buffers_t *b)
     const diag_heap_info_t internal = read_heap(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     const diag_heap_info_t psram = read_heap(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
+    float chip_c = 0.0f;
+    const bool chip_valid = s_tsens && temperature_sensor_get_celsius(s_tsens, &chip_c) == ESP_OK;
+
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     diag_windows_update(s_windows, b->samples, n, totals);
     s_internal = internal;
     s_psram = psram;
+    s_chip_temperature_valid = chip_valid;
+    s_chip_temperature_c = chip_c;
     const uint32_t untracked = s_windows->view.untracked;
 
     xSemaphoreGive(s_mutex);
@@ -154,6 +165,33 @@ static void release_resources(void)
     s_windows = NULL;
 }
 
+// Not essential: without the sensor the temperature stays unavailable and the rest of the diagnostics run.
+static void start_temperature_sensor(void)
+{
+    temperature_sensor_config_t config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(TSENS_RANGE_MIN_C, TSENS_RANGE_MAX_C);
+    esp_err_t err = temperature_sensor_install(&config, &s_tsens);
+
+    if (err == ESP_OK) {
+        err = temperature_sensor_enable(s_tsens);
+        if (err != ESP_OK) {
+            temperature_sensor_uninstall(s_tsens);
+        }
+    }
+    if (err != ESP_OK) {
+        s_tsens = NULL;
+        ESP_LOGW(TAG, "chip temperature sensor unavailable: %s", esp_err_to_name(err));
+    }
+}
+
+static void stop_temperature_sensor(void)
+{
+    if (s_tsens) {
+        temperature_sensor_disable(s_tsens);
+        temperature_sensor_uninstall(s_tsens);
+        s_tsens = NULL;
+    }
+}
+
 esp_err_t diag_start(void)
 {
     ESP_RETURN_ON_FALSE(!s_started, ESP_ERR_INVALID_STATE, TAG, "already started");
@@ -169,8 +207,10 @@ esp_err_t diag_start(void)
         return ESP_ERR_NO_MEM;
     }
     diag_windows_init(s_windows);
+    start_temperature_sensor();
     if (xTaskCreatePinnedToCore(sampler_task, "diag", SAMPLER_STACK, NULL, SAMPLER_PRIORITY, NULL, SAMPLER_CORE) != pdPASS) {
         release_resources();
+        stop_temperature_sensor();
         ESP_LOGE(TAG, "cannot create the sampler task");
         return ESP_ERR_NO_MEM;
     }
@@ -229,6 +269,8 @@ esp_err_t diag_snapshot_json(char **out_json)
     *view = s_windows->view;
     in.internal = s_internal;
     in.psram = s_psram;
+    in.chip_temperature_valid = s_chip_temperature_valid;
+    in.chip_temperature_c = s_chip_temperature_c;
     xSemaphoreGive(s_mutex);
 
     diag_lock_view_t lock;
@@ -275,6 +317,8 @@ esp_err_t diag_metrics_view(diag_metrics_view_t *out)
     out->psram.free = s_psram.free_bytes;
     out->psram.min_free = s_psram.min_free_bytes;
     out->psram.largest_free_block = s_psram.largest_free_block;
+    out->chip_temperature_valid = s_chip_temperature_valid;
+    out->chip_temperature_c = s_chip_temperature_c;
     xSemaphoreGive(s_mutex);
 
     diag_lock_view_t lock;

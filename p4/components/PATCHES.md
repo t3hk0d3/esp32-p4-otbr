@@ -61,6 +61,8 @@ reason, spec reference.
    2026-11-03: `frontend/ethernet.html` gets the "Thread over Ethernet" (TREL) card, `static/ethernet.js` its logic
    (`trelOnly`, `trelView`, `setTrel`); it also polls `/device/status` for the TREL state. No CSS change.
    (docs/superpowers/specs/2026-11-03-trel-design.md)
+   2026-11-06: `frontend/index.html` and `static/status.js` get a "Chip temperature" row (`t-chip-temp`) in the "Load and memory"
+   card, read from `chip_temperature_c` of `/device/diag`. No CSS change.
 4. Not applied. Not needed: Phase 0 showed `esp_ot_br_server` links without Wi-Fi. (spec 5.8)
 5. Applied (part a Task 11B, part b Task 13). `esp_br_http_ota`: (a) minimal RCP strip: removed the
    `esp_rcp_ota_*` / `esp_rcp_firmware.h` use and the `esp_rcp_update` entry in `REQUIRES`. Reason: the RCP firmware
