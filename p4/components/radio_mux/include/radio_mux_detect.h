@@ -55,13 +55,17 @@ typedef struct {
     uint8_t acc[RADIO_MUX_DETECT_ACC_MAX]; // ZNP / ASH bytes of the frame in progress
     size_t acc_n;
     bool ash_esc;
+    // Set by every radio_mux_detect_next call: true on the SEND that starts a probe step, false on the follow-ups
+    // (the Ziggurat GET, SYS_VERSION), on waits and on DONE. The board code drops any rx it has buffered before it
+    // writes tx of a new step, and reopens the device only when *baud changed; a follow-up must not flush.
+    bool new_step;
 } radio_mux_detect_t;
 
 void radio_mux_detect_start(radio_mux_detect_t *d, int64_t now_ms);
 
 // One step of the sequence. The first call after _start (rx_n 0) asks for the first probe. Every call fills *baud and
 // *wait_until_ms. SEND with *tx_n > 0: write those bytes (valid until the next call); SEND with *tx_n 0: nothing new,
-// keep collecting until *wait_until_ms. `rx` are the bytes collected since the previous call. A call at or after
+// keep collecting until *wait_until_ms. d->new_step tells a step start from a follow-up (see the struct). `rx` are the bytes collected since the previous call. A call at or after
 // start + RADIO_MUX_DETECT_CAP_MS finishes with unknown whatever the step (a spinel firmware seen by then is kept).
 radio_mux_probe_action_t radio_mux_detect_next(radio_mux_detect_t *d, int64_t now_ms, const uint8_t *rx, size_t rx_n,
                                                uint32_t *baud, const uint8_t **tx, size_t *tx_n,

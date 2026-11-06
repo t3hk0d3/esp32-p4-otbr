@@ -43,9 +43,11 @@ static const uint8_t ASH_RST[] = {0x1A, 0xC0, 0x38, 0xBC, 0x7E};
 #define ZNP_SRSP_SYS 0x61
 #define ZNP_PING_ID 0x01
 #define ZNP_VERSION_ID 0x02
+// SYS_VERSION payload: TransportRev, ProductId, MajorRel, MinorRel, MaintRel, then optionally CodeRevision (u32 LE),
+// BootloaderBuildType (u8) and BootloaderRevision (u32 LE).
 #define ZNP_LEN_VERSION 5
 #define ZNP_LEN_VERSION_REV 9
-#define ZNP_LEN_MAX 9
+#define ZNP_LEN_MAX 14
 #define ASH_FLAG 0x7E
 #define ASH_ESC 0x7D
 #define ASH_CANCEL 0x1A
@@ -109,6 +111,7 @@ static void enter_step(radio_mux_detect_t *d, int64_t now)
     const step_t *s = &STEPS[d->step];
 
     d->deadline_ms = now + s->budget_ms;
+    d->new_step = true;
     d->acc_n = 0;
     d->ash_esc = false;
     switch (s->kind) {
@@ -207,7 +210,7 @@ static void spinel_frame(radio_mux_detect_t *d, int64_t now, const uint8_t *f, s
     uint32_t cmd, prop;
     size_t used, at = 1;
 
-    if (n < 3 || (f[0] & 0xC0) != 0x80) {
+    if (n < 3 || f[0] != SPINEL_HEADER) { // answers to our requests only: TID 1; TID 0 is unsolicited
         return;
     }
     used = unpack_uint(f + at, n - at, &cmd);
@@ -261,15 +264,19 @@ static void spinel_feed(radio_mux_detect_t *d, int64_t now, const uint8_t *rx, s
 
 // ---- ZNP
 
-static const char *znp_chip(uint8_t product, char *buf, size_t cap)
+static const char *znp_variant(uint8_t product, char *buf, size_t cap)
 {
-    static const char *const CHIPS[] = {"CC2530", "CC2652", "CC1352"};
-
-    if (product < sizeof(CHIPS) / sizeof(CHIPS[0])) {
-        return CHIPS[product];
+    switch (product) {
+    case 0:
+        return "Z-Stack 1.2";
+    case 1:
+        return "Z-Stack 3.0.x";
+    case 2:
+        return "Z-Stack 3.x.0";
+    default:
+        snprintf(buf, cap, "Z-Stack product %u", (unsigned)product);
+        return buf;
     }
-    snprintf(buf, cap, "product %u", (unsigned)product);
-    return buf;
 }
 
 static void znp_frame(radio_mux_detect_t *d, const uint8_t *f)
@@ -279,18 +286,18 @@ static void znp_frame(radio_mux_detect_t *d, const uint8_t *f)
     if (f[3] == ZNP_PING_ID && d->stage == ST_ZNP_PING) {
         d->stage = ST_ZNP_VER;
         tx_literal(d, ZNP_VERSION, sizeof(ZNP_VERSION));
-    } else if (f[3] == ZNP_VERSION_ID && (len == ZNP_LEN_VERSION || len == ZNP_LEN_VERSION_REV)) {
-        char tmp[sizeof(d->rec.chip)];
-        const uint8_t *p = f + 4; // transport rev, product, major, minor, maint, [revision x4]
-        int n = snprintf(d->rec.version, sizeof(d->rec.version), "%u.%u.%u", (unsigned)p[2], (unsigned)p[3],
-                         (unsigned)p[4]);
+    } else if (f[3] == ZNP_VERSION_ID && len >= ZNP_LEN_VERSION) {
+        char tmp[24];
+        const uint8_t *p = f + 4; // transport rev, product, major, minor, maint, [code revision x4, bootloader ...]
+        int n = snprintf(d->rec.version, sizeof(d->rec.version), "%s %u.%u.%u", znp_variant(p[1], tmp, sizeof(tmp)),
+                         (unsigned)p[2], (unsigned)p[3], (unsigned)p[4]);
 
-        if (len == ZNP_LEN_VERSION_REV && n > 0) {
+        if (len >= ZNP_LEN_VERSION_REV && n > 0 && (size_t)n < sizeof(d->rec.version)) {
             uint32_t rev = (uint32_t)p[5] | (uint32_t)p[6] << 8 | (uint32_t)p[7] << 16 | (uint32_t)p[8] << 24;
 
-            snprintf(d->rec.version + n, sizeof(d->rec.version) - (size_t)n, "-%lu", (unsigned long)rev);
+            snprintf(d->rec.version + n, sizeof(d->rec.version) - (size_t)n, " rev %lu", (unsigned long)rev);
         }
-        snprintf(d->rec.chip, sizeof(d->rec.chip), "%s", znp_chip(p[1], tmp, sizeof(tmp)));
+        d->rec.chip[0] = '\0'; // ZNP does not report the chip
         finish(d, RADIO_MUX_FW_ZNP);
     }
 }
@@ -419,6 +426,7 @@ radio_mux_probe_action_t radio_mux_detect_next(radio_mux_detect_t *d, int64_t no
     int64_t until;
 
     d->tx_n = 0;
+    d->new_step = false;
     if (d->stage != ST_DONE && now_ms >= cap_end(d)) {
         // The cap wins over everything but a spinel firmware already seen.
         finish(d, d->stage == ST_VENDOR ? RADIO_MUX_FW_SPINEL : RADIO_MUX_FW_UNKNOWN);

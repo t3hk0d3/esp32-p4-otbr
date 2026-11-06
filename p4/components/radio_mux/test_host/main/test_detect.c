@@ -13,6 +13,7 @@ typedef struct {
     size_t tx_n;
     int64_t until;
     radio_mux_fw_record_t rec;
+    bool new_step;
 } out_t;
 
 static radio_mux_detect_t det;
@@ -23,6 +24,7 @@ static out_t call(int64_t now, const uint8_t *rx, size_t rx_n)
 
     memset(&o, 0, sizeof(o));
     o.act = radio_mux_detect_next(&det, now, rx, rx_n, &o.baud, &o.tx, &o.tx_n, &o.until, &o.rec);
+    o.new_step = det.new_step;
     return o;
 }
 
@@ -75,18 +77,24 @@ static const uint8_t PROP_NCP_VERSION[] = {0x02};
 static const uint8_t PROP_ZIGGURAT[] = {0xDA, 0x7A};
 
 // A spinel answer: header 0x81, command PROP_VALUE_IS (6), packed property, value.
-static size_t spinel_is(const uint8_t *prop, size_t prop_n, const uint8_t *val, size_t val_n, uint8_t *out, size_t cap)
+static size_t spinel_is_hdr(uint8_t hdr, const uint8_t *prop, size_t prop_n, const uint8_t *val, size_t val_n,
+                            uint8_t *out, size_t cap)
 {
     uint8_t f[200];
     size_t at = 0;
 
-    f[at++] = 0x81;
+    f[at++] = hdr;
     f[at++] = 0x06;
     memcpy(f + at, prop, prop_n);
     at += prop_n;
     memcpy(f + at, val, val_n);
     at += val_n;
     return spinel_wire(f, at, out, cap);
+}
+
+static size_t spinel_is(const uint8_t *prop, size_t prop_n, const uint8_t *val, size_t val_n, uint8_t *out, size_t cap)
+{
+    return spinel_is_hdr(0x81, prop, prop_n, val, val_n, out, cap);
 }
 
 static size_t ncp_version_answer(const char *s, uint8_t *out, size_t cap)
@@ -130,15 +138,18 @@ static size_t znp_ping_srsp(uint8_t *out)
     return znp_frame(0x61, 0x01, caps, sizeof(caps), out);
 }
 
-static size_t znp_version_srsp(uint8_t product, const uint8_t *rev4, uint8_t *out)
+// TransportRev 2, product, 2.7.1, then `extra_n` more payload bytes (CodeRevision, bootloader fields).
+static size_t znp_version_srsp(uint8_t product, const uint8_t *extra, size_t extra_n, uint8_t *out)
 {
-    uint8_t d[9] = {0x02, product, 2, 7, 1};
+    uint8_t d[16] = {0x02, product, 2, 7, 1};
 
-    if (rev4) {
-        memcpy(d + 5, rev4, 4);
+    if (extra_n) {
+        memcpy(d + 5, extra, extra_n);
     }
-    return znp_frame(0x61, 0x02, d, rev4 ? 9 : 5, out);
+    return znp_frame(0x61, 0x02, d, 5 + extra_n, out);
 }
+
+static const uint8_t REV_20598080[] = {0x40, 0x4D, 0x3A, 0x01};
 
 static uint16_t ash_crc(const uint8_t *p, size_t n)
 {
@@ -429,24 +440,24 @@ TEST_CASE("On a ZNP SYS_PING reply: no SYS_VERSION reply by the deadline finishe
     TEST_ASSERT_EQUAL_UINT32(115200, o.rec.baud);
 }
 
-TEST_CASE("On a ZNP SYS_VERSION reply: finishes with znp, version and chip from the reply", "[radio_mux]")
+TEST_CASE("On a ZNP SYS_VERSION reply: finishes with znp, the variant and version from the reply, no chip", "[radio_mux]")
 {
     uint8_t rx[24];
-    size_t n = znp_version_srsp(1, NULL, rx);
+    size_t n = znp_version_srsp(1, NULL, 0, rx);
     out_t step = at_step(2);
     out_t o = call(step.until - 300, rx, n);
 
     TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_DONE, o.act);
     TEST_ASSERT_EQUAL(RADIO_MUX_FW_ZNP, o.rec.type);
-    TEST_ASSERT_EQUAL_STRING("2.7.1", o.rec.version);
-    TEST_ASSERT_EQUAL_STRING("CC2652", o.rec.chip);
+    TEST_ASSERT_EQUAL_STRING("Z-Stack 3.0.x 2.7.1", o.rec.version);
+    TEST_ASSERT_EQUAL_STRING("", o.rec.chip);
     TEST_ASSERT_EQUAL_UINT32(115200, o.rec.baud);
 }
 
 TEST_CASE("On a ZNP SYS_VERSION reply: after the ping answer, in two reads", "[radio_mux]")
 {
     uint8_t rp[24], rv[24];
-    size_t np = znp_ping_srsp(rp), nv = znp_version_srsp(0, NULL, rv);
+    size_t np = znp_ping_srsp(rp), nv = znp_version_srsp(0, NULL, 0, rv);
     out_t step = at_step(2);
     out_t o = call(step.until - 300, rp, np);
 
@@ -454,36 +465,74 @@ TEST_CASE("On a ZNP SYS_VERSION reply: after the ping answer, in two reads", "[r
     TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_SEND, o.act);
     o = call(step.until - 100, rv + 3, nv - 3);
     TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_DONE, o.act);
-    TEST_ASSERT_EQUAL_STRING("CC2530", o.rec.chip);
+    TEST_ASSERT_EQUAL_STRING("Z-Stack 1.2 2.7.1", o.rec.version);
 }
 
-TEST_CASE("On a ZNP SYS_VERSION reply: a 4-byte revision is appended to the version", "[radio_mux]")
+TEST_CASE("On a ZNP SYS_VERSION reply: a CodeRevision is appended as rev <n>", "[radio_mux]")
 {
-    const uint8_t rev[] = {0x40, 0x4D, 0x3A, 0x01}; // 20598080 little-endian
-    uint8_t rx[24];
-    size_t n = znp_version_srsp(2, rev, rx);
+    uint8_t rx[32];
+    size_t n = znp_version_srsp(2, REV_20598080, sizeof(REV_20598080), rx);
     out_t step = at_step(2);
     out_t o = call(step.until - 300, rx, n);
 
     TEST_ASSERT_EQUAL(RADIO_MUX_FW_ZNP, o.rec.type);
-    TEST_ASSERT_EQUAL_STRING("2.7.1-20598080", o.rec.version);
-    TEST_ASSERT_EQUAL_STRING("CC1352", o.rec.chip);
+    TEST_ASSERT_EQUAL_STRING("Z-Stack 3.x.0 2.7.1 rev 20598080", o.rec.version);
+    TEST_ASSERT_EQUAL_STRING("", o.rec.chip);
 }
 
-TEST_CASE("On a ZNP SYS_VERSION reply: an unlisted product shows as product <n>", "[radio_mux]")
+TEST_CASE("On a ZNP SYS_VERSION reply: the longest payload (14 bytes, with bootloader fields) is accepted",
+          "[radio_mux]")
 {
-    uint8_t rx[24];
-    size_t n = znp_version_srsp(9, NULL, rx);
+    const uint8_t extra[] = {0x40, 0x4D, 0x3A, 0x01, 0x03, 0x11, 0x22, 0x33, 0x44};
+    uint8_t rx[32];
+    size_t n = znp_version_srsp(1, extra, sizeof(extra), rx);
     out_t step = at_step(2);
     out_t o = call(step.until - 300, rx, n);
 
-    TEST_ASSERT_EQUAL_STRING("product 9", o.rec.chip);
+    TEST_ASSERT_EQUAL_UINT32(19, n);
+    TEST_ASSERT_EQUAL(RADIO_MUX_FW_ZNP, o.rec.type);
+    TEST_ASSERT_EQUAL_STRING("Z-Stack 3.0.x 2.7.1 rev 20598080", o.rec.version);
+}
+
+TEST_CASE("On a ZNP SYS_VERSION reply: a payload of 10 bytes (CodeRevision and bootloader type) is accepted",
+          "[radio_mux]")
+{
+    const uint8_t extra[] = {0x40, 0x4D, 0x3A, 0x01, 0x03};
+    uint8_t rx[32];
+    size_t n = znp_version_srsp(1, extra, sizeof(extra), rx);
+    out_t step = at_step(2);
+    out_t o = call(step.until - 300, rx, n);
+
+    TEST_ASSERT_EQUAL(RADIO_MUX_FW_ZNP, o.rec.type);
+    TEST_ASSERT_EQUAL_STRING("Z-Stack 3.0.x 2.7.1 rev 20598080", o.rec.version);
+}
+
+TEST_CASE("On a ZNP SYS_VERSION reply: a payload of 15 bytes is not an answer", "[radio_mux]")
+{
+    const uint8_t extra[10] = {0x40, 0x4D, 0x3A, 0x01};
+    uint8_t rx[32];
+    size_t n = znp_version_srsp(1, extra, sizeof(extra), rx);
+    out_t step = at_step(2);
+    out_t o = call(step.until - 300, rx, n);
+
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_SEND, o.act);
+}
+
+TEST_CASE("On a ZNP SYS_VERSION reply: an unlisted product shows as Z-Stack product <n>", "[radio_mux]")
+{
+    uint8_t rx[24];
+    size_t n = znp_version_srsp(9, NULL, 0, rx);
+    out_t step = at_step(2);
+    out_t o = call(step.until - 300, rx, n);
+
+    TEST_ASSERT_EQUAL_STRING("Z-Stack product 9 2.7.1", o.rec.version);
+    TEST_ASSERT_EQUAL_STRING("", o.rec.chip);
 }
 
 TEST_CASE("On a ZNP SYS_VERSION reply: a bad FCS is ignored and the step times out", "[radio_mux]")
 {
     uint8_t rx[24];
-    size_t n = znp_version_srsp(1, NULL, rx);
+    size_t n = znp_version_srsp(1, NULL, 0, rx);
     out_t step = at_step(2);
     out_t o;
 
@@ -507,7 +556,7 @@ TEST_CASE("On a ZNP SYS_VERSION reply: noise before the frame is skipped", "[rad
     rx[n++] = 0x00;
     rx[n++] = 0xFE; // a false start: a short length, then the real frame
     rx[n++] = 0x01;
-    n += znp_version_srsp(1, NULL, rx + n);
+    n += znp_version_srsp(1, NULL, 0, rx + n);
     o = call(step.until - 300, rx, n);
     TEST_ASSERT_EQUAL(RADIO_MUX_FW_ZNP, o.rec.type);
 }
@@ -614,7 +663,7 @@ TEST_CASE("On 3000 ms elapsed: finishes with unknown in the first step", "[radio
 TEST_CASE("On 3000 ms elapsed: finishes with unknown in the ZNP step, even with an answer in hand", "[radio_mux]")
 {
     uint8_t rx[24];
-    size_t n = znp_version_srsp(1, NULL, rx);
+    size_t n = znp_version_srsp(1, NULL, 0, rx);
     out_t o;
 
     at_step(2);
@@ -645,6 +694,92 @@ TEST_CASE("On 3000 ms elapsed: a late spinel answer's follow-up wait ends at the
     o = call(T0 + 3000, NULL, 0);
     TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_DONE, o.act);
     TEST_ASSERT_EQUAL(RADIO_MUX_FW_SPINEL, o.rec.type);
+}
+
+TEST_CASE("On each probe step: new_step is true on the SEND that starts it", "[radio_mux]")
+{
+    out_t o = begin();
+
+    TEST_ASSERT_TRUE(o.new_step);
+    for (int i = 1; i < 5; i++) {
+        o = timeout_of(&o);
+        TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_SEND, o.act);
+        TEST_ASSERT_TRUE(o.new_step);
+    }
+}
+
+TEST_CASE("On waiting inside a step: new_step is false", "[radio_mux]")
+{
+    out_t o;
+
+    begin();
+    o = call(T0 + 100, NULL, 0);
+    TEST_ASSERT_FALSE(o.new_step);
+}
+
+TEST_CASE("On the Ziggurat follow-up: new_step is false", "[radio_mux]")
+{
+    uint8_t rx[160];
+    size_t n = ncp_version_answer(KOENKK, rx, sizeof(rx));
+    out_t o;
+
+    begin();
+    o = call(T0 + 40, rx, n);
+    TEST_ASSERT_TRUE(o.tx_n > 0);
+    TEST_ASSERT_FALSE(o.new_step);
+}
+
+TEST_CASE("On the SYS_VERSION follow-up: new_step is false", "[radio_mux]")
+{
+    uint8_t rx[24];
+    size_t n = znp_ping_srsp(rx);
+    out_t step = at_step(2);
+    out_t o;
+
+    TEST_ASSERT_TRUE(step.new_step);
+    o = call(step.until - 300, rx, n);
+    TEST_ASSERT_TRUE(o.tx_n > 0);
+    TEST_ASSERT_FALSE(o.new_step);
+}
+
+TEST_CASE("On DONE: new_step is false", "[radio_mux]")
+{
+    out_t o = at_step(5);
+
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_DONE, o.act);
+    TEST_ASSERT_FALSE(o.new_step);
+}
+
+TEST_CASE("On an unsolicited spinel frame (TID 0) in the vendor stage: ignores it, then takes the real answer",
+          "[radio_mux]")
+{
+    const uint8_t status[] = {0x00}, reset[] = {0x72};
+    uint8_t rx[160], rn[40], rz[40];
+    size_t n = ncp_version_answer(KOENKK, rx, sizeof(rx));
+    size_t nn = spinel_is_hdr(0x80, status, 1, reset, 1, rn, sizeof(rn));
+    size_t nz = spinel_is(PROP_ZIGGURAT, sizeof(PROP_ZIGGURAT), NULL, 0, rz, sizeof(rz));
+    out_t o;
+
+    begin();
+    call(T0 + 40, rx, n);
+    o = call(T0 + 50, rn, nn);
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_SEND, o.act);
+    TEST_ASSERT_EQUAL_UINT32(0, o.tx_n);
+    o = call(T0 + 60, rz, nz);
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_DONE, o.act);
+    TEST_ASSERT_EQUAL(RADIO_MUX_FW_ZIGGURAT, o.rec.type);
+}
+
+TEST_CASE("On an unsolicited spinel frame (TID 0) before the version answer: ignores it", "[radio_mux]")
+{
+    uint8_t rx[160];
+    size_t n = spinel_is_hdr(0x80, PROP_NCP_VERSION, 1, (const uint8_t *)"X/1.0; C", 9, rx, sizeof(rx));
+    out_t o;
+
+    begin();
+    o = call(T0 + 40, rx, n);
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_SEND, o.act);
+    TEST_ASSERT_EQUAL_UINT32(0, o.tx_n);
 }
 
 TEST_CASE("On \"OPENTHREAD/1.4.0-Koenkk-2025.3.1; CC13XX_CC26XX; Mar 13 2025\": returns version and chip",
