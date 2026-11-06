@@ -11,6 +11,9 @@
 #include "esp_random.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "reboot_gate.h"
 #include "ziggurat.h"
 #include "zigbee_ccm.h"
 #include "zigbee_priv.h"
@@ -226,10 +229,15 @@ void ziggurat_platform_hw_eui64(uint8_t *out)
 
 /* ---- reset, panic ---- */
 
+// Through reboot_gate (reboot_gate.h): a running update or C6 firmware push finishes first. The staticlib spins
+// forever after this call returns, so it never does: the zigbee task waits here for the reboot instead.
 void ziggurat_platform_hard_reset(void)
 {
     ESP_LOGW(TAG, "the client asked for a hard reset");
-    esp_restart();
+    reboot_gate_restart(0);
+    for (;;) {
+        vTaskDelay(portMAX_DELAY);
+    }
 }
 
 typedef struct {
