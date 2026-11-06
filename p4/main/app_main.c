@@ -128,8 +128,12 @@ void app_main(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "rcp_proxy_register: %s, no rcp-proxy mode", esp_err_to_name(err));
     }
-    // The radio channel mux: the only USB host owner. Consumers register before it starts; br_core keeps its own SPI
-    // path to the C6 until the C6 transport and the otbr consumer exist.
+    // OpenThread is the otbr consumer: it runs on whichever channel is stored in otbr (the C6 by default).
+    err = br_core_register_otbr();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "br_core_register_otbr: %s, no OTBR mode", esp_err_to_name(err));
+    }
+    // The radio channel mux: the only USB host and C6 SPI owner. Consumers register before it starts.
     err = radio_mux_start();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "radio_mux_start: %s, no USB radios", esp_err_to_name(err));

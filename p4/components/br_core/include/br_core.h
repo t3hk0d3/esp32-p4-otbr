@@ -16,13 +16,17 @@
 extern "C" {
 #endif
 
-// Eventfds OpenThread uses: the spinel SPI endpoint, one each for the netif, the task queue and the border router, and
-// one for TREL reception. app_main registers the eventfd VFS with these plus the mux's (RADIO_MUX_EVENTFD_COUNT).
+// Eventfds OpenThread uses: one each for the netif, the task queue and the border router, and one for TREL reception.
+// Its radio is a mux channel, whose eventfd is the mux's (RADIO_MUX_EVENTFD_COUNT); ESP-IDF's SPI spinel interface and
+// its eventfd are no longer used. app_main registers the eventfd VFS with these plus the mux's.
 #if CONFIG_OPENTHREAD_RADIO_TREL
-#define BR_CORE_EVENTFD_COUNT 5
-#else
 #define BR_CORE_EVENTFD_COUNT 4
+#else
+#define BR_CORE_EVENTFD_COUNT 3
 #endif
+
+// Room for a radio channel id (RADIO_MUX_ID_MAX).
+#define BR_CORE_CHANNEL_ID_MAX 48
 
 typedef struct {
     br_core_mode_t mode;
@@ -37,6 +41,7 @@ typedef struct {
     int pd_state;        /**< otBorderRoutingDhcp6PdState; -1 while the border router is not initialised */
     char pd_prefix[48];  /**< delegated OMR prefix, "" without one */
     char fault_reason[64]; /**< why the mode is BR_MODE_RADIO_FAULT, "" otherwise */
+    char otbr_channel[BR_CORE_CHANNEL_ID_MAX]; /**< the channel stored in mode otbr (present or not); "" for none (null) */
 } br_core_status_t;
 
 /**
@@ -47,6 +52,30 @@ typedef struct {
 void br_core_note_storage_init(esp_err_t storage_init_err);
 
 /**
+ * Register OpenThread as the radio mux's otbr consumer (one channel, spinel firmware, frames) and br_core_move_otbr as
+ * its mover. Call it once before radio_mux_start. OpenThread then runs on whichever channel is stored in otbr and
+ * present: it starts when that channel attaches and is torn down (NO_RADIO) when it goes.
+ */
+esp_err_t br_core_register_otbr(void);
+
+/**
+ * Move OpenThread from channel `from` (may be "" or absent: NO_RADIO) to `to` (radio_mux_set calls it for a PUT of mode
+ * otbr while another channel has it). The target's RCP is probed first, through the mux, while OpenThread still runs on
+ * `from`; this call waits for that probe (up to 10 s) and returns:
+ * - ESP_OK: accepted (202). The rest runs on br_core's radio task: stop, start on `to`, store both modes once it runs.
+ *   A drain timeout ("drain_timeout") or a failed start (OpenThread started on `from` again; RADIO_FAULT only when that
+ *   fails too) shows as `to`'s state fault with that reason, stored modes unchanged.
+ * - ESP_ERR_INVALID_RESPONSE: the probe failed (409 probe_failed); `reason` says why; nothing changed.
+ * - ESP_ERR_INVALID_STATE: busy (another move, a C6 push or recovery, OpenThread starting or sniffing); `reason`.
+ * - ESP_ERR_TIMEOUT: the probe did not finish in time; the move is dropped after it.
+ * `reason` (may be NULL) gets "" on ESP_OK.
+ */
+esp_err_t br_core_move_otbr(const char *from, const char *to, char *reason, size_t cap);
+
+/** True from an accepted br_core_move_otbr until the move ended (device_api's long-operation state). */
+bool br_core_move_running(void);
+
+/**
  * Start mDNS with `hostname` and the default service instance name `instance` (the names come from netnames). Idempotent;
  * the names are kept for the retry br_core_start makes when this failed. Needs esp_netif_init() and the default event
  * loop. app_main calls it before anything slow so that the HTTP server can start right after.
@@ -55,13 +84,15 @@ esp_err_t br_core_mdns_start(const char *hostname, const char *instance);
 
 /**
  * Boot the radio side (spec 5.3 steps 3 to 5): start mDNS (a retry, with the names
- * br_core_mdns_start was given), probe the installed RCP version (best effort, nothing is ever pushed at boot), reset the C6 into
- * its RCP, start OpenThread with RADIO_MODE_SPI_RCP on core 0 and
- * arrange for the border router to start once `backbone` has an IPv6 address. The border router start
+ * br_core_mdns_start was given). With no channel stored in otbr, or a dongle there, the mode is NO_RADIO (no fault) and
+ * OpenThread starts when that dongle attaches. With the C6 (the default), inside a C6 job of the radio mux: probe the
+ * installed RCP version (best effort, nothing is ever pushed at boot) and reset the C6 into its RCP; at the job's end the
+ * mux attaches the C6, and OpenThread starts on it through the mux (the RCP probed through the channel first) on core 0;
+ * the border router starts once `backbone` has an IPv6 address. The border router start
  * enables DHCPv6-PD and starts Thread when an active dataset is stored; otherwise Thread stays idle.
  *
- * Blocks until OpenThread is initialised or the radio fault mode was entered, and returns ESP_OK in both
- * cases (a radio fault is reported through br_core_get_mode: fault_reason "no rcp firmware" for an empty C6 boot
+ * Blocks until OpenThread is initialised, the radio fault mode was entered or the mode is NO_RADIO, and returns ESP_OK in
+ * all cases (a radio fault is reported through br_core_get_mode: fault_reason "no rcp firmware" for an empty C6 boot
  * slot, "rcp incompatible" when OpenThread rejects the RCP). The border router start itself may come later.
  * Call it from a task pinned to core 0 after esp_netif_init(), the default event loop and the storage mounts.
  *
