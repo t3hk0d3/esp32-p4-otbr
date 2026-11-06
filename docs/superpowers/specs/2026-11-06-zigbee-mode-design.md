@@ -128,12 +128,12 @@ From the spike and its on-board runs (2026-11-06):
   the `zigbee` component is built in. Choosing it asks for confirmation ("the board reboots; devices on this radio's current network lose it"),
   saves, and reboots. Offering Ziggurat on a second channel while one already has it is refused with a short reason.
 - **Navigation, reorganised by protocol** (the user's call, 2026-11-06): the **Management** menu is renamed
-  **Thread**, and **Topology** moves into it, so the top bar reads Dashboard, Thread, Zigbee, Device, About. The Thread
-  menu holds Network, Topology, Commissioner, Addresses, Tools and Console. **Zigbee** is a top-level link to its one
+  **Thread**, and **Topology**, **Routing** and **Packet capture** move into it, so the top bar reads Dashboard, Thread,
+  Zigbee, Device, About. The Thread menu holds Network, Topology, Routing, Commissioner, Addresses, Packet capture,
+  Tools and Console; Device keeps the board's own pages (Radios, Ethernet, Firmware, Diagnostics). **Zigbee** is a top-level link to its one
   page. The change applies in every mode, so the menu looks the same whether or not Zigbee is in use.
 - With a Ziggurat channel, the **Zigbee** link appears. The Thread pages follow the mux design's shared
-  rule: with no channel in `otbr` at all (a deliberate Zigbee-only board), the Thread menu, Routing and Packet
-  capture are hidden, and opening one directly
+  rule: with no channel in `otbr` at all (a deliberate Zigbee-only board), the Thread menu is hidden, and opening one directly
   shows a notice linking to the Radios page; with an OTBR channel that is absent or faulted, those pages stay and show
   "no radio in OTBR mode". With a working OTBR channel too, both sets of pages are shown.
 - The **Zigbee page** shows: which channel (radio) it runs on and that channel's detected firmware (the mux's
@@ -421,12 +421,12 @@ device_api
 web UI
     navigation
         In every mode
-            - names the former Management menu "Thread" and lists Topology inside it
-            - has no top-level Topology link
+            - names the former Management menu "Thread" and lists Topology, Routing and Packet capture inside it
+            - has no top-level Topology link, and no Routing or Packet capture under Device
         With a Ziggurat channel
             - shows the Zigbee link
         With no channel in otbr at all
-            - hides the Thread menu, Routing and Packet capture
+            - hides the Thread menu
         With the OTBR channel absent or faulted
             - keeps those pages, showing "no radio in OTBR mode"
         With only OTBR channels
