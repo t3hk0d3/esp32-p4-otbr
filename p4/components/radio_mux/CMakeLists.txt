@@ -5,7 +5,7 @@ if(IDF_TARGET STREQUAL "linux")
     return()
 endif()
 
-idf_component_register(SRCS "core.c" "detect.c" "hdlc.c" "pool.c" "mux.c" "usb_transport.c"
+idf_component_register(SRCS "core.c" "detect.c" "hdlc.c" "pool.c" "mux.c" "mux_api.c" "mux_deliver.c" "mux_nvs.c" "usb_transport.c"
                        INCLUDE_DIRS "include"
                        REQUIRES freertos
                        PRIV_REQUIRES board_cores esp_ringbuf esp_timer heap log nvs_flash vfs

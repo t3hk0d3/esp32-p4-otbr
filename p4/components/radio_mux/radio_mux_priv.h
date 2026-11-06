@@ -106,12 +106,101 @@ typedef struct {
     };
 } mux_msg_t;
 
-/* ---- mux.c, for the transports ---- */
+// A channel record. Written by the owner task (under g_mux.lock where other tasks read it), read under the lock.
+struct radio_mux_chan {
+    bool used;
+    bool remembered; // stored in NVS (unsupported devices never are)
+    char id[RADIO_MUX_ID_MAX];
+    radio_mux_kind_t kind;
+    mux_port_t *port; // the transport of its kind (for the whole firmware life)
+    // Stored settings.
+    radio_mux_mode_t mode;
+    uint32_t baud; // 0 = none stored (460800 applies)
+    bool flow;
+    radio_mux_proxy_settings_t proxy;
+    radio_mux_firmware_t fw;
+    int64_t first_seen, last_seen;
+    mux_usb_dev_t usb;
+    char label[RADIO_MUX_LABEL_MAX];
+    // Runtime, published through the snapshot.
+    bool present, supported;
+    radio_mux_mode_t eff_mode;
+    radio_mux_state_t state;
+    char reason[RADIO_MUX_REASON_MAX];
+    radio_mux_counters_t ctr; // while not on its port
+};
+
+struct mux_call {
+    SemaphoreHandle_t done;
+    atomic_int refs; // the caller and the owner; the last one frees
+    char id[RADIO_MUX_ID_MAX];
+    radio_mux_set_req_t req;
+    bool have_mover;
+    radio_mux_verdict_t verdict;
+    esp_err_t err;
+    char from[RADIO_MUX_ID_MAX];
+};
+
+#define MUX_RX_RING_SIZE (16 * 1024) // raw and detection bytes: a 100 ms burst at 921600 baud stays well inside
+
+// The mux's shared state (mux.c owns it).
+typedef struct {
+    QueueHandle_t queue;   // the owner task's messages
+    SemaphoreHandle_t lock; // the channel records: written by the owner, read by the API and consumers
+    struct radio_mux_chan chans[RADIO_MUX_CHANNELS_MAX]; // c6 in slot 0
+    mux_port_t c6;
+    mux_port_t usb;
+    radio_mux_consumer_t consumers[RADIO_MUX_RULES_MAX];
+    size_t n_consumers;
+    radio_mux_rules_t rules;
+    atomic_bool started;
+    esp_err_t (*_Atomic mover)(const char *from, const char *to);
+} mux_t;
+
+extern mux_t g_mux;
+
+/* ---- mux.c ---- */
 
 // Any task or callback, never blocks: false when the queue is full or the mux is not started.
 bool mux_post(const mux_msg_t *m);
+void mux_lock(void);
+void mux_unlock(void);
+// Seconds since the epoch, 0 when the board clock was never set.
+int64_t mux_now_epoch(void);
+// The stored baud, or 460800 when none is stored.
+uint32_t mux_eff_baud(const struct radio_mux_chan *ch);
+const radio_mux_consumer_t *mux_find_consumer(radio_mux_mode_t mode);
+
+/* ---- mux_deliver.c ---- */
+
 // Transport callback context, rx_lock held: bytes received from a byte-stream transport (USB), handled per rx_mode.
 void mux_rx_bytes(mux_port_t *p, const uint8_t *data, size_t len);
+// Any task: takes up to cap bytes from the port's ring without waiting.
+size_t mux_ring_take(mux_port_t *p, uint8_t *out, size_t cap);
+void mux_ring_flush(mux_port_t *p);
+// Any task: clears the eventfd, and sets it again when an event or ring bytes still wait.
+void mux_rearm(mux_port_t *p);
+// Any task: gives back the slot a frame pointer lies in (R12: frames sit at an offset inside their slot).
+void mux_slot_put(mux_port_t *p, uint8_t *frame);
+// Owner: what the receive path does with incoming bytes; waits for a callback in progress.
+void mux_set_rx(mux_port_t *p, mux_rx_mode_t mode);
+// Owner: GONE or RESET to the attached consumer.
+void mux_post_ctl(mux_port_t *p, radio_mux_ev_type_t type);
+// Owner: empties the channel's own queue, slots back to the pool.
+void mux_drain_evq(mux_port_t *p);
+
+/* ---- mux_nvs.c (owner) ---- */
+
+esp_err_t mux_store_chan(struct radio_mux_chan *ch);
+esp_err_t mux_erase_chan(struct radio_mux_chan *ch);
+void mux_chan_defaults(struct radio_mux_chan *ch, const char *id, radio_mux_kind_t kind);
+// Lists c6 and every remembered channel from NVS.
+void mux_load_chans(void);
+
+/* ---- mux_api.c ---- */
+
+// Drops one reference of a call record; the last one frees it.
+void mux_call_put(mux_call_t *call);
 
 /* ---- usb_transport.c ---- */
 
