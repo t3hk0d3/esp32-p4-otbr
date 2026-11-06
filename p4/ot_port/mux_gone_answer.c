@@ -38,9 +38,11 @@ static size_t pack_uint(uint32_t value, uint8_t *out)
 
 // GETs whose callers in RadioSpinel and ESP-IDF's port take an error (they log it and return it, or a default value).
 // The channel masks (GetRadioChannelMask, e.g. the CLI's `channel supported` in any task) end in SuccessOrDie on an
-// error: they get a value. The others (HWADDR, the versions and caps) are read only at OpenThread's init, on its own
-// task, and end in SuccessOrDie too: they get no answer, and the timeout leads to the reset-failure callback, which
-// br_core turns into a parked OpenThread task.
+// error: they get a value. The others are read only at OpenThread's init, on its own task, and get no answer:
+// SpinelDriver::Init's protocol version, coprocessor version and caps end in SuccessOrDie (DieNow: a GONE there
+// reboots the board), RadioSpinel::Init's HWADDR, RCP API versions and radio caps time out into RadioSpinel's
+// recovery, whose reset fails during the init (ot_mux_gone_answers_reset), and the reset-failure callback parks the
+// OpenThread task (br_core).
 static bool get_takes_error(uint32_t key)
 {
     switch (key) {
@@ -111,6 +113,21 @@ size_t ot_mux_gone_reset_frame(uint8_t out[OT_MUX_GONE_FRAME_MAX])
     out[n++] = SPINEL_PROP_LAST_STATUS;
     n += pack_uint(SPINEL_STATUS_RESET_UNKNOWN, &out[n]);
     return n;
+}
+
+bool ot_mux_gone_is_reset_notification(const uint8_t *frame, size_t len)
+{
+    uint32_t status;
+
+    return frame && len >= 4 && (frame[0] & 0xC0) == SPINEL_HEADER_FLAG && SPINEL_HEADER_GET_TID(frame[0]) == 0 &&
+           frame[1] == SPINEL_CMD_PROP_VALUE_IS && frame[2] == SPINEL_PROP_LAST_STATUS &&
+           unpack_uint(&frame[3], len - 3, &status) > 0 && status >= SPINEL_STATUS_RESET__BEGIN &&
+           status <= SPINEL_STATUS_RESET__END;
+}
+
+bool ot_mux_gone_answers_reset(bool reset_waiting, bool init_done)
+{
+    return reset_waiting && init_done;
 }
 
 size_t ot_mux_gone_frame(ot_mux_gone_t answer, uint8_t tid, uint32_t key, uint8_t out[OT_MUX_GONE_FRAME_MAX])

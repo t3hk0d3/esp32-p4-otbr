@@ -19,6 +19,7 @@
 #include "esp_openthread.h"
 #include "esp_openthread_border_router.h"
 #include "esp_openthread_lock.h"
+#include "esp_openthread_mux.h"
 #include "esp_openthread_netif_glue.h"
 #include "esp_openthread_spinel.h"
 #include "esp_openthread_types.h"
@@ -154,10 +155,11 @@ static void fault_and_park(const char *reason)
 }
 
 // The OTBR channel went away (GONE) and a reset of it failed: no fault and no reboot of its own (spec: an unplug ends
-// in NO_RADIO). Only OpenThread's init gets here on the OpenThread task (a reset before the RCP answered once; after
-// that, mux_spinel_interface.cpp answers a reset after GONE as done): the task parks quietly, a start waiting for it
-// sees the init abandoned, and br_radio's teardown of the lost channel ends in NO_RADIO. Another task never should;
-// OpenThread aborts when this returns and that task serves something else, so the board reboots then (docs/radios.md).
+// in NO_RADIO). Only OpenThread's init gets here on the OpenThread task (a reset during esp_openthread_init; after it,
+// esp_openthread_mux_init_done, mux_spinel_interface.cpp answers a reset after GONE as done): the task parks quietly,
+// a start waiting for it sees the init abandoned, and br_radio's teardown of the lost channel ends in NO_RADIO. Another
+// task never should; OpenThread aborts when this returns and that task serves something else, so the board reboots
+// then (docs/radios.md).
 static void park_gone(void)
 {
     const bool in_mainloop = g_core.loop_running;
@@ -465,6 +467,7 @@ static esp_err_t init_openthread(void)
     s_platform_config = platform_config(channel_bus_speed(radio_mux_chan_id(core_radio_chan())));
     core_radio_mux_set(); // before every esp_openthread_init: the channel it runs on
     ESP_RETURN_ON_ERROR(esp_openthread_init(&s_platform_config), TAG, "esp_openthread_init");
+    esp_openthread_mux_init_done(); // from now on a reset after GONE is answered as done (mux_spinel_interface.cpp)
     g_core.ot_initialised = true;
     set_vendor_sw_version();
 #if CONFIG_OPENTHREAD_RADIO_TREL
