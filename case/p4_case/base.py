@@ -77,7 +77,15 @@ def _standoffs() -> Part:
         )
         for x, y in P.SCREW_HOLES
     ]
-    return Part() + posts
+    # 45° flare at the root: the post widens by STANDOFF_ROOT_CHAMFER into the plate
+    c = P.STANDOFF_ROOT_CHAMFER
+    r = P.STANDOFF_D / 2
+    flares = [
+        Pos(x, y, board_z(P.PLATE_T) - EPS)
+        * Cone(r + c + EPS, r, c + EPS, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        for x, y in P.SCREW_HOLES
+    ]
+    return Part() + posts + flares
 
 
 def _screw_holes() -> Part:
