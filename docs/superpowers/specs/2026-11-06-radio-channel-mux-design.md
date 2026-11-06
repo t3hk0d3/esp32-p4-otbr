@@ -415,10 +415,22 @@ Everything above the radio belongs to the Zigbee work: its spinel client, task, 
 
 ### Web UI
 
-- A **Radios** page in the Device group: one row per channel with its label, state, mode selector, line settings and,
-  in `rcp-proxy` mode, its direction, adapter, port or host, and the peer. Moving Thread asks for confirmation ("Thread moves from the C6 to the
-  dongle; Thread devices lose the border router for a few seconds"); a mode whose consumer reboots on change says so
-  before saving. Layout is the builder's call.
+- A **Radios** page, first in the Device group, as sketched in
+  `docs/superpowers/specs/2026-11-06-radio-channel-mux-mockup.html` *(the user's layout)*:
+  - **The table:** every known channel, unplugged ones greyed out. Columns: radio (label, channel id, bridge), firmware
+    (type, version, chip), mode (icon and name, or "Off, stored: ..." when the firmware doesn't fit), state chip,
+    activity (peer or counters), and Configure. The page head says which radio Thread runs on.
+  - **The configure dialog:** a click on a row or Configure opens a modal for that channel. It holds:
+    - the mode cards;
+    - the `rcp-proxy` settings: direction, adapter, host or port, and framing for UDP;
+    - the serial line (USB only): baud, and flow control greyed out where the bridge has none.
+    For an unplugged stick, the dialog says changes apply on its return, and offers "Forget this radio".
+  - **The mode cards:** a carousel, one card per mode with an icon, a name and one line of description. A mode that
+    can't be chosen is greyed out with the reason on the card: not in this build, the firmware doesn't fit, or unplugged.
+  - **Moving Thread:** choosing Thread border router for a channel that doesn't run it turns Save into "Move Thread
+    here", with the move explained above it ("Thread devices lose the border router for a few seconds; ... if this radio
+    does not start, Thread goes back"). A mode whose consumer reboots on change says so before saving.
+  - The mockup's wording, icons and example values are placeholders; the structure is the decision.
 - The Dashboard's radio card names the OTBR channel.
 - The Thread pages (Management group, Topology, Routing, Packet capture) depend on why Thread is down *(design call,
   shared with the Zigbee design, which follows it)*:
