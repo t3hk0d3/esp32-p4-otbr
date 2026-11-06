@@ -197,6 +197,62 @@ TEST_CASE("On WAIT: no frame", "[ot_port]")
     TEST_ASSERT_EQUAL(0, ot_mux_gone_frame(OT_MUX_GONE_WAIT, 1, SPINEL_PROP_HWADDR, f));
 }
 
+TEST_CASE("On a live channel: its eventfd is in the select, which may wait", "[ot_port]")
+{
+    const ot_mux_loop_t plan = ot_mux_loop_plan(false, false, false);
+
+    TEST_ASSERT_TRUE(plan.watch_fd);
+    TEST_ASSERT_FALSE(plan.no_wait);
+}
+
+TEST_CASE("On a live channel with a frame waiting: its eventfd is in the select, which does not wait", "[ot_port]")
+{
+    const ot_mux_loop_t plan = ot_mux_loop_plan(false, true, false);
+
+    TEST_ASSERT_TRUE(plan.watch_fd);
+    TEST_ASSERT_TRUE(plan.no_wait);
+}
+
+TEST_CASE("On a live channel with requests unanswered: the select may wait (the RCP answers them)", "[ot_port]")
+{
+    const ot_mux_loop_t plan = ot_mux_loop_plan(false, false, true);
+
+    TEST_ASSERT_TRUE(plan.watch_fd);
+    TEST_ASSERT_FALSE(plan.no_wait);
+}
+
+TEST_CASE("On a gone channel: its eventfd is left out of the select, which may wait", "[ot_port]")
+{
+    const ot_mux_loop_t plan = ot_mux_loop_plan(true, false, false);
+
+    TEST_ASSERT_FALSE(plan.watch_fd);
+    TEST_ASSERT_FALSE(plan.no_wait);
+}
+
+TEST_CASE("On a gone channel with answers due or a frame waiting: the eventfd stays out, the select does not wait",
+          "[ot_port]")
+{
+    ot_mux_loop_t plan = ot_mux_loop_plan(true, false, true);
+
+    TEST_ASSERT_FALSE(plan.watch_fd);
+    TEST_ASSERT_TRUE(plan.no_wait);
+    plan = ot_mux_loop_plan(true, true, false);
+    TEST_ASSERT_FALSE(plan.watch_fd);
+    TEST_ASSERT_TRUE(plan.no_wait);
+}
+
+TEST_CASE("On a live channel: Process takes only with a frame waiting or the eventfd readable", "[ot_port]")
+{
+    TEST_ASSERT_FALSE(ot_mux_loop_take(false, false, false));
+    TEST_ASSERT_TRUE(ot_mux_loop_take(false, true, false));
+    TEST_ASSERT_TRUE(ot_mux_loop_take(false, false, true));
+}
+
+TEST_CASE("On a gone channel: Process takes on every pass (drains the queue, answers what is due)", "[ot_port]")
+{
+    TEST_ASSERT_TRUE(ot_mux_loop_take(true, false, false));
+}
+
 void app_main(void)
 {
     UNITY_BEGIN();

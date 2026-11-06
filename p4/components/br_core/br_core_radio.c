@@ -109,6 +109,8 @@ void core_radio_notify(void)
 // The mux operations of MuxSpinelInterface (esp_openthread_mux.h), on the OpenThread task under the OpenThread lock.
 // After `gone` nothing goes to the channel or comes from it any more, whatever the mux would still allow: the mux's
 // generations refuse a handle of an earlier attach, and this belt covers the time between GONE and the next attach.
+// What is still queued then is drained, not delivered: the slots go back to the pool and the last, empty poll clears
+// the eventfd (MuxSpinelInterface keeps the eventfd out of the main loop's select after GONE).
 static esp_err_t mux_tx(void *ctx, const uint8_t *f, size_t n)
 {
     const otbr_link_t *link = ctx;
@@ -123,7 +125,13 @@ static bool mux_poll(void *ctx, uint8_t **slot, size_t *len)
     radio_mux_chan_t *ch = atomic_load(&link->ch);
     radio_mux_ev_t ev;
 
-    while (ch && !atomic_load(&link->gone) && radio_mux_poll(ch, &ev)) {
+    while (ch && radio_mux_poll(ch, &ev)) {
+        if (atomic_load(&link->gone)) {
+            if (ev.type == RADIO_MUX_EV_RX_FRAME) {
+                radio_mux_release(ch, ev.slot);
+            }
+            continue;
+        }
         switch (ev.type) {
         case RADIO_MUX_EV_RX_FRAME:
             *slot = ev.slot;

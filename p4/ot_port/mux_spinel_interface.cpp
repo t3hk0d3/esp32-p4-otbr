@@ -5,13 +5,15 @@
 //
 // A vanished radio (GONE) must not reach RadioSpinel's recovery: on a radio that is not there it ends in DieNow (an
 // abort), in whichever task made the request (the HTTP server's too). So after GONE every request OpenThread sends, and
-// every one still unanswered, gets the answer mux_gone_answer.h picks for its command: SETs, INSERTs and REMOVEs "work",
-// a frame to send ends with ABORT, a GET whose caller takes an error fails, a channel mask GET gets the 2.4 GHz
+// every one still unanswered, gets the answer mux_gone_answer.h picks for its command: SETs, INSERTs and REMOVEs
+// "work", a frame to send ends with ABORT, a GET whose caller takes an error fails, a channel mask GET gets the 2.4 GHz
 // channels; the call returns, and br_core tears OpenThread down from its own task (its teardown is only SETs and the
-// transmit abort). A reset asked for after GONE (RadioSpinel's recovery of a request that timed out before GONE) is
-// answered by a reset notification, so the recovery completes instead of calling the reset-failure callback, as long
-// as the RCP answered once since Enable. GETs read only at OpenThread's init get no answer: during the init, on the
-// OpenThread task, their timeout and a failed reset end in the reset-failure callback (br_core parks that task).
+// transmit abort). The answers need no wakeup: after GONE the channel's eventfd stays out of the main loop's select and
+// what is still queued is drained, not delivered (ot_mux_loop_plan, br_core's mux_poll). A reset asked for after GONE
+// (RadioSpinel's recovery of a request that timed out before GONE) is answered by a reset notification, so the recovery
+// completes instead of calling the reset-failure callback, as long as the RCP answered once since Enable. GETs read
+// only at OpenThread's init get no answer: during the init, on the OpenThread task, their timeout and a failed reset
+// end in the reset-failure callback (br_core parks that task).
 #include "mux_spinel_interface.hpp"
 
 #include <cinttypes>
@@ -346,9 +348,15 @@ void MuxSpinelInterface::UpdateFdSet(void *aMainloopContext)
     if (mFd < 0) {
         return;
     }
-    if (mMaybeMore || mHeldLength > 0 || ((mPendingTids != 0 || mResetWaiting) && Gone())) {
+    const ot_mux_loop_t plan = ot_mux_loop_plan(Gone(), mMaybeMore || mHeldLength > 0,
+                                                mPendingTids != 0 || mResetWaiting);
+
+    if (plan.no_wait) {
         ctx->timeout.tv_sec = 0;
         ctx->timeout.tv_usec = 0;
+    }
+    if (!plan.watch_fd) {
+        return; // gone: the select waits for OpenThread's own timeout (at most 10 s) and the other fds
     }
     FD_SET(mFd, &ctx->read_fds);
     FD_SET(mFd, &ctx->error_fds);
@@ -364,8 +372,7 @@ void MuxSpinelInterface::Process(const void *aMainloopContext)
     if (mFd < 0) {
         return;
     }
-    if (mMaybeMore || mHeldLength > 0 || FD_ISSET(mFd, &ctx->read_fds) ||
-            ((mPendingTids != 0 || mResetWaiting) && Gone())) {
+    if (ot_mux_loop_take(Gone(), mMaybeMore || mHeldLength > 0, FD_ISSET(mFd, &ctx->read_fds))) {
         TakeOne();
     }
 }

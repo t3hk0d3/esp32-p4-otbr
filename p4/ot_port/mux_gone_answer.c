@@ -150,3 +150,15 @@ size_t ot_mux_gone_frame(ot_mux_gone_t answer, uint8_t tid, uint32_t key, uint8_
     }
     return n;
 }
+
+ot_mux_loop_t ot_mux_loop_plan(bool gone, bool frames_waiting, bool answers_due)
+{
+    return (ot_mux_loop_t) {
+        .watch_fd = !gone, .no_wait = frames_waiting || (gone && answers_due),
+    };
+}
+
+bool ot_mux_loop_take(bool gone, bool frames_waiting, bool readable)
+{
+    return gone || frames_waiting || readable;
+}
