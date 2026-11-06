@@ -6,9 +6,12 @@
 // A vanished radio (GONE) must not reach RadioSpinel's recovery: on a radio that is not there it ends in DieNow (an
 // abort), in whichever task made the request (the HTTP server's too). So after GONE every request OpenThread sends, and
 // every one still unanswered, gets the answer mux_gone_answer.h picks for its command: SETs, INSERTs and REMOVEs "work",
-// a frame to send ends with ABORT, a GET whose caller takes an error fails; the call returns, and br_core tears
-// OpenThread down from its own task (its teardown is only SETs and the transmit abort). GETs that OpenThread cannot
-// take an error for get no answer: their timeout ends in the reset-failure callback (br_core parks the OpenThread task).
+// a frame to send ends with ABORT, a GET whose caller takes an error fails, a channel mask GET gets the 2.4 GHz
+// channels; the call returns, and br_core tears OpenThread down from its own task (its teardown is only SETs and the
+// transmit abort). A reset asked for after GONE (RadioSpinel's recovery of a request that timed out before GONE) is
+// answered by a reset notification, so the recovery completes instead of calling the reset-failure callback, as long
+// as the RCP answered once since Enable. GETs read only at OpenThread's init get no answer: during the init, on the
+// OpenThread task, their timeout and a failed reset end in the reset-failure callback (br_core parks that task).
 #include "mux_spinel_interface.hpp"
 
 #include <cinttypes>
@@ -64,6 +67,8 @@ MuxSpinelInterface::MuxSpinelInterface(void)
     , mMaybeMore(false)
     , mResetSeen(false)
     , mGoneLogged(false)
+    , mRcpSeen(false)
+    , mResetWaiting(false)
     , mPendingTids(0)
     , mTxDropped(0)
     , mHeldLength(0)
@@ -100,6 +105,8 @@ esp_err_t MuxSpinelInterface::Enable(const esp_openthread_spi_host_config_t &aUn
     mPendingTids = 0;
     mHeldLength = 0;
     mGoneLogged = false;
+    mRcpSeen = false;
+    mResetWaiting = false;
     ESP_LOGI(OT_PLAT_LOG_TAG, "spinel over the radio mux");
     return ESP_OK;
 }
@@ -153,6 +160,9 @@ otError MuxSpinelInterface::SendFrame(const uint8_t *aFrame, uint16_t aLength)
         return OT_ERROR_NO_BUFS;
     }
     NoteSent(aFrame, aLength);
+    if (ot_mux_gone_is_reset(aFrame, aLength)) {
+        mResetWaiting = true; // SpinelDriver waits for the reset notification next
+    }
     if (Gone()) {
         return OT_ERROR_NONE; // dropped; a request in it is answered by AnswerGone
     }
@@ -198,6 +208,31 @@ bool MuxSpinelInterface::Deliver(const uint8_t *aFrame, size_t aLength)
     return true;
 }
 
+// A frame from the RCP: it answered since Enable; its reset notification answers a reset asked for.
+void MuxSpinelInterface::NoteRcp(const uint8_t *aFrame, size_t aLength)
+{
+    mRcpSeen = true;
+    if (IsResetNotification(aFrame, aLength)) {
+        mResetWaiting = false;
+    }
+}
+
+// After GONE: a reset asked for gets its notification (the RCP forgot every request with it), but only once the RCP
+// answered since Enable: during OpenThread's init a reset that cannot be done must fail (the init's requests after it
+// get no answer, and the reset-failure callback parks the OpenThread task instead of a SuccessOrDie abort).
+bool MuxSpinelInterface::AnswerReset(void)
+{
+    uint8_t answer[OT_MUX_GONE_FRAME_MAX];
+
+    if (!mResetWaiting || !mRcpSeen) {
+        return false;
+    }
+    mResetWaiting = false;
+    mPendingTids = 0;
+    mMaybeMore = true;
+    return Deliver(answer, ot_mux_gone_reset_frame(answer));
+}
+
 // After GONE: the answer for the lowest unanswered TID (mux_gone_answer.h). A request that gets none is forgotten: its
 // own timeout follows.
 bool MuxSpinelInterface::AnswerGone(void)
@@ -207,7 +242,8 @@ bool MuxSpinelInterface::AnswerGone(void)
             continue;
         }
         uint8_t answer[OT_MUX_GONE_FRAME_MAX];
-        const size_t len = ot_mux_gone_frame(ot_mux_gone_answer(mPendingCmd[tid], mPendingKey[tid]), tid, answer);
+        const size_t len = ot_mux_gone_frame(ot_mux_gone_answer(mPendingCmd[tid], mPendingKey[tid]), tid,
+                                             mPendingKey[tid], answer);
 
         if (len == 0) {
             mPendingTids &= static_cast<uint16_t>(~(1u << tid));
@@ -237,6 +273,7 @@ bool MuxSpinelInterface::TakeOne(void)
     if (mHeldLength > 0) { // the frame HardwareReset put back
         const size_t held = mHeldLength;
 
+        NoteRcp(mHeld, held);
         mHeldLength = 0;
         mMaybeMore = true;
         if (Deliver(mHeld, held)) {
@@ -248,6 +285,7 @@ bool MuxSpinelInterface::TakeOne(void)
             mResetSeen = true;
             continue;
         }
+        NoteRcp(slot, len);
         const bool delivered = Deliver(slot, len);
 
         mOps->release(mCtx, slot);
@@ -262,7 +300,7 @@ bool MuxSpinelInterface::TakeOne(void)
             mGoneLogged = true;
             ESP_LOGW(OT_PLAT_LOG_TAG, "the radio channel is gone: requests are refused until OpenThread stops");
         }
-        return AnswerGone();
+        return AnswerReset() || AnswerGone();
     }
     return false;
 }
@@ -308,7 +346,7 @@ void MuxSpinelInterface::UpdateFdSet(void *aMainloopContext)
     if (mFd < 0) {
         return;
     }
-    if (mMaybeMore || mHeldLength > 0 || (mPendingTids != 0 && Gone())) {
+    if (mMaybeMore || mHeldLength > 0 || ((mPendingTids != 0 || mResetWaiting) && Gone())) {
         ctx->timeout.tv_sec = 0;
         ctx->timeout.tv_usec = 0;
     }
@@ -326,7 +364,8 @@ void MuxSpinelInterface::Process(const void *aMainloopContext)
     if (mFd < 0) {
         return;
     }
-    if (mMaybeMore || mHeldLength > 0 || FD_ISSET(mFd, &ctx->read_fds) || (mPendingTids != 0 && Gone())) {
+    if (mMaybeMore || mHeldLength > 0 || FD_ISSET(mFd, &ctx->read_fds) ||
+            ((mPendingTids != 0 || mResetWaiting) && Gone())) {
         TakeOne();
     }
 }
@@ -345,6 +384,7 @@ void MuxSpinelInterface::AfterReset(void)
         if (!mOps->poll(mCtx, &slot, &len)) {
             WaitReadable(kGoneSliceUs);
         } else if (slot) {
+            NoteRcp(slot, len);
             announced = IsResetNotification(slot, len);
             Hold(slot, len);
             mOps->release(mCtx, slot);
@@ -364,7 +404,10 @@ otError MuxSpinelInterface::HardwareReset(void)
     size_t len;
 
     if (Gone()) {
-        return OT_ERROR_NONE; // nothing can reset a radio that is not there: the reset fails, br_core is told
+        // Nothing can reset a radio that is not there. Past the init the reset is answered as done (AnswerReset);
+        // during it the reset fails and br_core's reset-failure callback parks the OpenThread task.
+        mResetWaiting = true;
+        return OT_ERROR_NONE;
     }
     mResetSeen = false;
     mHeldLength = 0;
@@ -379,6 +422,7 @@ otError MuxSpinelInterface::HardwareReset(void)
     while (!mResetSeen && !Gone() && NowUs() < deadline) {
         if (mOps->poll(mCtx, &slot, &len)) {
             if (slot) {
+                NoteRcp(slot, len);
                 mOps->release(mCtx, slot);
             } else {
                 mResetSeen = true;
@@ -393,6 +437,9 @@ otError MuxSpinelInterface::HardwareReset(void)
         AfterReset();
     } else if (!Gone()) {
         ESP_LOGW(OT_PLAT_LOG_TAG, "the radio channel did not report a reset within 2 s");
+    }
+    if (Gone() && mHeldLength == 0) {
+        mResetWaiting = true; // went during the reset: answered as done once the RCP had answered (AnswerReset)
     }
     return OT_ERROR_NONE;
 }

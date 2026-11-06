@@ -29,6 +29,7 @@ typedef struct {
     char started_on[48];          /* the id of the last ot_start that worked */
     char stored_from[48], stored_to[48];
     br_core_mode_t mode_in_stop; /* the mode the ot_stop op saw */
+    bool fault_in_stop;          /* ot_stop enters RADIO_FAULT while it runs (a park during the lost drain) */
 } fake_t;
 
 enum { OP_THREAD_STOP, OP_NETIF_DOWN, OP_RAW_ENABLE, OP_RAW_DISABLE, OP_RESTORE_CHANNEL, OP_NETIF_UP, OP_THREAD_START,
@@ -133,6 +134,9 @@ static esp_err_t f_probe_channel(const char *id, char *err, size_t cap)
 static esp_err_t f_ot_stop(void)
 {
     fake.mode_in_stop = mode_fsm_get_mode(&fsm);
+    if (fake.fault_in_stop) {
+        mode_fsm_set_fault(&fsm); /* an OpenThread task parked by its failure hook during the drain */
+    }
     return record(OP_OT_STOP, "ot_stop");
 }
 static esp_err_t f_ot_start(const char *id)
@@ -1160,6 +1164,15 @@ TEST_CASE("On the OTBR channel gone while sniffing: the capture owner is told, e
     mode_fsm_set_sniffer_end_cb(&fsm, end_cb);
     mode_fsm_on_channel_gone(&fsm);
     TEST_ASSERT_EQUAL(1, end_cb_calls);
+    TEST_ASSERT_EQUAL(1, count_of("ot_stop"));
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_fsm_get_mode(&fsm));
+}
+
+TEST_CASE("On the OTBR channel gone and a fault entered during the teardown: ends in NO_RADIO", "[mode_fsm]")
+{
+    setup(BR_MODE_BR_RUNNING);
+    fake.fault_in_stop = true;
+    mode_fsm_on_channel_gone(&fsm);
     TEST_ASSERT_EQUAL(1, count_of("ot_stop"));
     TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_fsm_get_mode(&fsm));
 }

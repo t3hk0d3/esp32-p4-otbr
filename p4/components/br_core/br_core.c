@@ -153,6 +153,33 @@ static void fault_and_park(const char *reason)
     vTaskDelete(NULL);
 }
 
+// The OTBR channel went away (GONE) and a reset of it failed: no fault and no reboot of its own (spec: an unplug ends
+// in NO_RADIO). Only OpenThread's init gets here on the OpenThread task (a reset before the RCP answered once; after
+// that, mux_spinel_interface.cpp answers a reset after GONE as done): the task parks quietly, a start waiting for it
+// sees the init abandoned, and br_radio's teardown of the lost channel ends in NO_RADIO. Another task never should;
+// OpenThread aborts when this returns and that task serves something else, so the board reboots then (docs/radios.md).
+static void park_gone(void)
+{
+    const bool in_mainloop = g_core.loop_running;
+
+    if (mode_fsm_fault_action(xTaskGetCurrentTaskHandle() == g_core.ot_task) == MODE_FSM_FAULT_REBOOT) {
+        ESP_LOGE(TAG, "the radio channel went away during a reset in task %s: rebooting", pcTaskGetName(NULL));
+        esp_restart();
+    }
+    if (!in_mainloop && !g_core.ot_initialised) {
+        g_core.init_abandoned = true; // parked inside esp_openthread_init: nothing of it can be released from outside
+    }
+    ESP_LOGW(TAG, "the radio channel is gone: the OpenThread task stops until br_radio tears OpenThread down");
+    esp_br_web_set_openthread_ready(false);
+    xSemaphoreGive(g_core.boot_done); // a start waiting for the init sees it did not finish
+    if (in_mainloop) {
+        esp_openthread_lock_release();
+    }
+    g_core.loop_running = false;
+    g_core.ot_task = NULL;
+    vTaskDelete(NULL);
+}
+
 static void set_compatible(bool compatible)
 {
     xSemaphoreTake(g_core.mutex, portMAX_DELAY);
@@ -164,8 +191,7 @@ static void set_compatible(bool compatible)
 static void on_coprocessor_reset_failure(void)
 {
     if (core_radio_gone()) {
-        // The channel went away during a recovery: br_radio tears OpenThread down and ends in NO_RADIO.
-        fault_and_park("the radio channel is gone");
+        park_gone(); // the channel went away: br_radio tears OpenThread down and ends in NO_RADIO
     }
     set_compatible(false);
     // loop_running, not ot_ready: a push clears ot_ready while OpenThread still runs.

@@ -442,6 +442,9 @@ void mode_fsm_on_channel_gone(mode_fsm_t *fsm)
     if (fsm->ops->ot_stop() != ESP_OK) {
         ESP_LOGE(TAG, "tearing OpenThread down after the OTBR channel went failed");
         mode_fsm_set_fault(fsm);
+    } else if (!fsm->radio_job) {
+        // OpenThread is gone: NO_RADIO again, also when its task parked itself into RADIO_FAULT during the drain.
+        set_mode(fsm, BR_MODE_NO_RADIO);
     }
 }
 

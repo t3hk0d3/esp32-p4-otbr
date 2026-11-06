@@ -242,7 +242,8 @@ esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, 
 /**
  * The OTBR channel is gone (unplugged, failed, its mode changed): NO_RADIO at once (the guards refuse new Thread
  * sessions while the open ones drain), a capture ends (sniffer end callback), then OpenThread is torn down (ot_stop);
- * RADIO_FAULT when the teardown did not finish. Nothing during a radio job (its own detach).
+ * NO_RADIO again once it is (a fault entered meanwhile, e.g. a parked OpenThread task, does not stay), RADIO_FAULT when
+ * the teardown did not finish. Nothing during a radio job (its own detach).
  */
 void mode_fsm_on_channel_gone(mode_fsm_t *fsm);
 
