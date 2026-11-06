@@ -432,14 +432,16 @@ Everything above the radio belongs to the Zigbee work: its spinel client, task, 
     does not start, Thread goes back"). A mode whose consumer reboots on change says so before saving.
   - The mockup's wording, icons and example values are placeholders; the structure is the decision.
 - The Dashboard's radio card names the OTBR channel.
-- Navigation *(user decision relayed by the Zigbee work, 2026-11-06)*: the top bar is Dashboard, Thread, Zigbee, Device,
-  About. The Thread menu (the former Management menu, with Topology moved into it) holds Network, Topology,
-  Commissioner, Addresses, Tools and Console; Zigbee is the Zigbee work's link. Which plan carries the rename is still
-  open.
-- The Thread pages (the Thread menu, plus Routing and Packet capture) depend on why Thread is down *(design call,
-  shared with the Zigbee design, which follows it)*:
-  - No channel at all in `otbr` (a deliberate choice, for example the board runs only Zigbee): the pages are hidden,
-    and opening one directly shows a short notice linking to the Radios page.
+- Navigation *(user decisions relayed by the Zigbee work, 2026-11-06)*:
+  - The top bar is Dashboard, Thread, Zigbee, Device, About.
+  - The Thread menu (the former Management menu) holds Network, Topology, Routing, Commissioner, Addresses, Packet
+    capture, Tools and Console.
+  - Device keeps the board's own pages: Radios, Ethernet, Firmware, Diagnostics.
+  - Zigbee is the Zigbee work's link.
+  - Which plan carries the rename is still open.
+- The Thread menu depends on why Thread is down *(design call, shared with the Zigbee design, which follows it)*:
+  - No channel at all in `otbr` (a deliberate choice, for example the board runs only Zigbee): the Thread menu is
+    hidden, and opening one of its pages directly shows a short notice linking to the Radios page.
   - The OTBR channel is unavailable or faulted (unplugged, broken): the pages stay and show "no radio in OTBR mode" with
     the channel's state and a link to the Radios page. A transient unplug should not reshuffle the navigation.
   - The Thread REST API and the console WebSocket answer 503 in `NO_RADIO`, as in `STARTING`.

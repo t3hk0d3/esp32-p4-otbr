@@ -701,15 +701,16 @@ mode_fsm.h, CMakeLists.txt, br_core_test.c, test_host/main/test_mode_fsm.c}`, `p
 **Files:** Create `p4/components/esp_ot_br_server/frontend/radios.html`, `frontend/static/radios.js`,
 `tools/tests/test_radios_page.py`. Modify `frontend/static/api.js` (Radios first in the Device group; the Thread-menu rename below only if the user assigns it to
 this plan),
-`status.js` (Dashboard chip "Thread runs on: <label>"; `NO_RADIO` banner), `mgmt.js` and `capture.js` (the shared
-`NO_RADIO` rule: hidden pages when no channel is in `otbr`, notice when the OTBR channel is unavailable or faulted),
+`status.js` (Dashboard chip "Thread runs on: <label>"; `NO_RADIO` banner), `mgmt.js`, `capture.js`, `routing.js`, `topology.js` (the shared
+`NO_RADIO` rule: the Thread menu hidden when no channel is in `otbr`, a notice on its pages when the OTBR channel is
+unavailable or faulted),
 `device_common.js` (shared helpers for that rule), `style.css` (the table, the dialog and the mode cards, from the
 mockup's CSS), `PATCHES.md` (the frontend files are vendored: add them to entry 26).
 
-**Navigation:** the hide rule applies to the Thread menu (Network, Topology, Commissioner, Addresses, Tools, Console),
-Routing and Packet capture. The rename of Management to Thread with Topology inside, and the Zigbee link, are decided
-(top bar: Dashboard, Thread, Zigbee, Device, About); whether this task or the Zigbee work implements the rename is
-open, so ask before starting this task. The Zigbee link itself is never this plan's.
+**Navigation:** decided: top bar Dashboard, Thread, Zigbee, Device, About; Thread menu Network, Topology, Routing,
+Commissioner, Addresses, Packet capture, Tools, Console; Device menu Radios, Ethernet, Firmware, Diagnostics. The hide
+rule hides the whole Thread menu when no channel is in `otbr`. Whether this task or the Zigbee work implements the
+regrouping is open, so ask before starting this task. The Zigbee link itself is never this plan's.
 
 **Interfaces:** the page reads `GET /device/channels` and `/device/status`, writes with `PUT` and `DELETE`, polls every
 2 s while a channel is `starting`. Structure, icons and texts follow the mockup; the mode cards come from a list in
