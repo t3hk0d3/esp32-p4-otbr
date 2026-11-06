@@ -8,7 +8,7 @@ if(IDF_TARGET STREQUAL "linux")
     return()
 endif()
 
-set(srcs "br_core.c" "mode_fsm.c" "validity.c" "leader.c" "trel_peers.c" "vendor_info.c" "otbr_probe.c")
+set(srcs "br_core.c" "br_core_radio.c" "mode_fsm.c" "validity.c" "leader.c" "trel_peers.c" "vendor_info.c" "otbr_probe.c")
 if(OTBR_TEST_BUILD)
     list(APPEND srcs "br_core_test.c")
 endif()
