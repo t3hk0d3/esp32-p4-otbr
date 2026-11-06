@@ -708,8 +708,9 @@ unavailable or faulted),
 mockup's CSS), `PATCHES.md` (the frontend files are vendored: add them to entry 26).
 
 **Navigation:** decided: top bar Dashboard, Thread, Zigbee, Device, About; Thread menu Network, Topology, Routing,
-Commissioner, Addresses, Packet capture, Tools, Console; Device menu Radios, Ethernet, Firmware, Diagnostics. The hide
-rule hides the whole Thread menu when no channel is in `otbr`. Whether this task or the Zigbee work implements the
+Commissioner, Addresses, Tools, Console; Device menu Radios, Ethernet, Firmware, Diagnostics, Packet capture. The hide
+rule hides the whole Thread menu when no channel is in `otbr`; Packet capture stays and shows "Packet capture needs a
+radio in Thread border router mode" with a link to Radios. Whether this task or the Zigbee work implements the
 regrouping is open, so ask before starting this task. The Zigbee link itself is never this plan's.
 
 **Interfaces:** the page reads `GET /device/channels` and `/device/status`, writes with `PUT` and `DELETE`, polls every

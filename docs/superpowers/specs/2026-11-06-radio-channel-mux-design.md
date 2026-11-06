@@ -434,9 +434,13 @@ Everything above the radio belongs to the Zigbee work: its spinel client, task, 
 - The Dashboard's radio card names the OTBR channel.
 - Navigation *(user decisions relayed by the Zigbee work, 2026-11-06)*:
   - The top bar is Dashboard, Thread, Zigbee, Device, About.
-  - The Thread menu (the former Management menu) holds Network, Topology, Routing, Commissioner, Addresses, Packet
-    capture, Tools and Console.
-  - Device keeps the board's own pages: Radios, Ethernet, Firmware, Diagnostics.
+  - The Thread menu (the former Management menu) holds Network, Topology, Routing, Commissioner, Addresses, Tools and
+    Console.
+  - Device holds Radios, Ethernet, Firmware, Diagnostics and Packet capture (it needs a radio with RCP firmware, not
+    Thread as such; the user may revisit this).
+  - Packet capture still borrows the OTBR channel's radio today (section 3, OTBR mode), so with no channel in `otbr` it
+    stays in the menu and shows "Packet capture needs a radio in Thread border router mode" with a link to the Radios
+    page *(design call: a notice, not hiding, since the page belongs to Device)*.
   - Zigbee is the Zigbee work's link.
   - Which plan carries the rename is still open.
 - The Thread menu depends on why Thread is down *(design call, shared with the Zigbee design, which follows it)*:
