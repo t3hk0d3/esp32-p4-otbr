@@ -150,8 +150,10 @@ outer vertical edges are rounded.
 - Under each of the four standoffs, a through-hole runs from the outer back face up through the standoff, on the axis
   of the board's mounting hole: a Ø2.2 pilot, so an M2.5 screw cuts its own thread in the plastic (no nut needed).
 - At the back face it keeps a 90° countersink (Ø5.4) from the first design, which used countersunk screws from the back
-  with nuts on top. It is now the repair route: if a pilot hole strips, drill it out and use a countersunk M2.5 from the
-  back with a nut on top of the board.
+  with nuts on top. It stays as a repair route: if a pilot hole strips, drill it out and use a countersunk M2.5 from
+  the back with a nut on top of the board. The simpler repair is a slightly bigger self-tapping screw (ST2.9 still
+  fits the board's Ø3 hole). The pilot's thread is strong enough to hold the board; over-tightening is the only
+  realistic way to strip it, and the docs warn against it.
 - Screw length: M2.5 × 6 from the top (1.6 mm board + about 4 mm into the standoff). The docs give it.
 - On top of the board, a repair nut (5 mm across flats, 2 mm tall) needs a free circle of about Ø6.5 around the hole. The
   builder checks this against the top of the board model; the nearest parts are the FPC socket near (3.5, 57.3) and the
