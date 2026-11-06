@@ -15,9 +15,8 @@ The aux C6 is shared with other projects. Opening it refuses while another proce
 is flashed (esptool, from tools/zigbee_test_device/build) only when its app is not this project's. Build the firmware
 first: `make zigbee-test-device`.
 
-Opening the port is meant not to reset the C6 (to be confirmed on the board): the CH343 auto-download circuit uses DTR
-and RTS for GPIO9 and EN, the tty open raises both, and the order used here is (DTR, RTS) = (1,1), (1,0), (0,0), which
-never asserts EN alone. Only esptool resets it, when it flashes.
+Opening the port is meant to neither reset the C6 nor enter download mode; this follows from the board's schematic and
+is still to be confirmed on the board (see open_console). Only esptool resets it, when it flashes.
 """
 
 import errno
@@ -79,11 +78,14 @@ def check_port_free(port):
 
 
 def open_console(port):
-    """Open the console without an EN pulse on the way to DTR and RTS low.
+    """Open the console without pulling EN low, so that opening resets neither the chip nor enters download mode.
 
-    The tty open raises both lines (1,1) and pyserial applies DTR before RTS, so RTS goes low before open() applies
-    anything (DTR stays at its default), and DTR goes low after it: (1,1) -> (1,0) -> (0,0). Setting DTR low first would
-    pass through (0,1), which asserts EN in the esptool auto-reset circuit."""
+    Auto-program circuit of the Waveshare ESP32-C6-DEV-KIT-N8 (schematic table, pin levels):
+    DTR RTS -> EN IO9:  1 1 -> 1 1,  0 0 -> 1 1,  1 0 -> 0 1,  0 1 -> 1 0.
+    pyserial's True (asserted) is pin level 0, so EN is pulled low only with DTR released and RTS asserted.
+    Sequence: the kernel's open asserts both (idle); pyserial applies the stored `rts = False` after it, which releases
+    RTS (IO9 low with EN high; IO9 is sampled only at reset); then `dtr = False` releases DTR (idle). EN is never low.
+    Derived from the schematic; still to be confirmed on the board."""
     console = serial.Serial()
     console.port = port
     console.baudrate = BAUD
