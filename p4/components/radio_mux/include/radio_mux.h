@@ -36,6 +36,7 @@ extern "C" {
 #define RADIO_MUX_SERIAL_MAX 32
 #define RADIO_MUX_REASON_MAX 96
 #define RADIO_MUX_PEER_MAX 64
+// RADIO_MUX_C6_ID ("c6", radio_mux_core.h): the id of the on-board C6 channel; USB channels are "usb-<vid>-<pid>[-serial]".
 
 /* ---- events ---- */
 
@@ -61,7 +62,10 @@ typedef struct {
     radio_mux_fw_t needs;   // firmware the mode needs; UNKNOWN = any (otbr always needs spinel, rcp-proxy nothing)
     uint8_t limit;          // channels that may run the mode at once; 0 = no limit (otbr is always 1)
     bool reboot_on_change;  // entering or leaving the mode reboots the board
-    bool frames;            // true: spinel frames (RX_FRAME events, radio_mux_tx takes frames); false: raw bytes
+    // Byte transports (USB) only. true: spinel frames (RX_FRAME events, radio_mux_tx takes frames); false: raw bytes
+    // (radio_mux_read_raw, radio_mux_tx takes bytes). Ignored on the C6, which always delivers and takes frames: ask
+    // radio_mux_chan_frames in attach.
+    bool frames;
     // Called from the owner task when the channel enters the mode (present, firmware fits). Bind a queue or take the
     // eventfd here and return quickly: long work (a probe, a stack start) belongs on the consumer's own task. An error
     // leaves the channel in fault with the error in its reason.
@@ -109,6 +113,10 @@ esp_err_t radio_mux_reset(radio_mux_chan_t *ch);
 // Raw channels: takes up to cap received bytes without waiting; 0 when there are none.
 size_t radio_mux_read_raw(radio_mux_chan_t *ch, uint8_t *out, size_t cap);
 const char *radio_mux_chan_id(const radio_mux_chan_t *ch);
+// Whether the attached consumer gets frames on this channel (RX_FRAME, radio_mux_tx of frames) rather than raw bytes:
+// always true on the C6, the consumer's `frames` on a USB channel. Valid from attach (the delivery kind is set before
+// attach is called) until the next attach on the transport.
+bool radio_mux_chan_frames(const radio_mux_chan_t *ch);
 // The channel's stored rcp_proxy settings (for the rcp-proxy consumer, read at attach: a change re-attaches it).
 void radio_mux_get_proxy(const radio_mux_chan_t *ch, radio_mux_proxy_settings_t *out);
 // Passive firmware update (a consumer saw the spinel version): stored with source passive and the time. Does not wait.

@@ -68,6 +68,19 @@ bool rcp_proxy_udp_lock_expire(rcp_proxy_udp_lock_t *lock, int64_t now_ms);
 // When the lock expires; -1 when unlocked.
 int64_t rcp_proxy_udp_lock_deadline(const rcp_proxy_udp_lock_t *lock);
 
+// Whether a peer that just became the session's peer starts a new peer session, which replays the radio's reset
+// handshake (frame channels). TCP: every accept and every connect is new (init before each). UDP: init once per socket
+// session; connect is then new once, and listen only when the newly locked source differs from the previous peer, so
+// a host that was silent for 30 s and sends again keeps its session.
+typedef struct {
+    bool had;              // a peer was seen in this socket session
+    rcp_proxy_addr_t last; // that peer
+} rcp_proxy_peer_memo_t;
+
+void rcp_proxy_peer_memo_init(rcp_proxy_peer_memo_t *m);
+// Records peer; true when it starts a new peer session (no peer before, or a different one).
+bool rcp_proxy_peer_new(rcp_proxy_peer_memo_t *m, const rcp_proxy_addr_t *peer);
+
 typedef enum {
     RCP_PROXY_TAKE,
     RCP_PROXY_REFUSE,

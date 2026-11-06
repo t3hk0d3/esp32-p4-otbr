@@ -175,7 +175,7 @@ void mux_load_chans(void)
     nvs_handle_t nvs;
     chan_blob_t b;
 
-    mux_chan_defaults(&g_mux.chans[0], "c6", RADIO_MUX_KIND_C6);
+    mux_chan_defaults(&g_mux.chans[0], RADIO_MUX_C6_ID, RADIO_MUX_KIND_C6);
     // Until the C6 transport exists (Task 6) the mux lists c6 without opening it; br_core runs its own SPI path.
     snprintf(g_mux.chans[0].reason, sizeof(g_mux.chans[0].reason), "C6 transport not in this build yet");
     snprintf(g_mux.chans[0].label, sizeof(g_mux.chans[0].label), "ESP32-C6 (on board)");
@@ -201,7 +201,7 @@ void mux_load_chans(void)
             ESP_LOGW(TAG, "stored channel %s unreadable: skipped", ids[i]);
             continue;
         }
-        const bool c6 = strcmp(ids[i], "c6") == 0;
+        const bool c6 = strcmp(ids[i], RADIO_MUX_C6_ID) == 0;
         struct radio_mux_chan *ch = c6 ? &g_mux.chans[0] : (slot < RADIO_MUX_CHANNELS_MAX ? &g_mux.chans[slot++] : NULL);
 
         if (ch == NULL) {

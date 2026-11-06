@@ -1,6 +1,10 @@
 // RCP proxy: the consumer of the rcp-proxy mode (spec 2026-11-06 radio channel mux, section RCP proxy mode). A channel
 // in rcp-proxy is served to one network peer: listen or connect, over TCP or UDP. One task owns every socket; it waits
-// in one select() over the adapters' sockets, the channels' eventfds and its own kick eventfd.
+// in one select() over the adapters' sockets, the channels' eventfds and its own kick eventfd. The netcfg access rules
+// apply to every peer: TCP listen clients by their socket (netcfg_socket_allowed), UDP sources and the connect target
+// of both adapters by address (netcfg_peer_allowed; the mesh is refused). A frame channel's radio is reset when a new
+// peer session starts (TCP accept or connect; UDP connect once per socket; UDP listen when the source differs from the
+// previous peer), never when a quiet peer sends again.
 #pragma once
 
 #include "esp_err.h"
@@ -22,8 +26,9 @@ typedef struct {
 } rcp_proxy_status_t;
 
 // Registers the rcp-proxy consumer with the mux (any firmware, no channel limit, no reboot; raw bytes on USB
-// channels, frames on the C6, which it HDLC-encodes itself) and starts the proxy task (MGMT_CORE). Before
-// radio_mux_start, after the eventfd VFS is registered. Once: ESP_ERR_INVALID_STATE on a second call.
+// channels, frames on the C6, which it HDLC-encodes itself), then starts the proxy task (MGMT_CORE). Before
+// radio_mux_start, after the eventfd VFS is registered. Once: ESP_ERR_INVALID_STATE on a second call. ESP_ERR_NO_MEM
+// when the task cannot be created (the consumer stays registered and refuses attach).
 esp_err_t rcp_proxy_register(void);
 
 // Drops the current peer of the channel, if it is in rcp-proxy: TCP closes the client (listen takes the next one,

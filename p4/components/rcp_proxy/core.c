@@ -257,6 +257,22 @@ int64_t rcp_proxy_udp_lock_deadline(const rcp_proxy_udp_lock_t *lock)
     return lock->locked ? lock->last_ms + RCP_PROXY_UDP_SILENCE_MS : -1;
 }
 
+/* ---- new peer session (reset-handshake replay) ---- */
+
+void rcp_proxy_peer_memo_init(rcp_proxy_peer_memo_t *m)
+{
+    memset(m, 0, sizeof(*m));
+}
+
+bool rcp_proxy_peer_new(rcp_proxy_peer_memo_t *m, const rcp_proxy_addr_t *peer)
+{
+    const bool fresh = !m->had || !rcp_proxy_addr_eq(&m->last, peer);
+
+    m->had = true;
+    m->last = *peer;
+    return fresh;
+}
+
 /* ---- TCP accept rule ---- */
 
 rcp_proxy_accept_t rcp_proxy_accept(bool peer_connected)

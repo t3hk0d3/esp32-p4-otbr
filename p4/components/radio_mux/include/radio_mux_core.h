@@ -11,6 +11,8 @@ extern "C" {
 
 // "usb-" + vid + "-" + pid + "-" + serial is cut to 47 characters; the buffer adds the NUL.
 #define RADIO_MUX_ID_MAX 48
+// The id of the on-board C6 channel (radio_mux.h documents it with the API).
+#define RADIO_MUX_C6_ID "c6"
 #define RADIO_MUX_CP210X_FLOW_LEN 16
 #define RADIO_MUX_RULES_MAX 4
 #define RADIO_MUX_PROXY_DEFAULT_PORT 6638
@@ -242,6 +244,10 @@ radio_mux_post_t radio_mux_post_rx(bool queue_full, size_t len, radio_mux_counte
 // NVS key of a channel's settings blob: "c6" for the C6, else "u" + 8 lowercase hex digits of the FNV-1a (32 bit)
 // hash of the id.
 void radio_mux_nvs_key(const char *id, char out[16]);
+
+// What the consumer of a port gets: the C6 port always delivers and takes spinel frames (its SPI transport has no byte
+// stream), whatever the consumer declares; a byte transport (USB) follows the consumer's `frames`.
+bool radio_mux_port_frames(bool c6_port, bool consumer_frames);
 
 // How long a USB write of n bytes may take: RADIO_MUX_TX_BASE_MS plus twice its time on the wire (10 bits a byte) at
 // `baud`, rounded up. A baud of 0 (unknown) counts as the slowest accepted one, 38400.

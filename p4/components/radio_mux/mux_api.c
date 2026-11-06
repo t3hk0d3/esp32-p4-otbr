@@ -151,6 +151,19 @@ size_t radio_mux_read_raw(radio_mux_chan_t *ch, uint8_t *out, size_t cap)
     return n;
 }
 
+bool radio_mux_chan_frames(const radio_mux_chan_t *ch)
+{
+    if (!ch) {
+        return false;
+    }
+    if (ch->kind == RADIO_MUX_KIND_C6) {
+        return true;
+    }
+    const mux_port_t *p = ch->port;
+
+    return atomic_load(&p->evq_chan) == ch && p->tx_frames;
+}
+
 const char *radio_mux_chan_id(const radio_mux_chan_t *ch)
 {
     return ch ? ch->id : NULL;

@@ -1,5 +1,6 @@
 // TCP adapter (from usb_serial's tcp.c): listen (first client wins, refusals reset with SO_LINGER {1, 0}) or connect
-// (non-blocking dial, back-off on failure). Clients get TCP_NODELAY and keepalive 10/2/3. Bytes towards the peer
+// (non-blocking dial to a target the netcfg rules allow, back-off on failure). Clients get TCP_NODELAY and keepalive
+// 10/2/3; every accept and connect is a new peer session (reset replay on a frame channel). Bytes towards the peer
 // wait in the session's ring while the socket has no room; a ring that would overflow disconnects the peer.
 #include <errno.h>
 #include <stdio.h>
@@ -113,9 +114,10 @@ static esp_err_t tcp_open(proxy_t *p)
         return ESP_OK;
     }
     p->state = PROXY_CONNECTING;
-    if (rcp_proxy_resolve(p, SOCK_STREAM) != ESP_OK) {
-        ESP_LOGW(TAG, "%s: %s does not resolve", p->id, p->set.host);
-        return ESP_ERR_NOT_FOUND;
+    const esp_err_t err = rcp_proxy_resolve(p, SOCK_STREAM); // resolves and applies netcfg_peer_allowed
+
+    if (err != ESP_OK) {
+        return err;
     }
     p->fd = socket(p->dst.ss_family, SOCK_STREAM, IPPROTO_TCP);
     if (p->fd < 0) {
@@ -124,7 +126,7 @@ static esp_err_t tcp_open(proxy_t *p)
     }
     peer_setup(p->fd);
     if (connect(p->fd, (struct sockaddr *)&p->dst, p->dst_len) == 0) {
-        rcp_proxy_peer_up(p, (struct sockaddr *)&p->dst);
+        rcp_proxy_peer_up(p, (struct sockaddr *)&p->dst, true);
         return ESP_OK;
     }
     if (errno != EINPROGRESS) {
@@ -207,7 +209,7 @@ static void connect_done(proxy_t *p)
         rcp_proxy_retry(p, why);
         return;
     }
-    rcp_proxy_peer_up(p, (struct sockaddr *)&p->dst);
+    rcp_proxy_peer_up(p, (struct sockaddr *)&p->dst, true); // every connect is a new peer session
 }
 
 static void read_peer(proxy_t *p)
@@ -243,7 +245,7 @@ static void accept_one(proxy_t *p)
     }
     peer_setup(fd);
     p->fd = fd;
-    rcp_proxy_peer_up(p, (struct sockaddr *)&sa);
+    rcp_proxy_peer_up(p, (struct sockaddr *)&sa, true); // every accept is a new peer session
 }
 
 static void tcp_ready(proxy_t *p, fd_set *rd, fd_set *wr)

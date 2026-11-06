@@ -224,8 +224,8 @@ static void do_attach(mux_port_t *p)
     xSemaphoreGive(p->rx_lock);
     atomic_store(&p->evq_chan, ch); // from here on the queue, ring and TX are this channel's consumer's
     p->consumer = c;
-    p->tx_frames = c->frames;
-    mux_set_rx(p, c->frames ? MUX_RX_FRAMES : MUX_RX_RAW);
+    p->tx_frames = radio_mux_port_frames(p->kind == RADIO_MUX_KIND_C6, c->frames); // the C6 ignores c->frames
+    mux_set_rx(p, p->tx_frames ? MUX_RX_FRAMES : MUX_RX_RAW);
     atomic_store(&p->tx_ok, true);
     const esp_err_t err = c->attach((radio_mux_chan_t *)ch, c->ctx);
 

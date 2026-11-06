@@ -20,6 +20,7 @@
 #include "lwip/inet.h"
 #include "lwip/netdb.h"
 #include "mdns.h"
+#include "netcfg.h"
 #include "rcp_proxy_priv.h"
 
 static const char *TAG = "rcp_proxy";
@@ -31,7 +32,6 @@ static const char *TAG = "rcp_proxy";
 #define SLOTS 2
 #define SLOT_C6 0
 #define SLOT_USB 1
-#define C6_ID "c6"
 // The wait is set by the back-off and lock timers; without one it is a long safety wake. Never shorter than 1 s.
 #define WAIT_MIN_MS 1000
 #define WAIT_MAX_MS 60000
@@ -47,6 +47,7 @@ static const char *TAG = "rcp_proxy";
 typedef struct {
     radio_mux_chan_t *ch; // NULL: no channel
     char id[RADIO_MUX_ID_MAX];
+    bool frames; // radio_mux_chan_frames at attach
     radio_mux_proxy_settings_t set;
     uint32_t gen; // bumped by every attach and detach
     bool kick;
@@ -64,6 +65,7 @@ static want_t s_want[SLOTS]; // under s_lock: attach, detach, kick
 static pub_t s_pub[SLOTS];   // under s_lock: what the task last published
 static int s_kick_fd = -1;
 static bool s_registered;
+static bool s_task_up; // false: attach is refused (the task could not be created)
 
 // Proxy task only.
 static proxy_t s_px[SLOTS];
@@ -124,7 +126,7 @@ static void peer_text(const struct sockaddr *sa, char *out, size_t cap)
     }
 }
 
-esp_err_t rcp_proxy_resolve(proxy_t *p, int socktype)
+static esp_err_t resolve_host(proxy_t *p, int socktype)
 {
     char name[RADIO_MUX_PROXY_HOST_MAX];
 
@@ -168,6 +170,22 @@ esp_err_t rcp_proxy_resolve(proxy_t *p, int socktype)
     memcpy(&p->dst, res->ai_addr, len);
     p->dst_len = (socklen_t)len;
     freeaddrinfo(res);
+    return ESP_OK;
+}
+
+esp_err_t rcp_proxy_resolve(proxy_t *p, int socktype)
+{
+    const esp_err_t err = resolve_host(p, socktype);
+
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "%s: %s does not resolve", p->id, p->set.host);
+        return err;
+    }
+    // One rule for both adapters: the connect target is judged like a UDP source (the mesh is refused).
+    if (!netcfg_peer_allowed((const struct sockaddr *)&p->dst, NETCFG_SVC_RCP_PROXY)) {
+        ESP_LOGW(TAG, "%s: %s is not allowed by the network access rules", p->id, p->set.host);
+        return ESP_ERR_NOT_ALLOWED;
+    }
     return ESP_OK;
 }
 
@@ -271,7 +289,7 @@ static void session_open(proxy_t *p, const want_t *w)
     p->ch = w->ch;
     strlcpy(p->id, w->id, sizeof(p->id));
     p->set = w->set;
-    p->frames = strcmp(p->id, C6_ID) == 0;
+    p->frames = w->frames;
     p->ad = p->set.adapter == RADIO_MUX_PROXY_UDP ? &rcp_proxy_adapter_udp : &rcp_proxy_adapter_tcp;
     ESP_LOGI(TAG, "%s: %s %s %s%s%u%s", p->id, p->set.dir == RADIO_MUX_PROXY_CONNECT ? "connect to" : "listen on",
              p->ad->name, p->set.dir == RADIO_MUX_PROXY_CONNECT ? p->set.host : "port ",
@@ -297,7 +315,7 @@ static void session_close(proxy_t *p)
     p->wake_ms = -1;
 }
 
-void rcp_proxy_peer_up(proxy_t *p, const struct sockaddr *peer)
+void rcp_proxy_peer_up(proxy_t *p, const struct sockaddr *peer, bool new_session)
 {
     peer_text(peer, p->peer, sizeof(p->peer));
     p->state = PROXY_CONNECTED;
@@ -311,8 +329,8 @@ void rcp_proxy_peer_up(proxy_t *p, const struct sockaddr *peer)
     if (p->dec_buf) {
         radio_mux_hdlc_dec_init(&p->dec, p->dec_buf, DEC_CAP);
     }
-    ESP_LOGI(TAG, "%s: peer %s (%s)", p->id, p->peer, p->ad->name);
-    if (p->frames) { // the peer's host starts from the radio's reset handshake
+    ESP_LOGI(TAG, "%s: peer %s (%s)%s", p->id, p->peer, p->ad->name, new_session ? "" : ", same peer again");
+    if (p->frames && new_session) { // the peer's host starts from the radio's reset handshake
         const esp_err_t err = radio_mux_reset(p->ch);
 
         if (err != ESP_OK) {
@@ -597,7 +615,7 @@ static void proxy_task(void *arg)
 
 static int slot_of(const radio_mux_chan_t *ch)
 {
-    return strcmp(radio_mux_chan_id(ch), C6_ID) == 0 ? SLOT_C6 : SLOT_USB;
+    return strcmp(radio_mux_chan_id(ch), RADIO_MUX_C6_ID) == 0 ? SLOT_C6 : SLOT_USB;
 }
 
 // Owner task: note the wish and wake the proxy task. The settings are read here, at attach: a change re-attaches.
@@ -605,6 +623,9 @@ static esp_err_t on_attach(radio_mux_chan_t *ch, void *ctx)
 {
     radio_mux_proxy_settings_t set;
 
+    if (!s_task_up) {
+        return ESP_ERR_INVALID_STATE;
+    }
     radio_mux_get_proxy(ch, &set);
     if (rcp_proxy_settings_check(&set) != RCP_PROXY_OK) {
         ESP_LOGE(TAG, "%s: stored rcp_proxy settings are invalid", radio_mux_chan_id(ch));
@@ -615,6 +636,7 @@ static esp_err_t on_attach(radio_mux_chan_t *ch, void *ctx)
     taskENTER_CRITICAL(&s_lock);
     s_want[i].ch = ch;
     strlcpy(s_want[i].id, radio_mux_chan_id(ch), sizeof(s_want[i].id));
+    s_want[i].frames = radio_mux_chan_frames(ch); // the mux owns the delivery kind (the C6: always frames)
     s_want[i].set = set;
     s_want[i].gen++;
     s_want[i].kick = false;
@@ -638,25 +660,19 @@ static void on_detach(radio_mux_chan_t *ch, void *ctx)
     poke();
 }
 
+// The consumer first, then the task: a refused registration leaves nothing running. A task that cannot be created
+// leaves the consumer registered with attach refused (its channels show the fault).
 esp_err_t rcp_proxy_register(void)
 {
     ESP_RETURN_ON_FALSE(!s_registered, ESP_ERR_INVALID_STATE, TAG, "already registered");
     s_kick_fd = eventfd(0, 0);
     ESP_RETURN_ON_FALSE(s_kick_fd >= 0, ESP_ERR_NO_MEM, TAG, "eventfd (is the eventfd VFS registered?)");
-    TaskHandle_t task = NULL;
-
-    if (xTaskCreatePinnedToCore(proxy_task, "rcp_proxy", TASK_STACK, NULL, TASK_PRIORITY, &task, MGMT_CORE) !=
-            pdPASS) {
-        close(s_kick_fd);
-        s_kick_fd = -1;
-        return ESP_ERR_NO_MEM;
-    }
     const radio_mux_consumer_t c = {
         .mode = RADIO_MUX_MODE_RCP_PROXY,
         .needs = RADIO_MUX_FW_UNKNOWN,
         .limit = 0,
         .reboot_on_change = false,
-        .frames = false, // USB channels: raw bytes; the C6 delivers frames whatever this says
+        .frames = false, // USB channels: raw bytes; the C6 always delivers frames (radio_mux_chan_frames)
         .attach = on_attach,
         .detach = on_detach,
         .ctx = NULL,
@@ -664,12 +680,16 @@ esp_err_t rcp_proxy_register(void)
     const esp_err_t err = radio_mux_register_consumer(&c);
 
     if (err != ESP_OK) {
-        vTaskDelete(task);
         close(s_kick_fd);
         s_kick_fd = -1;
         return err;
     }
     s_registered = true;
+    if (xTaskCreatePinnedToCore(proxy_task, "rcp_proxy", TASK_STACK, NULL, TASK_PRIORITY, NULL, MGMT_CORE) != pdPASS) {
+        ESP_LOGE(TAG, "the proxy task could not be created: rcp-proxy channels stay in fault");
+        return ESP_ERR_NO_MEM;
+    }
+    s_task_up = true;
     return ESP_OK;
 }
 

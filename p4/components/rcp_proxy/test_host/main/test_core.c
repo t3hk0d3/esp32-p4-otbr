@@ -310,6 +310,71 @@ TEST_CASE("On link-local sources in different zones: they are different sources"
     TEST_ASSERT_FALSE(rcp_proxy_udp_lock_offer(&lock, &b, 1));
 }
 
+/* ---- rcp_proxy_peer_new (the reset-handshake replay) ---- */
+
+TEST_CASE("On the first peer of a socket session: returns true (replay)", "[rcp_proxy]")
+{
+    rcp_proxy_peer_memo_t m;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+
+    rcp_proxy_peer_memo_init(&m);
+    TEST_ASSERT_TRUE(rcp_proxy_peer_new(&m, &a));
+}
+
+TEST_CASE("On the same source locking again after 30 s of silence: returns false (no replay)", "[rcp_proxy]")
+{
+    rcp_proxy_peer_memo_t m;
+    rcp_proxy_udp_lock_t lock;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+
+    rcp_proxy_peer_memo_init(&m);
+    rcp_proxy_udp_lock_init(&lock);
+    TEST_ASSERT_TRUE(rcp_proxy_udp_lock_offer(&lock, &a, 0));
+    TEST_ASSERT_TRUE(rcp_proxy_peer_new(&m, &a));
+    TEST_ASSERT_TRUE(rcp_proxy_udp_lock_expire(&lock, RCP_PROXY_UDP_SILENCE_MS));
+    TEST_ASSERT_TRUE(rcp_proxy_udp_lock_offer(&lock, &a, RCP_PROXY_UDP_SILENCE_MS + 5000));
+    TEST_ASSERT_FALSE(rcp_proxy_peer_new(&m, &a));
+}
+
+TEST_CASE("On a different source locking after the previous peer: returns true (replay)", "[rcp_proxy]")
+{
+    rcp_proxy_peer_memo_t m;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+    const rcp_proxy_addr_t b = addr(20, 5000);
+    const rcp_proxy_addr_t a_other_port = addr(10, 5001);
+
+    rcp_proxy_peer_memo_init(&m);
+    rcp_proxy_peer_new(&m, &a);
+    TEST_ASSERT_TRUE(rcp_proxy_peer_new(&m, &b));
+    TEST_ASSERT_TRUE(rcp_proxy_peer_new(&m, &a)); // differs from the previous peer, b
+    TEST_ASSERT_TRUE(rcp_proxy_peer_new(&m, &a_other_port));
+}
+
+TEST_CASE("On UDP connect: replays once per socket session; a new session (init) replays again", "[rcp_proxy]")
+{
+    rcp_proxy_peer_memo_t m;
+    const rcp_proxy_addr_t target = addr(30, 6638);
+
+    rcp_proxy_peer_memo_init(&m);
+    TEST_ASSERT_TRUE(rcp_proxy_peer_new(&m, &target));
+    TEST_ASSERT_FALSE(rcp_proxy_peer_new(&m, &target)); // heard again after a silence
+    TEST_ASSERT_FALSE(rcp_proxy_peer_new(&m, &target));
+    rcp_proxy_peer_memo_init(&m); // the socket was opened again (back-off, re-attach)
+    TEST_ASSERT_TRUE(rcp_proxy_peer_new(&m, &target));
+}
+
+TEST_CASE("On TCP accept or connect (init before each): every peer session replays, also the same address",
+          "[rcp_proxy]")
+{
+    rcp_proxy_peer_memo_t m;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+
+    for (int i = 0; i < 3; i++) {
+        rcp_proxy_peer_memo_init(&m);
+        TEST_ASSERT_TRUE(rcp_proxy_peer_new(&m, &a));
+    }
+}
+
 /* ---- rcp_proxy_accept (TCP listen) ---- */
 
 TEST_CASE("On a connection with no peer: returns RCP_PROXY_TAKE", "[rcp_proxy]")

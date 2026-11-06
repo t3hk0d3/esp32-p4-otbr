@@ -1,7 +1,9 @@
 // UDP adapter: one HDLC frame (framing hdlc) or up to 1024 bytes (framing raw) per datagram; proxy.c cuts and encodes.
 // Listen: the first allowed source becomes the peer until 30 s of silence or a kick (rcp_proxy_udp_lock); the netcfg
-// access rules are checked for a source before it can lock. Connect: datagrams go to host:port, and only datagrams from
-// that address are taken; the state is connected from its first datagram until 30 s of silence.
+// access rules are checked for a source before it can lock. Connect: datagrams go to host:port (a target the netcfg
+// rules allow), and only datagrams from that address are taken; the state is connected from its first datagram until
+// 30 s of silence. The reset replay runs for a new peer session only (rcp_proxy_peer_new): once per socket session in
+// connect, and in listen when the locked source differs from the previous peer.
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
@@ -58,6 +60,7 @@ static esp_err_t udp_open(proxy_t *p)
 {
     p->fd = -1;
     rcp_proxy_udp_lock_init(&p->lock);
+    rcp_proxy_peer_memo_init(&p->memo); // a new socket session: the next peer is new
     p->state = waiting_state(p);
     if (is_listen(p)) {
         p->fd = bind_listen(p->set.port);
@@ -67,13 +70,10 @@ static esp_err_t udp_open(proxy_t *p)
         ESP_LOGI(TAG, "%s: listening on UDP port %u", p->id, p->set.port);
         return ESP_OK;
     }
-    if (rcp_proxy_resolve(p, SOCK_DGRAM) != ESP_OK) {
-        ESP_LOGW(TAG, "%s: %s does not resolve", p->id, p->set.host);
-        return ESP_ERR_NOT_FOUND;
-    }
-    if (!netcfg_peer_allowed((struct sockaddr *)&p->dst, NETCFG_SVC_RCP_PROXY)) {
-        ESP_LOGW(TAG, "%s: %s is not allowed by the network access rules", p->id, p->set.host);
-        return ESP_ERR_NOT_ALLOWED;
+    const esp_err_t err = rcp_proxy_resolve(p, SOCK_DGRAM); // resolves and applies netcfg_peer_allowed
+
+    if (err != ESP_OK) {
+        return err;
     }
     p->fd = socket(p->dst.ss_family, SOCK_DGRAM, IPPROTO_UDP);
     if (p->fd < 0) {
@@ -140,7 +140,7 @@ static bool take_source(proxy_t *p, const struct sockaddr_storage *src, socklen_
             p->dst = *src;
             p->dst_len = len;
         }
-        rcp_proxy_peer_up(p, (const struct sockaddr *)src);
+        rcp_proxy_peer_up(p, (const struct sockaddr *)src, rcp_proxy_peer_new(&p->memo, &a));
     }
     return true;
 }

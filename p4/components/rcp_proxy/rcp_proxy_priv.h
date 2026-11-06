@@ -50,7 +50,7 @@ extern const rcp_proxy_adapter_t rcp_proxy_adapter_udp;
 struct proxy {
     radio_mux_chan_t *ch; // NULL: idle
     char id[RADIO_MUX_ID_MAX];
-    bool frames;          // a frame channel (the C6): spinel frames in, HDLC towards the peer
+    bool frames;          // a frame channel (radio_mux_chan_frames: the C6): spinel frames in, HDLC towards the peer
     radio_mux_proxy_settings_t set;
     const rcp_proxy_adapter_t *ad;
     proxy_state_t state;
@@ -67,6 +67,7 @@ struct proxy {
     socklen_t dst_len;
     int64_t conn_deadline_ms; // TCP connect in progress: give up at
     rcp_proxy_udp_lock_t lock;
+    rcp_proxy_peer_memo_t memo; // the previous peer of this socket session (UDP: reset replay only for a new one)
 
     // Buffers of the session (allocated when it opens).
     uint8_t *ring_buf; // TCP: radio -> peer bytes the socket has not taken yet
@@ -87,9 +88,10 @@ struct proxy {
 uint8_t *rcp_proxy_rx_buf(void);
 
 int64_t rcp_proxy_now_ms(void);
-// A peer is there: state CONNECTED, its address as text, the session's buffers cleared; on a frame channel the radio
-// is reset, so the peer's host starts from the reset handshake.
-void rcp_proxy_peer_up(proxy_t *p, const struct sockaddr *peer);
+// A peer is there: state CONNECTED, its address as text, the session's buffers cleared. When it starts a new peer
+// session (new_session, rcp_proxy_peer_new) on a frame channel, the radio is reset, so the peer's host starts from the
+// reset handshake.
+void rcp_proxy_peer_up(proxy_t *p, const struct sockaddr *peer, bool new_session);
 // The peer left: back to `st` (LISTENING or CONNECTING) without a peer.
 void rcp_proxy_peer_lost(proxy_t *p, proxy_state_t st);
 // Closes the adapter and opens it again after the back-off (connect failed, the connection was lost, a listener
@@ -98,7 +100,8 @@ void rcp_proxy_retry(proxy_t *p, const char *why);
 // The peer's bytes (a stream chunk or one datagram) towards the radio.
 void rcp_proxy_from_peer(proxy_t *p, const uint8_t *d, size_t n);
 // Resolves p->set.host and p->set.port into p->dst: an IP literal or a DNS name (getaddrinfo), a .local name over mDNS
-// (A, then AAAA, bounded waits). Blocks the proxy task for at most a few seconds.
+// (A, then AAAA, bounded waits), then applies the netcfg access rules to the target (netcfg_peer_allowed, the same rule
+// as for UDP sources; ESP_ERR_NOT_ALLOWED). Blocks the proxy task for at most a few seconds.
 esp_err_t rcp_proxy_resolve(proxy_t *p, int socktype);
 void rcp_proxy_addr_from(const struct sockaddr *sa, rcp_proxy_addr_t *out);
 void rcp_proxy_set_nonblocking(int fd);

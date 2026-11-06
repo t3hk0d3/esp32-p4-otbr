@@ -396,8 +396,8 @@ void radio_mux_nvs_key(const char *id, char out[16])
 {
     uint32_t h = FNV_OFFSET;
 
-    if (strcmp(id, "c6") == 0) {
-        snprintf(out, 16, "c6");
+    if (strcmp(id, RADIO_MUX_C6_ID) == 0) {
+        snprintf(out, 16, "%s", RADIO_MUX_C6_ID);
         return;
     }
     for (size_t i = 0; id[i] != '\0'; i++) {
@@ -466,4 +466,9 @@ uint32_t radio_mux_tx_timeout_ms(size_t n, uint32_t baud)
     const uint64_t bits_ms = (uint64_t)n * TX_BITS_PER_BYTE * TX_MARGIN * MS_PER_S;
 
     return RADIO_MUX_TX_BASE_MS + (uint32_t)((bits_ms + b - 1) / b);
+}
+
+bool radio_mux_port_frames(bool c6_port, bool consumer_frames)
+{
+    return c6_port || consumer_frames;
 }

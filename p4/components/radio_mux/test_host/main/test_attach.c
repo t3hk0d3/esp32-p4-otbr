@@ -529,3 +529,25 @@ TEST_CASE("TX timeout of nothing: the base", "[radio_mux]")
 {
     TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_TX_BASE_MS, radio_mux_tx_timeout_ms(0, 115200));
 }
+
+/* ---- radio_mux_port_frames: the delivery kind ---- */
+
+TEST_CASE("Delivery on the C6 port: frames, whatever the consumer declares", "[radio_mux]")
+{
+    TEST_ASSERT_TRUE(radio_mux_port_frames(true, false));
+    TEST_ASSERT_TRUE(radio_mux_port_frames(true, true));
+}
+
+TEST_CASE("Delivery on a byte transport (USB): the consumer's frames setting", "[radio_mux]")
+{
+    TEST_ASSERT_FALSE(radio_mux_port_frames(false, false));
+    TEST_ASSERT_TRUE(radio_mux_port_frames(false, true));
+}
+
+TEST_CASE("NVS key of the C6 id constant: the id itself", "[radio_mux]")
+{
+    char key[16];
+
+    radio_mux_nvs_key(RADIO_MUX_C6_ID, key);
+    TEST_ASSERT_EQUAL_STRING("c6", key);
+}
