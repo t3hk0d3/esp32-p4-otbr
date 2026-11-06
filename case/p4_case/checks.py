@@ -8,11 +8,12 @@ import math
 from collections.abc import Iterable
 
 import numpy as np
+import shapely
 import trimesh
-from build123d import Align, Box, Cylinder, Part, Pos, Rot
+from build123d import Align, Box, Cylinder, Part, Pos, Rot, Vector
 
 from p4_case import params as P
-from p4_case.base import rounded_block
+from p4_case.base import rounded_block, tab_y_centres
 from p4_case.board import ENV_RES, FACTS, BoardModel, check_facts
 from p4_case.lid import opening_widths
 from p4_case.params import board_z
@@ -36,10 +37,10 @@ FIT_STEP_MM = 0.25
 SMA_ENVELOPE_R = 5.0  # 5.2: free radius around the SMA axis inside the wall
 SMA_ENVELOPE_LEN = 12.0
 HEADER_RIBBON_X = (2.1, 52.9)  # a 40-wire ribbon centred on the header
-# header-slot probes run between the header-end tabs' root fillets (the ribbon's edges may brush them, spec 5.3)
+# header-slot probes run between the header-end tabs' root gussets (the ribbon's edges may brush them, spec 5.3)
 SLOT_PROBE_X = (
-    HEADER_RIBBON_X[0] + P.TAB_FILLET + 0.2,
-    HEADER_RIBBON_X[1] - P.TAB_FILLET - 0.2,
+    HEADER_RIBBON_X[0] + P.TAB_GUSSET + 0.2,
+    HEADER_RIBBON_X[1] - P.TAB_GUSSET - 0.2,
 )
 
 
@@ -301,6 +302,33 @@ def sma_envelope() -> Part:
     )
 
 
+def sma_room(board: BoardModel, radius: float = SMA_ENVELOPE_R) -> CheckResult:
+    """The SMA bulkhead's nut and washer envelope inside the wall is free of the board's columns."""
+    env = board.envelope
+    zc = board_z(P.SMA_CASE_Z)
+    hits = []
+    for x in np.arange(P.INNER[1] - SMA_ENVELOPE_LEN, P.INNER[1], ENV_RES):
+        for y in np.arange(P.SMA_Y - radius, P.SMA_Y + radius, ENV_RES):
+            top, bottom = env.top(x, y), env.bottom(x, y)
+            if math.isnan(top):
+                continue
+            dz = math.sqrt(max(0.0, radius * radius - (y - P.SMA_Y) ** 2))
+            if bottom < zc + dz and top > zc - dz:
+                hits.append((x, y, bottom, top))
+    if not hits:
+        return CheckResult(
+            "SMA nut clears the board",
+            True,
+            f"Ø{2 * radius:.0f} × {SMA_ENVELOPE_LEN:.0f} mm free inside the wall",
+        )
+    x, y, bottom, top = hits[0]
+    return CheckResult(
+        "SMA nut clears the board",
+        False,
+        f"{len(hits)} cells inside the envelope; e.g. ({x:.2f}, {y:.2f}), board column {bottom:.2f}..{top:.2f}",
+    )
+
+
 def lid_clearance(board: BoardModel, lid: Part) -> list[CheckResult]:
     """The lid clears the board, the SMA body, a ribbon plug and the ribbon between the tab roots."""
     results = [board_clearance(board, lid, "lid")]
@@ -309,8 +337,9 @@ def lid_clearance(board: BoardModel, lid: Part) -> list[CheckResult]:
         "ribbon plug": ribbon_plug_block(),
         "ribbon": _box(
             HEADER_RIBBON_X[0]
-            + P.TAB_FILLET,  # the ribbon may brush the header-end tabs (5.3); not counted
-            HEADER_RIBBON_X[1] - P.TAB_FILLET,
+            # the ribbon may brush the header-end tabs (5.3); not counted
+            + P.TAB_GUSSET,
+            HEADER_RIBBON_X[1] - P.TAB_GUSSET,
             FACTS["header"].y0,
             P.INNER[3],
             P.HEADER_BODY_TOP + P.RIBBON_PLUG[2],
@@ -430,11 +459,75 @@ def opening_size(base: Part, lid: Part) -> CheckResult:
     )
 
 
+def _bump_zones() -> list[Part]:
+    """The space past each side wall's inner face around a bump: where the bump presses into its dent by design."""
+    zc = board_z(P.BUMP_Z)
+    half = P.BUMP_LEN / 2 + 0.1
+    zones = []
+    for yc in tab_y_centres():
+        for x0, x1 in ((P.INNER[0] - 1, P.INNER[0]), (P.INNER[1], P.INNER[1] + 1)):
+            zones.append(_box(x0, x1, yc - half, yc + half, zc - 1.5, zc + 1.5))
+    return zones
+
+
 def lid_seats(base: Part, lid: Part) -> CheckResult:
-    """The fitted lid does not overlap the base anywhere (tabs, bumps in their dents, flange in the rebate)."""
-    overlap = _intersection(base, lid)
+    """The fitted lid does not overlap the base anywhere (tabs, flange in the rebate), apart from the bumps' preload."""
+    overlap = _intersection(base, lid - (Part() + _bump_zones()))
     return CheckResult(
-        "lid seats on the base", overlap <= BOOL_EPS, f"overlap {overlap:.3f} mm³"
+        "lid seats on the base",
+        overlap <= BOOL_EPS,
+        f"overlap {overlap:.3f} mm³ (bump preload excluded)",
+    )
+
+
+DETENT_REACH_MIN = 0.15  # a bump must reach this far past the wall face
+# ... and press into its dent's hold face by no more than this
+DETENT_PRELOAD_MAX = 0.15
+
+
+def _boundary(solid_at, inside: float, outside: float) -> float:
+    """Bisect for the surface between a solid point (inside) and an empty one (outside), to 0.005 mm."""
+    while abs(outside - inside) > 0.005:
+        mid = (inside + outside) / 2
+        if solid_at(mid):
+            inside = mid
+        else:
+            outside = mid
+    return (inside + outside) / 2
+
+
+def detent_engagement(base: Part, lid: Part) -> CheckResult:
+    """At each bump's crest height the bump reaches past the wall face and presses lightly into its dent.
+
+    reach: how far the lid gets past the wall's inner face; dent: how deep the wall is cut there; the difference is
+    the preload that keeps the lid down without rattle.
+    """
+    z = board_z(P.BUMP_Z)
+    reaches, preloads = [], []
+    for yc in tab_y_centres():
+        for face, out in ((P.INNER[0], -1), (P.INNER[1], 1)):
+
+            def lid_at(u, face=face, out=out, yc=yc):
+                return lid.is_inside(Vector(face + out * u, yc, z))
+
+            def gap_at(u, face=face, out=out, yc=yc):
+                return not base.is_inside(Vector(face + out * u, yc, z))
+
+            reach = (
+                _boundary(lid_at, -P.TAB_CLEAR - 0.3, 1.0)
+                if lid_at(-P.TAB_CLEAR - 0.3)
+                else -math.inf
+            )
+            dent = _boundary(gap_at, -0.05, 1.0)
+            reaches.append(reach)
+            preloads.append(reach - dent)
+    reach, low, high = min(reaches), min(preloads), max(preloads)
+    ok = reach >= DETENT_REACH_MIN and low > 0 and high <= DETENT_PRELOAD_MAX
+    return CheckResult(
+        "lid snaps engage the walls",
+        ok,
+        f"bumps reach {reach:.2f} mm past the wall (need {DETENT_REACH_MIN}); "
+        f"preload {low:.2f}..{high:.2f} mm (need > 0, ≤ {DETENT_PRELOAD_MAX})",
     )
 
 
@@ -497,6 +590,54 @@ def printability(part: Part, name: str, top_down: bool) -> CheckResult:
     )
 
 
+MIN_PRINT_WIDTH = 0.8  # two 0.4 mm lines
+PRINT_WIDTH_TOL = 0.05
+STRAND_AREA_MIN = 0.2  # mm²: smaller thin bits are corner rounding
+# a strand has the outside along both long sides; a bump on a wall along one
+STRAND_EDGE_SHARE = 0.75
+
+
+def min_print_width(part: Part, name: str, top_down: bool) -> CheckResult:
+    """No layer holds a free-standing strand narrower than MIN_PRINT_WIDTH (a slicer prints it as one line or drops it).
+
+    Each layer's section (at layer centres, LAYER_H apart, print pose) is opened by the width: the thin pieces it
+    removes count as strands when the part's outline runs along most of their edge. Bumps on walls do not count.
+    """
+    mesh = print_pose(part, top_down)
+    heights = np.arange(P.LAYER_H / 2, mesh.bounds[1][2], P.LAYER_H)
+    sections = mesh.section_multiplane(
+        plane_origin=(0, 0, 0), plane_normal=(0, 0, 1), heights=list(heights)
+    )
+    w = MIN_PRINT_WIDTH - PRINT_WIDTH_TOL
+    problems = []
+    for z, path in zip(heights, sections, strict=True):
+        if path is None:
+            continue
+        for poly in path.polygons_full:
+            opened = poly.buffer(-w / 2).buffer(w / 2)
+            thin = poly.difference(opened)
+            outline = poly.boundary.buffer(1e-3)
+            for piece in getattr(thin, "geoms", [thin]):
+                if piece.is_empty or piece.area < STRAND_AREA_MIN:
+                    continue
+                share = (
+                    piece.boundary.intersection(outline).length / piece.boundary.length
+                )
+                if share > STRAND_EDGE_SHARE:
+                    c = shapely.centroid(piece)
+                    x, y, _ = trimesh.transform_points(
+                        [(c.x, c.y, 0.0)], path.metadata["to_3D"]
+                    )[0]
+                    problems.append(
+                        f"{piece.area / max(piece.length / 2, 1e-6):.2f} mm strand at ({x:.1f}, {y:.1f}, z {z:.1f})"
+                    )
+    return CheckResult(
+        f"{name} has no strand under {MIN_PRINT_WIDTH} mm",
+        not problems,
+        "; ".join(problems[:5]) or "ok",
+    )
+
+
 # --- all ---------------------------------------------------------------------------------------------------------------
 
 
@@ -507,6 +648,8 @@ def run_all(board: BoardModel, base: Part, lid: Part) -> list[CheckResult]:
         *lid_clearance(board, lid),
         opening_paths(base, lid),
         lid_seats(base, lid),
+        detent_engagement(base, lid),
+        sma_room(board),
         fitting_motion(base, board),
         ribbon_plug_headroom(),
         keyhole_volumes(board),
@@ -516,4 +659,6 @@ def run_all(board: BoardModel, base: Part, lid: Part) -> list[CheckResult]:
         watertight(lid, "lid"),
         printability(base, "base", top_down=False),
         printability(lid, "lid", top_down=True),
+        min_print_width(base, "base", top_down=False),
+        min_print_width(lid, "lid", top_down=True),
     ]
