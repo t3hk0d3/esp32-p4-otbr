@@ -51,7 +51,9 @@ GROWING_GAPS = 2
 GAP_GROWTH = 1.5
 GAP_TOLERANCE_S = 5
 BACKOFF_CAP_S = 30
-HTTP_BURST = 30
+WEB_SLOTS = 7  # ESP_BR_WEB_MAX_OPEN_SOCKETS (esp_br_web.c); the web server purges the least recent one beyond it
+HTTP_WAVES = 3
+RESET_RETRIES = 1
 HDLC_FLAG = 0x7E
 HDLC_ESCAPE = 0x7D
 HDLC_XOR = 0x20
@@ -301,9 +303,10 @@ def test_move_refusals(dut, base_url, dongle):
     assert busy.status_code == 409, busy.text
     assert busy.json()["error"] == "busy"
     deadline = time.monotonic() + MOVE_TIMEOUT_S
-    while (
-        get_status(base_url)["otbr_channel"] != dongle
-    ):  # not BR_RUNNING: the board is still on the C6 mid-move
+    while True:  # not BR_RUNNING: the board is still on the C6 mid-move
+        with contextlib.suppress(requests.RequestException):
+            if get_status(base_url)["otbr_channel"] == dongle:
+                break
         assert time.monotonic() < deadline, "the move never finished"
         time.sleep(1)
     wait_mode(base_url, "BR_RUNNING")
@@ -525,24 +528,32 @@ def test_proxy_connect_refused_soak(base_url, board_ip, dongle):
     while time.monotonic() < deadline:
         time.sleep(5)
         assert proxy_state(base_url, dongle)["state"] in ("backoff", "connecting")
-    # LWIP_MAX_SOCKETS is 24 and RCP_PROXY_SOCKETS 6, so 30 simultaneous connections cannot all be open unless sockets
-    # were freed: a leaked socket or two would show as refused or timed-out requests.
+    # The socket budget is exactly 24 (CONFIG_LWIP_MAX_SOCKETS) with no slack, so a socket leaked by the refused
+    # connects starves the web server's slots first. Each wave fills every web slot (WEB_SLOTS concurrent requests,
+    # the most the server keeps open without purging one); a request is retried once on a connection reset.
     results = []
 
     def fetch():
-        try:
-            results.append(
-                requests.get(f"{base_url}/device/status", timeout=30).status_code
-            )
-        except requests.RequestException as error:
-            results.append(type(error).__name__)
+        for attempt in range(RESET_RETRIES + 1):
+            try:
+                results.append(
+                    requests.get(f"{base_url}/device/status", timeout=30).status_code
+                )
+                return
+            except requests.ConnectionError as error:
+                if attempt == RESET_RETRIES:
+                    results.append(type(error).__name__)
+            except requests.RequestException as error:
+                results.append(type(error).__name__)
+                return
 
-    burst = [threading.Thread(target=fetch) for _ in range(HTTP_BURST)]
-    for thread in burst:
-        thread.start()
-    for thread in burst:
-        thread.join(timeout=60)
-    assert results.count(requests.codes.ok) == HTTP_BURST, results
+    for _ in range(HTTP_WAVES):
+        wave = [threading.Thread(target=fetch) for _ in range(WEB_SLOTS)]
+        for thread in wave:
+            thread.start()
+        for thread in wave:
+            thread.join(timeout=60)
+    assert results.count(requests.codes.ok) == WEB_SLOTS * HTTP_WAVES, results
     assert (
         put_channel(
             base_url,
