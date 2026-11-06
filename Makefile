@@ -26,10 +26,10 @@ IDF := $(if $(shell command -v idf.py),,. "$(IDF_EXPORT)" >/dev/null &&)
 board_url = $(if $(BOARD),http://$(BOARD),$(error set BOARD=<board address>, e.g. make $@ BOARD=192.168.1.50))
 
 .PHONY: help build build-test reconfigure clean flash monitor erase c6-flash-base bundle package sizes sizes-report ota radio recover \
-	status docs docs-serve docs-firmware test test-host test-vendored test-tools test-target lan-ping-up lan-ping-down lint routing-vectors
+	status zigbee-test-device docs docs-serve docs-firmware test test-host test-vendored test-tools test-target lan-ping-up lan-ping-down lint routing-vectors
 
 help: ## List the targets
-	@awk -F':.*## ' '/^[a-z0-9-]+:.*## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk -F':.*## ' '/^[a-z0-9-]+:.*## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@echo
 	@echo "Variables: PORT=$(PORT) C6_PORT=$(C6_PORT) BOARD=<address> DIST=$(DIST) TEST=<test file> MARK=<marker>"
 
@@ -45,8 +45,11 @@ reconfigure: ## Refresh the P4 version stamp (the -dirty flag is as of the last 
 	$(IDF) idf.py -C p4 reconfigure
 
 clean: ## Remove all build directories and dist/
-	rm -rf c6_updater/build c6_rcp/build c6_installer/build p4/build $(DIST) $(SIZES)
+	rm -rf c6_updater/build c6_rcp/build c6_installer/build p4/build tools/zigbee_test_device/build $(DIST) $(SIZES)
 	find . -path ./.venv -prune -o -type d -name build -path '*/test_host/build' -print0 | xargs -0 rm -rf
+
+zigbee-test-device: ## Build the rig's Zigbee test device (on/off light router for the aux C6, tools/zigbee_test_device)
+	$(IDF) idf.py -C tools/zigbee_test_device build
 
 # --- flash over USB ---
 

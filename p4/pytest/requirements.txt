@@ -9,3 +9,4 @@ requests==2.34.2
 aiohttp==3.14.5
 python-otbr-api==3.1.0
 prometheus_client==0.25.0
+zigpy-ziggurat==1.2.1
