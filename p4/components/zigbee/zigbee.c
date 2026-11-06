@@ -123,6 +123,19 @@ static uint32_t take_flags(void)
     return flags;
 }
 
+// Takes only ZIGBEE_FLAG_WAKE (ziggurat's pender), leaving the other flags for the next round.
+static bool take_wake(void)
+{
+    zigbee_t *z = &g_zigbee;
+
+    taskENTER_CRITICAL(&z->mb_lock);
+    const bool wake = (z->mb_flags & ZIGBEE_FLAG_WAKE) != 0;
+
+    z->mb_flags &= ~ZIGBEE_FLAG_WAKE;
+    taskEXIT_CRITICAL(&z->mb_lock);
+    return wake;
+}
+
 static bool take_msg(zigbee_msg_t *m)
 {
     zigbee_t *z = &g_zigbee;
@@ -447,8 +460,22 @@ static void start_if_due(void)
     atomic_store(&z->started, true); // the WebSocket accepts clients from now on
 }
 
+// Polls ziggurat when its pender asked for it since the last poll.
+static void process_if_woken(void)
+{
+    if (g_zigbee.start_ran && take_wake()) {
+        ziggurat_process();
+    }
+}
+
 // The mailbox: flags, the frames the sender took, then up to MAILBOX_BATCH messages in order, then the ready signal
 // and ziggurat's wake. Only from the loop, never inside a ziggurat call.
+//
+// ziggurat_host_frame is a try_send into ziggurat's 16-deep INBOUND channel that drops the frame when it is full and
+// reports nothing. So ziggurat is polled before the first message (a wake left from the last round: frames it has
+// not taken yet) and after every message that woke it (handing a frame to a waiting ziggurat_main wakes it): its
+// frame loop takes each frame before the next one is handed in. A frame it takes but cannot finish at once (a radio
+// operation, or replies waiting for the client to read) leaves the next ones queued in INBOUND, up to its depth.
 static void run_mailbox(void)
 {
     zigbee_t *z = &g_zigbee;
@@ -469,6 +496,10 @@ static void run_mailbox(void)
     if (z->start_ran && (flags & ZIGBEE_FLAG_TIMER)) {
         zigbee_platform_timer_due();
     }
+    if (z->start_ran && (flags & ZIGBEE_FLAG_WAKE)) {
+        ziggurat_process();
+    }
+    process_if_woken();
     zigbee_msg_t m;
     unsigned n = 0;
 
@@ -488,6 +519,7 @@ static void run_mailbox(void)
             }
         }
         zigbee_frame_free(m.frame);
+        process_if_woken();
     }
     if (n == MAILBOX_BATCH) {
         taskENTER_CRITICAL(&z->mb_lock);
@@ -497,9 +529,7 @@ static void run_mailbox(void)
     if (z->start_ran && zigbee_link_drained(&z->link)) {
         ziggurat_host_send_ready();
     }
-    if (z->start_ran && (flags & ZIGBEE_FLAG_WAKE)) {
-        ziggurat_process();
-    }
+    process_if_woken();
 }
 
 static void zigbee_task(void *arg)
