@@ -316,7 +316,8 @@ reason, spec reference.
    adds `GET`/`PUT /device/console` and the WebSocket `GET /device/console/ws`: 25 routes plus the catch-all, one slot
    of headroom. (docs/superpowers/specs/2026-11-04-thread-console-design.md)
 25. Applied (USB serial proxy, Task 4). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 27 -> 29.
-   `device_api` adds `GET`/`PUT /device/usb_serial`: 27 routes plus the catch-all, one slot of headroom.
+   `device_api` adds `GET`/`PUT /device/usb_serial`: 27 routes plus the catch-all, one slot of headroom (those two routes
+   are gone again in patch 26).
    (docs/superpowers/specs/2026-11-05-usb-serial-proxy-design.md)
 26. Applied (radio channel mux, Task 8). `esp_ot_br_server`: the board mode `NO_RADIO` (no radio channel in otbr is
    present) in the REST guard. `src/esp_br_guard.c`: `READ` and `THREAD_OP` answer 503 in `NO_RADIO` whatever the
