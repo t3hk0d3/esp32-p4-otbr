@@ -104,9 +104,15 @@ static bool app_signal_handler(const ezb_app_signal_t *app_signal)
 static void set_attr_value_handler(ezb_zcl_set_attr_value_message_t *message)
 {
     ESP_RETURN_ON_FALSE(message,, TAG, "message is empty");
+    const ezb_zcl_attribute_t *attribute = &message->in.attribute;
+
+    /* Only the OnOff attribute (a bool): OnTime, OffWaitTime and GlobalSceneControl are other attributes of the cluster. */
     if (message->info.cluster_id == EZB_ZCL_CLUSTER_ID_ON_OFF &&
-            message->info.status == EZB_ZCL_STATUS_SUCCESS) {
-        (void)light_set(*(uint8_t *)message->in.attribute.data.value != 0);
+            message->info.status == EZB_ZCL_STATUS_SUCCESS &&
+            attribute->id == EZB_ZCL_ATTR_ON_OFF_ON_OFF_ID &&
+            attribute->data.type == EZB_ZCL_ATTR_TYPE_BOOL &&
+            attribute->data.value != NULL) {
+        (void)light_set(*(uint8_t *)attribute->data.value != 0);
     }
 }
 

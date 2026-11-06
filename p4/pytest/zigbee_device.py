@@ -15,10 +15,12 @@ The aux C6 is shared with other projects. Opening it refuses while another proce
 is flashed (esptool, from tools/zigbee_test_device/build) only when its app is not this project's. Build the firmware
 first: `make zigbee-test-device`.
 
-Opening the port does not reset the C6: DTR and RTS are held low (the CH343 auto-download circuit uses them for EN and
-GPIO9). Only esptool resets it, when it flashes.
+Opening the port is meant not to reset the C6 (to be confirmed on the board): the CH343 auto-download circuit uses DTR
+and RTS for GPIO9 and EN, the tty open raises both, and the order used here is (DTR, RTS) = (1,1), (1,0), (0,0), which
+never asserts EN alone. Only esptool resets it, when it flashes.
 """
 
+import errno
 import os
 import re
 import subprocess
@@ -77,15 +79,25 @@ def check_port_free(port):
 
 
 def open_console(port):
-    """Open the console without toggling DTR/RTS into a reset (both low from the first state update on)."""
+    """Open the console without an EN pulse on the way to DTR and RTS low.
+
+    The tty open raises both lines (1,1) and pyserial applies DTR before RTS, so RTS goes low before open() applies
+    anything (DTR stays at its default), and DTR goes low after it: (1,1) -> (1,0) -> (0,0). Setting DTR low first would
+    pass through (0,1), which asserts EN in the esptool auto-reset circuit."""
     console = serial.Serial()
     console.port = port
     console.baudrate = BAUD
     console.timeout = 0.1
     console.exclusive = True
-    console.dtr = False
     console.rts = False
     console.open()
+    try:
+        console.dtr = False
+    except OSError as error:
+        if (
+            error.errno != errno.ENOTTY
+        ):  # a pty (the tests of this module) has no modem lines
+            raise
     return console
 
 
