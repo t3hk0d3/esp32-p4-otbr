@@ -30,8 +30,11 @@ typedef struct {
 } esp_openthread_mux_ops_t;
 
 // The channel the next esp_openthread_init runs on (br_core calls it before every esp_openthread_init). `ops` must
-// outlive OpenThread; `ctx` is passed to every operation.
+// outlive OpenThread; `ctx` is passed to every operation. Clears the init-done mark (esp_openthread_mux_init_done).
 void esp_openthread_mux_set(const esp_openthread_mux_ops_t *ops, void *ctx);
+// OpenThread's init on the channel finished (br_core calls it once esp_openthread_init returned ESP_OK). From then on a
+// reset asked for after GONE is answered as done; before, it fails (mux_gone_answer.h, ot_mux_gone_answers_reset).
+void esp_openthread_mux_init_done(void);
 
 #ifdef __cplusplus
 }

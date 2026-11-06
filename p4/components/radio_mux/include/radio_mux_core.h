@@ -201,6 +201,10 @@ const char *radio_mux_fw_name(radio_mux_fw_t fw);
 // RADIO_MUX_MODE_BIT; never unavailable or invalid.
 uint32_t radio_mux_available_modes(const radio_mux_rules_t *rules);
 
+// The modes whose rule has reboot_on_change (entering or leaving them reboots the board, radio_mux_decide's
+// APPLY_REBOOT): a set of RADIO_MUX_MODE_BIT; never unavailable or invalid.
+uint32_t radio_mux_reboot_modes(const radio_mux_rules_t *rules);
+
 // Whether firmware of this type can run the mode. otbr needs spinel; off and rcp-proxy fit anything; a registered mode
 // uses the type its registration declares; any other mode fits nothing.
 bool radio_mux_fits(const radio_mux_rules_t *rules, radio_mux_mode_t mode, radio_mux_fw_t fw);

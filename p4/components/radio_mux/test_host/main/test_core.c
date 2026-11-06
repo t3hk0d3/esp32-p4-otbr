@@ -132,6 +132,41 @@ TEST_CASE("On a rule for a non-mode (unavailable, invalid): it is ignored", "[ra
     TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF), radio_mux_available_modes(&rules));
 }
 
+/* ---- radio_mux_reboot_modes ---- */
+
+TEST_CASE("On no rules: no mode reboots", "[radio_mux]")
+{
+    const radio_mux_rules_t rules = {0};
+
+    TEST_ASSERT_EQUAL_UINT32(0, radio_mux_reboot_modes(&rules));
+}
+
+TEST_CASE("On a ziggurat rule with reboot_on_change and an otbr rule without: only ziggurat reboots", "[radio_mux]")
+{
+    radio_mux_rules_t rules = {0};
+
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_OTBR
+    };
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_ZIGGURAT, .reboot_on_change = true
+    };
+    TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_ZIGGURAT), radio_mux_reboot_modes(&rules));
+}
+
+TEST_CASE("On a reboot rule for a non-mode (unavailable, invalid): it is ignored", "[radio_mux]")
+{
+    radio_mux_rules_t rules = {0};
+
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_UNAVAILABLE, .reboot_on_change = true
+    };
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_INVALID, .reboot_on_change = true
+    };
+    TEST_ASSERT_EQUAL_UINT32(0, radio_mux_reboot_modes(&rules));
+}
+
 /* ---- radio_mux_mode_parse / radio_mux_mode_name ---- */
 
 TEST_CASE("On each wire name: round-trips unavailable, off, otbr, ziggurat, rcp-proxy", "[radio_mux]")

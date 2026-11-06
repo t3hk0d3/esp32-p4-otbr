@@ -297,12 +297,22 @@ def test_move_thread_to_dongle_and_back(dut, base_url, dongle):
 
 
 def test_move_refusals(dut, base_url, dongle):
-    # PUT on a move, On a move that also carries line settings: 400; during a move a mode PUT: 409 busy; the attached
-    # dongle cannot be forgotten: 409 in_use; a ZNP/EZSP dongle would give 409 probe_failed or incompatible (not here).
+    # PUT on a move, On a move or a stop that also carries line or proxy settings: 400, nothing stored; during a move a
+    # mode PUT: 409 busy; the attached dongle cannot be forgotten: 409 in_use; a ZNP/EZSP dongle would give 409
+    # probe_failed or incompatible (not here).
     mixed = put_channel(base_url, {"mode": "otbr", "baud": SPINEL_BAUD}, dongle)
     assert mixed.status_code == 400, mixed.text
     assert mixed.json()["error"] == "bad_value"
     assert get_channel(base_url, "c6")["mode"] == "otbr"
+    c6_port = get_channel(base_url, "c6")["rcp_proxy"]["port"]
+    stop_mixed = put_channel(
+        base_url, {"mode": "rcp-proxy", "rcp_proxy": {"port": 6639}}, "c6"
+    )
+    assert stop_mixed.status_code == 400, stop_mixed.text
+    assert stop_mixed.json()["error"] == "bad_value"
+    assert "stopping" in stop_mixed.json()["detail"]
+    assert get_channel(base_url, "c6")["mode"] == "otbr"
+    assert get_channel(base_url, "c6")["rcp_proxy"]["port"] == c6_port
     forget = requests.delete(f"{base_url}/device/channels/{dongle}", timeout=10)
     assert forget.status_code == 409, forget.text
     assert forget.json()["error"] == "in_use"

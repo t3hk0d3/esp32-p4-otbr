@@ -35,9 +35,9 @@ public:
     }
     // The registered failure handler (br_core: its recovery ladder resets the channel), else a channel reset; then up
     // to 2 s for the RESET. A dongle's reopen does not reset its RCP, so a spinel software reset follows when the RCP
-    // does not announce a reset by itself. Returns at once after GONE: once the RCP has answered since Enable (past
-    // OpenThread's init), the reset that follows is answered as done (see AnswerReset), so RadioSpinel's recovery
-    // completes against the GONE answers in whichever task runs it, without the reset-failure callback.
+    // does not announce a reset by itself. Returns at once after GONE: past OpenThread's init
+    // (esp_openthread_mux_init_done) the reset that follows is answered as done (see AnswerReset), so RadioSpinel's
+    // recovery completes against the GONE answers in whichever task runs it, without the reset-failure callback.
     otError HardwareReset(void) override;
     const otRcpInterfaceMetrics *GetRcpInterfaceMetrics(void) const override
     {
@@ -75,7 +75,6 @@ private:
     bool mMaybeMore;        // a frame was taken: more may wait (the eventfd stays set until a poll finds none)
     bool mResetSeen;        // poll reported a RESET
     bool mGoneLogged;
-    bool mRcpSeen;          // a frame came from the RCP since Enable (OpenThread's init got past its first reset)
     bool mResetWaiting;     // a reset was asked for (RESET command, HardwareReset) and not answered yet
     uint16_t mPendingTids;  // requests sent and not answered yet (bit = spinel TID 1..15)
     uint32_t mPendingCmd[16]; // per TID: the command and property of the request (the answer after GONE)

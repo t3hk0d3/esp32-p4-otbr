@@ -197,6 +197,138 @@ TEST_CASE("On WAIT: no frame", "[ot_port]")
     TEST_ASSERT_EQUAL(0, ot_mux_gone_frame(OT_MUX_GONE_WAIT, 1, SPINEL_PROP_HWADDR, f));
 }
 
+TEST_CASE("On a live channel: its eventfd is in the select, which may wait", "[ot_port]")
+{
+    const ot_mux_loop_t plan = ot_mux_loop_plan(false, false, false);
+
+    TEST_ASSERT_TRUE(plan.watch_fd);
+    TEST_ASSERT_FALSE(plan.no_wait);
+}
+
+TEST_CASE("On a live channel with a frame waiting: its eventfd is in the select, which does not wait", "[ot_port]")
+{
+    const ot_mux_loop_t plan = ot_mux_loop_plan(false, true, false);
+
+    TEST_ASSERT_TRUE(plan.watch_fd);
+    TEST_ASSERT_TRUE(plan.no_wait);
+}
+
+TEST_CASE("On a live channel with requests unanswered: the select may wait (the RCP answers them)", "[ot_port]")
+{
+    const ot_mux_loop_t plan = ot_mux_loop_plan(false, false, true);
+
+    TEST_ASSERT_TRUE(plan.watch_fd);
+    TEST_ASSERT_FALSE(plan.no_wait);
+}
+
+TEST_CASE("On a gone channel: its eventfd is left out of the select, which may wait", "[ot_port]")
+{
+    const ot_mux_loop_t plan = ot_mux_loop_plan(true, false, false);
+
+    TEST_ASSERT_FALSE(plan.watch_fd);
+    TEST_ASSERT_FALSE(plan.no_wait);
+}
+
+TEST_CASE("On a gone channel with answers due or a frame waiting: the eventfd stays out, the select does not wait",
+          "[ot_port]")
+{
+    ot_mux_loop_t plan = ot_mux_loop_plan(true, false, true);
+
+    TEST_ASSERT_FALSE(plan.watch_fd);
+    TEST_ASSERT_TRUE(plan.no_wait);
+    plan = ot_mux_loop_plan(true, true, false);
+    TEST_ASSERT_FALSE(plan.watch_fd);
+    TEST_ASSERT_TRUE(plan.no_wait);
+}
+
+TEST_CASE("On a live channel: Process takes only with a frame waiting or the eventfd readable", "[ot_port]")
+{
+    TEST_ASSERT_FALSE(ot_mux_loop_take(false, false, false));
+    TEST_ASSERT_TRUE(ot_mux_loop_take(false, true, false));
+    TEST_ASSERT_TRUE(ot_mux_loop_take(false, false, true));
+}
+
+TEST_CASE("On a gone channel: Process takes on every pass (drains the queue, answers what is due)", "[ot_port]")
+{
+    TEST_ASSERT_TRUE(ot_mux_loop_take(true, false, false));
+}
+
+TEST_CASE("On LAST_STATUS RESET_POWER_ON or RESET_UNKNOWN with TID 0: a reset notification", "[ot_port]")
+{
+    const uint8_t power_on[] = {SPINEL_HEADER_FLAG, SPINEL_CMD_PROP_VALUE_IS, SPINEL_PROP_LAST_STATUS,
+                                SPINEL_STATUS_RESET_POWER_ON
+                               };
+    const uint8_t unknown[] = {SPINEL_HEADER_FLAG, SPINEL_CMD_PROP_VALUE_IS, SPINEL_PROP_LAST_STATUS,
+                               SPINEL_STATUS_RESET_UNKNOWN
+                              };
+
+    TEST_ASSERT_TRUE(ot_mux_gone_is_reset_notification(power_on, sizeof(power_on)));
+    TEST_ASSERT_TRUE(ot_mux_gone_is_reset_notification(unknown, sizeof(unknown)));
+}
+
+TEST_CASE("On LAST_STATUS RESET__END (128, packed in two bytes): a reset notification, as OpenThread counts it",
+          "[ot_port]")
+{
+    const uint8_t f[] = {SPINEL_HEADER_FLAG, SPINEL_CMD_PROP_VALUE_IS, SPINEL_PROP_LAST_STATUS, 0x80, 0x01};
+
+    TEST_ASSERT_EQUAL(128, SPINEL_STATUS_RESET__END);
+    TEST_ASSERT_TRUE(ot_mux_gone_is_reset_notification(f, sizeof(f)));
+}
+
+TEST_CASE("On a status just outside the reset range (111, 129): not a reset notification", "[ot_port]")
+{
+    const uint8_t below[] = {SPINEL_HEADER_FLAG, SPINEL_CMD_PROP_VALUE_IS, SPINEL_PROP_LAST_STATUS, 111};
+    const uint8_t above[] = {SPINEL_HEADER_FLAG, SPINEL_CMD_PROP_VALUE_IS, SPINEL_PROP_LAST_STATUS, 0x81, 0x01};
+
+    TEST_ASSERT_FALSE(ot_mux_gone_is_reset_notification(below, sizeof(below)));
+    TEST_ASSERT_FALSE(ot_mux_gone_is_reset_notification(above, sizeof(above)));
+}
+
+TEST_CASE("On a reset status with a TID, about another property, cut short or without the flag: not a reset "
+          "notification", "[ot_port]")
+{
+    const uint8_t tid[] = {SPINEL_HEADER_FLAG | 1, SPINEL_CMD_PROP_VALUE_IS, SPINEL_PROP_LAST_STATUS,
+                           SPINEL_STATUS_RESET_POWER_ON
+                          };
+    const uint8_t prop[] = {SPINEL_HEADER_FLAG, SPINEL_CMD_PROP_VALUE_IS, SPINEL_PROP_HWADDR,
+                            SPINEL_STATUS_RESET_POWER_ON
+                           };
+    const uint8_t cut[] = {SPINEL_HEADER_FLAG, SPINEL_CMD_PROP_VALUE_IS, SPINEL_PROP_LAST_STATUS, 0x80};
+    const uint8_t no_flag[] = {0x00, SPINEL_CMD_PROP_VALUE_IS, SPINEL_PROP_LAST_STATUS, SPINEL_STATUS_RESET_POWER_ON};
+
+    TEST_ASSERT_FALSE(ot_mux_gone_is_reset_notification(tid, sizeof(tid)));
+    TEST_ASSERT_FALSE(ot_mux_gone_is_reset_notification(prop, sizeof(prop)));
+    TEST_ASSERT_FALSE(ot_mux_gone_is_reset_notification(cut, sizeof(cut)));
+    TEST_ASSERT_FALSE(ot_mux_gone_is_reset_notification(no_flag, sizeof(no_flag)));
+    TEST_ASSERT_FALSE(ot_mux_gone_is_reset_notification(NULL, 4));
+}
+
+TEST_CASE("On a reset status with an interface id in the header: a reset notification", "[ot_port]")
+{
+    const uint8_t f[] = {SPINEL_HEADER_FLAG | (1 << SPINEL_HEADER_IID_SHIFT), SPINEL_CMD_PROP_VALUE_IS,
+                         SPINEL_PROP_LAST_STATUS, SPINEL_STATUS_RESET_SOFTWARE
+                        };
+
+    TEST_ASSERT_TRUE(ot_mux_gone_is_reset_notification(f, sizeof(f)));
+}
+
+TEST_CASE("On a reset asked for after GONE once OpenThread's init finished: answered as done", "[ot_port]")
+{
+    TEST_ASSERT_TRUE(ot_mux_gone_answers_reset(true, true));
+}
+
+TEST_CASE("On a reset asked for after GONE during OpenThread's init (the RCP answered or not): not answered",
+          "[ot_port]")
+{
+    TEST_ASSERT_FALSE(ot_mux_gone_answers_reset(true, false));
+}
+
+TEST_CASE("On no reset asked for: nothing answered", "[ot_port]")
+{
+    TEST_ASSERT_FALSE(ot_mux_gone_answers_reset(false, true));
+    TEST_ASSERT_FALSE(ot_mux_gone_answers_reset(false, false));
+}
+
 void app_main(void)
 {
     UNITY_BEGIN();

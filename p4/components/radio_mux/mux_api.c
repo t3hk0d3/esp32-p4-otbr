@@ -308,11 +308,13 @@ void radio_mux_get_snapshot(radio_mux_snapshot_t *out)
 {
     out->n = 0;
     out->available_modes = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF);
+    out->reboot_modes = 0;
     if (!atomic_load(&g_mux.started)) {
         return;
     }
     mux_lock();
     out->available_modes = radio_mux_available_modes(&g_mux.rules);
+    out->reboot_modes = radio_mux_reboot_modes(&g_mux.rules);
     for (size_t i = 0; i < RADIO_MUX_CHANNELS_MAX; i++) {
         if (g_mux.chans[i].used) {
             fill_info(&g_mux.chans[i], &out->chans[out->n++]);
@@ -404,18 +406,7 @@ radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req
     if (moved_from && cap > 0) {
         snprintf(moved_from, cap, "%s", from);
     }
-    // The line and rcp_proxy parts of the request apply like any other change; the move stores the modes.
-    radio_mux_set_req_t rest = *req;
-
-    rest.has_mode = false;
-    if (rest.has_baud || rest.has_flow || rest.has_proxy) {
-        const radio_mux_verdict_t r = radio_mux_set(id, &rest, NULL, 0, NULL, 0);
-
-        if (r != RADIO_MUX_APPLY) {
-            ESP_LOGW(TAG, "%s: line settings after the move: verdict %d", id, (int)r);
-        }
-    }
-    return RADIO_MUX_MOVE;
+    return RADIO_MUX_MOVE; // the move stores the modes; it carries no line or rcp_proxy settings (handle_set)
 }
 
 bool radio_mux_started(void)

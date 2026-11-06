@@ -1072,6 +1072,9 @@ static void handle_set(mux_call_t *call)
         if (v == RADIO_MUX_MOVE && !call->have_mover) {
             v = RADIO_MUX_REFUSE_NOT_AVAILABLE; // nothing runs a move yet (Task 7)
         }
+        if (v == RADIO_MUX_MOVE && (req->has_baud || req->has_flow || req->has_proxy)) {
+            v = RADIO_MUX_REFUSE_BAD_VALUE; // a start, move or stop goes alone: its settings would never be stored
+        }
         if (v == RADIO_MUX_MOVE && call->stop) {
             ch->leave_mode = req->mode; // stored by the stop's commit, once OpenThread stopped
         }

@@ -34,6 +34,31 @@ size_t ot_mux_gone_frame(ot_mux_gone_t answer, uint8_t tid, uint32_t key, uint8_
 bool ot_mux_gone_is_reset(const uint8_t *frame, size_t len);
 // The reset notification that answers a reset after GONE: LAST_STATUS RESET_UNKNOWN with TID 0.
 size_t ot_mux_gone_reset_frame(uint8_t out[OT_MUX_GONE_FRAME_MAX]);
+// Whether an incoming frame is the RCP's reset notification: PROP_VALUE_IS LAST_STATUS with TID 0 (any interface id)
+// and a status from SPINEL_STATUS_RESET__BEGIN to SPINEL_STATUS_RESET__END, both included, as OpenThread counts it.
+bool ot_mux_gone_is_reset_notification(const uint8_t *frame, size_t len);
+// Whether a reset asked for after GONE (`reset_waiting`) is answered as done. Only once OpenThread's init finished
+// (`init_done`, esp_openthread_mux_init_done): during the init the reset must fail, so the reset-failure callback parks
+// the OpenThread task (br_core) and the init is abandoned; answered there, RadioSpinel would repeat the init's GET that
+// timed out, recover again, and never end.
+bool ot_mux_gone_answers_reset(bool reset_waiting, bool init_done);
+
+// The main loop's use of the channel (MuxSpinelInterface's UpdateFdSet). After GONE the channel's eventfd stays out
+// of the select: nothing comes from the channel any more, the answers after GONE need no wakeup, and an eventfd left
+// readable (an event still queued, or the next consumer's after a new attach) would make the select return at once on
+// every pass.
+typedef struct {
+    bool watch_fd; // put the channel's eventfd into the select
+    bool no_wait;  // the select must not wait (a zero timeout)
+} ot_mux_loop_t;
+
+// `gone`: the channel is gone. `frames_waiting`: a frame may still wait (one was just taken, or one is held back).
+// `answers_due`: a request or a reset waits for its answer (answered only after GONE; before, the RCP answers).
+ot_mux_loop_t ot_mux_loop_plan(bool gone, bool frames_waiting, bool answers_due);
+// Whether Process takes from the channel this pass (`readable`: the select found the eventfd readable). After GONE on
+// every pass: the take drains what is still queued (slots back to the pool, the eventfd cleared) and answers what is
+// due.
+bool ot_mux_loop_take(bool gone, bool frames_waiting, bool readable);
 
 #ifdef __cplusplus
 }

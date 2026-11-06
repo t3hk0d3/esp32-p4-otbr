@@ -565,19 +565,25 @@ static bool moves_to(const radio_mux_set_req_t *req, const char *id, const char 
     return sets_otbr(req) && (!otbr_id || strcmp(otbr_id, id) != 0);
 }
 
-bool device_api_channel_is_move(const radio_mux_set_req_t *req, const char *id, const char *otbr_id)
+bool device_api_channel_is_move(const radio_mux_set_req_t *req, const char *id, const char *otbr_id,
+                                uint32_t reboot_modes)
 {
-    const bool stop = req->has_mode && req->mode != RADIO_MUX_MODE_OTBR && otbr_id && strcmp(otbr_id, id) == 0;
+    // The mux decides APPLY_REBOOT before a stop: leaving otbr for (or from) a rebooting mode is no stop.
+    const bool reboots = req->has_mode && (reboot_modes & (RADIO_MUX_MODE_BIT(req->mode) |
+                                                           RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OTBR)));
+    const bool stop = req->has_mode && req->mode != RADIO_MUX_MODE_OTBR && otbr_id && strcmp(otbr_id, id) == 0 &&
+                      !reboots;
 
     return moves_to(req, id, otbr_id) || stop;
 }
 
-const char *device_api_channel_move_refusal(const radio_mux_set_req_t *req, const char *id, const char *otbr_id)
+const char *device_api_channel_move_refusal(const radio_mux_set_req_t *req, const char *id, const char *otbr_id,
+                                           uint32_t reboot_modes)
 {
     const bool more = req->has_baud || req->has_flow || req->has_proxy || req->kick;
 
-    return more && moves_to(req, id, otbr_id)
-           ? "send line or proxy settings in a separate request from moving Thread" : NULL;
+    return more && device_api_channel_is_move(req, id, otbr_id, reboot_modes)
+           ? "send line or proxy settings in a separate request from starting, moving or stopping Thread" : NULL;
 }
 
 const char *device_api_channel_move_busy(const radio_mux_set_req_t *req, bool move_running)

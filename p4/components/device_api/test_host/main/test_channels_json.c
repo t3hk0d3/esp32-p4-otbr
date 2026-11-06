@@ -810,8 +810,8 @@ TEST_CASE("On a move of Thread that also carries line or proxy settings: 400, no
     for (size_t i = 0; i < sizeof(bodies) / sizeof(bodies[0]); i++) {
         const radio_mux_set_req_t req = proxy_req(bodies[i]);
 
-        TEST_ASSERT_EQUAL_STRING_MESSAGE("send line or proxy settings in a separate request from moving Thread",
-                                         device_api_channel_move_refusal(&req, "usb-1", "c6"), bodies[i]);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE("send line or proxy settings in a separate request from starting, moving or stopping Thread",
+                                         device_api_channel_move_refusal(&req, "usb-1", "c6", 0), bodies[i]);
     }
 }
 
@@ -819,20 +819,48 @@ TEST_CASE("On a move of Thread alone, or settings with otbr that is no move: acc
 {
     radio_mux_set_req_t req = proxy_req("{\"mode\":\"otbr\"}");
 
-    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "c6"));
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "c6", 0));
     req = proxy_req("{\"mode\":\"otbr\",\"baud\":460800}");
-    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "c6", "c6"));  // already there: no move
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "c6", "c6", 0));  // already there: no move
     req = proxy_req("{\"mode\":\"rcp-proxy\",\"rcp_proxy\":{\"port\":7000}}");
-    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "c6"));
-    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "c6", "c6")); // a stop takes its new mode's settings
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "c6", 0)); // another channel's mode: no move
+}
+
+TEST_CASE("On a stop of Thread that also carries line or proxy settings: 400, nothing to claim", "[device_api]")
+{
+    static const char *const bodies[] = {
+        "{\"mode\":\"rcp-proxy\",\"rcp_proxy\":{\"port\":7000}}",
+        "{\"mode\":\"rcp-proxy\",\"rcp_proxy\":{\"kick\":true}}",
+        "{\"mode\":\"off\",\"baud\":115200}",
+        "{\"mode\":\"off\",\"flow_control\":true}",
+    };
+
+    for (size_t i = 0; i < sizeof(bodies) / sizeof(bodies[0]); i++) {
+        const radio_mux_set_req_t req = proxy_req(bodies[i]);
+
+        TEST_ASSERT_EQUAL_STRING_MESSAGE("send line or proxy settings in a separate request from starting, moving or "
+                                         "stopping Thread", device_api_channel_move_refusal(&req, "usb-1", "usb-1", 0),
+                                         bodies[i]);
+    }
+}
+
+TEST_CASE("On a stop of Thread alone, or settings without a mode on the Thread channel: accepted", "[device_api]")
+{
+    radio_mux_set_req_t req = proxy_req("{\"mode\":\"off\"}");
+
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "usb-1", 0));
+    req = proxy_req("{\"rcp_proxy\":{\"port\":7000}}");
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "usb-1", 0));
+    req = proxy_req("{\"baud\":115200}");
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "usb-1", 0));
 }
 
 TEST_CASE("On a start of Thread (no channel has it) that also carries line or proxy settings: 400", "[device_api]")
 {
     const radio_mux_set_req_t req = proxy_req("{\"mode\":\"otbr\",\"baud\":460800}");
 
-    TEST_ASSERT_EQUAL_STRING("send line or proxy settings in a separate request from moving Thread",
-                             device_api_channel_move_refusal(&req, "usb-1", NULL));
+    TEST_ASSERT_EQUAL_STRING("send line or proxy settings in a separate request from starting, moving or stopping Thread",
+                             device_api_channel_move_refusal(&req, "usb-1", NULL, 0));
 }
 
 TEST_CASE("On a mode PUT while a move of Thread runs: 409 busy on any channel", "[device_api]")
@@ -943,13 +971,13 @@ TEST_CASE("On a PUT of otbr while another channel has it: it is a move (the long
 {
     radio_mux_set_req_t req = proxy_req("{\"mode\":\"otbr\"}");
 
-    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "usb-10c4-ea60", "c6"));
-    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "c6", "c6"));    // already there
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "usb-10c4-ea60", "c6", 0));
+    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "c6", "c6", 0));    // already there
     req = proxy_req("{\"mode\":\"off\"}");
-    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "usb-10c4-ea60", "c6"));
+    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "usb-10c4-ea60", "c6", 0));
     req = proxy_req("{\"baud\":115200}");
-    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "usb-10c4-ea60", "c6"));
-    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "c6", "c6"));
+    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "usb-10c4-ea60", "c6", 0));
+    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "c6", "c6", 0));
 }
 
 TEST_CASE("On a PUT of otbr while no channel has it: a start, run like a move (the long-operation slot)",
@@ -957,7 +985,7 @@ TEST_CASE("On a PUT of otbr while no channel has it: a start, run like a move (t
 {
     const radio_mux_set_req_t req = proxy_req("{\"mode\":\"otbr\"}");
 
-    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", NULL));
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", NULL, 0));
 }
 
 TEST_CASE("On a PUT of off or rcp-proxy on the OTBR channel: a stop, run like a move (the long-operation slot)",
@@ -965,9 +993,32 @@ TEST_CASE("On a PUT of off or rcp-proxy on the OTBR channel: a stop, run like a 
 {
     radio_mux_set_req_t req = proxy_req("{\"mode\":\"off\"}");
 
-    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", "c6"));
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", "c6", 0));
     req = proxy_req("{\"mode\":\"rcp-proxy\"}");
-    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", "c6"));
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", "c6", 0));
+}
+
+TEST_CASE("On a PUT of a rebooting mode (ziggurat) on the OTBR channel: not a stop, as the mux's APPLY_REBOOT comes first",
+          "[device_api]")
+{
+    const uint32_t reboots = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_ZIGGURAT);
+    radio_mux_set_req_t req = proxy_req("{\"mode\":\"ziggurat\"}");
+
+    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "c6", "c6", reboots));
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", "c6", 0)); // no consumer reboots: a stop
+    req = proxy_req("{\"mode\":\"off\"}");
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", "c6", reboots)); // off does not reboot: still a stop
+    req = proxy_req("{\"mode\":\"otbr\"}");
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "usb-1", "c6", reboots)); // a move is decided before reboots
+}
+
+TEST_CASE("On a PUT of ziggurat with settings on the OTBR channel while ziggurat reboots: the settings are not refused",
+          "[device_api]")
+{
+    const radio_mux_set_req_t req = proxy_req("{\"mode\":\"ziggurat\",\"baud\":115200}");
+
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "c6", "c6", RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_ZIGGURAT)));
+    TEST_ASSERT_NOT_NULL(device_api_channel_move_refusal(&req, "c6", "c6", 0));
 }
 
 TEST_CASE("On a PUT of otbr on the OTBR channel in RADIO_FAULT: OpenThread's start is retried", "[device_api]")

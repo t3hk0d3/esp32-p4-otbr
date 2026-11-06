@@ -295,7 +295,7 @@ settings are stored and applied at once, also for an unplugged radio.
 | --- | --- |
 | 200 + the channel | applied; with `"reboot": true` when the mode's consumer reboots the board on a change |
 | 202 `{"moving": true, "moved_from": "<id>"}` | `otbr` on a channel while another has it: Thread moves after the target passed a probe; the target shows `starting` until it settles, the stored modes change only when it runs. The same for a start (`otbr` while no channel has it; `moved_from` null) and a stop (another mode on the channel that has `otbr`; `moved_from` is that channel: its sessions drain, OpenThread stops, then the new mode is stored) |
-| 400 `bad_value` | wrong type or value; `detail` names the field (`mode`, `baud`, `rcp_proxy.port`, `rcp_proxy.host`, ...); `unavailable` cannot be set; a move or start may not carry `baud`, `flow_control` or `rcp_proxy` settings (a stop may: they are its new mode's) |
+| 400 `bad_value` | wrong type or value; `detail` names the field (`mode`, `baud`, `rcp_proxy.port`, `rcp_proxy.host`, ...); `unavailable` cannot be set; a start, move or stop of Thread may not carry `baud`, `flow_control` or `rcp_proxy` settings (send them in a request of their own; nothing is stored) |
 | 404 `unknown_channel` | no such id |
 | 409 `unavailable`, `incompatible`, `not_available` | the radio is not usable, its detected firmware does not fit the mode, or no consumer is registered for the mode (`ziggurat`) |
 | 409 `mode_taken`, `hybrid_not_supported` | the mode is at its channel limit; OTBR and a registered `ziggurat` consumer at once |
