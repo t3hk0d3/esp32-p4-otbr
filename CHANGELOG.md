@@ -16,6 +16,10 @@ release's `versions.txt`.
   `/device/radio/firmware?from_url=` now accept `https://` (verified against the built-in certificate bundle) and follow
   redirects. Bundles are not signed; trust is TLS to GitHub. Test builds add the console command `update_source`. See
   `docs/updates.md`. Not yet checked on a board.
+- Chip temperature: `chip_temperature_c` in `GET /device/diag`, the gauge `br_chip_temperature_celsius` in `/metrics`
+  and a "Chip temperature" row in the "Load and memory" card of the Status page. It is the die temperature, not the
+  room temperature: it reads above ambient and rises with load. The sensor measures 20 to 100 °C, about ±2 °C. When it
+  cannot start or a read fails, the value is `null` (`-` on the page, no series in `/metrics`). See `docs/diagnostics.md`.
 
 ## [0.4.0] - 2026-11-05
 
