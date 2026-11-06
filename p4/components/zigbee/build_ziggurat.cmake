@@ -53,5 +53,8 @@ add_custom_target(ziggurat_staticlib DEPENDS "${ZIGGURAT_LIB}" "${ZIGGURAT_HEADE
 
 add_prebuilt_library(ziggurat_ot "${ZIGGURAT_LIB}")
 add_dependencies(ziggurat_ot ziggurat_staticlib)
-target_link_libraries(${COMPONENT_LIB} INTERFACE ziggurat_ot)
-target_include_directories(${COMPONENT_LIB} INTERFACE "${ZIGGURAT_OUT_DIR}")
+# The component's C sources include ziggurat.h (so it is generated before they compile) and define the archive's
+# imports; the archive is linked after the component's library.
+add_dependencies(${COMPONENT_LIB} ziggurat_staticlib)
+target_link_libraries(${COMPONENT_LIB} PUBLIC ziggurat_ot)
+target_include_directories(${COMPONENT_LIB} PRIVATE "${ZIGGURAT_OUT_DIR}")

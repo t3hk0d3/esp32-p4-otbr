@@ -8,7 +8,8 @@ Names are the FreeRTOS task names as reported in /device/diag tasks[].name:
 - mdns: mDNS service task (CONFIG_MDNS_TASK_AFFINITY_CPU0)
 - esp_timer: esp_timer task, always core 0
 - httpd: esp_http_server (httpd_config_t.core_id, patch 1); thread_rest: upstream REST worker (patch 11)
-- diag, c6_log, pcap_stream, ota_http, radio_fw, rom_recover, radio_mux, rcp_proxy: our tasks, pinned in code
+- diag, c6_log, pcap_stream, ota_http, radio_fw, rom_recover, radio_mux, rcp_proxy, zigbee, zigbee_tx: our tasks,
+  pinned in code (the two zigbee tasks exist only once a channel in mode ziggurat was attached)
 - usb_lib, USB-CDC: the USB host daemon and the CDC driver task, pinned by radio_mux
 - console_repl: the console REPL (IDF esp_console_repl_chip.c:144; main/console.c pins it)
 Tasks that no knob pins (e.g. the Wi-Fi provisioning DNS task) and tasks outside the table are ignored.
@@ -24,6 +25,8 @@ NETWORK_TASKS = {
     "sys_evt": NET_CORE,
     "mdns": NET_CORE,
     "esp_timer": NET_CORE,
+    # Zigbee mode: the zigbee task (ZIGBEE_TASK_CORE), made when a channel in mode ziggurat is first attached.
+    "zigbee": NET_CORE,
 }
 
 MANAGEMENT_TASKS = {
@@ -42,6 +45,8 @@ MANAGEMENT_TASKS = {
     "USB-CDC": MGMT_CORE,
     # RCP proxy (the rcp-proxy mode's sockets), started at every boot.
     "rcp_proxy": MGMT_CORE,
+    # Zigbee mode: the WebSocket sender, made with the zigbee task.
+    "zigbee_tx": MGMT_CORE,
 }
 
 # Present in every BR-mode boot with the jumper fitted; the others exist only while their job or request runs.

@@ -25,6 +25,7 @@
 #include "routing.h"
 #include "storage.h"
 #include "supervisor.h"
+#include "zigbee.h"
 
 static const char *TAG = "app";
 
@@ -32,6 +33,19 @@ static const char *TAG = "app";
 #define NET_INIT_TASK_PRIORITY 5
 
 static char s_web_base_path[] = "/web";
+
+// The web server's extra handlers (patch 10): the device API, then the Zigbee WebSocket. A failed /zigbee leaves the
+// device API in place.
+static esp_err_t register_extra_handlers(httpd_handle_t server)
+{
+    ESP_RETURN_ON_ERROR(device_api_register(server), TAG, "device_api_register");
+    const esp_err_t err = zigbee_register_ws(server);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "zigbee_register_ws: %s, no /zigbee", esp_err_to_name(err));
+    }
+    return ESP_OK;
+}
 
 // Drivers allocate their interrupts on the core that installs them: the Ethernet driver and the netifs (netcfg) are set up
 // from core 0, and br_core_start (radio sync, OpenThread) runs from the same task on the backbone netif netcfg created.
@@ -128,6 +142,11 @@ void app_main(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "rcp_proxy_register: %s, no rcp-proxy mode", esp_err_to_name(err));
     }
+    // The ziggurat consumer (Zigbee mode) too: its task starts when the mux attaches a channel stored in ziggurat.
+    err = zigbee_register();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "zigbee_register: %s, no ziggurat mode", esp_err_to_name(err));
+    }
     // The radio channel mux: the only USB host owner. Consumers register before it starts; br_core keeps its own SPI
     // path to the C6 until the C6 transport and the otbr consumer exist.
     err = radio_mux_start();
@@ -153,7 +172,7 @@ void app_main(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "the embedded C6 base image is unusable, ROM recovery is off: %s", esp_err_to_name(err));
     }
-    esp_br_web_set_extra_handlers(device_api_register);
+    esp_br_web_set_extra_handlers(register_extra_handlers);
     esp_br_web_start(s_web_base_path);
     // A stuck OpenThread lock or HTTP server task aborts (core dump, reboot) instead of waiting for a power cycle.
     err = supervisor_start();
