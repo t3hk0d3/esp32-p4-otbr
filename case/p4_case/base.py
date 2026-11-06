@@ -8,6 +8,7 @@ from build123d import (
     Circle,
     Cone,
     Cylinder,
+    Kind,
     Part,
     Plane,
     Polygon,
@@ -16,6 +17,7 @@ from build123d import (
     Rot,
     SlotCenterToCenter,
     extrude,
+    offset,
 )
 
 from p4_case import params as P
@@ -97,6 +99,20 @@ def _screw_holes() -> Part:
     return Part() + cut
 
 
+def _neck_lobes(x: float, y: float) -> list:
+    """Round lobes narrowing both arms of a keyhole to KEY_NECK_W over about KEY_NECK_LEN."""
+    r = P.KEY_NECK_LEN / 2 + 0.1
+    off = P.KEY_NECK_W / 2 + r  # lobe centres sit just outside the neck
+    at = P.KEY_NECK_AT
+    centres = [
+        (x - off, y + at),
+        (x + off, y + at),
+        (x + at, y - off),
+        (x + at, y + off),
+    ]
+    return [Pos(cx, cy) * Circle(r) for cx, cy in centres]
+
+
 def _keyholes() -> Part:
     cut = []
     sep = P.KEY_ARM_L
@@ -106,8 +122,19 @@ def _keyholes() -> Part:
             Pos(x, y + sep / 2) * Rot(0, 0, 90) * SlotCenterToCenter(sep, P.KEY_ARM_W)
         )
         arm_x = Pos(x + sep / 2, y) * SlotCenterToCenter(sep, P.KEY_ARM_W)
-        profile = entry + arm_y + arm_x
+        outline = entry + arm_y + arm_x
+        profile = outline
+        for lobe in _neck_lobes(x, y):
+            profile -= lobe
         cut.append(Pos(0, 0, board_z(0.0) - 1) * extrude(profile, P.PLATE_T + 2))
+        # 45° chamfer at the back face (the bed side): the outline (without the neck) grown by KEY_CHAMFER, tapering
+        # back to it; it trims the neck lobes' first KEY_CHAMFER too, so squish can't narrow the neck either.
+        # It starts EPS below the face and ends EPS inside the bore, so its cone crosses the bore wall cleanly.
+        c = P.KEY_CHAMFER
+        mouth = offset(outline, c + EPS, kind=Kind.ARC)
+        cut.append(
+            Pos(0, 0, board_z(0.0) - EPS) * extrude(mouth, c + 3 * EPS, taper=45)
+        )
     return Part() + cut
 
 
@@ -120,12 +147,13 @@ def _cable_wall_openings() -> Part:
         block(cx0, cx1, y0, y1, P.OPENING_BOTTOM, board_z(P.TOP) + 1),
         block(sx0, sx1, y0, y1, sz0, sz1),
     ]
-    # thumb scoop on the slot's top edge: a wedge into the outer face (YZ profile, extruded along X)
+    # thumb scoop above the slot's top edge, past a SCOOP_LIP lip: a wedge into the outer face (YZ profile, along X)
     face = P.OUTER[2]
+    z0 = sz1 + P.SCOOP_LIP
     wedge = [
-        (face - EPS, sz1 - EPS),
-        (face + P.SCOOP_DEPTH, sz1 - EPS),
-        (face - EPS, sz1 + P.SCOOP_RISE),
+        (face - EPS, z0),
+        (face + P.SCOOP_DEPTH, z0),
+        (face - EPS, z0 + P.SCOOP_RISE),
     ]
     sx_a, sx_b = P.SCOOP_X
     prism = extrude(
@@ -137,10 +165,11 @@ def _cable_wall_openings() -> Part:
 
 def _header_slot() -> Part:
     x0, x1 = P.HEADER_SLOT_X
+    # starts INNER_R inside the cavity: it takes the cavity's rounded corners too, leaving no sliver against the slot
     return block(
         x0,
         x1,
-        P.INNER[3] - EPS,
+        P.INNER[3] - P.INNER_R,
         P.OUTER[3] + 1,
         board_z(P.HEADER_SLOT_BOTTOM),
         board_z(P.TOP) + 1,
@@ -150,11 +179,13 @@ def _header_slot() -> Part:
 def _buttons() -> Part:
     a, b = FACTS["button_a"], FACTS["button_b"]
     m = P.BUTTON_RECESS_MARGIN
-    cuts = [
-        block(
-            P.BUTTON_RECESS_X, P.INNER[0] + EPS, a.y0 - m, b.y1 + m, a.z0 - m, a.z1 + m
-        )
-    ]
+    # recess into the wall's inner face; its ceiling slopes up at 45° to the face, so it needs no bridge
+    x0, x1 = P.BUTTON_RECESS_X, P.INNER[0] + EPS
+    z0, z1 = a.z0 - m, a.z1 + m
+    profile = [(x0, z0), (x1, z0), (x1, z1 + (x1 - x0)), (x0, z1)]
+    span = b.y1 - a.y0 + 2 * m
+    recess = extrude(Plane.XZ * Polygon(*profile, align=None), span / 2, both=True)
+    cuts = [Pos(0, (a.y0 + b.y1) / 2, 0) * recess]
     for btn in (a, b):
         yc, zc = (btn.y0 + btn.y1) / 2, (btn.z0 + btn.z1) / 2
         cuts.append(
@@ -175,11 +206,22 @@ def _buttons() -> Part:
 
 def _sma() -> Part:
     zc = board_z(P.SMA_CASE_Z)
-    # the hole stops short of the outer face: a one-line knock-out closes it until an SMA is fitted
+    r = P.SMA_D / 2
+    # the hole stops short of the outer face: a two-line knock-out closes it until an SMA is fitted
     x0, x1 = P.INNER[1] - EPS, P.OUTER[1] - P.SMA_KNOCKOUT_T
     hole = x_cylinder(P.SMA_Y, zc, P.SMA_D, x0, x1)
-    flat_z = zc + P.SMA_FLAT - P.SMA_D / 2
-    keep = block(x0, x1, P.SMA_Y - P.SMA_D, P.SMA_Y + P.SMA_D, zc - P.SMA_D, flat_z)
+    # teardrop top: a 45° roof tangent to the circle, so the top prints without support
+    roof = [
+        (P.SMA_Y - r / math.sqrt(2), zc + r / math.sqrt(2)),
+        (P.SMA_Y, zc + r * math.sqrt(2)),
+        (P.SMA_Y + r / math.sqrt(2), zc + r / math.sqrt(2)),
+        (P.SMA_Y, zc),
+    ]
+    # extrudes toward -X
+    hole += Pos(x1, 0, 0) * extrude(Plane.YZ * Polygon(*roof, align=None), x1 - x0)
+    # the flat is at the bottom, where it prints as a floor; it keeps the bulkhead from turning
+    flat_z = zc - (P.SMA_FLAT - r)
+    keep = block(x0, x1, P.SMA_Y - P.SMA_D, P.SMA_Y + P.SMA_D, flat_z, zc + P.SMA_D)
     return hole & keep
 
 
@@ -190,16 +232,20 @@ def tab_y_centres() -> tuple[float, float]:
 
 
 def _dents() -> Part:
-    z = board_z(P.BUMP_Z)
+    """Dents shaped like the bumps (lead face below, hold face above), DENT_PRELOAD lower than the bump crests."""
+    z = board_z(P.BUMP_Z - P.DENT_PRELOAD)
     d = P.DENT_DEPTH
-    flank = d / math.tan(math.radians(P.BUMP_ANGLE))
+    # the cut starts this far inside the cavity, continuing both faces' slopes
+    over = 0.2
+    lead = (d + over) / math.tan(math.radians(P.BUMP_LEAD_ANGLE))
+    hold = (d + over) / math.tan(math.radians(P.BUMP_HOLD_ANGLE))
     cuts = []
     for yc in tab_y_centres():
         for face_x, out in ((P.INNER[0], -1), (P.INNER[1], 1)):
             pts = [
-                (face_x - out * 0.2, z - flank - 0.2),
+                (face_x - out * over, z - lead),
                 (face_x + out * d, z),
-                (face_x - out * 0.2, z + flank + 0.2),
+                (face_x - out * over, z + hold),
             ]
             prism = extrude(
                 Plane.XZ * Polygon(*pts, align=None), P.DENT_LEN / 2, both=True

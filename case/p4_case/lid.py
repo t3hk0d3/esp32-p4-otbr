@@ -3,8 +3,7 @@
 import math
 
 from build123d import (
-    Align,
-    Cylinder,
+    Axis,
     Face,
     Part,
     Plane,
@@ -12,7 +11,7 @@ from build123d import (
     Pos,
     Rectangle,
     RegularPolygon,
-    Rot,
+    chamfer,
     extrude,
 )
 
@@ -42,6 +41,9 @@ def _plate() -> Part:
     fx0, fx1, fy0, fy1, fr = _flange_outline()
     bx0, bx1, by0, by1, br = _body_outline()
     flange = rounded_block(fx0, fx1, fy0, fy1, FLOOR, TOP, fr)
+    # the top face prints on the bed: chamfer its edge so elephant's foot doesn't widen the flange
+    top_edges = flange.faces().sort_by(Axis.Z)[-1].outer_wire().edges()
+    flange = chamfer(top_edges, P.LID_TOP_CHAMFER)
     body = rounded_block(bx0, bx1, by0, by1, UNDER, FLOOR + EPS, br)
     return flange + body
 
@@ -120,38 +122,35 @@ def _tab(side: int, end: int) -> Part:
     lengthwise = Pos(x_face, 0, 0) * lengthwise
     tab = across & lengthwise
 
-    # root fillet: a concave quarter-round along the inner root edge
-    r = P.TAB_FILLET
-    xr = xp(P.TAB_ROOT_T)
-    y0, y1 = sorted((y_end, y_far))
-    wedge = block(
-        min(xr, xp(P.TAB_ROOT_T + r)),
-        max(xr, xp(P.TAB_ROOT_T + r)),
-        y0,
-        y1,
-        UNDER - r,
-        UNDER + EPS,
-    )
-    round_cut = (
-        Pos(xp(P.TAB_ROOT_T + r), y0 - 1, UNDER - r)
-        * Rot(-90, 0, 0)
-        * Cylinder(r, y1 - y0 + 2, align=(Align.CENTER, Align.CENTER, Align.MIN))
-    )
-    tab += wedge - round_cut
-
-    return tab
+    # root gusset: a 45° wedge along the inner root edge (it prints as steps; a fillet would mostly vanish). It
+    # starts 0.5 inside the tab: the tab's inner face tapers away from the root, and the gusset must stay joined to it
+    g = P.TAB_GUSSET
+    xr, xin = xp(P.TAB_ROOT_T), xp(P.TAB_ROOT_T - 0.5)
+    gusset = [
+        (xin, UNDER + EPS),
+        (xp(P.TAB_ROOT_T + g), UNDER + EPS),
+        (xr, UNDER - g),
+        (xin, UNDER - g),
+    ]
+    wedge = extrude(Plane.XZ * Polygon(*gusset, align=None), P.TAB_LEN / 2, both=True)
+    return tab + Pos(0, (y_end + y_far) / 2, 0) * wedge
 
 
 def _bump(side: int, end: int) -> Part:
-    """Detent bump on a tab's wall face, centred on the tab, reaching BUMP_H toward the wall."""
+    """Detent bump on a tab's wall face, centred on the tab, reaching BUMP_H toward the wall.
+
+    Its lower (lead) face slopes at BUMP_LEAD_ANGLE from the tab face, its upper (hold) face at BUMP_HOLD_ANGLE.
+    """
     x_face = IX0 + P.TAB_CLEAR if side < 0 else IX1 - P.TAB_CLEAR
     inward = -side
     zc = board_z(P.BUMP_Z)
-    flank = P.BUMP_H / math.tan(math.radians(P.BUMP_ANGLE))
+    sink = 0.1  # the bump's base sits this far inside the tab, continuing both faces' slopes
+    lead = (P.BUMP_H + sink) / math.tan(math.radians(P.BUMP_LEAD_ANGLE))
+    hold = (P.BUMP_H + sink) / math.tan(math.radians(P.BUMP_HOLD_ANGLE))
     tri = [
-        (x_face + inward * 0.1, zc - flank - 0.06),
+        (x_face + inward * sink, zc - lead),
         (x_face - inward * P.BUMP_H, zc),
-        (x_face + inward * 0.1, zc + flank + 0.06),
+        (x_face + inward * sink, zc + hold),
     ]
     bump = extrude(Plane.XZ * Polygon(*tri, align=None), P.BUMP_LEN / 2, both=True)
     yc = tab_y_centres()[0 if end < 0 else 1]

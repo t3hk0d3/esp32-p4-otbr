@@ -55,6 +55,13 @@ KEY_ARM_W = 4.3
 KEY_ARM_L = 7.0  # entry centre to arm-end centre, toward +Y and +X
 KEY_HEAD_D = 7.5
 KEY_HEAD_H = 2.5
+# snap neck in each arm: a Ø3.5 shank clicks past it, so pushing a plug in can't lift the case off its screws
+KEY_NECK_W = 3.3
+# entry centre to neck centre; the shank parks past it at the arm's end
+KEY_NECK_AT = 4.5
+KEY_NECK_LEN = 1.0
+# 45° on the bed side: first-layer squish would otherwise narrow the keyholes
+KEY_CHAMFER = 0.4
 
 # --- cable wall openings (5.2) ---
 OPENING_MARGIN = 0.5
@@ -68,13 +75,15 @@ LINTEL_SPLIT_X = (
     FACTS["usb"].x1 + FACTS["rj45"].x0
 ) / 2  # where the lintel steps from the USB to the RJ45 height
 SCOOP_X = (41.5, 49.0)
-# above the slot, where the card's grip edge is (print feedback); deepest at the slot's top edge, its ceiling slopes
-# back out to the face at about 40 degrees from vertical so it prints without support
-SCOOP_DEPTH = 1.5
+# above the slot, where the card's grip edge is (print feedback). A 0.4 mm lip stays over the slot and 0.8 mm (two
+# printed lines) behind the scoop; its ceiling slopes back out to the face at about 34 degrees from vertical
+SCOOP_LIP = 0.4
+SCOOP_DEPTH = 1.2
 SCOOP_RISE = 1.8
 
 # --- header-end slot and ribbon-plug room (5.2) ---
-HEADER_SLOT_X = (0.5, 54.5)
+# the full inner width: no thin slivers at the corners
+HEADER_SLOT_X = (INNER[0], INNER[1])
 HEADER_SLOT_CLEAR = 3.5  # clear height under the lid flange
 # case Z 22.1: 3.5 mm under the lid body, which overhangs the slot floor by TAB/LID clearance only; the slot is cut
 # open to the wall top (no bridge), so inside the wall it is 4.5 mm tall up to the lid flange
@@ -93,13 +102,18 @@ BUTTON_RECESS_MARGIN = 0.5
 SMA_Y = 52.0
 SMA_CASE_Z = 17.6
 SMA_D = 6.5
-SMA_FLAT = 5.9  # across the flat; the flat is on top
-SMA_KNOCKOUT_T = 0.45  # one extrusion line left over the hole at the outer face; cut it out to fit the SMA
+# across the flat; the flat is at the bottom and the top is a 45° teardrop: no support needed
+SMA_FLAT = 5.9
+# two extrusion lines left over the hole at the outer face; cut it out to fit the SMA
+SMA_KNOCKOUT_T = 0.8
 
 # --- lid and tabs (5.3) ---
 # 2.0: 1 mm body inside the walls + 1 mm flange in the rebate
 LID_T = TOP - LID_UNDERSIDE
 LID_CLEAR = 0.2  # per side, flange to rebate and body to inner wall
+# 45° on the top face's edge, which prints on the bed: room for elephant's foot
+LID_TOP_CHAMFER = 0.4
+LAYER_H = 0.2  # the print layer height the detent is aligned to
 FRAME_W = 5.5
 CELL = 3.5  # honeycomb, across flats
 CELL_WALL = 1.0
@@ -112,10 +126,17 @@ TAB_TIP_T = 1.9  # inner-face taper target, before the outer lead-in
 TAB_FLAT = 2.0
 TAB_LEAD = 0.5
 TAB_CLEAR = 0.2
-TAB_FILLET = 1.5
-BUMP_H = 0.5  # 0.4 opened too easily (print feedback)
-BUMP_ANGLE = 30.0  # ramp angle from the tab face
+# 45° root gusset, legs along the plate and down the tab (a fillet mostly vanishes when sliced)
+TAB_GUSSET = 1.2
+# 0.4 is back: the 4 mm side walls no longer flex, the 45° hold face and the preload do the retaining
+BUMP_H = 0.4  # from the tab face; reaches BUMP_H - TAB_CLEAR past the wall face
+BUMP_LEAD_ANGLE = 30.0  # lower face, from the tab face: the lid closes over it
+BUMP_HOLD_ANGLE = 45.0  # upper face: opening takes about 1.75x the force of closing
 BUMP_LEN = 6.0  # along Y
-BUMP_Z = LID_UNDERSIDE - 1.0  # case Z of the bump's crest
-DENT_DEPTH = BUMP_H + 0.1
+# case Z of the bump's crest, on a layer centre of the top-down lid
+BUMP_Z = LID_UNDERSIDE - 0.9
+# into the wall: as far as the bump reaches past the wall face
+DENT_DEPTH = BUMP_H - TAB_CLEAR
+# dent sits this much lower: its hold face presses the bump, pulling the lid down; no rattle
+DENT_PRELOAD = 0.1
 DENT_LEN = BUMP_LEN + 1.0

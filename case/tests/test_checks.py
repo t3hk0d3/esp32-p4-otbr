@@ -169,7 +169,7 @@ class TestRunAll:
 
         board_facts = [n for n in results if n.startswith("board fact")]
         assert len(board_facts) == len(F) + 2
-        assert len(results) - len(board_facts) == 14
+        assert len(results) - len(board_facts) == 18
 
 
 class TestOpeningSizeTallSlot:
@@ -207,3 +207,79 @@ class TestPrintabilityCantilever:
         roof = box(5, 15, 0, 10, 8, 10)
         r = checks.printability(tower + roof, "fixture", top_down=False)
         assert not r.ok
+
+
+class TestDetentEngagementDefault:
+    """checks.detent_engagement: On the default lid and base"""
+
+    def test_passes_and_reports_reach_and_preload(self, results):
+        r = results["lid snaps engage the walls"]
+        assert r.ok, r.detail
+        assert "past the wall" in r.detail and "preload" in r.detail
+
+
+class TestDetentEngagementNoBumps:
+    """checks.detent_engagement: With the bumps trimmed back to the tab faces"""
+
+    def test_fails_reporting_the_reach(self, base, lid):
+        x0, x1, _, _ = P.INNER
+        z0, z1 = board_z(P.BUMP_Z) - 2, board_z(P.BUMP_Z) + 2
+        trim = box(x0 - 1, x0 + P.TAB_CLEAR, -5, 80, z0, z1) + box(
+            x1 - P.TAB_CLEAR, x1 + 1, -5, 80, z0, z1
+        )
+        r = checks.detent_engagement(base, lid - trim)
+        assert not r.ok
+        assert "past the wall" in r.detail
+
+
+class TestLidSeatsPreload:
+    """checks.lid_seats: With the bumps preloaded into their dents"""
+
+    def test_ignores_the_designed_bump_overlap(self, base, lid):
+        assert checks._intersection(base, lid) > checks.BOOL_EPS  # the preload
+        assert checks.lid_seats(base, lid).ok
+
+
+class TestSmaRoom:
+    """checks.sma_room: On the vendor board"""
+
+    def test_passes_for_the_default_envelope(self, results):
+        r = results["SMA nut clears the board"]
+        assert r.ok, r.detail
+
+    def test_fails_when_the_envelope_reaches_the_board(self, board):
+        r = checks.sma_room(board, radius=12.0)
+        assert not r.ok
+        assert "board column" in r.detail
+
+
+class TestMinPrintWidthDefault:
+    """checks.min_print_width: On the base (plate down) and the lid (top down)"""
+
+    def test_passes(self, results):
+        for name in (
+            "base has no strand under 0.8 mm",
+            "lid has no strand under 0.8 mm",
+        ):
+            assert results[name].ok, results[name].detail
+
+
+class TestMinPrintWidthStrand:
+    """checks.min_print_width: With two blocks joined by a 0.45 mm wall"""
+
+    def test_fails_with_the_strand_location(self):
+        part = (
+            box(0, 5, 0, 5, 0, 5) + box(10, 15, 0, 5, 0, 5) + box(5, 10, 2, 2.45, 0, 5)
+        )
+        r = checks.min_print_width(part, "fixture", top_down=False)
+        assert not r.ok
+        assert "at (" in r.detail
+
+
+class TestMinPrintWidthBump:
+    """checks.min_print_width: With a 0.4 mm bump on a thick wall"""
+
+    def test_passes(self):
+        part = box(0, 10, 0, 5, 0, 5) + box(3, 7, 5, 5.4, 0, 5)
+        r = checks.min_print_width(part, "fixture", top_down=False)
+        assert r.ok, r.detail
