@@ -88,7 +88,9 @@ make case-test    # the model's tests (about 2.5 min)
    slightly and slide it toward the cable wall so the USB and RJ45 go into their holes, then let it settle onto the
    standoffs. Drive the four M2.5 screws from the top through the board into the standoffs. Go gently on the first
    turn: the screw cuts its own thread in the plastic. Snug it down and stop: the thread in the plastic strips if you
-   keep turning.
+   keep turning. If one does strip, use a slightly bigger self-tapping screw: a 2.9 mm sheet-metal screw (ST2.9)
+   still fits the board's Ø3 hole. Or drill the pilot out and use a countersunk M2.5 from the back, with a nut on top
+   of the board; the back plate keeps a countersink under each standoff for that.
 2. **SMA (optional):** the D-hole in the right wall is closed on the outside by a thin knock-out skin, so the case
    stays closed when you use an in-case antenna. To fit an SMA antenna, cut the skin (two lines thick) out along the
    hole's edge with a craft knife. Clip the pigtail onto the board's antenna socket, turn the bulkhead so its flat is
