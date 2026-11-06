@@ -14,10 +14,18 @@ set(ot_idf "$ENV{IDF_PATH}/components/openthread")
 set(ot_port_src "${CMAKE_CURRENT_LIST_DIR}/../p4/ot_port")
 set(ot_shadow "${CMAKE_BINARY_DIR}/ot_port_components/openthread")
 
-# Symlinks in `dst` to every entry of `src` except those named in the remaining arguments.
+# Symlinks in `dst` to every entry of `src` except those named in the remaining arguments. The listing of `src` is a
+# configure dependency (an IDF update that adds or removes a file there reconfigures), and a link whose target is gone
+# is removed (a file IDF no longer has must not stay in the generated component).
 function(ot_port_link_all src dst)
     file(MAKE_DIRECTORY "${dst}")
-    file(GLOB entries RELATIVE "${src}" "${src}/*")
+    file(GLOB old LIST_DIRECTORIES true RELATIVE "${dst}" "${dst}/*")
+    foreach(entry ${old})
+        if(IS_SYMLINK "${dst}/${entry}" AND NOT EXISTS "${dst}/${entry}")
+            file(REMOVE "${dst}/${entry}")
+        endif()
+    endforeach()
+    file(GLOB entries LIST_DIRECTORIES true CONFIGURE_DEPENDS RELATIVE "${src}" "${src}/*")
     foreach(entry ${entries})
         if(NOT entry IN_LIST ARGN)
             file(CREATE_LINK "${src}/${entry}" "${dst}/${entry}" SYMBOLIC)
@@ -105,7 +113,7 @@ file(READ "${ot_file}" ot_text)
 ot_port_patch(ot_text "${ot_file}"
     [=[    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     OUTPUT_VARIABLE IDF_VERSION_FOR_OPENTHREAD_PACKAGE]=]
-    "    WORKING_DIRECTORY ${ot_idf} # ot_radio_port: IDF's git, not this build directory's
+    "    WORKING_DIRECTORY \"${ot_idf}\" # ot_radio_port: IDF's git, not this build directory's
     OUTPUT_VARIABLE IDF_VERSION_FOR_OPENTHREAD_PACKAGE")
 ot_port_write("${ot_shadow}/CMakeLists.txt" "${ot_text}")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ot_file}" "${CMAKE_CURRENT_LIST_FILE}")

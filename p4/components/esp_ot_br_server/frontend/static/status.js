@@ -48,12 +48,21 @@ function heroFor(s) {
                  ' frames so far. The Thread network is stopped until the capture ends.',
       link : {href : '/capture.html', label : 'Open packet capture'}
     };
+  var dongle = !!s.otbr_channel && s.otbr_channel !== 'c6'; // Thread's radio is a USB stick: nothing to update here
   if (s.mode === 'RADIO_FAULT')
     return {
       tone : 'fault',
       title : 'Radio fault',
       text : faultText(s.fault_reason),
-      link : {href : '/firmware.html', label : 'Open firmware'}
+      link : dongle ? {href : '/radios.html', label : 'Open Radios'} : {href : '/firmware.html', label : 'Open firmware'}
+    };
+  if (s.mode === 'NO_RADIO')
+    return {
+      tone : 'idle',
+      title : 'No Thread radio',
+      text : 'No radio runs the Thread border router' + (s.fault_reason ? ' (' + s.fault_reason + ')' : '') +
+                 '. Choose or plug in its radio on the Radios page.',
+      link : {href : '/radios.html', label : 'Open Radios'}
     };
   if (s.mode === 'STARTING')
     return {

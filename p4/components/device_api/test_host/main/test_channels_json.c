@@ -822,9 +822,17 @@ TEST_CASE("On a move of Thread alone, or settings with otbr that is no move: acc
     TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "c6"));
     req = proxy_req("{\"mode\":\"otbr\",\"baud\":460800}");
     TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "c6", "c6"));  // already there: no move
-    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", NULL)); // nothing has it: no move
     req = proxy_req("{\"mode\":\"rcp-proxy\",\"rcp_proxy\":{\"port\":7000}}");
     TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "c6"));
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "c6", "c6")); // a stop takes its new mode's settings
+}
+
+TEST_CASE("On a start of Thread (no channel has it) that also carries line or proxy settings: 400", "[device_api]")
+{
+    const radio_mux_set_req_t req = proxy_req("{\"mode\":\"otbr\",\"baud\":460800}");
+
+    TEST_ASSERT_EQUAL_STRING("send line or proxy settings in a separate request from moving Thread",
+                             device_api_channel_move_refusal(&req, "usb-1", NULL));
 }
 
 TEST_CASE("On a mode PUT while a move of Thread runs: 409 busy on any channel", "[device_api]")
@@ -937,11 +945,29 @@ TEST_CASE("On a PUT of otbr while another channel has it: it is a move (the long
 
     TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "usb-10c4-ea60", "c6"));
     TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "c6", "c6"));    // already there
-    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "c6", NULL));    // nothing to move from
     req = proxy_req("{\"mode\":\"off\"}");
     TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "usb-10c4-ea60", "c6"));
     req = proxy_req("{\"baud\":115200}");
     TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "usb-10c4-ea60", "c6"));
+    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "c6", "c6"));
+}
+
+TEST_CASE("On a PUT of otbr while no channel has it: a start, run like a move (the long-operation slot)",
+          "[device_api]")
+{
+    const radio_mux_set_req_t req = proxy_req("{\"mode\":\"otbr\"}");
+
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", NULL));
+}
+
+TEST_CASE("On a PUT of off or rcp-proxy on the OTBR channel: a stop, run like a move (the long-operation slot)",
+          "[device_api]")
+{
+    radio_mux_set_req_t req = proxy_req("{\"mode\":\"off\"}");
+
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", "c6"));
+    req = proxy_req("{\"mode\":\"rcp-proxy\"}");
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", "c6"));
 }
 
 TEST_CASE("On a PUT of otbr on the OTBR channel in RADIO_FAULT: OpenThread's start is retried", "[device_api]")
@@ -957,7 +983,15 @@ TEST_CASE("On a PUT of otbr on the OTBR channel in RADIO_FAULT: OpenThread's sta
     TEST_ASSERT_FALSE(device_api_channel_retry_otbr(&req, RADIO_MUX_APPLY, "usb-1", "usb-1", BR_MODE_RADIO_FAULT));
 }
 
-/* ---- device_api_channels_overlay_otbr ---- */
+/* ---- device_api_channels_overlay_board ---- */
+
+// The board as fill_channels sees it, without a move or a refused stop.
+static void board_view(radio_mux_snapshot_t *s, const char *otbr_id, int mode, const char *fault_reason)
+{
+    const device_api_board_view_t b = {.otbr_id = otbr_id, .mode = mode, .fault_reason = fault_reason};
+
+    device_api_channels_overlay_board(s, &b);
+}
 
 TEST_CASE("On RADIO_FAULT: the running OTBR channel shows fault with the board's reason", "[device_api]")
 {
@@ -967,7 +1001,7 @@ TEST_CASE("On RADIO_FAULT: the running OTBR channel shows fault with the board's
     s.n = 2;
     s.chans[0] = c6_chan();
     s.chans[1] = usb_chan();
-    device_api_channels_overlay_otbr(&s, "c6", BR_MODE_RADIO_FAULT, "rcp incompatible");
+    board_view(&s, "c6", BR_MODE_RADIO_FAULT, "rcp incompatible");
     TEST_ASSERT_EQUAL(RADIO_MUX_STATE_FAULT, s.chans[0].state);
     TEST_ASSERT_EQUAL_STRING("rcp incompatible", s.chans[0].reason);
     TEST_ASSERT_EQUAL(RADIO_MUX_STATE_RUNNING, s.chans[1].state); // not the OTBR channel
@@ -980,12 +1014,79 @@ TEST_CASE("On any other mode or no OTBR channel: the channels are left as the mu
     memset(&s, 0, sizeof(s));
     s.n = 1;
     s.chans[0] = c6_chan();
-    device_api_channels_overlay_otbr(&s, "c6", BR_MODE_BR_RUNNING, "");
-    device_api_channels_overlay_otbr(&s, "c6", BR_MODE_STARTING, "");
-    device_api_channels_overlay_otbr(&s, NULL, BR_MODE_RADIO_FAULT, "x");
+    board_view(&s, "c6", BR_MODE_BR_RUNNING, "");
+    board_view(&s, NULL, BR_MODE_RADIO_FAULT, "x");
+    board_view(&s, NULL, BR_MODE_STARTING, "");
     TEST_ASSERT_EQUAL(RADIO_MUX_STATE_RUNNING, s.chans[0].state);
     TEST_ASSERT_EQUAL_STRING("", s.chans[0].reason);
     s.chans[0].state = RADIO_MUX_STATE_BUSY; // a C6 job: its own state wins
-    device_api_channels_overlay_otbr(&s, "c6", BR_MODE_RADIO_FAULT, "x");
+    board_view(&s, "c6", BR_MODE_RADIO_FAULT, "x");
+    board_view(&s, "c6", BR_MODE_STARTING, "");
     TEST_ASSERT_EQUAL(RADIO_MUX_STATE_BUSY, s.chans[0].state);
+}
+
+TEST_CASE("On STARTING: the running OTBR channel shows starting until OpenThread runs", "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+
+    memset(&s, 0, sizeof(s));
+    s.n = 2;
+    s.chans[0] = c6_chan();
+    s.chans[1] = usb_chan();
+    board_view(&s, "c6", BR_MODE_STARTING, "");
+    TEST_ASSERT_EQUAL(RADIO_MUX_STATE_STARTING, s.chans[0].state);
+    TEST_ASSERT_EQUAL(RADIO_MUX_STATE_RUNNING, s.chans[1].state); // not the OTBR channel
+}
+
+TEST_CASE("On STARTING during a move, start or stop: the channels are left as the mux says", "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+    const device_api_board_view_t b = {
+        .otbr_id = "c6", .mode = BR_MODE_STARTING, .fault_reason = "", .moving = true,
+    };
+
+    memset(&s, 0, sizeof(s));
+    s.n = 1;
+    s.chans[0] = c6_chan();
+    device_api_channels_overlay_board(&s, &b);
+    TEST_ASSERT_EQUAL(RADIO_MUX_STATE_RUNNING, s.chans[0].state); // the move's own target shows starting (lease)
+}
+
+TEST_CASE("On a refused stop of OpenThread: its running channel shows the reason as its error", "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+    const device_api_board_view_t b = {
+        .otbr_id = "c6", .mode = BR_MODE_BR_RUNNING, .fault_reason = "",
+        .refused_id = "c6", .refused_reason = "drain_timeout",
+    };
+
+    memset(&s, 0, sizeof(s));
+    s.n = 2;
+    s.chans[0] = c6_chan();
+    s.chans[1] = usb_chan();
+    device_api_channels_overlay_board(&s, &b);
+    TEST_ASSERT_EQUAL(RADIO_MUX_STATE_RUNNING, s.chans[0].state);
+    TEST_ASSERT_EQUAL_STRING("drain_timeout", s.chans[0].reason);
+    TEST_ASSERT_EQUAL_STRING("", s.chans[1].reason);
+}
+
+TEST_CASE("On a refused stop of a channel that no longer runs otbr, or has a reason of its own: nothing changes",
+          "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+    device_api_board_view_t b = {
+        .otbr_id = "c6", .mode = BR_MODE_BR_RUNNING, .fault_reason = "",
+        .refused_id = "usb-10c4-ea60-abc123", .refused_reason = "drain_timeout",
+    };
+
+    memset(&s, 0, sizeof(s));
+    s.n = 2;
+    s.chans[0] = c6_chan();
+    s.chans[1] = usb_chan(); // rcp-proxy now
+    device_api_channels_overlay_board(&s, &b);
+    TEST_ASSERT_EQUAL_STRING("", s.chans[1].reason);
+    b.refused_id = "c6";
+    strcpy(s.chans[0].reason, "flow control not supported");
+    device_api_channels_overlay_board(&s, &b);
+    TEST_ASSERT_EQUAL_STRING("flow control not supported", s.chans[0].reason);
 }

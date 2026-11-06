@@ -559,16 +559,24 @@ static bool sets_otbr(const radio_mux_set_req_t *req)
     return req->has_mode && req->mode == RADIO_MUX_MODE_OTBR;
 }
 
+// otbr on a channel that does not have it: a move from the otbr channel, or a start when none has it.
+static bool moves_to(const radio_mux_set_req_t *req, const char *id, const char *otbr_id)
+{
+    return sets_otbr(req) && (!otbr_id || strcmp(otbr_id, id) != 0);
+}
+
 bool device_api_channel_is_move(const radio_mux_set_req_t *req, const char *id, const char *otbr_id)
 {
-    return sets_otbr(req) && otbr_id && strcmp(otbr_id, id) != 0;
+    const bool stop = req->has_mode && req->mode != RADIO_MUX_MODE_OTBR && otbr_id && strcmp(otbr_id, id) == 0;
+
+    return moves_to(req, id, otbr_id) || stop;
 }
 
 const char *device_api_channel_move_refusal(const radio_mux_set_req_t *req, const char *id, const char *otbr_id)
 {
     const bool more = req->has_baud || req->has_flow || req->has_proxy || req->kick;
 
-    return more && device_api_channel_is_move(req, id, otbr_id)
+    return more && moves_to(req, id, otbr_id)
            ? "send line or proxy settings in a separate request from moving Thread" : NULL;
 }
 
@@ -584,17 +592,24 @@ bool device_api_channel_retry_otbr(const radio_mux_set_req_t *req, radio_mux_ver
            mode == BR_MODE_RADIO_FAULT;
 }
 
-void device_api_channels_overlay_otbr(radio_mux_snapshot_t *s, const char *otbr_id, int mode, const char *fault_reason)
+void device_api_channels_overlay_board(radio_mux_snapshot_t *s, const device_api_board_view_t *b)
 {
-    if (!otbr_id || mode != BR_MODE_RADIO_FAULT) {
+    if (!b->otbr_id) {
         return;
     }
     for (size_t i = 0; i < s->n && i < RADIO_MUX_CHANNELS_MAX; i++) {
         radio_mux_chan_info_t *c = &s->chans[i];
 
-        if (strcmp(c->id, otbr_id) == 0 && c->state == RADIO_MUX_STATE_RUNNING) {
+        if (strcmp(c->id, b->otbr_id) != 0 || c->state != RADIO_MUX_STATE_RUNNING) {
+            continue; // only the OTBR channel the mux lists running: a C6 job's busy, a fault, a lease stay
+        }
+        if (b->mode == BR_MODE_RADIO_FAULT) {
             c->state = RADIO_MUX_STATE_FAULT;
-            strlcpy(c->reason, fault_reason ? fault_reason : "", sizeof(c->reason));
+            strlcpy(c->reason, b->fault_reason ? b->fault_reason : "", sizeof(c->reason));
+        } else if (b->mode == BR_MODE_STARTING && !b->moving) {
+            c->state = RADIO_MUX_STATE_STARTING; // attached, OpenThread not up yet (a move's target shows its own)
+        } else if (b->refused_id && strcmp(b->refused_id, c->id) == 0 && c->reason[0] == '\0') {
+            strlcpy(c->reason, b->refused_reason ? b->refused_reason : "", sizeof(c->reason));
         }
     }
 }

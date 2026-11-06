@@ -32,6 +32,8 @@ typedef struct {
     char label[RADIO_MUX_LABEL_MAX];
     char id[RADIO_MUX_ID_MAX];
 } chan_blob_t;
+// A change of the layout above (or of a type in it) is a new blob version: the old blobs would be read wrongly.
+_Static_assert(sizeof(chan_blob_t) == 336, "chan_blob_t changed: bump BLOB_VERSION (and read the old one) first");
 
 static void blob_from_chan(const struct radio_mux_chan *ch, chan_blob_t *b)
 {

@@ -66,6 +66,7 @@ typedef struct {
     /**
      * Probe the RCP of channel `id` through the radio mux (spinel reset, PROP_NCP_VERSION, the caps OpenThread needs)
      * while OpenThread may still run elsewhere. ESP_OK leaves the channel ready for ot_start; otherwise `err` says why.
+     * `id` "" (a stop of OpenThread, mode_fsm_move_otbr): nothing to probe, it answers ESP_OK (the stop is accepted).
      */
     esp_err_t (*probe_channel)(const char *id, char *err, size_t cap);
     /**
@@ -225,12 +226,17 @@ void mode_fsm_installed_after_push(bool probe_ok, const char *probed_version, bo
 bool mode_fsm_boot(mode_fsm_t *fsm, const char *otbr_id);
 
 /**
- * Move OpenThread from channel `from` to `to` (spec: Moving Thread). In order: probe `to` (refused with
+ * Move OpenThread from channel `from` ("" for a start: no channel runs it) to `to` ("" for a stop of OpenThread on
+ * `from`, which leaves otbr): the spec's plain stop and start "work the same way". A stop: the probe op is called with
+ * "" (it only accepts), then STARTING, ot_stop (MODE_FSM_ERR_DRAIN_TIMEOUT: the mode before back, nothing stored, never
+ * RADIO_FAULT), store_otbr(from, "") and NO_RADIO; a failed store starts OpenThread on `from` again as below.
+ * A move or start: in order: probe `to` (refused with
  * MODE_FSM_ERR_PROBE_FAILED, the reason in `err`, nothing changed); STARTING; stop OpenThread (MODE_FSM_ERR_DRAIN_TIMEOUT,
  * `err` MODE_FSM_DRAIN_TIMEOUT, the mode before the move back, nothing changed); start on `to`; store both modes only
  * then. A failed start on `to`, or a failed store after it (OpenThread stopped on `to` again), starts OpenThread on
  * `from` again and returns MODE_FSM_ERR_START_FAILED with nothing stored; when that start fails too the mode is
- * RADIO_FAULT. From NO_RADIO (`from` is absent) the stop does nothing and a failed start leaves NO_RADIO. A start on
+ * RADIO_FAULT. From NO_RADIO (`from` is absent) or for a start the stop does nothing and a failed start leaves NO_RADIO.
+ * A start on
  * `to` that abandoned OpenThread's init (MODE_FSM_ERR_START_ABANDONED) cannot be followed by another start: the move
  * returns it, nothing stored, the mode stays STARTING, and the caller reboots the board (it boots on `from`). The same
  * when the start on `from` again abandons the init.

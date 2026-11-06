@@ -173,7 +173,8 @@ function proxyOf(ch) {
 /*
  * What Save sends for `draft` = {pick, touched, direction, adapter, framing, host, port, baud, flow}: {error} or
  * {requests: [body, ...], move}. The settings go first and the mode alone after them: the API refuses a move of
- * Thread that carries settings.
+ * Thread that carries settings. Thread onto a radio that runs rcp-proxy sets it off first (the API refuses otbr while
+ * the proxy runs on it).
  */
 function plan(ch, snapshot, draft, status) {
   var settings = {};
@@ -214,6 +215,8 @@ function plan(ch, snapshot, draft, status) {
     requests.push(settings);
   var move = false;
   if (plugged && draft.touched && draft.pick !== ch.stored_mode) {
+    if (draft.pick === 'otbr' && ch.mode === 'rcp-proxy')
+      requests.push({mode : 'off'});
     requests.push({mode : draft.pick});
     move = draft.pick === 'otbr' && !!threadElsewhere(snapshot, ch, status);
   }
@@ -364,13 +367,35 @@ function anyStarting() {
 }
 
 /*
- * After a move was accepted, says how it ended. It failed only when the target was seen starting (or faulted) and
- * then settled without Thread running on it, or when 90 s passed without either: the first answers after the 202
- * may still show the old picture.
+ * After a stop of Thread was accepted (202 for another mode on its radio), says how it ended: stopped once the radio
+ * stores the new mode; refused when it stays in otbr with a reason (drain_timeout: Thread runs on); else after 90 s.
+ */
+function settleStop() {
+  var ch = L.findChannel(snap, moving.to);
+  var name = L.labelOf(snap, moving.to);
+  if (ch && ch.stored_mode === moving.mode) {
+    note('rMsg', 'Thread stopped on ' + name + '.', false);
+  } else if ((ch && ch.stored_mode === 'otbr' && ch.error) || env.now() - moving.at > MOVE_GIVE_UP_MS) {
+    note('rMsg', 'Thread did not stop on ' + name + (ch && ch.error ? ' (' + ch.error + ')' : '') +
+                     ': it keeps running there.', true);
+  } else {
+    return;
+  }
+  moving = null;
+}
+
+/*
+ * After a move (or a start) was accepted, says how it ended. It failed only when the target was seen starting (or
+ * faulted) and then settled without Thread running on it, or when 90 s passed without either: the first answers after
+ * the 202 may still show the old picture.
  */
 function settleMove() {
   if (!moving)
     return;
+  if (moving.stop) {
+    settleStop();
+    return;
+  }
   var to = L.findChannel(snap, moving.to);
   var name = L.labelOf(snap, moving.to);
   if (to && (to.state === 'starting' || to.state === 'fault'))
@@ -611,10 +636,18 @@ function save() {
       } else {
         closeDialog();
         if (last.status === 202) {
-          moving = {from : last.body && last.body.moved_from ? last.body.moved_from : (from && from.id), to : ch.id,
-                    at : env.now(), seen : false};
-          note('rMsg', 'Moving Thread' + (moving.from ? ' from ' + L.labelOf(snap, moving.from) : '') + ' to ' + ch.label +
-                           ': Thread devices lose the border router for a few seconds.', false);
+          var mode = p.requests[p.requests.length - 1].mode;
+          var stop = mode !== 'otbr'; // another mode on the radio that runs Thread
+          moving = {from : stop ? ch.id : (last.body && last.body.moved_from ? last.body.moved_from : (from && from.id)),
+                    to : ch.id, at : env.now(), seen : false, stop : stop, mode : mode};
+          if (stop)
+            note('rMsg', 'Stopping Thread on ' + ch.label + ': its sessions end first, then the radio changes mode.',
+                 false);
+          else if (moving.from)
+            note('rMsg', 'Moving Thread from ' + L.labelOf(snap, moving.from) + ' to ' + ch.label +
+                             ': Thread devices lose the border router for a few seconds.', false);
+          else
+            note('rMsg', 'Starting Thread on ' + ch.label + '.', false);
         } else if (!rebooting) {
           note('rMsg', 'Saved ' + ch.label + '.', false);
         }

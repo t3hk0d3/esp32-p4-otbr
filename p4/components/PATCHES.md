@@ -337,6 +337,11 @@ reason, spec reference.
    `threadNotice` and the kit's `renderThreadNotice`/`watchThread`; `status.js` (chip "Thread runs on", notice),
    `mgmt.js` (mode banner), `routing.js`, `topology.js`, `capture.js` and their pages (`#threadNotice`) show the
    "no radio in OTBR mode" notice; `index.html` text and chip; `static/style.css` appends the Radios classes.
+   Final review fixes: `radios.js` shows a proxy in backoff as a warning with its `last_error`, names `port_taken`,
+   sets a radio that runs `rcp-proxy` off before it takes Thread, and follows a 202 for a start ("Starting Thread on")
+   and a stop of Thread ("Stopping Thread on", then stopped or refused with the reason); `status.js` has a
+   `NO_RADIO` hero linking the Radios page, and the `RADIO_FAULT` hero links Radios instead of Firmware while Thread's
+   radio is a dongle.
    (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md, sections Board mode and API)
 
 ### REST guard classification (patches 2 and 9)

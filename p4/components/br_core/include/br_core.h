@@ -60,15 +60,19 @@ esp_err_t br_core_register_otbr(void);
 
 /**
  * Move OpenThread from channel `from` (may be "" or absent: NO_RADIO) to `to` (radio_mux_set calls it for a PUT of mode
- * otbr while another channel has it). The target's RCP is probed first, through the mux, while OpenThread still runs on
- * `from`; this call waits for that probe (up to 10 s) and returns:
+ * otbr while another channel has it, or while none has it: a start, `from` ""). The target's RCP is probed first,
+ * through the mux, while OpenThread still runs on `from`; this call waits for that probe (up to 10 s). `to` "" is a stop
+ * of OpenThread on `from` (a PUT of another mode on the otbr channel): nothing is probed, the call returns once the
+ * stop is accepted, and br_core's radio task drains and stops OpenThread, then stores the requested mode
+ * (radio_mux_commit_otbr); a drain timeout leaves everything as it was (br_core_otbr_refusal says so). Returns:
  * - ESP_OK: accepted (202). The rest runs on br_core's radio task: stop, start on `to`, store both modes once it runs.
  *   A drain timeout ("drain_timeout"), a failed start or a failed store (OpenThread started on `from` again; RADIO_FAULT
  *   only when that fails too) shows as `to`'s state fault with that reason, stored modes unchanged. A start on `to` that
  *   abandons OpenThread's init (nothing starts OpenThread again in this boot) shows the same way, and the board reboots
  *   1.5 s later onto the unchanged stored modes (Thread back on `from`, same network); fault_reason says so meanwhile.
  * - ESP_ERR_INVALID_RESPONSE: the probe failed (409 probe_failed); `reason` says why; nothing changed.
- * - ESP_ERR_INVALID_STATE: busy (another move, a C6 push or recovery, OpenThread starting or sniffing); `reason`.
+ * - ESP_ERR_INVALID_STATE: busy (another move, a C6 push or recovery, OpenThread starting or sniffing, or br_core's
+ *   radio task stopping or starting OpenThread on its channel, e.g. after an unplug: refused at once); `reason`.
  * - ESP_ERR_TIMEOUT: the probe did not finish in time; the move is dropped after it.
  * `reason` (may be NULL) gets "" on ESP_OK.
  */
@@ -76,6 +80,13 @@ esp_err_t br_core_move_otbr(const char *from, const char *to, char *reason, size
 
 /** True from an accepted br_core_move_otbr until the move ended (device_api's long-operation state). */
 bool br_core_move_running(void);
+
+/**
+ * The last refused stop of OpenThread (its sessions did not end within the drain): `id` gets the channel, which still
+ * runs otbr, and `reason` why ("drain_timeout"); true then. False (both "") once a later move, start or stop was
+ * accepted or a channel operation ran, or when none was refused. Any task.
+ */
+bool br_core_otbr_refusal(char *id, size_t id_cap, char *reason, size_t reason_cap);
 
 /**
  * `done` (NULL: none) is called on br_core's radio task each time a move that br_core_move_otbr accepted (ESP_OK) has

@@ -86,15 +86,17 @@ const char *device_api_channel_refusal_detail(radio_mux_verdict_t v);
 device_api_error_t device_api_channel_forget_error(esp_err_t err, bool mux_started);
 
 /**
- * Whether the PUT moves OpenThread (and so takes the long-operation slot first): it sets mode otbr on `id` while
- * another channel (`otbr_id`, radio_mux_otbr_channel) has it.
+ * Whether the PUT changes where OpenThread runs (and so takes the long-operation slot first), as the mux's MOVE
+ * verdict: mode otbr on `id` while another channel (`otbr_id`, from radio_mux_otbr_channel; NULL: none) has it (a move)
+ * or none has it (a start), or another mode on the OTBR channel itself (a stop).
  */
 bool device_api_channel_is_move(const radio_mux_set_req_t *req, const char *id, const char *otbr_id);
 
 /**
- * A move of Thread (device_api_channel_is_move) goes alone: with baud, flow_control or any rcp_proxy setting (kick
- * included) the PUT is refused, 400 bad_value with the returned detail, before anything is claimed or stored (the
- * mux would refuse them on the leased target after the 202). NULL when the PUT may go on.
+ * A move or start of Thread (otbr on a channel that does not have it) goes alone: with baud, flow_control or any
+ * rcp_proxy setting (kick included) the PUT is refused, 400 bad_value with the returned detail, before anything is
+ * claimed or stored (the mux would refuse them on the leased target after the 202). A stop may carry them (they are
+ * the new mode's). NULL when the PUT may go on.
  */
 const char *device_api_channel_move_refusal(const radio_mux_set_req_t *req, const char *id, const char *otbr_id);
 
@@ -111,12 +113,23 @@ const char *device_api_channel_move_busy(const radio_mux_set_req_t *req, bool mo
 bool device_api_channel_retry_otbr(const radio_mux_set_req_t *req, radio_mux_verdict_t v, const char *id,
                                    const char *otbr_id, int mode);
 
+/** What br_core knows about OpenThread that the mux's channel list does not. */
+typedef struct {
+    const char *otbr_id;        // the channel stored in otbr (radio_mux_otbr_channel), NULL for none
+    int mode;                   // br_core_mode_t
+    const char *fault_reason;   // br_core's fault reason (RADIO_FAULT)
+    bool moving;                // a move, start or stop of OpenThread runs (br_core_move_running)
+    const char *refused_id;     // the channel whose stop of OpenThread was refused last (br_core_otbr_refusal), or NULL
+    const char *refused_reason; // why ("drain_timeout")
+} device_api_board_view_t;
+
 /**
- * The board's view over the mux's: while the board `mode` (br_core_mode_t) is RADIO_FAULT, the OTBR channel `otbr_id`
- * that the mux lists running (its consumer is attached, but OpenThread did not start on it) shows state fault with
- * `fault_reason`. Nothing else changes.
+ * The board's view over the mux's, for the OTBR channel `b->otbr_id` that the mux lists running (its consumer is
+ * attached): in RADIO_FAULT (OpenThread did not start on it) state fault with `fault_reason`; in STARTING outside a
+ * move, start or stop (OpenThread is starting on it) state starting; otherwise, when it is `refused_id` and has no
+ * reason of its own, `refused_reason` as its reason (it stays running: the stop was refused). Nothing else changes.
  */
-void device_api_channels_overlay_otbr(radio_mux_snapshot_t *s, const char *otbr_id, int mode, const char *fault_reason);
+void device_api_channels_overlay_board(radio_mux_snapshot_t *s, const device_api_board_view_t *b);
 
 #ifdef __cplusplus
 }

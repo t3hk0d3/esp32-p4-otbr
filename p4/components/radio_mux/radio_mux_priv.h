@@ -150,6 +150,7 @@ struct radio_mux_chan {
     radio_mux_state_t state;
     char reason[RADIO_MUX_REASON_MAX];
     radio_mux_counters_t ctr; // while not on its port
+    radio_mux_mode_t leave_mode; // owner: the mode a stop of OpenThread on it stores at its commit (radio_mux_set)
 };
 
 struct mux_call {
@@ -158,6 +159,7 @@ struct mux_call {
     char id[RADIO_MUX_ID_MAX];
     radio_mux_set_req_t req;
     bool have_mover;
+    bool stop; // SET: the MOVE is a stop of OpenThread on this channel (it leaves otbr), not a move to it
     bool c6_ok; // C6_JOB_END: the job left a working C6
     atomic_int claim; // C6_JOB_BEGIN: MUX_CALL_PENDING until the owner takes it (TAKEN) or the caller gives up
     radio_mux_verdict_t verdict;

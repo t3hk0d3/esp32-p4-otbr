@@ -331,8 +331,22 @@ TEST_CASE("On otbr while a ziggurat consumer is active, or ziggurat while otbr i
     c[0].mode = RADIO_MUX_MODE_OFF;
     c[1].mode = MODE_ZIGGURAT;
     TEST_ASSERT_EQUAL(RADIO_MUX_REFUSE_HYBRID, radio_mux_check_set_mode(&zig, c, N_CHANS, 0, RADIO_MUX_MODE_OTBR, NULL));
-    // A channel leaving ziggurat for otbr is not a hybrid: nothing else runs ziggurat.
-    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY, radio_mux_check_set_mode(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, NULL));
+    // A channel leaving ziggurat for otbr is not a hybrid: nothing else runs ziggurat (a plain start of otbr).
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_check_set_mode(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, NULL));
+}
+
+TEST_CASE("On otbr while another channel stores ziggurat but no ziggurat consumer is registered: not a hybrid",
+          "[radio_mux]")
+{
+    radio_mux_rules_t none = no_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    size_t from = 99;
+
+    three_channels(c);
+    c[0].mode = RADIO_MUX_MODE_OFF;
+    c[1].mode = MODE_ZIGGURAT; // stored by a build that had the consumer
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_check_set_mode(&none, c, N_CHANS, 0, RADIO_MUX_MODE_OTBR, &from));
+    TEST_ASSERT_EQUAL(N_CHANS, from);
 }
 
 TEST_CASE("On a mode whose registration declares reboot on enter or leave: returns RADIO_MUX_APPLY_REBOOT",
@@ -360,18 +374,55 @@ TEST_CASE("On off or rcp-proxy otherwise: returns RADIO_MUX_APPLY", "[radio_mux]
     radio_mux_chan_view_t c[N_CHANS];
 
     three_channels(c);
-    // Any firmware, including one otbr does not fit, and the otbr channel itself.
+    // Any firmware, including one otbr does not fit.
     TEST_ASSERT_EQUAL(RADIO_MUX_APPLY, radio_mux_check_set_mode(&none, c, N_CHANS, 2, RADIO_MUX_MODE_RCP_PROXY, NULL));
     TEST_ASSERT_EQUAL(RADIO_MUX_APPLY, radio_mux_check_set_mode(&none, c, N_CHANS, 2, RADIO_MUX_MODE_OFF, NULL));
-    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY, radio_mux_check_set_mode(&none, c, N_CHANS, 0, RADIO_MUX_MODE_OFF, NULL));
     // Leaving a registered mode without a reboot declaration.
     c[0].mode = RADIO_MUX_MODE_OFF;
     c[1].mode = MODE_ZIGGURAT;
     TEST_ASSERT_EQUAL(RADIO_MUX_APPLY, radio_mux_check_set_mode(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OFF, NULL));
-    // otbr onto a free spinel channel, no other otbr.
-    c[1].mode = RADIO_MUX_MODE_OFF;
+}
+
+TEST_CASE("On otbr for a channel while no channel has otbr: returns RADIO_MUX_MOVE from no source (a plain start)",
+          "[radio_mux]")
+{
+    radio_mux_rules_t none = no_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    size_t from = 99;
+
+    three_channels(c);
     c[0].mode = RADIO_MUX_MODE_OFF;
-    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY, radio_mux_check_set_mode(&none, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, NULL));
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_check_set_mode(&none, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, &from));
+    TEST_ASSERT_EQUAL(N_CHANS, from); // n: no channel to move from
+    c[1].mode = RADIO_MUX_MODE_RCP_PROXY; // from another mode the same (the lease refuses a running consumer)
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_check_set_mode(&none, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, &from));
+    TEST_ASSERT_EQUAL(N_CHANS, from);
+}
+
+TEST_CASE("On off or rcp-proxy for the channel that has otbr: returns RADIO_MUX_MOVE with itself as the source "
+          "(a plain stop)", "[radio_mux]")
+{
+    radio_mux_rules_t none = no_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    size_t from = 99;
+
+    three_channels(c);
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_check_set_mode(&none, c, N_CHANS, 0, RADIO_MUX_MODE_OFF, &from));
+    TEST_ASSERT_EQUAL(0, from);
+    from = 99;
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_check_set_mode(&none, c, N_CHANS, 0, RADIO_MUX_MODE_RCP_PROXY, &from));
+    TEST_ASSERT_EQUAL(0, from);
+}
+
+TEST_CASE("On leaving otbr for a mode whose registration reboots: returns RADIO_MUX_APPLY_REBOOT, not a stop",
+          "[radio_mux]")
+{
+    radio_mux_rules_t zig = ziggurat_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+
+    zig.rules[0].reboot_on_change = true;
+    three_channels(c);
+    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY_REBOOT, radio_mux_check_set_mode(&zig, c, N_CHANS, 0, MODE_ZIGGURAT, NULL));
 }
 
 /* ---- radio_mux_after_detect ---- */

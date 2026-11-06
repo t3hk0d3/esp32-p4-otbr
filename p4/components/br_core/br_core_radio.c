@@ -68,6 +68,14 @@ static atomic_bool s_retry;   // br_core_retry_otbr: try the failed start on the
 static void (*_Atomic s_move_done)(void); // br_core_set_move_done_cb
 static char s_no_radio_reason[96]; // br_radio: why the mode is NO_RADIO
 static bool s_lost;                // br_radio: OpenThread's channel was lost, not detached by a deliberate change
+// br_radio runs a channel operation (OpenThread torn down after GONE, or started after an attach): a move, start or
+// stop asked for meanwhile is refused at once (br_core_move_otbr) instead of waiting for its probe.
+static atomic_bool s_radio_busy;
+// The last refused stop of OpenThread (its sessions did not end): the channel, which runs otbr on, and why. Kept until
+// the next accepted move, start or stop, or channel operation; under s_refusal_lock (device_api reads it).
+static portMUX_TYPE s_refusal_lock = portMUX_INITIALIZER_UNLOCKED;
+static char s_refused_id[RADIO_MUX_ID_MAX];
+static char s_refused_reason[RADIO_MUX_REASON_MAX];
 // Owned by the task that starts and stops OpenThread (br_radio, or a radio job while push_busy):
 static radio_mux_chan_t *s_ot_chan; // the channel OpenThread was started on, NULL when it is stopped
 static unsigned s_ot_gen;           // the attach it was started on: another attach since means the channel went
@@ -340,7 +348,7 @@ static bool move_signal(esp_err_t result, const char *reason)
 
 esp_err_t core_radio_probe_channel(const char *id, char *err, size_t cap)
 {
-    radio_mux_chan_t *ch = channel_for(id);
+    radio_mux_chan_t *ch = id[0] ? channel_for(id) : NULL;
     radio_mux_fw_record_t fw;
     esp_err_t ret = ESP_OK;
 
@@ -348,6 +356,16 @@ esp_err_t core_radio_probe_channel(const char *id, char *err, size_t cap)
         s_move_probe = false;
         snprintf(err, cap, "the request gave up waiting for the probe");
         return ESP_ERR_TIMEOUT; // nothing leased, nothing probed
+    }
+    if (id[0] == '\0') { // a stop of OpenThread: no target to probe; accepted
+        if (s_move_probe) {
+            s_move_probe = false;
+            if (!move_signal(ESP_OK, "")) {
+                snprintf(err, cap, "the request gave up waiting for the stop to be accepted");
+                return ESP_ERR_TIMEOUT;
+            }
+        }
+        return ESP_OK;
     }
     if (!ch) { // not the attached channel: a move's target, taken from the mux until the move ends
         ret = radio_mux_lease(id, &s_lease, err, cap);
@@ -516,12 +534,13 @@ static void after_channel_op(void)
 // change, a move, a C6 job), which keeps the normal drain.
 static bool note_no_radio_reason(radio_mux_chan_t *ran_on)
 {
-    const char *otbr = radio_mux_otbr_channel();
-    radio_mux_snapshot_t *snap = otbr ? malloc(sizeof(*snap)) : NULL;
+    char otbr[RADIO_MUX_ID_MAX];
+    const bool stored = radio_mux_otbr_channel(otbr, sizeof(otbr));
+    radio_mux_snapshot_t *snap = stored ? malloc(sizeof(*snap)) : NULL;
     const char *why = "the OTBR channel went away";
     bool busy = false;
 
-    if (!otbr) {
+    if (!stored) {
         snprintf(s_no_radio_reason, sizeof(s_no_radio_reason), "no channel in otbr");
         return false;
     }
@@ -541,6 +560,14 @@ static bool note_no_radio_reason(radio_mux_chan_t *ran_on)
 
 // OpenThread follows the otbr channel: torn down when it went (unplug, mode change, a C6 job outside a push), started
 // when one is attached (boot, plug-in, the end of a C6 job, a mode change); a failed start waits for the next attach.
+static void note_refusal(const char *id, const char *reason)
+{
+    taskENTER_CRITICAL(&s_refusal_lock);
+    strlcpy(s_refused_id, id ? id : "", sizeof(s_refused_id));
+    strlcpy(s_refused_reason, reason ? reason : "", sizeof(s_refused_reason));
+    taskEXIT_CRITICAL(&s_refusal_lock);
+}
+
 static void reconcile(void)
 {
     if (atomic_load(&g_core.push_busy) || atomic_load(&s_booting)) {
@@ -551,22 +578,28 @@ static void reconcile(void)
 
     if ((s_ot_chan && (s_ot_chan != att || s_ot_gen != gen || atomic_load(&s_link.gone))) ||
             (!s_ot_chan && !att && s_start_failed)) {
+        atomic_store(&s_radio_busy, true);
+        note_refusal(NULL, NULL);
         s_lost = note_no_radio_reason(s_ot_chan);
         ESP_LOGW(TAG, "%s: NO_RADIO, OpenThread stops", s_no_radio_reason);
         s_start_failed = false;
         mode_fsm_on_channel_gone(&g_fsm); // NO_RADIO first: new sessions are refused while the open ones drain
         s_lost = false;
         after_channel_op();
+        atomic_store(&s_radio_busy, false);
     }
     const bool retry = atomic_exchange(&s_retry, false) && s_start_failed; // a PUT of mode otbr (device_api)
 
     if (!s_ot_chan && att && (gen != s_tried_gen || retry)) {
+        atomic_store(&s_radio_busy, true);
+        note_refusal(NULL, NULL);
         s_tried_gen = gen;
         s_probe_err[0] = '\0';
         ESP_LOGI(TAG, "%s: starting OpenThread", radio_mux_chan_id(att));
         mode_fsm_on_channel_back(&g_fsm, radio_mux_chan_id(att));
         s_start_failed = br_core_get_mode() == BR_MODE_RADIO_FAULT;
         after_channel_op();
+        atomic_store(&s_radio_busy, false);
     }
 }
 
@@ -590,7 +623,11 @@ static void run_move(void)
         atomic_store(&s_move.running, false);
         return;
     }
-    ESP_LOGI(TAG, "moving OpenThread from %s to %s", s_move.from[0] ? s_move.from : "(none)", s_move.to);
+    const bool stop = s_move.to[0] == '\0';
+
+    note_refusal(NULL, NULL); // a new move, start or stop: an earlier refusal no longer says anything
+    ESP_LOGI(TAG, "moving OpenThread from %s to %s", s_move.from[0] ? s_move.from : "(none)",
+             stop ? "(none): a stop" : s_move.to);
     s_move_probe = true;
     const esp_err_t ret = mode_fsm_move_otbr(&g_fsm, s_move.from, s_move.to, err, sizeof(err));
 
@@ -607,9 +644,16 @@ static void run_move(void)
 
     if (ret == ESP_OK) {
         s_start_failed = false;
-        ESP_LOGI(TAG, "OpenThread moved to %s", s_move.to);
+        if (stop) {
+            note_no_radio_reason(NULL); // "no channel in otbr"
+        }
+        ESP_LOGI(TAG, "OpenThread %s %s", stop ? "stopped on" : "moved to", stop ? s_move.from : s_move.to);
     } else {
-        ESP_LOGW(TAG, "moving OpenThread to %s: %s (%s)", s_move.to, esp_err_to_name(ret), err);
+        if (stop && ret == MODE_FSM_ERR_DRAIN_TIMEOUT) {
+            note_refusal(s_move.from, err); // OpenThread runs on as before: the channel shows why it stayed
+        }
+        ESP_LOGW(TAG, "%s OpenThread %s %s: %s (%s)", stop ? "stopping" : "moving", stop ? "on" : "to",
+                 stop ? s_move.from : s_move.to, esp_err_to_name(ret), err);
     }
     after_channel_op();
     if (ret == MODE_FSM_ERR_START_ABANDONED) {
@@ -652,12 +696,8 @@ static esp_err_t start_radio_task(void)
 // end, which starts OpenThread on br_radio.
 void core_radio_boot(void)
 {
-    char id[RADIO_MUX_ID_MAX] = "";
-    const char *stored = radio_mux_otbr_channel();
-
-    if (stored) {
-        strlcpy(id, stored, sizeof(id));
-    }
+    char id[RADIO_MUX_ID_MAX];
+    const bool stored = radio_mux_otbr_channel(id, sizeof(id));
     const bool c6 = mode_fsm_boot(&g_fsm, stored ? id : NULL);
 
     // br_radio first, so moves and the channel's return work whatever the boot below does. The C6's boot job keeps it
@@ -721,8 +761,12 @@ esp_err_t br_core_move_otbr(const char *from, const char *to, char *reason, size
     if (reason && cap > 0) {
         reason[0] = '\0';
     }
-    if (!g_core.started || !atomic_load(&s_radio_task) || !to) {
+    if (!g_core.started || !atomic_load(&s_radio_task) || !to || (!to[0] && (!from || !from[0]))) {
         snprintf(reason, cap, "OpenThread is not started");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (atomic_load(&s_radio_busy)) { // a lost channel's drain or a start runs: its probe would wait for it
+        snprintf(reason, cap, "OpenThread is stopping or starting on its radio");
         return ESP_ERR_INVALID_STATE;
     }
     if (!atomic_compare_exchange_strong(&s_move.running, &idle, true)) {
@@ -746,13 +790,24 @@ esp_err_t br_core_move_otbr(const char *from, const char *to, char *reason, size
         int waiting = MOVE_WAITING;
 
         if (atomic_compare_exchange_strong(&s_move.state, &waiting, MOVE_ABANDONED)) {
-            snprintf(reason, cap, "the probe of %s did not finish in time", to);
+            snprintf(reason, cap, "the probe of %s did not finish in time", to[0] ? to : "(none)");
             return ESP_ERR_TIMEOUT; // br_radio stops the move after its probe
         }
         xSemaphoreTake(s_move.probed, portMAX_DELAY); // signalled just now
     }
     snprintf(reason, cap, "%s", s_move.reason);
     return s_move.result;
+}
+
+bool br_core_otbr_refusal(char *id, size_t id_cap, char *reason, size_t reason_cap)
+{
+    taskENTER_CRITICAL(&s_refusal_lock);
+    const bool set = s_refused_id[0] != '\0';
+
+    strlcpy(id, s_refused_id, id_cap);
+    strlcpy(reason, s_refused_reason, reason_cap);
+    taskEXIT_CRITICAL(&s_refusal_lock);
+    return set;
 }
 
 bool br_core_move_running(void)

@@ -741,9 +741,7 @@ static void get_status_brief(br_core_status_t *out, bool *ot_ready, bool *border
     if (!g_core.started) {
         return;
     }
-    const char *otbr = radio_mux_otbr_channel(); // not under br_core's mutex: it takes the mux's lock
-
-    strlcpy(out->otbr_channel, otbr ? otbr : "", sizeof(out->otbr_channel));
+    radio_mux_otbr_channel(out->otbr_channel, sizeof(out->otbr_channel)); // not under br_core's mutex: the mux's lock
     xSemaphoreTake(g_core.mutex, portMAX_DELAY);
     strlcpy(out->rcp_installed, g_core.rcp_installed, sizeof(out->rcp_installed));
     out->rcp_installed_known = g_core.rcp_installed_known;
@@ -1476,9 +1474,9 @@ static esp_err_t run_radio_job(const rcp_fw_source_t *source, char *err_detail, 
         }
         return ESP_ERR_INVALID_STATE;
     }
-    const char *otbr = radio_mux_otbr_channel();
+    char otbr[RADIO_MUX_ID_MAX];
 
-    if (!otbr || strcmp(otbr, RADIO_MUX_C6_ID) != 0) {
+    if (!radio_mux_otbr_channel(otbr, sizeof(otbr)) || strcmp(otbr, RADIO_MUX_C6_ID) != 0) {
         // OpenThread does not run on the C6 (a dongle has it, or no channel): the job leaves it and the mode alone.
         const esp_err_t alone = run_c6_job_alone(source, err_detail, err_cap);
 

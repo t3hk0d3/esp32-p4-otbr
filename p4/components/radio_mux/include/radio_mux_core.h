@@ -205,9 +205,12 @@ uint32_t radio_mux_available_modes(const radio_mux_rules_t *rules);
 // uses the type its registration declares; any other mode fits nothing.
 bool radio_mux_fits(const radio_mux_rules_t *rules, radio_mux_mode_t mode, radio_mux_fw_t fw);
 
-// Decision for setting channel `target` (index into chans[0..n)) to `want`. On RADIO_MUX_MOVE, *move_from is the index
-// of the channel that currently has otbr; move_from may be NULL. Checks run in the order of the verdicts: bad value,
-// unavailable channel, mode not registered, firmware fit, hybrid, move or limit, reboot.
+// Decision for setting channel `target` (index into chans[0..n)) to `want`. RADIO_MUX_MOVE is every change of where
+// OpenThread runs, each run by br_core as a long operation: otbr while another channel has it (a move; *move_from is
+// that channel's index), otbr while no channel has it (a start; *move_from is n), and the otbr channel leaving otbr
+// for another mode without a reboot (a stop; *move_from is target). move_from may be NULL. Checks run in the order of
+// the verdicts: bad value, unavailable channel, mode not registered, firmware fit, hybrid (otbr next to a stored
+// ziggurat only while a ziggurat consumer is registered), move or limit, start, reboot, stop.
 radio_mux_verdict_t radio_mux_check_set_mode(const radio_mux_rules_t *rules, const radio_mux_chan_view_t *chans,
                                              size_t n, size_t target, radio_mux_mode_t want, size_t *move_from);
 

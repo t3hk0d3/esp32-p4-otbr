@@ -1626,17 +1626,16 @@ static esp_err_t thread_put_handler(httpd_req_t *req)
 // The OTBR channel's id ("" for none), copied out of the mux.
 static void otbr_channel_id(char out[RADIO_MUX_ID_MAX])
 {
-    const char *id = radio_mux_otbr_channel();
-
-    strlcpy(out, id ? id : "", RADIO_MUX_ID_MAX);
+    radio_mux_otbr_channel(out, RADIO_MUX_ID_MAX);
 }
 
-// What the mux leaves to device_api: the proxy's state and peer of channels in rcp-proxy, and the board's fault on the
-// OTBR channel (OpenThread did not start on a channel the mux lists running).
+// What the mux leaves to device_api: the proxy's state, peer and last error of channels in rcp-proxy, and the board's
+// view of the OTBR channel (OpenThread failed or still starting on a channel the mux lists running, a refused stop).
 static void fill_channels(radio_mux_snapshot_t *s)
 {
-    char otbr[RADIO_MUX_ID_MAX];
-    const br_core_mode_t mode = br_core_get_mode();
+    char refused_id[RADIO_MUX_ID_MAX];
+    char refused_reason[RADIO_MUX_REASON_MAX];
+    br_core_status_t bs;
 
     for (size_t i = 0; i < s->n; i++) {
         radio_mux_chan_info_t *c = &s->chans[i];
@@ -1648,13 +1647,18 @@ static void fill_channels(radio_mux_snapshot_t *s)
             strlcpy(c->proxy_last_error, ps.last_error, sizeof(c->proxy_last_error));
         }
     }
-    if (mode == BR_MODE_RADIO_FAULT) {
-        br_core_status_t bs;
+    br_core_get_status_brief(&bs); // mode, fault reason and the otbr channel; never the OpenThread lock
+    const bool refused = br_core_otbr_refusal(refused_id, sizeof(refused_id), refused_reason, sizeof(refused_reason));
+    const device_api_board_view_t b = {
+        .otbr_id = bs.otbr_channel[0] ? bs.otbr_channel : NULL,
+        .mode = bs.mode,
+        .fault_reason = bs.fault_reason,
+        .moving = br_core_move_running(),
+        .refused_id = refused ? refused_id : NULL,
+        .refused_reason = refused_reason,
+    };
 
-        br_core_get_status(&bs);
-        otbr_channel_id(otbr);
-        device_api_channels_overlay_otbr(s, otbr[0] ? otbr : NULL, bs.mode, bs.fault_reason);
-    }
+    device_api_channels_overlay_board(s, &b);
 }
 
 static const radio_mux_chan_info_t *find_channel(const radio_mux_snapshot_t *s, const char *id)

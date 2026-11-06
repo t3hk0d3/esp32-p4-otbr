@@ -361,6 +361,29 @@ static esp_err_t start_on(mode_fsm_t *fsm, const char *id)
     return err;
 }
 
+// 5. of a move: back on the source, which keeps its stored mode; NO_RADIO when there is none to go back to (absent:
+// the mode before was NO_RADIO; a start: no source). MODE_FSM_ERR_START_FAILED, or ..._START_ABANDONED.
+static esp_err_t start_back(mode_fsm_t *fsm, br_core_mode_t prev, const char *from, const char *to, char *err,
+                            size_t cap)
+{
+    if (prev == BR_MODE_NO_RADIO || from[0] == '\0') {
+        set_mode(fsm, BR_MODE_NO_RADIO);
+        return MODE_FSM_ERR_START_FAILED;
+    }
+    const esp_err_t back_err = start_on(fsm, from);
+
+    if (back_err == MODE_FSM_ERR_START_ABANDONED) {
+        // As on the target: nothing starts OpenThread again in this boot; a reboot brings it back on `from`.
+        snprintf(err, cap, "OpenThread did not start on %s, nor again on %s: rebooting", to[0] ? to : "(none)", from);
+        return MODE_FSM_ERR_START_ABANDONED;
+    }
+    if (back_err != ESP_OK) {
+        snprintf(err, cap, "OpenThread did not start on %s, nor again on %s", to[0] ? to : "(none)", from);
+        mode_fsm_set_fault(fsm);
+    }
+    return MODE_FSM_ERR_START_FAILED;
+}
+
 esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, char *err, size_t cap)
 {
     const mode_fsm_ops_t *ops = fsm->ops;
@@ -373,18 +396,28 @@ esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, 
         snprintf(err, cap, "OpenThread is busy (%s), try again", fsm->radio_job ? "radio job" : mode_name(prev));
         return ESP_ERR_INVALID_STATE;
     }
-    // 1. The probe, while OpenThread still runs on the source.
+    // 1. The probe, while OpenThread still runs on the source (a stop has no target: the op only accepts it).
     if (ops->probe_channel(to, err, cap) != ESP_OK) {
         ESP_LOGW(TAG, "moving OpenThread to %s: the probe failed: %s", to, err);
         return MODE_FSM_ERR_PROBE_FAILED;
     }
-    // 2. Stop on the source (nothing runs there when it is absent: NO_RADIO).
+    // 2. Stop on the source (nothing runs there when it is absent, NO_RADIO, or for a start).
     set_mode(fsm, BR_MODE_STARTING);
     if (ops->ot_stop() != ESP_OK) {
         set_mode(fsm, prev);
         snprintf(err, cap, "%s", MODE_FSM_DRAIN_TIMEOUT);
-        ESP_LOGW(TAG, "moving OpenThread to %s: the sessions did not end, nothing changed", to);
+        ESP_LOGW(TAG, "%s %s: the sessions did not end, nothing changed", to[0] ? "moving OpenThread to" :
+                 "stopping OpenThread on", to[0] ? to : from);
         return MODE_FSM_ERR_DRAIN_TIMEOUT;
+    }
+    if (to[0] == '\0') {
+        // A stop: the source's new mode is stored only now that OpenThread stopped.
+        if (ops->store_otbr(from, "") == ESP_OK) {
+            set_mode(fsm, BR_MODE_NO_RADIO);
+            return ESP_OK;
+        }
+        snprintf(err, cap, "storing the mode failed: OpenThread starts again on %s", from);
+        return start_back(fsm, prev, from, to, err, cap);
     }
     // 3. Start on the target; 4. store both modes only once it runs.
     const esp_err_t start_err = start_on(fsm, to);
@@ -407,23 +440,7 @@ esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, 
     } else {
         snprintf(err, cap, "OpenThread did not start on %s", to);
     }
-    // 5. Back on the source, which keeps its stored mode.
-    if (prev == BR_MODE_NO_RADIO) {
-        set_mode(fsm, BR_MODE_NO_RADIO); // the source is absent: nothing to go back to
-    } else {
-        const esp_err_t back_err = start_on(fsm, from);
-
-        if (back_err == MODE_FSM_ERR_START_ABANDONED) {
-            // As on the target: nothing starts OpenThread again in this boot; a reboot brings it back on `from`.
-            snprintf(err, cap, "OpenThread did not start on %s, nor again on %s: rebooting", to, from);
-            return MODE_FSM_ERR_START_ABANDONED;
-        }
-        if (back_err != ESP_OK) {
-            snprintf(err, cap, "OpenThread did not start on %s, nor again on %s", to, from);
-            mode_fsm_set_fault(fsm);
-        }
-    }
-    return MODE_FSM_ERR_START_FAILED;
+    return start_back(fsm, prev, from, to, err, cap);
 }
 
 void mode_fsm_on_channel_gone(mode_fsm_t *fsm)

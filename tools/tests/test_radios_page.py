@@ -610,7 +610,7 @@ class TestSave:
         assert r[2] is True
 
     def test_proxy_settings_of_a_hidden_panel_are_not_sent(self):
-        # On a new port and Thread moved here: the proxy panel is hidden, so only the mode goes.
+        # On a new port and Thread moved here: the proxy panel is hidden, so only the modes go (off first: rcp-proxy runs).
         r = scenario(
             setup()
             + open_row(1)
@@ -618,10 +618,13 @@ class TestSave:
             + self.puts()
             + ";"
         )
-        assert r == [["/device/channels/usb-10c4-ea60-abc123", {"mode": "otbr"}]]
+        assert r == [
+            ["/device/channels/usb-10c4-ea60-abc123", {"mode": "off"}],
+            ["/device/channels/usb-10c4-ea60-abc123", {"mode": "otbr"}],
+        ]
 
     def test_line_settings_then_move(self):
-        # On a new baud and Thread moved here: baud PUT first, then the mode PUT.
+        # On a new baud and Thread moved here: baud PUT first, then the mode PUTs.
         r = scenario(
             setup()
             + open_row(1)
@@ -631,8 +634,87 @@ class TestSave:
         )
         assert r == [
             ["/device/channels/usb-10c4-ea60-abc123", {"baud": 230400}],
+            ["/device/channels/usb-10c4-ea60-abc123", {"mode": "off"}],
             ["/device/channels/usb-10c4-ea60-abc123", {"mode": "otbr"}],
         ]
+
+    def test_otbr_on_a_radio_in_rcp_proxy_sets_it_off_first(self):
+        # On otbr picked for a stick that runs rcp-proxy: PUT off, then PUT otbr (the API refuses otbr on a running proxy).
+        r = scenario(
+            setup()
+            + open_row(1)
+            + f"{card('otbr')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10); return "
+            + self.puts()
+            + ";"
+        )
+        assert [b for _, b in r] == [{"mode": "off"}, {"mode": "otbr"}]
+
+    def test_otbr_on_an_idle_radio_goes_alone(self):
+        # On otbr picked for a stick that is off: one PUT otbr.
+        idle = {**OLLY, "mode": "off", "stored_mode": "off"}
+        r = scenario(
+            setup({"channels": [C6, idle]})
+            + open_row(1)
+            + f"{card('otbr')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10); return "
+            + self.puts()
+            + ";"
+        )
+        assert [b for _, b in r] == [{"mode": "otbr"}]
+
+    def test_failed_off_put_stops_before_otbr(self):
+        # On a refused PUT off (before otbr): otbr is not sent and the reason shows.
+        r = scenario(
+            setup()
+            + "t.put = () => ({status: 409, body: {error: 'busy', detail: 'a move runs'}});"
+            + open_row(1)
+            + f"{card('otbr')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10); return [{self.puts()}.length, t.el('mMsg').textContent];"
+        )
+        assert r[0] == 1
+        assert "a move runs" in r[1]
+
+    def test_accepted_start_says_thread_starts_here(self):
+        # On 202 for otbr while no radio has Thread: "Starting Thread on" the radio; it settles once Thread runs there.
+        idle = {**OLLY, "mode": "off", "stored_mode": "off"}
+        c6_off = {**C6, "mode": "off", "stored_mode": "off"}
+        r = scenario(
+            setup({"channels": [c6_off, idle]}, NO_RADIO)
+            + "t.put = () => ({status: 202, body: {moving: true, moved_from: null}});"
+            + open_row(1)
+            + f"{card('otbr')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10);"
+            + "const first = t.el('rMsg').textContent;"
+            + f"t.snap = {{channels: [{json.dumps(c6_off)}, Object.assign({{}}, {json.dumps(idle)}, {{mode: 'otbr', stored_mode: 'otbr', state: 'running'}})]}};"
+            + "t.status = {mode: 'BR_RUNNING', otbr_channel: 'usb-10c4-ea60-abc123', fault_reason: null};"
+            + "await t.advance(5100); return [first, t.el('rMsg').textContent];"
+        )
+        assert "Starting Thread on OllyZig CC2652P" in r[0]
+        assert "Thread now runs on OllyZig CC2652P" in r[1]
+
+    def test_accepted_stop_says_thread_stops_and_then_that_it_stopped(self):
+        # On 202 for off on the radio that runs Thread: "Stopping Thread"; once its stored mode is off: "stopped".
+        r = scenario(
+            setup()
+            + "t.put = () => ({status: 202, body: {moving: true, moved_from: 'c6'}});"
+            + open_row(0)
+            + f"{card('off')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10);"
+            + "const first = t.el('rMsg').textContent;"
+            + f"t.snap = {{channels: [Object.assign({{}}, {json.dumps(C6)}, {{mode: 'off', stored_mode: 'off', state: 'idle'}})]}};"
+            + "t.status = {mode: 'NO_RADIO', otbr_channel: null, fault_reason: 'no channel in otbr'};"
+            + "await t.advance(5100); return [first, t.el('rMsg').textContent];"
+        )
+        assert "Stopping Thread on ESP32-C6 (on board)" in r[0]
+        assert "Thread stopped on ESP32-C6 (on board)" in r[1]
+
+    def test_refused_stop_says_thread_keeps_running(self):
+        # On a stop whose sessions did not end: the radio stays in otbr with error drain_timeout; the page says so.
+        r = scenario(
+            setup()
+            + "t.put = () => ({status: 202, body: {moving: true, moved_from: 'c6'}});"
+            + open_row(0)
+            + f"{card('off')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10);"
+            + f"t.snap = {{channels: [Object.assign({{}}, {json.dumps(C6)}, {{error: 'drain_timeout'}})]}};"
+            + "await t.advance(5100); return t.el('rMsg').textContent;"
+        )
+        assert "did not stop" in r and "drain_timeout" in r
 
     def test_failed_settings_put_stops_before_the_move(self):
         # On a refused settings PUT: the mode PUT is not sent and the reason shows in the dialog.

@@ -167,8 +167,8 @@ radio_mux_verdict_t radio_mux_check_set_mode(const radio_mux_rules_t *rules, con
     if (!radio_mux_fits(rules, want, chans[target].fw)) {
         return RADIO_MUX_REFUSE_INCOMPATIBLE;
     }
-    // otbr and a registered ziggurat consumer never run together.
-    if ((want == RADIO_MUX_MODE_OTBR &&
+    // otbr and a registered ziggurat consumer never run together (a stored ziggurat without its consumer runs nothing).
+    if ((want == RADIO_MUX_MODE_OTBR && find_rule(rules, RADIO_MUX_MODE_ZIGGURAT) != NULL &&
             mode_used_by_other(chans, n, target, RADIO_MUX_MODE_ZIGGURAT, NULL, &count)) ||
             (want == RADIO_MUX_MODE_ZIGGURAT &&
              mode_used_by_other(chans, n, target, RADIO_MUX_MODE_OTBR, NULL, &count))) {
@@ -184,11 +184,25 @@ radio_mux_verdict_t radio_mux_check_set_mode(const radio_mux_rules_t *rules, con
         }
         return RADIO_MUX_REFUSE_MODE_TAKEN;
     }
+    // otbr where no channel has it: a start, run like a move from nowhere (probe, start, store once it runs).
+    if (want == RADIO_MUX_MODE_OTBR && chans[target].mode != RADIO_MUX_MODE_OTBR) {
+        if (move_from != NULL) {
+            *move_from = n;
+        }
+        return RADIO_MUX_MOVE;
+    }
     const radio_mux_rule_t *leaving = find_rule(rules, chans[target].mode);
 
     if (chans[target].mode != want && ((rule != NULL && rule->reboot_on_change) ||
                                        (leaving != NULL && leaving->reboot_on_change))) {
         return RADIO_MUX_APPLY_REBOOT;
+    }
+    // The otbr channel leaving otbr: a stop, run like a move to nowhere (drain, stop, store once it stopped).
+    if (chans[target].mode == RADIO_MUX_MODE_OTBR && want != RADIO_MUX_MODE_OTBR) {
+        if (move_from != NULL) {
+            *move_from = target;
+        }
+        return RADIO_MUX_MOVE;
     }
     return RADIO_MUX_APPLY;
 }

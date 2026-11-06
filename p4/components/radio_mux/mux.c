@@ -777,10 +777,47 @@ static void handle_lease_end(mux_call_t *call)
 
 // The end of a move: `to` (leased, OpenThread runs on it) is stored in otbr and `from` in off, in that order of
 // effect: `from`'s consumer is detached (GONE), then the lease becomes the otbr consumer's attach (no GONE, no reopen).
+// The end of a stop: `from` leaves otbr for the mode its PUT asked for (leave_mode), once OpenThread stopped on it;
+// its otbr consumer is detached (GONE) and that mode's attached.
+static void commit_stop(mux_call_t *call, struct radio_mux_chan *from)
+{
+    const radio_mux_mode_t old = from ? from->mode : RADIO_MUX_MODE_OFF;
+
+    if (!from || old != RADIO_MUX_MODE_OTBR) {
+        call->err = ESP_ERR_INVALID_STATE;
+        return;
+    }
+    const radio_mux_mode_t m = from->leave_mode;
+
+    mux_lock();
+    from->mode = m == RADIO_MUX_MODE_RCP_PROXY || m == RADIO_MUX_MODE_ZIGGURAT ? m : RADIO_MUX_MODE_OFF;
+    mux_unlock();
+    call->err = mux_store_chan(from);
+    if (call->err != ESP_OK) {
+        mux_lock();
+        from->mode = old;
+        mux_unlock();
+        return;
+    }
+    mux_port_t *p = from->port;
+
+    if (p->kind == RADIO_MUX_KIND_C6) {
+        c6_apply(true); // otbr detached (GONE); the new mode's consumer attached, or off: held in reset
+    } else if (p->chan == from) {
+        feed(p, RADIO_MUX_AEV_MODE_SET);
+    }
+    ESP_LOGI(TAG, "otbr stopped on %s: %s", from->id, radio_mux_mode_name(from->mode));
+}
+
 static void handle_commit_otbr(mux_call_t *call)
 {
-    struct radio_mux_chan *to = find_chan(call->id);
     struct radio_mux_chan *from = call->from[0] ? find_chan(call->from) : NULL;
+
+    if (call->id[0] == '\0') { // no target: a stop
+        commit_stop(call, from);
+        return;
+    }
+    struct radio_mux_chan *to = find_chan(call->id);
     const radio_mux_consumer_t *c = mux_find_consumer(RADIO_MUX_MODE_OTBR);
 
     if (!to || !to->port->leased || to->port->chan != to || !c) {
@@ -987,7 +1024,9 @@ static radio_mux_verdict_t check_req(const struct radio_mux_chan *ch, const radi
     return RADIO_MUX_APPLY;
 }
 
-static radio_mux_verdict_t check_mode(struct radio_mux_chan *ch, radio_mux_mode_t want, char *from, size_t cap)
+// On MOVE: `from` gets the channel OpenThread leaves ("" for a start), *stop whether it is a stop on `ch` itself.
+static radio_mux_verdict_t check_mode(struct radio_mux_chan *ch, radio_mux_mode_t want, char *from, size_t cap,
+                                      bool *stop)
 {
     radio_mux_chan_view_t views[RADIO_MUX_CHANNELS_MAX];
     size_t n = 0, target = 0, move_from = 0;
@@ -1002,8 +1041,10 @@ static radio_mux_verdict_t check_mode(struct radio_mux_chan *ch, radio_mux_mode_
     }
     const radio_mux_verdict_t v = radio_mux_check_set_mode(&g_mux.rules, views, n, target, want, &move_from);
 
+    *stop = false;
     if (v == RADIO_MUX_MOVE) {
-        snprintf(from, cap, "%s", views[move_from].id);
+        snprintf(from, cap, "%s", move_from < n ? views[move_from].id : "");
+        *stop = move_from == target;
     }
     return v;
 }
@@ -1015,6 +1056,7 @@ static void handle_set(mux_call_t *call)
     radio_mux_proxy_settings_t proxy;
 
     call->from[0] = '\0';
+    call->stop = false;
     if (!ch) {
         call->verdict = RADIO_MUX_REFUSE_UNKNOWN_CHANNEL;
         return;
@@ -1026,9 +1068,12 @@ static void handle_set(mux_call_t *call)
     radio_mux_verdict_t v = check_req(ch, req, &proxy);
 
     if (v == RADIO_MUX_APPLY && req->has_mode) {
-        v = check_mode(ch, req->mode, call->from, sizeof(call->from));
+        v = check_mode(ch, req->mode, call->from, sizeof(call->from), &call->stop);
         if (v == RADIO_MUX_MOVE && !call->have_mover) {
             v = RADIO_MUX_REFUSE_NOT_AVAILABLE; // nothing runs a move yet (Task 7)
+        }
+        if (v == RADIO_MUX_MOVE && call->stop) {
+            ch->leave_mode = req->mode; // stored by the stop's commit, once OpenThread stopped
         }
     }
     call->verdict = v;

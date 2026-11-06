@@ -59,7 +59,8 @@ static bool is_current(const mux_port_t *p, const radio_mux_chan_t *h)
     size_t slot;
     uint32_t gen;
 
-    return radio_mux_handle_unpack((uintptr_t)h, &slot, &gen) && radio_mux_handle_current(gen, atomic_load(&p->att_gen));
+    return radio_mux_handle_unpack((uintptr_t)h, &slot, &gen) &&
+           radio_mux_handle_current(gen, atomic_load(&p->att_gen));
 }
 
 esp_err_t radio_mux_bind_queue(radio_mux_chan_t *ch, QueueHandle_t q)
@@ -378,6 +379,7 @@ radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req
     }
     radio_mux_verdict_t v = call->verdict;
     char from[RADIO_MUX_ID_MAX];
+    const bool stop = call->stop;
 
     snprintf(from, sizeof(from), "%s", call->from);
     mux_call_put(call);
@@ -385,12 +387,14 @@ radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req
         return v;
     }
     // The mover is called on the caller's task, never the owner's: its probe goes through the mux. It answers once the
-    // probe is done; the rest of the move runs on br_core's task (a long operation).
+    // probe is done (a stop has none: once accepted); the rest runs on br_core's task (a long operation).
     char why[RADIO_MUX_REASON_MAX] = "";
-    const esp_err_t err = mover(from, id, why, sizeof(why));
+    const char *to = stop ? "" : id;
+    const esp_err_t err = mover(from, to, why, sizeof(why));
 
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "moving otbr from %s to %s: %s (%s)", from, id, esp_err_to_name(err), why);
+        ESP_LOGW(TAG, "moving otbr from %s to %s: %s (%s)", from[0] ? from : "(none)", to[0] ? to : "(none)",
+                 esp_err_to_name(err), why);
         if (reason && reason_cap > 0) {
             snprintf(reason, reason_cap, "%s", why);
         }
@@ -480,21 +484,25 @@ void radio_mux_c6_job_end(bool c6_ok)
     mux_call_put(call);
 }
 
-const char *radio_mux_otbr_channel(void)
+bool radio_mux_otbr_channel(char *out, size_t cap)
 {
-    const char *id = NULL;
+    bool found = false;
 
+    if (cap > 0) {
+        out[0] = '\0';
+    }
     if (!atomic_load(&g_mux.started)) {
-        return NULL;
+        return false;
     }
     mux_lock();
-    for (size_t i = 0; i < RADIO_MUX_CHANNELS_MAX && !id; i++) {
+    for (size_t i = 0; i < RADIO_MUX_CHANNELS_MAX && !found; i++) {
         if (g_mux.chans[i].used && g_mux.chans[i].mode == RADIO_MUX_MODE_OTBR) {
-            id = g_mux.chans[i].id;
+            snprintf(out, cap, "%s", g_mux.chans[i].id); // the record may change once the lock is released
+            found = true;
         }
     }
     mux_unlock();
-    return id;
+    return found;
 }
 
 void radio_mux_set_otbr_mover(esp_err_t (*move)(const char *from, const char *to, char *reason, size_t cap))
@@ -563,8 +571,9 @@ void radio_mux_lease_end(radio_mux_chan_t *ch, const char *fault)
 
 esp_err_t radio_mux_commit_otbr(const char *from, const char *to)
 {
-    ESP_RETURN_ON_FALSE(to && atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "not started");
-    mux_call_t *call = call_new(to);
+    ESP_RETURN_ON_FALSE(atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "not started");
+    ESP_RETURN_ON_FALSE((to && to[0]) || (from && from[0]), ESP_ERR_INVALID_ARG, TAG, "neither a target nor a source");
+    mux_call_t *call = call_new(to ? to : "");
 
     ESP_RETURN_ON_FALSE(call, ESP_ERR_NO_MEM, TAG, "call");
     snprintf(call->from, sizeof(call->from), "%s", from ? from : "");
