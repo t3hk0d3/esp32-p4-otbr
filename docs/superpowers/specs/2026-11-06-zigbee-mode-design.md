@@ -1,8 +1,9 @@
 # Zigbee mode: ziggurat on a radio channel: design
 
 Date: 2026-11-06 (revised the same day: built on the radio channel mux, mode per channel). Status: draft for review.
-Spike: branch `spike/ziggurat-p4` (b190cfb), throwaway. Depends on: the radio channel mux design from the "RCP USB
-dongle support" work (in progress, 2026-11-06).
+Spike: branch `spike/ziggurat-p4` (b190cfb), throwaway. Depends on: the radio channel mux design,
+`docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md` on branch `feat/radio-mux` (approved 2026-11-06,
+77e683b), which defines the consumer API and the mode-consumer registration used here.
 
 ## 1. Purpose and scope
 
@@ -151,7 +152,7 @@ From the spike and its on-board runs (2026-11-06):
   design adds it.
 - The channel API itself (`GET /device/channels`, `PUT /device/channels/{id}` with `mode` `ziggurat`, the reply's
   `"reboot": true`, 409 `mode_taken` and `hybrid_not_supported`) is the mux design's
-  (`2026-11-06-radio-channel-mux-design.md`).
+  (`2026-11-06-radio-channel-mux-design.md` on `feat/radio-mux`).
 - `/metrics` gains Zigbee counters with a `zigbee_` prefix, only while a channel runs Ziggurat.
 
 ### Board side: `br_core`
