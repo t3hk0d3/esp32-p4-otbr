@@ -1,5 +1,6 @@
 #include "mode_fsm.h"
 
+#include <stdio.h>
 #include <string.h>
 #include "esp_log.h"
 
@@ -16,6 +17,8 @@ static const char *mode_name(br_core_mode_t mode)
         return "SNIFFER";
     case BR_MODE_RADIO_FAULT:
         return "RADIO_FAULT";
+    case BR_MODE_NO_RADIO:
+        return "NO_RADIO";
     }
     return "?";
 }
@@ -335,4 +338,108 @@ esp_err_t mode_fsm_radio_job_result(bool base_only, esp_err_t job_err, esp_err_t
         return job_err;
     }
     return restart_err == ESP_OK ? ESP_OK : RCP_SYNC_ERR_RESTART;
+}
+
+bool mode_fsm_boot(mode_fsm_t *fsm, const char *otbr_id)
+{
+    if (otbr_id && strcmp(otbr_id, MODE_FSM_C6_ID) == 0) {
+        return true; // the C6 boots as it always did
+    }
+    set_mode(fsm, BR_MODE_NO_RADIO);
+    return false;
+}
+
+// STARTING, then OpenThread on `id`. The border router start sets BR_RUNNING (mode_fsm_set_started).
+static esp_err_t start_on(mode_fsm_t *fsm, const char *id)
+{
+    set_mode(fsm, BR_MODE_STARTING);
+    const esp_err_t err = fsm->ops->ot_start(id);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "starting OpenThread on %s failed: %s", id, esp_err_to_name(err));
+    }
+    return err;
+}
+
+esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, char *err, size_t cap)
+{
+    const mode_fsm_ops_t *ops = fsm->ops;
+    const br_core_mode_t prev = mode_fsm_get_mode(fsm);
+
+    if (cap > 0) {
+        err[0] = '\0';
+    }
+    if (fsm->radio_job || prev == BR_MODE_STARTING || prev == BR_MODE_SNIFFER) {
+        snprintf(err, cap, "OpenThread is busy (%s), try again", fsm->radio_job ? "radio job" : mode_name(prev));
+        return ESP_ERR_INVALID_STATE;
+    }
+    // 1. The probe, while OpenThread still runs on the source.
+    if (ops->probe_channel(to, err, cap) != ESP_OK) {
+        ESP_LOGW(TAG, "moving OpenThread to %s: the probe failed: %s", to, err);
+        return MODE_FSM_ERR_PROBE_FAILED;
+    }
+    // 2. Stop on the source (nothing runs there when it is absent: NO_RADIO).
+    set_mode(fsm, BR_MODE_STARTING);
+    if (ops->ot_stop() != ESP_OK) {
+        set_mode(fsm, prev);
+        snprintf(err, cap, "%s", MODE_FSM_DRAIN_TIMEOUT);
+        ESP_LOGW(TAG, "moving OpenThread to %s: the sessions did not end, nothing changed", to);
+        return MODE_FSM_ERR_DRAIN_TIMEOUT;
+    }
+    // 3. Start on the target; 4. store both modes only once it runs.
+    if (start_on(fsm, to) == ESP_OK) {
+        const esp_err_t store_err = ops->store_otbr(from, to);
+
+        if (store_err != ESP_OK) {
+            snprintf(err, cap, "OpenThread runs on %s, but storing the modes failed", to);
+        }
+        return store_err;
+    }
+    snprintf(err, cap, "OpenThread did not start on %s", to);
+    // 5. Back on the source, which keeps its stored mode.
+    if (prev == BR_MODE_NO_RADIO) {
+        set_mode(fsm, BR_MODE_NO_RADIO); // the source is absent: nothing to go back to
+    } else if (start_on(fsm, from) != ESP_OK) {
+        snprintf(err, cap, "OpenThread did not start on %s, nor again on %s", to, from);
+        mode_fsm_set_fault(fsm);
+    }
+    return MODE_FSM_ERR_START_FAILED;
+}
+
+void mode_fsm_on_channel_gone(mode_fsm_t *fsm)
+{
+    if (fsm->radio_job) {
+        return; // the job took the radio: it starts OpenThread again itself
+    }
+    const br_core_mode_t before = atomic_exchange(&fsm->mode, BR_MODE_STARTING);
+
+    ESP_LOGI(TAG, "mode %s (the OTBR channel is gone)", mode_name(BR_MODE_STARTING));
+    if (before == BR_MODE_SNIFFER) {
+        fsm->thread_stopped_by_capture = false; // OpenThread goes away: nothing to restore
+        notify_sniffer_end(fsm);
+    }
+    if (fsm->ops->ot_stop() != ESP_OK) {
+        ESP_LOGE(TAG, "tearing OpenThread down after the OTBR channel went failed");
+        mode_fsm_set_fault(fsm);
+        return;
+    }
+    set_mode(fsm, BR_MODE_NO_RADIO);
+}
+
+void mode_fsm_on_channel_back(mode_fsm_t *fsm, const char *id)
+{
+    char err[64];
+
+    if (fsm->radio_job) {
+        return;
+    }
+    set_mode(fsm, BR_MODE_STARTING);
+    if (fsm->ops->probe_channel(id, err, sizeof(err)) != ESP_OK) {
+        ESP_LOGE(TAG, "%s: the RCP probe failed: %s", id, err);
+        mode_fsm_set_fault(fsm);
+        return;
+    }
+    if (start_on(fsm, id) != ESP_OK) {
+        mode_fsm_set_fault(fsm);
+    }
 }

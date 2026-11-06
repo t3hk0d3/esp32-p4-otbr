@@ -184,7 +184,7 @@ static int cmd_c6_jumper_ignore(int argc, char **argv)
 // br_status: br_core mode, installed RCP version, dataset and DHCPv6-PD state.
 static int cmd_br_status(int argc, char **argv)
 {
-    static const char *const modes[] = {"STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT"};
+    static const char *const modes[] = {"STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT", "NO_RADIO"};
     br_core_status_t status;
     br_core_get_status(&status);
     printf("br_status: mode=%s installed=%s known=%d compatible=%d dataset=%d channel=%u pd=%d prefix=%s fault=%s\n",
