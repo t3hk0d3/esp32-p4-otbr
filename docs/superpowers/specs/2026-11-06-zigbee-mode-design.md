@@ -102,7 +102,12 @@ From the spike and its on-board runs (2026-11-06):
   for a channel reset (C6: GPIO reset; dongle: USB close and reopen), answered by RESET. Per-channel counters,
   including frame-pool drops, are readable by the consumer. A consumer attaches when its channel is present and in its
   mode. Spinel-level RCP reboots are not turned into RESET; the consumer sees them in its own parsing. In a build
-  without the `zigbee` component, the mux refuses `ziggurat` (409 `not_available`) and does not offer it. Nothing in the
+  without the `zigbee` component, the mux refuses `ziggurat` (409 `not_available`) and does not offer it. Every stick
+  that appears starts `off`; the mux probes its firmware (spinel, ZNP, EZSP; a Ziggurat-on-stick firmware is told apart
+  by its vendor property and fits only `rcp-proxy`), resets it, and switches it to its stored mode only if the firmware
+  fits (`ziggurat` needs spinel); a PUT of a mode that does not fit gets 409 `incompatible`. So a Ziggurat consumer only
+  ever sees a spinel RCP. Each channel reports a `firmware` object (type, version, chip, baud, source, time). The C6 is
+  probed by rcp_sync as before. Nothing in the
   mux calls into the consumer from a transport task or an ISR, and nothing in it calls exit() or DieNow.
 - Ziggurat is Apache-2.0; this project is AGPL-3.0-or-later. Apache-2.0 code can be combined into it; `NOTICE` gets
   the attribution.
@@ -121,7 +126,8 @@ From the spike and its on-board runs (2026-11-06):
   Commissioner, Addresses, Tools, Console), Topology, Routing and Packet capture are hidden, and opening one directly
   shows a notice linking to the Radios page; with an OTBR channel that is absent or faulted, those pages stay and show
   "no radio in OTBR mode". With a working OTBR channel too, both sets of pages are shown.
-- The **Zigbee page** shows: which channel (radio) it runs on, stack state (starting, waiting for a client, running,
+- The **Zigbee page** shows: which channel (radio) it runs on and that channel's detected firmware (the mux's
+  `firmware` type, version and chip), stack state (starting, waiting for a client, running,
   radio resetting, radio gone), the connected client (address, connected since) or none, the radio as last configured
   by the stack (channel, PAN ID, coordinator IEEE address, short address, TX power), radio counters (frames received,
   dropped, sent, failed, energy scans, RCP resets), and the stack's PSRAM use (current and peak). It also shows the ZHA
@@ -285,6 +291,9 @@ zigbee
             - reports the radio as incompatible on the page and in /device/zigbee
         With no channel in Ziggurat mode
             - does nothing
+        With the Ziggurat dongle's firmware detected as anything but spinel (ZNP, EZSP, Ziggurat-on-stick, unknown)
+            - is never attached: the mux keeps the channel off with its reason and the stored mode
+            - does not start the stack, and the Zigbee page shows the mux's reason
         With the Ziggurat channel reported unavailable (stored_mode ziggurat; dongle not detected, or radio not compatible)
             - does not start the stack
             - reports the channel as unavailable on the page and in /device/zigbee
