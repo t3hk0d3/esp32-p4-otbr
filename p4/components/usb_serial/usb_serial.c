@@ -37,6 +37,10 @@ static const char *TAG = "usb_serial";
 #define CONFIRM_WAIT_MS 5000
 #define ATTACH_POLL_US 1000000 // how often an unsupported or closed device is checked for still being there
 
+// At least one tick: at CONFIG_FREERTOS_HZ 100, pdMS_TO_TICKS(5) is 0 and the wait would not block (a busy loop at
+// priority 6 on core 1 starves the web server).
+#define WAIT_TICKS(ms) (pdMS_TO_TICKS(ms) > 0 ? pdMS_TO_TICKS(ms) : 1)
+
 static QueueHandle_t s_queue;
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 static usb_serial_settings_t s_stored; // under s_mux
@@ -384,17 +388,19 @@ static void owner_task(void *arg)
             const int ready = select(maxfd + 1, &rd, NULL, NULL, &tv);
 
             if (ready > 0) {
-                if (s_listen_fd >= 0 && FD_ISSET(s_listen_fd, &rd)) {
-                    accept_one();
-                }
+                // The old client first: a client that closes and reconnects at once makes both readable, and its
+                // close must be seen before the new connection is judged.
                 if (s_client_fd >= 0 && FD_ISSET(s_client_fd, &rd)) {
                     read_client();
                 }
+                if (s_listen_fd >= 0 && FD_ISSET(s_listen_fd, &rd)) {
+                    accept_one();
+                }
             } else if (ready < 0) {
-                vTaskDelay(pdMS_TO_TICKS(SELECT_MS));
+                vTaskDelay(WAIT_TICKS(SELECT_MS));
             }
         } else { // no listener (the port could not be bound): just the messages
-            if (xQueueReceive(s_queue, &m, pdMS_TO_TICKS(SELECT_MS)) == pdTRUE) {
+            if (xQueueReceive(s_queue, &m, WAIT_TICKS(SELECT_MS)) == pdTRUE) {
                 handle(&m);
             }
         }
