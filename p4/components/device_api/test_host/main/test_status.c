@@ -214,7 +214,7 @@ TEST_CASE("On a build without TREL: trel is null", "[device_api]")
     device_api_status_t s = sample();
 
     render(&s);
-    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":null}"));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":null,\"zigbee_channel\""));
 }
 
 TEST_CASE("On TREL whose state could not be read: enabled is written, the rest is null", "[device_api]")
@@ -370,4 +370,24 @@ TEST_CASE("routing not started: routing is null", "[routing]")
     render(&s);
     TEST_ASSERT_NOT_NULL(strstr(body, "\"routing\":null"));
     TEST_ASSERT_NOT_NULL(strstr(body, "\"pd\":{\"state\":\"running\",\"prefix\":\"fd00:1::/64\"}"));
+}
+
+TEST_CASE("On a channel running ziggurat: zigbee_channel is its id", "[device_api]")
+{
+    device_api_status_t s = sample();
+
+    s.zigbee_channel = "usb-303a:1001";
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"zigbee_channel\":\"usb-303a:1001\""));
+}
+
+TEST_CASE("On no channel running ziggurat: zigbee_channel is null", "[device_api]")
+{
+    device_api_status_t s = sample();
+
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"zigbee_channel\":null"));
+    s.zigbee_channel = "";
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"zigbee_channel\":null"));
 }

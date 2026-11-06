@@ -587,3 +587,85 @@ TEST_CASE("On TREL switched off: enabled 0, active 0, families still written", "
     TEST_ASSERT_TRUE(has_line(out, "br_trel_peers_other 0"));
     free(out);
 }
+
+/* ---- Zigbee ---- */
+
+static void with_zigbee(void)
+{
+    with_sample();
+    s_in.device.zigbee = (metrics_zigbee_t) {
+        .active = true, .frames_rx = 10, .frames_tx = 9, .tx_no_ack = 2, .tx_cca = 3, .tx_failed = 4, .rcp_resets = 6,
+        .heap_current = 1000, .heap_peak = 2000, .client_connected = true,
+    };
+}
+
+TEST_CASE("Zigbee series while a channel runs ziggurat: frames per direction", "[metrics]")
+{
+    with_zigbee();
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE zigbee_frames_total counter"));
+    TEST_ASSERT_TRUE(has_line(out, "zigbee_frames_total{dir=\"rx\"} 10"));
+    TEST_ASSERT_TRUE(has_line(out, "zigbee_frames_total{dir=\"tx\"} 9"));
+    free(out);
+}
+
+TEST_CASE("Zigbee series: transmit results as no_ack, cca and failed", "[metrics]")
+{
+    with_zigbee();
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE zigbee_tx_results_total counter"));
+    TEST_ASSERT_TRUE(has_line(out, "zigbee_tx_results_total{result=\"no_ack\"} 2"));
+    TEST_ASSERT_TRUE(has_line(out, "zigbee_tx_results_total{result=\"cca\"} 3"));
+    TEST_ASSERT_TRUE(has_line(out, "zigbee_tx_results_total{result=\"failed\"} 4"));
+    TEST_ASSERT_EQUAL_INT(0, count_prefix(out, "zigbee_tx_results_total{result=\"acked\"}"));
+    free(out);
+}
+
+TEST_CASE("Zigbee series: RCP resets, heap bytes by kind and the client flag", "[metrics]")
+{
+    with_zigbee();
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE zigbee_rcp_resets_total counter"));
+    TEST_ASSERT_TRUE(has_line(out, "zigbee_rcp_resets_total 6"));
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE zigbee_heap_bytes gauge"));
+    TEST_ASSERT_TRUE(has_line(out, "zigbee_heap_bytes{kind=\"current\"} 1000"));
+    TEST_ASSERT_TRUE(has_line(out, "zigbee_heap_bytes{kind=\"peak\"} 2000"));
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE zigbee_client_connected gauge"));
+    TEST_ASSERT_TRUE(has_line(out, "zigbee_client_connected 1"));
+    free(out);
+}
+
+TEST_CASE("Zigbee series without a client: zigbee_client_connected is 0", "[metrics]")
+{
+    with_zigbee();
+    s_in.device.zigbee.client_connected = false;
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "zigbee_client_connected 0"));
+    free(out);
+}
+
+TEST_CASE("Zigbee series without a ziggurat channel: no zigbee family", "[metrics]")
+{
+    with_sample();
+    char *out = render();
+
+    TEST_ASSERT_NULL(strstr(out, "zigbee_"));
+    free(out);
+}
+
+TEST_CASE("Zigbee series: written after the routing families", "[metrics]")
+{
+    with_zigbee();
+    char *out = render();
+    const char *routing = strstr(out, "# TYPE br_bgp_session_resets_total ");
+    const char *zigbee = strstr(out, "# TYPE zigbee_frames_total ");
+
+    TEST_ASSERT_NOT_NULL(routing);
+    TEST_ASSERT_NOT_NULL(zigbee);
+    TEST_ASSERT_TRUE(zigbee > routing);
+    free(out);
+}
