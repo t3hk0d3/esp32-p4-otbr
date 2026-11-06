@@ -74,8 +74,21 @@ def _box(x0, x1, y0, y1, z0, z1) -> Part:
 # --- board clearance -----------------------------------------------------------------------------------------------
 
 
+def _on_standoff(x: np.ndarray, y: np.ndarray, grow: float) -> np.ndarray:
+    """Points within grow of a standoff's footprint: the post, or its web out to the side wall."""
+    ok = np.zeros_like(x, dtype=bool)
+    r = P.STANDOFF_D / 2 + grow
+    mid = (P.INNER[0] + P.INNER[1]) / 2
+    for hx, hy in P.SCREW_HOLES:
+        ok |= (x - hx) ** 2 + (y - hy) ** 2 <= r * r
+        wall = P.INNER[0] if hx < mid else P.INNER[1]
+        x0, x1 = sorted((hx, wall))
+        ok |= (x >= x0 - grow) & (x <= x1 + grow) & (np.abs(y - hy) <= r)
+    return ok
+
+
 def _allowed_contact(x: np.ndarray, y: np.ndarray) -> np.ndarray:
-    """Standoff tops and their bores touch the board by design."""
+    """The round standoff tops and their bores touch the board by design (the webs sit lower and must clear it)."""
     ok = np.zeros_like(x, dtype=bool)
     r = P.STANDOFF_D / 2 + CLEARANCE
     for hx, hy in P.SCREW_HOLES:
@@ -212,21 +225,21 @@ def _posed(bodies: list[Part], shift_y: float, lift: float) -> Part:
 
 
 def _underside_over_standoffs(board: BoardModel, shift_max: float) -> float:
-    """Deepest board underside part (below the PCB) that crosses a standoff top while the board slides shift_max → 0."""
+    """Deepest board underside part (below the PCB) that crosses a standoff top (post or web) while the board slides
+    shift_max → 0."""
     env = board.envelope
-    r = P.STANDOFF_D / 2
     pcb_bottom = FACTS["pcb"].z0
+    xs = np.arange(P.INNER[0], P.INNER[1] + ENV_RES / 2, ENV_RES)
+    ys = np.arange(P.INNER[2], P.INNER[3] + ENV_RES / 2, ENV_RES)
+    gx, gy = np.meshgrid(xs, ys)
+    keep = _on_standoff(gx, gy, 0.0)
+    pts = list(zip(gx[keep], gy[keep], strict=True))
     deepest = 0.0
-    offsets = np.arange(-r, r + ENV_RES / 2, ENV_RES)
-    for hx, hy in P.SCREW_HOLES:
-        for s in np.arange(0.0, shift_max + 1e-6, ENV_RES):
-            for dx in offsets:
-                for dy in offsets:
-                    if dx * dx + dy * dy > r * r:
-                        continue
-                    b = env.bottom(hx + dx, hy + dy - s)
-                    if not math.isnan(b):
-                        deepest = max(deepest, pcb_bottom - b)
+    for s in np.arange(0.0, shift_max + 1e-6, ENV_RES):
+        for x, y in pts:
+            b = env.bottom(x, y - s)
+            if not math.isnan(b):
+                deepest = max(deepest, pcb_bottom - b)
     return deepest
 
 
