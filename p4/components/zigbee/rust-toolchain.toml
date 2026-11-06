@@ -1,0 +1,5 @@
+# The toolchain that builds ziggurat (tools/build_staticlib.sh). The Docker fallback uses the matching rust:<channel>-slim image.
+[toolchain]
+channel = "1.99"
+profile = "minimal"
+targets = ["riscv32imafc-unknown-none-elf"]

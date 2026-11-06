@@ -1,0 +1,3 @@
+[submodule "p4/components/zigbee/ziggurat"]
+	path = p4/components/zigbee/ziggurat
+	url = https://github.com/zigpy/ziggurat.git
