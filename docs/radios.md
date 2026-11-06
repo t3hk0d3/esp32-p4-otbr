@@ -85,7 +85,9 @@ under `rcp_proxy`:
 | connect | Retries with back-off 1, 2, 4, 8, 16, then 30 s; the back-off resets to 1 s after a connection that lasted 60 s. A connect that gets no answer gives up after 10 s. | Datagrams go to `host:port`; only datagrams from that address are accepted. |
 
 Listen sockets and UDP sources follow the [network access rules](networking.md) (per-VLAN rule, Thread-mesh refusal).
-Ports 80 and 179 are refused.
+Ports 80 and 179 are refused. Two channels cannot listen on the same adapter and port: a PUT that would make a second
+channel in `rcp-proxy` listen where another one (also an unplugged one) is stored listening is refused with 409
+`port_taken`, naming the port and that channel.
 
 **Framing.** A USB channel passes bytes as they are. On the C6 the proxy turns spinel frames into HDLC bytes and back,
 so a Linux `otbr-agent` (`spinel+hdlc+uart` through `socat`) can drive the C6; when a peer connects (TCP) or first sends
@@ -98,8 +100,17 @@ datagram of at most 1024 bytes; loss and reordering corrupt the stream, so use i
 **Behaviour.** A peer that does not read until the buffer overflows is disconnected. Unplugging the dongle drops the
 peer; the channel serves again when the radio returns. Changing a proxy setting re-opens the listener or connection.
 The channel's counters and the peer's address are in `GET /device/channels` (`rcp_proxy.state`: `listening`,
-`connecting`, `backoff`, `connected`). A firmware push or recovery of the C6 is refused with 409 `c6_busy` while its
-proxy has a peer.
+`connecting`, `backoff`, `connected`). When a listener cannot be opened (the port is used by another service) or a
+connect fails (the host does not resolve, the access rules refuse it, no answer), the proxy backs off and tries again;
+`rcp_proxy.last_error` says why the last try failed, and while it backs off that is also the channel's `error` (the
+Radios page shows a warning "Backoff" with it). A firmware push or recovery of the C6 is refused with 409 `c6_busy`
+while its proxy has a peer.
+
+**One task for both channels.** A single proxy task serves the C6 and the dongle. Work that blocks it holds up the other
+channel for that time: resolving a `connect` host (DNS, or mDNS for `.local` names: up to about 2 s per try, again at
+every back-off) and writing a large raw chunk to a slow dongle (a 4 KB chunk at 38400 baud takes about 1 s; the write
+gives up after its timeout). Prefer an address over a name for `connect`, and a high baud on a raw channel, when both
+channels run `rcp-proxy`.
 
 ## Moving Thread
 
@@ -119,9 +130,22 @@ The stored Thread network (dataset) is kept; only the radio changes.
    unchanged. The fault reason says "rebooting" first.
 
 A move takes up to about a minute, runs as a long operation (an update, a firmware push or a recovery at the same
-time give 409 `busy`, and so does a mode change while a move runs) and cannot carry baud, flow control or proxy
-settings: send them in a separate request. Setting `otbr` on a channel while no channel has it simply starts Thread
-there; `off` stops it.
+time give 409 `busy`, and so does a mode change while a move runs, or while the board is still stopping or starting
+OpenThread on its radio, e.g. after an unplug) and cannot carry baud, flow control or proxy settings: send them in a
+separate request.
+
+A **start** (`otbr` on a channel while no channel has it) and a **stop** (another mode on the channel that has `otbr`)
+work the same way, as long operations with **202**:
+
+- Start: `{"moving": true, "moved_from": null}`. The target is probed first (409 `probe_failed`, nothing changed), then
+  OpenThread starts on it; its mode is stored only once it runs. If it does not start, the target shows `fault` with
+  the reason and the board stays `NO_RADIO`.
+- Stop: `{"moving": true, "moved_from": "<the channel itself>"}`. Open sessions are given up to 45 s to end, OpenThread
+  stops, and only then the new mode (`off` or `rcp-proxy`, with any proxy settings of the same request) is stored and
+  applied; the board becomes `NO_RADIO`. If the sessions do not end, nothing changes: the channel keeps running `otbr`
+  with `error` `drain_timeout`, and Thread runs on.
+- A channel that runs `rcp-proxy` cannot take `otbr` directly (409 `probe_failed`, "set it off first"): set it `off`
+  first. The Radios page does that by itself.
 
 ## Unplugging the Thread radio
 
@@ -138,6 +162,15 @@ When the dongle that runs OpenThread is unplugged:
 - Unplugging a dongle in any other mode drops its proxy peer or stops it, and nothing else changes.
 - A dongle that stays plugged in but goes silent gets a close and reopen, then a spinel reset; after three failed recoveries
   the board enters `RADIO_FAULT` with the reason (no abort). A PUT of `otbr` on that channel starts it again.
+- Requests to the radio that are in flight when it goes, or that come before OpenThread is torn down (the console's
+  `channel supported`, a REST call), are answered by the board itself: settings "work", reads that can fail fail, the
+  channel masks read as 11 to 26, and a recovery that resets the radio completes against those answers instead of
+  failing. So an unplug ends in `NO_RADIO`, without `RADIO_FAULT` and without a reboot, whichever task used the radio.
+- **Remaining risks.** An unplug during OpenThread's own start (inside its initialisation, before the radio answered
+  once) leaves that start abandoned: the board goes to `NO_RADIO`, and when the radio returns it shows `RADIO_FAULT`
+  "an earlier OpenThread start was abandoned: reboot" until a reboot. An unplug in the few milliseconds between a radio
+  reset and the radio's answer to it, while a task other than OpenThread's runs a recovery, still reboots the board
+  (OpenThread aborts the process if that task returns); no such path is known to be reachable.
 
 ## The Radios page
 
@@ -149,7 +182,9 @@ When the dongle that runs OpenThread is unplugged:
   build, the firmware does not fit, or unplugged), the `rcp-proxy` settings (direction, adapter, host or port, framing for
   UDP) and, for USB, baud and flow control. Settings are saved first, then the mode.
 - Choosing Thread border router on a channel while another runs it turns Save into **Move Thread here**. After the 202
-  the page polls until the move settles and shows a failure with its reason.
+  the page polls until the move settles and shows a failure with its reason. A start and a stop of Thread are followed
+  the same way ("Starting Thread on ...", "Stopping Thread on ..."; a refused stop says Thread keeps running there).
+  A radio that runs `rcp-proxy` is set `off` before it takes Thread.
 - With no channel in `otbr` the Thread menu is hidden and the Thread pages show a notice linking here. When the OTBR
   channel is only unplugged or faulted, the menu stays and the pages say "no radio in OTBR mode" with its state. Packet
   capture needs a radio in Thread border router mode.
@@ -159,7 +194,7 @@ When the dongle that runs OpenThread is unplugged:
 | Request | Purpose |
 | --- | --- |
 | `GET /device/channels` | `available_modes` and every channel |
-| `PUT /device/channels/{id}` | change mode, line, proxy settings, or kick; 202 for a move |
+| `PUT /device/channels/{id}` | change mode, line, proxy settings, or kick; 202 for a move, start or stop of Thread |
 | `DELETE /device/channels/{id}` | forget an unplugged radio |
 | `GET /device/status` | `mode` (including `NO_RADIO`) and `otbr_channel` |
 
@@ -187,5 +222,26 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
 - **C6 jobs**: a firmware push with OpenThread on the dongle leaves OpenThread alone; with a proxy peer on the C6 it gives
   409 `c6_busy`.
 - **Boot**: a stored dongle that is unplugged gives `NO_RADIO` without a fault; plugging it in gives `BR_RUNNING`.
-- **Heap**: about 21 KB of internal DMA RAM is taken at the first C6 open; a proxy session takes an 8 KB ring (TCP) plus
-  codec buffers.
+- **Heap**: about 21 KB of internal DMA RAM is taken at the first C6 open, about 39 KB (pool, buffers, 16 KB ring) at
+  the first dongle open (never on a board without a dongle); a proxy session takes an 8 KB ring (TCP) plus codec
+  buffers. Compare the free and the minimum free internal heap (`GET /device/diag`) after boot with no dongle against
+  v0.4.0 on the same board: at most 40 KB less (the six new tasks, below, the queues and the C6 buffers). This is a
+  limit to measure in the hardware pass, not a measured number yet.
+- **Task stacks** (not shrunk: no high-water marks measured yet): `radio_mux` 6144, `usb_lib` 4096, `USB-CDC` 4096,
+  `c6` transport 4096, `rcp_proxy` 6144, `br_radio` 6144 bytes. Read their high-water marks after the checks below
+  (a C6 move, a dongle detection, a proxy with a `.local` connect host) before shrinking any.
+- **C6 drops under REST load**: with Thread on the C6 and the REST load of `test_unplug_during_rest_load` (without the
+  unplug) for 5 minutes, the C6 channel's `drops` and `rx_errors` stay at or near 0 and pings to a Thread device do not
+  get lost more than without the load (compare v0.4.0's open ping-loss note).
+- **C6 otbr → rcp-proxy → otbr with an otbr-agent peer** (handles of earlier attaches): `RADIO_MUX_AGENT_TEST=1
+  pytest -s -m usb_dongle -k otbr_agent` (it creates `wpan0` and routes on the host and advertises a Border Agent on the
+  LAN while it runs). While the old OpenThread drains, the agent gets its RCP's answers and resets, never the board's,
+  and the board's OpenThread does not log frames it did not ask for; afterwards Thread is back on the C6 with the same
+  network.
+- **Two channels in `rcp-proxy` on the same port**: refused with 409 `port_taken` (`test_proxy_port_taken`); a
+  listener held by another service shows `backoff` with `last_error` "Address already in use" on the page.
+- **Unplug with the console open** running `channel supported` (and `state`) in a loop while the OTBR dongle is
+  unplugged: `NO_RADIO`, never `RADIO_FAULT`, no reboot (uptime keeps growing); the open console's commands get
+  answers or errors, never a hang, until the session closes with the teardown.
+- **Stop with an open session**: hold a REST session longer than 45 s while setting the OTBR channel `off`: the PUT
+  answers 202, the channel stays `otbr` running with `error` `drain_timeout`, Thread keeps running.

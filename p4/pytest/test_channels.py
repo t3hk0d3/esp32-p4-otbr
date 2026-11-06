@@ -36,7 +36,16 @@ COUNTER_KEYS = [
     "resets",
     "rx_errors",
 ]
-PROXY_KEYS = ["direction", "adapter", "port", "host", "framing", "state", "peer"]
+PROXY_KEYS = [
+    "direction",
+    "adapter",
+    "port",
+    "host",
+    "framing",
+    "state",
+    "peer",
+    "last_error",
+]
 PROXY_DEFAULTS = {
     "direction": "listen",
     "adapter": "tcp",
@@ -47,6 +56,7 @@ PROXY_DEFAULTS = {
 OFFERED_MODES = {"off", "otbr", "rcp-proxy"}
 NO_RADIO_DETAIL = "no radio in OTBR mode"
 STATUS_TIMEOUT_S = 90
+SETTLE_TIMEOUT_S = 120  # a move, start or stop of Thread: drain, probe and start
 THREAD_TIMEOUT_S = 120
 PROXY_PORT = 6638
 PROXY_PEER_WAIT_S = 10
@@ -130,11 +140,36 @@ def wait_mode(base_url, mode, timeout=STATUS_TIMEOUT_S):
     pytest.fail(f"board mode is {status.get('mode')!r}, expected {mode!r}")
 
 
+def set_mode(base_url, mode, channel_id="c6", timeout=SETTLE_TIMEOUT_S):
+    """PUT `mode` on the channel and wait until it settled; return the reply. A 200 applies at once. A 202 (a move,
+    start or stop of Thread, a long operation) is waited for: until the channel stores the mode, and for otbr until
+    Thread runs on it. Before otbr, a radio that runs rcp-proxy is set off first (the API refuses otbr while the proxy
+    runs on it, "set it off first")."""
+    if mode == "otbr" and get_channel(base_url, channel_id)["mode"] == "rcp-proxy":
+        set_mode(base_url, "off", channel_id, timeout)
+    reply = put_channel(base_url, {"mode": mode}, channel_id)
+    assert reply.status_code in (200, 202), reply.text
+    deadline = time.monotonic() + timeout
+    while reply.status_code == 202 and time.monotonic() < deadline:
+        with_thread = mode != "otbr" or (
+            get_status(base_url)["otbr_channel"] == channel_id
+            and get_status(base_url)["mode"] == "BR_RUNNING"
+        )
+        if get_channel(base_url, channel_id)["stored_mode"] == mode and with_thread:
+            return reply
+        time.sleep(1)
+    if reply.status_code == 202:
+        pytest.fail(f"{channel_id} did not settle in {mode}")
+    return reply
+
+
 @pytest.fixture
 def c6_in_otbr(base_url):
     """After the test the C6 is in `otbr` again with its default proxy settings, and Thread runs on it."""
     yield
-    put_channel(base_url, {"mode": "otbr", "rcp_proxy": PROXY_DEFAULTS})
+    put_channel(base_url, {"rcp_proxy": PROXY_DEFAULTS})
+    if get_channel(base_url)["stored_mode"] != "otbr":
+        set_mode(base_url, "otbr")
     wait_mode(base_url, "BR_RUNNING")
 
 
@@ -158,6 +193,7 @@ def test_c6_listed_in_otbr(base_url, board_ip):
     assert {k: channel["rcp_proxy"][k] for k in PROXY_DEFAULTS} == PROXY_DEFAULTS
     assert channel["rcp_proxy"]["state"] is None
     assert channel["rcp_proxy"]["peer"] is None
+    assert channel["rcp_proxy"]["last_error"] is None
     status = get_status(base_url)
     assert status["mode"] == "BR_RUNNING"
     assert status["otbr_channel"] == "c6"
@@ -228,8 +264,9 @@ def test_put_validation_409(base_url):
 
 def test_put_validation_c6_busy(base_url, c6_in_otbr):
     # POST /device/radio/recover, On rcp-proxy with a connected peer on the C6: 409 c6_busy, the peer stays.
-    reply = put_channel(base_url, {"mode": "rcp-proxy"})
-    assert reply.status_code in (200, 202), reply.text
+    set_mode(
+        base_url, "rcp-proxy"
+    )  # a stop of Thread on the C6 (202), then the proxy listens
     host = base_url.removeprefix("http://")
     with socket.create_connection((host, PROXY_PORT), timeout=PROXY_PEER_WAIT_S):
         deadline = time.monotonic() + PROXY_PEER_WAIT_S
@@ -262,16 +299,22 @@ def test_c6_off_and_back(dut, base_url, c6_in_otbr):
     if not before or not before[-1].isalnum():
         pytest.skip("the board has no active dataset")
     dataset = before[-1]
-    off = put_channel(base_url, {"mode": "off"})
-    assert off.status_code in (200, 202), off.text
+    off = set_mode(
+        base_url, "off"
+    )  # a stop of Thread: 202, the mode stored once OpenThread stopped
+    assert off.status_code == 202, off.text
+    assert off.json() == {"moving": True, "moved_from": "c6"}
     status = wait_mode(base_url, "NO_RADIO")
     assert status["otbr_channel"] is None
     channel = get_channel(base_url)
     assert channel["mode"] == "off"
     assert channel["stored_mode"] == "off"
     assert channel["state"] == "idle"
-    on = put_channel(base_url, {"mode": "otbr"})
-    assert on.status_code in (200, 202), on.text
+    on = set_mode(
+        base_url, "otbr"
+    )  # a start of Thread: 202, probe, start, stored once it runs
+    assert on.status_code == 202, on.text
+    assert on.json() == {"moving": True, "moved_from": None}
     status = wait_mode(base_url, "BR_RUNNING")
     assert status["otbr_channel"] == "c6"
     assert get_channel(base_url)["state"] == "running"
@@ -297,7 +340,7 @@ def test_rest_503_in_no_radio(base_url, c6_in_otbr):
     ]
     requests.put(f"{base_url}/device/console", json={"enabled": True}, timeout=10)
     try:
-        assert put_channel(base_url, {"mode": "off"}).status_code in (200, 202)
+        set_mode(base_url, "off")
         wait_mode(base_url, "NO_RADIO")
         for path in (DATASET, "/node/state", "/node"):
             reply = requests.get(base_url + path, timeout=10)

@@ -8,6 +8,8 @@ settings) afterwards. Optional: PROXY_HOST_IF is not needed; the proxy peers run
 its address. Environment:
   PROXY_SOAK_S   seconds the refused-connect soak runs (default 600)
   PROXY_PORT     host port the connect tests listen on (default 16638)
+  RADIO_MUX_AGENT_TEST  1 runs test_c6_proxy_otbr_agent (also needs Docker and the usbproxy-otbr:local image); it changes
+                 this host's network (see the test), so it never runs by default
 """
 
 import contextlib
@@ -30,6 +32,7 @@ from test_channels import (
     get_channels,
     get_status,
     put_channel,
+    set_mode,
     wait_mode,
 )
 
@@ -99,8 +102,14 @@ def reset_modes(base_url, channel_id):
     """C6 back to `otbr` with Thread running, the dongle `off`, default proxy settings."""
     with contextlib.suppress(requests.RequestException):
         wait_no_move(base_url)
-        put_channel(base_url, {"mode": "off", "rcp_proxy": PROXY_DEFAULTS}, channel_id)
-        put_channel(base_url, {"mode": "otbr", "rcp_proxy": PROXY_DEFAULTS}, "c6")
+        put_channel(base_url, {"rcp_proxy": PROXY_DEFAULTS}, channel_id)
+        put_channel(base_url, {"rcp_proxy": PROXY_DEFAULTS}, "c6")
+        if get_channel(base_url, channel_id)["stored_mode"] != "off":
+            set_mode(
+                base_url, "off", channel_id
+            )  # a stop when Thread ran on the dongle: wait for it
+        if get_channel(base_url, "c6")["stored_mode"] != "otbr":
+            set_mode(base_url, "otbr", "c6")
         wait_mode(base_url, "BR_RUNNING", MOVE_TIMEOUT_S)
 
 
@@ -310,6 +319,25 @@ def test_move_refusals(dut, base_url, dongle):
         assert time.monotonic() < deadline, "the move never finished"
         time.sleep(1)
     wait_mode(base_url, "BR_RUNNING")
+
+
+def test_proxy_port_taken(base_url, dongle):
+    # PUT rcp-proxy on the dongle, On the C6 already listening in rcp-proxy on the same TCP port: 409 port_taken naming
+    # the port and the C6; nothing changes. Another port is accepted.
+    set_mode(
+        base_url, "rcp-proxy", "c6"
+    )  # a stop of Thread on the C6, then its proxy listens on 6638
+    taken = put_channel(
+        base_url, {"mode": "rcp-proxy", "rcp_proxy": PROXY_DEFAULTS}, dongle
+    )
+    assert taken.status_code == 409, taken.text
+    assert taken.json()["error"] == "port_taken"
+    assert "6638" in taken.json()["detail"] and "c6" in taken.json()["detail"]
+    assert get_channel(base_url, dongle)["stored_mode"] == "off"
+    other = put_channel(
+        base_url, {"mode": "rcp-proxy", "rcp_proxy": {"port": 6639}}, dongle
+    )
+    assert other.status_code == 200, other.text
 
 
 def test_unplug_and_replug_under_otbr(dut, base_url, dongle):
@@ -615,7 +643,12 @@ def test_proxy_udp_hdlc_roundtrip(base_url, board_ip, dongle):
 
 @pytest.fixture
 def agent_container():
-    """The usbproxy-otbr:local container from the spike, if Docker and the image exist; removed afterwards."""
+    """The usbproxy-otbr:local container from the spike; removed afterwards. Opt-in: RADIO_MUX_AGENT_TEST=1, Docker and
+    the image; skipped otherwise."""
+    if os.environ.get("RADIO_MUX_AGENT_TEST") != "1":
+        pytest.skip(
+            "opt-in: set RADIO_MUX_AGENT_TEST=1 (it changes this host's network)"
+        )
     if shutil.which("docker") is None:
         pytest.skip("docker is not installed")
     found = subprocess.run(
@@ -645,11 +678,16 @@ def agent_container():
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
 
 
-def test_c6_proxy_otbr_agent(base_url, board_ip, agent_container, dongle):
-    # rcp-proxy on the C6 with otbr-agent on this host (container usbproxy-otbr:local): the agent reaches the C6's RCP
-    # through the proxy and reports a thread state; the board's own Thread stops while the C6 serves the proxy.
-    del dongle  # only the dongle rig runs this test; the C6 is what is proxied
-    assert put_channel(base_url, {"mode": "rcp-proxy"}, "c6").status_code == 200
+def test_c6_proxy_otbr_agent(base_url, board_ip, agent_container):
+    """rcp-proxy on the C6 with otbr-agent on this host (container usbproxy-otbr:local): the agent reaches the C6's RCP
+    through the proxy and reports a thread state; the board's own Thread stops while the C6 serves the proxy.
+
+    Opt-in only (RADIO_MUX_AGENT_TEST=1 and the image present; never run by default): the container runs privileged on
+    the host network, so otbr-agent creates wpan0 and its routes on THIS host and advertises a Thread Border Agent
+    (_meshcop._udp) on the LAN while it runs. Uses only the C6 (no dongle needed)."""
+    set_mode(
+        base_url, "rcp-proxy", "c6"
+    )  # a stop of Thread on the C6 (202), then the proxy listens
     try:
         wait_mode(base_url, "NO_RADIO")
         wait_proxy_state(base_url, "c6", "listening", PROXY_PEER_WAIT_S)
@@ -681,5 +719,7 @@ def test_c6_proxy_otbr_agent(base_url, board_ip, agent_container, dongle):
         assert counters["frames_in"] > 0
         assert counters["frames_out"] > 0
     finally:
-        put_channel(base_url, {"mode": "otbr"}, "c6")
+        set_mode(
+            base_url, "otbr", "c6"
+        )  # off first (the proxy runs on it), then the start of Thread
         wait_mode(base_url, "BR_RUNNING", MOVE_TIMEOUT_S)

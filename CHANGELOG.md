@@ -16,11 +16,12 @@ release's `versions.txt`.
   `docs/radios.md`. Not yet checked on a board.
 - Thread on a USB dongle: OpenThread runs on the C6 or on a spinel RCP dongle (design target: ZigStar OllyZig,
   CC2652P), and moves between them at runtime without a reboot and with the stored network (`PUT` `otbr` on the other
-  channel answers 202). Unplugging the OTBR dongle leaves the board up with the new mode `NO_RADIO` (the Thread REST
-  API and the console answer 503 `no radio in OTBR mode`); Thread starts again on its return. `/device/status` gains
-  `otbr_channel`.
+  channel answers 202; a start and a stop of Thread run the same way). Unplugging the OTBR dongle leaves the board up
+  with the new mode `NO_RADIO` (the Thread REST API and the console answer 503 `no radio in OTBR mode`); Thread starts
+  again on its return. `/device/status` gains `otbr_channel`.
 - RCP proxy: a channel's bytes (the dongle's, or the C6's spinel frames as HDLC) served over TCP or UDP, listening or
-  connecting out (back-off 1 to 30 s), with `hdlc` or `raw` framing on UDP. Replaces the experimental USB serial proxy.
+  connecting out (back-off 1 to 30 s, `last_error` says why), with `hdlc` or `raw` framing on UDP. Two channels on one
+  listen port are refused (409 `port_taken`). Replaces the experimental USB serial proxy.
 
 ### Changed
 
