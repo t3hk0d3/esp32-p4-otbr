@@ -935,19 +935,20 @@ class TestThreadPagesWithoutRadio:
         assert "no radio in OTBR mode" not in r[1]
 
 
+THREAD_PAGES = [
+    "index",
+    "network",
+    "topology",
+    "routing",
+    "commission",
+    "addresses",
+    "tools",
+    "console",
+]
+
+
 class TestSharedBehaviour:
     """Thread pages in a browser-like scope"""
-
-    THREAD_PAGES = [
-        "index",
-        "network",
-        "topology",
-        "routing",
-        "commission",
-        "addresses",
-        "tools",
-        "console",
-    ]
 
     @pytest.mark.parametrize("name", THREAD_PAGES)
     def test_every_thread_page_has_a_notice_slot_or_the_mode_guard(self, name):
@@ -1084,17 +1085,18 @@ class TestTwoStepSave:
         assert r[1] >= 1
 
 
+OLLY_STARTING = {
+    **OLLY,
+    "mode": "otbr",
+    "stored_mode": "otbr",
+    "state": "starting",
+    "id": "usb-10c4-ea60-abc123",
+}
+
+
 @needs_node
 class TestSettleMove:
     """When a move counts as failed"""
-
-    OLLY_STARTING = {
-        **OLLY,
-        "mode": "otbr",
-        "stored_mode": "otbr",
-        "state": "starting",
-        "id": "usb-10c4-ea60-abc123",
-    }
 
     def accept(self, after_js=""):
         return (
@@ -1115,7 +1117,7 @@ class TestSettleMove:
 
     def test_target_seen_starting_then_settled_without_thread_is_a_failure(self):
         # On a target that starts and then falls to a fault without becoming otbr_channel: the move failed.
-        starting = json.dumps({"channels": [C6, self.OLLY_STARTING]})
+        starting = json.dumps({"channels": [C6, OLLY_STARTING]})
         fault = json.dumps(
             {
                 "channels": [
@@ -1137,7 +1139,7 @@ class TestSettleMove:
             {
                 "channels": [
                     {**C6, "mode": "off", "stored_mode": "off"},
-                    self.OLLY_STARTING,
+                    OLLY_STARTING,
                 ]
             }
         )
