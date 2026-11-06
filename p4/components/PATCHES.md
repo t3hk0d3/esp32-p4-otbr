@@ -318,7 +318,7 @@ reason, spec reference.
 25. Applied (USB serial proxy, Task 4). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 27 -> 29.
    `device_api` adds `GET`/`PUT /device/usb_serial`: 27 routes plus the catch-all, one slot of headroom.
    (docs/superpowers/specs/2026-11-05-usb-serial-proxy-design.md)
-26. Applied (Zigbee mode, Task 5). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 29 -> 30. The
+27. Applied (Zigbee mode, Task 5). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 29 -> 30. The
    extra-handlers callback (`app_main.c` `register_extra_handlers`) also registers the WebSocket `GET /zigbee`
    (`zigbee_register_ws`) after the device API, before the catch-all. (docs/superpowers/specs/2026-11-06-zigbee-mode-design.md)
 

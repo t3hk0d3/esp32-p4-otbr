@@ -8,7 +8,7 @@
 //    owner task runs attach and detach. These only post to the zigbee task.
 //
 // The zigbee task's queue (`q`) carries radio_mux_ev_t items: the mux's events (it is the queue the mux is bound to),
-// plus ZIGBEE_EV_ATTACH (posted by attach) and ZIGBEE_EV_KICK (coalesced: "the mailbox has work"). Everything else
+// plus ZIGBEE_EV_ATTACH (posted by attach) and ZIGBEE_EV_KICK (at most one: "the mailbox has work"). Everything else
 // (inbound frames, connects and disconnects, timer, wake, tick, frames the sender took) waits in the mailbox, so that a
 // property request's wait (zigbee.c op_wait) can take the mux's events out of `q` while the mailbox keeps its order,
 // and so that `q` holds only what the mux sized it for (RADIO_MUX_POOL_SLOTS frames + RESET + GONE).
@@ -27,6 +27,7 @@
 #include "radio_mux.h"
 #include "zigbee.h"
 #include "zigbee_heap_stats.h"
+#include "zigbee_kick.h"
 #include "zigbee_link.h"
 #include "zigbee_spinel.h"
 
@@ -94,7 +95,9 @@ typedef struct {
     _Atomic(radio_mux_chan_t *) ch; // the attached channel (kept after GONE: slots are still released through it)
     _Atomic(httpd_handle_t) server;
     atomic_bool started;      // ziggurat_start ran (or is running): the WebSocket accepts clients
-    atomic_bool kick_pending; // a KICK is in `q` or the zigbee task is about to look at the mailbox
+    zigbee_kick_t kick;       // at most one KICK in `q` (zigbee_kick.h)
+    atomic_uint attached;     // attachments numbered by on_attach (1, 2, ...): the last number given
+    atomic_uint detached;     // the number of the attachment on_detach last detached (the GONE backstop)
     atomic_uint sent;         // counted frames the sender took off `out` since the zigbee task last looked
     atomic_uint gen;          // the link's generation, published by the zigbee task (the sender drops older frames)
     atomic_int client_fd;     // the link's client, published by the zigbee task (the sender's LRU refresh)
@@ -114,6 +117,8 @@ typedef struct {
     uint64_t timer_deadline;     // UINT64_MAX: not armed
     bool start_due;              // the first ready came: ziggurat_start runs at the top of the loop
     bool start_ran;
+    uint32_t attach_seen;        // the number of the last ATTACH handled (0: none)
+    uint32_t gone_seen;          // the attachment number of the last GONE handled (0: none)
     bool kick_swallowed;         // op_wait took a KICK out of `q`: the loop looks at the mailbox without blocking
     bool mailbox_more;           // the last mailbox round left messages behind
 } zigbee_t;

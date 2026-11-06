@@ -1,4 +1,4 @@
-idf_component_register(SRCS "test_ccm.c" "test_heap_stats.c" "test_link.c" "test_spinel.c" "test_main.c"
+idf_component_register(SRCS "test_ccm.c" "test_heap_stats.c" "test_kick.c" "test_link.c" "test_spinel.c" "test_main.c"
                        REQUIRES zigbee unity
                        WHOLE_ARCHIVE)
 # The tests build spinel frames with spinel.h; added after the registration so ESP-IDF does not warn that the

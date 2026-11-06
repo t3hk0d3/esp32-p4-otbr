@@ -69,14 +69,16 @@ void zigbee_kick(void)
 {
     zigbee_t *z = &g_zigbee;
 
-    if (z->q == NULL || atomic_exchange(&z->kick_pending, true)) {
+    // At most one KICK is in the queue (zigbee_kick.h): it shares the queue with the mux's frames, RESET and GONE,
+    // which the mux posts without waiting.
+    if (z->q == NULL || !zigbee_kick_claim(&z->kick)) {
         return;
     }
     const radio_mux_ev_t ev = {.type = ZIGBEE_EV_KICK};
 
     // A full queue: the zigbee task looks at the mailbox after every item it takes, so nothing is stranded.
     if (xQueueSend(z->q, &ev, 0) != pdTRUE) {
-        atomic_store(&z->kick_pending, false);
+        zigbee_kick_unclaim(&z->kick);
     }
 }
 
@@ -162,6 +164,7 @@ static void publish_link(void)
 /* ---- the spinel client's board side (zigbee task) ---- */
 
 static bool handle_event(const radio_mux_ev_t *ev);
+static bool gone_backstop(void);
 
 static int op_send(void *ctx, const uint8_t *frame, size_t len)
 {
@@ -204,7 +207,7 @@ static int op_wait(void *ctx, int64_t until_us)
         if (xQueueReceive(z->q, &ev, ticks > 0 ? ticks : 1) != pdTRUE) {
             continue; // the clock decides
         }
-        if (handle_event(&ev)) {
+        if (handle_event(&ev) || gone_backstop()) {
             return 0;
         }
         z->kick_swallowed = true;
@@ -276,6 +279,31 @@ static void sink_scan_done(void *ctx, int8_t max_rssi)
     }
 }
 
+static void handle_gone(void)
+{
+    zigbee_t *z = &g_zigbee;
+
+    z->gone_seen = z->attach_seen;
+    zigbee_spinel_on_gone(z->spinel);
+    zigbee_status_set_state(ZIGBEE_STATE_NO_RADIO, "radio gone");
+}
+
+// The mux posts GONE without waiting, so with its queue full a GONE can be lost; on_detach also records the detached
+// attachment and kicks. When the current attachment was detached and its GONE has not come, it is handled now.
+// A GONE still on its way afterwards repeats an idempotent on_gone. true: it handled one.
+static bool gone_backstop(void)
+{
+    zigbee_t *z = &g_zigbee;
+
+    if (!zigbee_gone_lost(atomic_load(&z->detached), z->attach_seen, z->gone_seen)) {
+        return false;
+    }
+    ESP_LOGW(TAG, "radio detached without its GONE: running without a radio");
+    handle_gone();
+    ZIGBEE_STATUS(g_zigbee_status.counters.rcp_resets = zigbee_spinel_resets(z->spinel));
+    return true;
+}
+
 // One item of the zigbee task's queue, from the loop or from op_wait. true: a radio event was given to the client
 // (op_wait's "an event was delivered"); false: a KICK.
 static bool handle_event(const radio_mux_ev_t *ev)
@@ -299,15 +327,16 @@ static bool handle_event(const radio_mux_ev_t *ev)
         break;
     case RADIO_MUX_EV_GONE:
         ESP_LOGW(TAG, "radio gone: running without a radio");
-        zigbee_spinel_on_gone(sp);
-        zigbee_status_set_state(ZIGBEE_STATE_NO_RADIO, "radio gone");
+        handle_gone();
         break;
     case ZIGBEE_EV_ATTACH:
+        z->attach_seen = (uint32_t)ev->len; // the attachment's number (on_attach)
         ESP_LOGI(TAG, "radio attached: %s", radio_mux_chan_id(atomic_load(&z->ch)));
         zigbee_status_set_state(ZIGBEE_STATE_STARTING, NULL);
         zigbee_spinel_attach(sp);
         break;
-    default: // ZIGBEE_EV_KICK
+    default: // ZIGBEE_EV_KICK: taken out of the queue, so the next post queues a new one; the mailbox is read after
+        zigbee_kick_taken(&z->kick);
         return false;
     }
     ZIGBEE_STATUS(g_zigbee_status.counters.rcp_resets = zigbee_spinel_resets(sp));
@@ -423,10 +452,11 @@ static void run_mailbox(void)
 {
     zigbee_t *z = &g_zigbee;
 
-    // Cleared first: anything posted from here on kicks again (or is swallowed by op_wait, which says so).
+    // The KICK claim is not released here: only when a KICK leaves the queue (handle_event), so a KICK still queued
+    // behind the item just taken is never doubled. What op_wait swallowed is read now.
     z->kick_swallowed = false;
     z->mailbox_more = false;
-    atomic_store(&z->kick_pending, false);
+    gone_backstop();
     const uint32_t flags = take_flags();
 
     for (unsigned n = atomic_exchange(&z->sent, 0); n > 0; n--) {
@@ -570,7 +600,8 @@ static esp_err_t on_attach(radio_mux_chan_t *ch, void *ctx)
     zigbee_status_note_channel(radio_mux_chan_id(ch));
     ESP_RETURN_ON_ERROR(radio_mux_bind_queue(ch, z->q), TAG, "binding the event queue");
     // After the bind: frames that came before it are ahead of ATTACH and meet a client with no radio (ignored).
-    const radio_mux_ev_t ev = {.type = ZIGBEE_EV_ATTACH};
+    // ATTACH carries the attachment's number (1, 2, ...) for the GONE backstop.
+    const radio_mux_ev_t ev = {.type = ZIGBEE_EV_ATTACH, .len = atomic_fetch_add(&z->attached, 1) + 1};
 
     if (xQueueSend(z->q, &ev, pdMS_TO_TICKS(ATTACH_POST_MS)) != pdTRUE) {
         radio_mux_bind_queue(ch, NULL);
@@ -580,10 +611,15 @@ static esp_err_t on_attach(radio_mux_chan_t *ch, void *ctx)
     return ESP_OK;
 }
 
-// GONE is already in the queue; the zigbee task handles it (no radio). Slots taken before it are released there.
+// GONE is normally already in the queue; the zigbee task handles it (no radio) and releases the slots taken before
+// it. The backstop for a GONE the mux could not post: the detached attachment's number and a KICK (never blocks).
 static void on_detach(radio_mux_chan_t *ch, void *ctx)
 {
+    zigbee_t *z = &g_zigbee;
+
     ESP_LOGI(TAG, "%s detached", radio_mux_chan_id(ch));
+    atomic_store(&z->detached, atomic_load(&z->attached));
+    zigbee_kick();
 }
 
 esp_err_t zigbee_register(void)
