@@ -58,10 +58,15 @@ typedef struct mux_port {
     // consumer, until radio_mux_lease_end or radio_mux_commit_otbr; an unplug posts GONE and ends it
     bool leased;
 
-    // The channel whose consumer the queue, eventfd, ring and TX belong to: set at attach, kept through detach and
-    // close (so the old consumer can still take its GONE), replaced at the next attach. Calls through any other
-    // handle get false, 0 or ESP_ERR_INVALID_STATE.
-    _Atomic(struct radio_mux_chan *) evq_chan;
+    // The generation of the attach (or lease) the queue, eventfd, ring and TX belong to: set at attach, kept through
+    // detach and close (so the old consumer can still take its GONE), replaced at the next attach (mux_new_attach,
+    // which holds tx_lock and ev_lock for it). Calls through a handle of any other generation get false, 0 or
+    // ESP_ERR_INVALID_STATE. 0: nothing attached yet.
+    _Atomic uint32_t att_gen;
+    radio_mux_chan_t *att_handle; // owner: the handle of att_gen (what detach and a lease's commit pass on)
+    // Consumers' takes (radio_mux_poll, radio_mux_read_raw, radio_mux_bind_queue) check att_gen and take under it; the
+    // owner holds it while it drains the queue and moves att_gen on, so an earlier handle never takes a later event.
+    SemaphoreHandle_t ev_lock;
     atomic_bool dev_gone; // the transport saw the device disconnect (set by its callback, cleared by the open)
 
     // Delivery. Changed by the owner with rx_lock held, read by the transport with rx_lock held.
@@ -115,9 +120,9 @@ typedef struct {
         mux_usb_dev_t dev;        // NEW_DEV
         const void *hdl;          // GONE: the CDC handle that went away
         mux_call_t *call;         // SET, FORGET, C6_JOB_BEGIN, C6_JOB_END, LEASE, LEASE_END, COMMIT_OTBR
-        struct radio_mux_chan *ch; // RESET
+        radio_mux_chan_t *h;      // RESET: the consumer's handle
         struct {
-            struct radio_mux_chan *ch;
+            radio_mux_chan_t *h;
             radio_mux_fw_record_t fw;
         } note;                   // NOTE_FW
     };
@@ -158,7 +163,7 @@ struct mux_call {
     radio_mux_verdict_t verdict;
     esp_err_t err;
     char from[RADIO_MUX_ID_MAX];         // SET: the source of a MOVE; COMMIT_OTBR: the channel that leaves otbr
-    struct radio_mux_chan *chan;         // LEASE: the leased channel; LEASE_END: the channel to give back
+    radio_mux_chan_t *handle;            // LEASE: the lease's handle; LEASE_END: the lease to give back
     char reason[RADIO_MUX_REASON_MAX];   // LEASE: why it was refused; LEASE_END: the fault to show ("" none)
 };
 
@@ -181,6 +186,7 @@ typedef struct {
     radio_mux_rules_t rules;
     atomic_bool started;
     esp_err_t (*_Atomic mover)(const char *from, const char *to, char *reason, size_t cap);
+    uint32_t gen; // owner: the generation of the last attach or lease (radio_mux_gen_next), on any transport
 } mux_t;
 
 extern mux_t g_mux;
@@ -196,6 +202,12 @@ int64_t mux_now_epoch(void);
 // The stored baud, or 460800 when none is stored.
 uint32_t mux_eff_baud(const struct radio_mux_chan *ch);
 const radio_mux_consumer_t *mux_find_consumer(radio_mux_mode_t mode);
+// Any task: the channel record and transport behind a handle of any generation (*gen set); NULL when `h` is no handle.
+struct radio_mux_chan *mux_handle_chan(const radio_mux_chan_t *h, mux_port_t **port, uint32_t *gen);
+// Owner, before a consumer's attach or a lease on p->chan: what the earlier consumer left in the channel's own queue
+// goes, the queue is unbound, and a new generation starts (tx_lock and ev_lock held for it, so an earlier handle's
+// transmit or take in progress ends first). Returns the new handle (also in p->att_handle).
+radio_mux_chan_t *mux_new_attach(mux_port_t *p);
 
 /* ---- mux_deliver.c ---- */
 

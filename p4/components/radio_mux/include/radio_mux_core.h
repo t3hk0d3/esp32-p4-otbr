@@ -338,6 +338,29 @@ bool radio_mux_c6_present(const radio_mux_c6_probe_t *probe, char *reason, size_
 // attached and it reported a connected peer.
 bool radio_mux_c6_job_refused(radio_mux_mode_t stored_mode, bool attached, bool has_peer);
 
+/* ---- attach handles ---- */
+
+// A consumer's handle (radio_mux_chan_t *, radio_mux.h) is one attach or lease, not the channel: the pointer value
+// packs the channel's slot (low RADIO_MUX_HANDLE_SLOT_BITS bits) and the generation of that attach (the rest). It is
+// never dereferenced. Every attach and lease takes the next generation; a transport accepts calls only through the
+// handle of its current generation.
+#define RADIO_MUX_HANDLE_SLOT_BITS 3
+#define RADIO_MUX_HANDLE_SLOTS (1u << RADIO_MUX_HANDLE_SLOT_BITS)
+// The largest generation that fits a 32-bit pointer next to the slot.
+#define RADIO_MUX_GEN_MAX (UINT32_MAX >> RADIO_MUX_HANDLE_SLOT_BITS)
+
+// The generation after `gen`: gen + 1, from RADIO_MUX_GEN_MAX (or anything above it) back to 1; never 0, which no
+// handle carries (0 = no attach yet).
+uint32_t radio_mux_gen_next(uint32_t gen);
+// The handle value of slot `slot` (< RADIO_MUX_HANDLE_SLOTS) at generation `gen` (1..RADIO_MUX_GEN_MAX); 0 when either
+// is out of range. Never 0 otherwise.
+uintptr_t radio_mux_handle_pack(size_t slot, uint32_t gen);
+// The slot and generation of handle value `h`; false (nothing set) for 0 or a generation of 0.
+bool radio_mux_handle_unpack(uintptr_t h, size_t *slot, uint32_t *gen);
+// Whether a handle of generation `gen` may use a transport whose current attach has generation `current`: equal, and
+// not 0 (nothing attached to the transport yet).
+bool radio_mux_handle_current(uint32_t gen, uint32_t current);
+
 #ifdef __cplusplus
 }
 #endif

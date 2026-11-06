@@ -36,65 +36,109 @@ esp_err_t radio_mux_register_consumer(const radio_mux_consumer_t *c)
 
 /* ---- consumer side ---- */
 
+// The transport behind handle `h` when `h` is of its current attach (the record in *chp when chp is not NULL); NULL
+// otherwise. Callers that take something check again under the lock that guards it.
+static mux_port_t *current_port(const radio_mux_chan_t *h, struct radio_mux_chan **chp)
+{
+    mux_port_t *p;
+    uint32_t gen;
+    struct radio_mux_chan *ch = atomic_load(&g_mux.started) ? mux_handle_chan(h, &p, &gen) : NULL;
+
+    if (!ch || !radio_mux_handle_current(gen, atomic_load(&p->att_gen))) {
+        return NULL;
+    }
+    if (chp) {
+        *chp = ch;
+    }
+    return p;
+}
+
+// Whether `h` is of p's current attach (p from mux_handle_chan or current_port).
+static bool is_current(const mux_port_t *p, const radio_mux_chan_t *h)
+{
+    size_t slot;
+    uint32_t gen;
+
+    return radio_mux_handle_unpack((uintptr_t)h, &slot, &gen) && radio_mux_handle_current(gen, atomic_load(&p->att_gen));
+}
+
 esp_err_t radio_mux_bind_queue(radio_mux_chan_t *ch, QueueHandle_t q)
 {
-    ESP_RETURN_ON_FALSE(ch && atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "not started");
-    mux_port_t *p = ch->port;
+    struct radio_mux_chan *rec = NULL;
+    mux_port_t *p = current_port(ch, &rec);
     radio_mux_ev_t ev;
+    esp_err_t err = ESP_OK;
 
-    ESP_RETURN_ON_FALSE(atomic_load(&p->evq_chan) == ch, ESP_ERR_INVALID_STATE, TAG, "%s is not attached", ch->id);
+    ESP_RETURN_ON_FALSE(p, ESP_ERR_INVALID_STATE, TAG, "not attached (or a handle of an earlier attach)");
+    // rx_lock: no delivery while the queue changes; ev_lock: the generation cannot move on meanwhile (the owner unbinds
+    // under rx_lock after it moved the generation on, so a late bind of an earlier handle never sticks).
     xSemaphoreTake(p->rx_lock, portMAX_DELAY);
-    p->bound = q;
-    // What arrived between the start of the receive path and this call moves over, in order.
-    while (q && xQueueReceive(p->evq, &ev, 0) == pdTRUE) {
-        if (xQueueSend(q, &ev, 0) != pdTRUE && ev.type == RADIO_MUX_EV_RX_FRAME) {
-            mux_slot_put(p, ev.slot);
-            taskENTER_CRITICAL(&p->lock);
-            p->ctr.drops++;
-            taskEXIT_CRITICAL(&p->lock);
+    xSemaphoreTake(p->ev_lock, portMAX_DELAY);
+    if (!is_current(p, ch)) {
+        err = ESP_ERR_INVALID_STATE;
+    } else {
+        p->bound = q;
+        // What arrived between the start of the receive path and this call moves over, in order.
+        while (q && xQueueReceive(p->evq, &ev, 0) == pdTRUE) {
+            if (xQueueSend(q, &ev, 0) != pdTRUE && ev.type == RADIO_MUX_EV_RX_FRAME) {
+                mux_slot_put(p, ev.slot);
+                taskENTER_CRITICAL(&p->lock);
+                p->ctr.drops++;
+                taskEXIT_CRITICAL(&p->lock);
+            }
         }
     }
+    xSemaphoreGive(p->ev_lock);
     xSemaphoreGive(p->rx_lock);
-    return ESP_OK;
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "%s: bind through a handle of an earlier attach: refused", rec->id);
+    }
+    return err;
 }
 
 int radio_mux_eventfd(radio_mux_chan_t *ch)
 {
-    return ch && atomic_load(&g_mux.started) ? ch->port->efd : -1;
+    mux_port_t *p;
+    uint32_t gen;
+
+    return atomic_load(&g_mux.started) && mux_handle_chan(ch, &p, &gen) ? p->efd : -1;
 }
 
 bool radio_mux_poll(radio_mux_chan_t *ch, radio_mux_ev_t *ev)
 {
-    if (!ch || !atomic_load(&g_mux.started)) {
-        return false;
-    }
-    mux_port_t *p = ch->port;
+    mux_port_t *p = current_port(ch, NULL);
+    bool got = false;
 
-    if (atomic_load(&p->evq_chan) != ch) {
-        return false; // a stale handle: the queue belongs to the consumer of another channel now
+    if (!p) {
+        return false; // a handle of an earlier attach: the queue is the next consumer's
     }
-    if (xQueueReceive(p->evq, ev, 0) == pdTRUE) {
-        return true;
+    xSemaphoreTake(p->ev_lock, portMAX_DELAY);
+    if (is_current(p, ch)) {
+        got = xQueueReceive(p->evq, ev, 0) == pdTRUE;
+        if (!got) {
+            mux_rearm(p);
+        }
     }
-    mux_rearm(p);
-    return false;
+    xSemaphoreGive(p->ev_lock);
+    return got;
 }
 
 void radio_mux_release(radio_mux_chan_t *ch, uint8_t *slot)
 {
-    if (ch && slot) {
-        mux_slot_put(ch->port, slot);
+    mux_port_t *p;
+    uint32_t gen;
+
+    // Any generation: the slot belongs to the transport's pool, whoever was attached when it was delivered.
+    if (slot && atomic_load(&g_mux.started) && mux_handle_chan(ch, &p, &gen)) {
+        mux_slot_put(p, slot);
     }
 }
 
 esp_err_t radio_mux_tx(radio_mux_chan_t *ch, const uint8_t *data, size_t n)
 {
-    if (!ch || !atomic_load(&g_mux.started)) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    mux_port_t *p = ch->port;
+    mux_port_t *p = current_port(ch, NULL);
 
-    if (!atomic_load(&p->tx_ok) || atomic_load(&p->evq_chan) != ch) {
+    if (!p || !atomic_load(&p->tx_ok)) {
         return ESP_ERR_INVALID_STATE;
     }
     if (!data || n == 0 || (p->tx_frames && n > RADIO_MUX_FRAME_MAX)) {
@@ -102,8 +146,9 @@ esp_err_t radio_mux_tx(radio_mux_chan_t *ch, const uint8_t *data, size_t n)
     }
     esp_err_t err;
 
+    // tx_lock: the owner moves the generation on only with it held, so the check below holds for the whole send.
     xSemaphoreTake(p->tx_lock, portMAX_DELAY);
-    if (!atomic_load(&p->tx_ok) || atomic_load(&p->evq_chan) != ch) {
+    if (!atomic_load(&p->tx_ok) || !is_current(p, ch)) {
         err = ESP_ERR_INVALID_STATE;
     } else if (p->kind == RADIO_MUX_KIND_C6) {
         err = c6_transport_tx(data, n); // one SPI transaction (frames only, R23)
@@ -126,87 +171,96 @@ esp_err_t radio_mux_tx(radio_mux_chan_t *ch, const uint8_t *data, size_t n)
 
 esp_err_t radio_mux_reset(radio_mux_chan_t *ch)
 {
-    ESP_RETURN_ON_FALSE(ch && atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "not started");
-    const mux_msg_t m = {.type = MUX_MSG_RESET, .ch = ch};
+    mux_port_t *p;
+    uint32_t gen;
+
+    ESP_RETURN_ON_FALSE(atomic_load(&g_mux.started) && mux_handle_chan(ch, &p, &gen), ESP_ERR_INVALID_STATE, TAG,
+                        "not started");
+    const mux_msg_t m = {.type = MUX_MSG_RESET, .h = ch}; // the owner checks the generation
 
     return mux_post(&m) ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
 size_t radio_mux_read_raw(radio_mux_chan_t *ch, uint8_t *out, size_t cap)
 {
-    if (!ch || !atomic_load(&g_mux.started) || !ch->port->ring) {
-        return 0;
-    }
-    mux_port_t *p = ch->port;
+    mux_port_t *p = current_port(ch, NULL);
+    size_t n = 0;
 
-    if (atomic_load(&p->evq_chan) != ch) {
-        return 0; // a stale handle: the ring belongs to the consumer of another channel now
+    if (!p || !p->ring) {
+        return 0; // a handle of an earlier attach: the ring is the next consumer's
     }
-    const size_t n = mux_ring_take(p, out, cap);
-
-    if (n == 0) {
-        mux_rearm(p);
+    xSemaphoreTake(p->ev_lock, portMAX_DELAY);
+    if (is_current(p, ch)) {
+        n = mux_ring_take(p, out, cap);
+        if (n == 0) {
+            mux_rearm(p);
+        }
     }
+    xSemaphoreGive(p->ev_lock);
     return n;
 }
 
 bool radio_mux_chan_frames(const radio_mux_chan_t *ch)
 {
-    if (!ch) {
-        return false;
-    }
-    if (ch->kind == RADIO_MUX_KIND_C6) {
-        return true;
-    }
-    const mux_port_t *p = ch->port;
+    mux_port_t *p = current_port(ch, NULL);
 
-    return atomic_load(&p->evq_chan) == ch && p->tx_frames;
+    return p && (p->kind == RADIO_MUX_KIND_C6 || p->tx_frames);
 }
 
 const char *radio_mux_chan_id(const radio_mux_chan_t *ch)
 {
-    return ch ? ch->id : NULL;
+    mux_port_t *p;
+    uint32_t gen;
+    const struct radio_mux_chan *rec = mux_handle_chan(ch, &p, &gen);
+
+    return rec ? rec->id : NULL;
 }
 
 void radio_mux_get_proxy(const radio_mux_chan_t *ch, radio_mux_proxy_settings_t *out)
 {
-    if (!ch || !g_mux.lock) {
+    mux_port_t *p;
+    uint32_t gen;
+    const struct radio_mux_chan *rec = g_mux.lock ? mux_handle_chan(ch, &p, &gen) : NULL;
+
+    if (!rec) {
         radio_mux_proxy_defaults(out);
         return;
     }
     mux_lock();
-    *out = ch->proxy;
+    *out = rec->proxy;
     mux_unlock();
 }
 
 void radio_mux_set_busy_peer(radio_mux_chan_t *ch, bool has_peer)
 {
-    if (!ch || !atomic_load(&g_mux.started)) {
-        return;
-    }
-    mux_port_t *p = ch->port;
+    mux_port_t *p = current_port(ch, NULL);
 
+    if (!p) {
+        return; // a handle of an earlier attach: the flag is the current consumer's
+    }
     // A true from a consumer that is no longer attached (its GONE not yet taken) is dropped: detach cleared the flag.
     taskENTER_CRITICAL(&p->lock);
-    if (!has_peer) {
-        p->busy_peer = false;
-    } else if (atomic_load(&p->tx_ok) && atomic_load(&p->evq_chan) == ch) {
-        p->busy_peer = true;
+    if (is_current(p, ch) && (!has_peer || atomic_load(&p->tx_ok))) {
+        p->busy_peer = has_peer;
     }
     taskEXIT_CRITICAL(&p->lock);
 }
 
 void radio_mux_note_firmware(radio_mux_chan_t *ch, const radio_mux_fw_record_t *fw)
 {
-    if (!ch || !fw) {
+    mux_port_t *p;
+    uint32_t gen;
+    const struct radio_mux_chan *rec = fw && atomic_load(&g_mux.started) ? mux_handle_chan(ch, &p, &gen) : NULL;
+
+    if (!rec) {
         return;
     }
     mux_msg_t m = {.type = MUX_MSG_NOTE_FW};
 
-    m.note.ch = ch;
+    m.note.h = ch; // the owner checks the generation
     m.note.fw = *fw;
     if (!mux_post(&m)) {
-        ESP_LOGW(TAG, "%s: firmware note lost: queue full", ch->id);
+        ESP_LOGW(TAG, "%s: firmware note lost: queue full", rec->id);
     }
 }
 
@@ -478,7 +532,7 @@ esp_err_t radio_mux_lease(const char *id, radio_mux_chan_t **out, char *err, siz
     const esp_err_t ret = call_owner_claimed(MUX_MSG_LEASE, call);
 
     if (ret == ESP_OK) {
-        *out = (radio_mux_chan_t *)call->chan;
+        *out = call->handle;
     } else if (err && cap > 0) {
         snprintf(err, cap, "%s", ret == ESP_ERR_TIMEOUT ? "the radio mux did not answer" : call->reason);
     }
@@ -488,19 +542,21 @@ esp_err_t radio_mux_lease(const char *id, radio_mux_chan_t **out, char *err, siz
 
 void radio_mux_lease_end(radio_mux_chan_t *ch, const char *fault)
 {
-    if (!ch || !atomic_load(&g_mux.started)) {
+    const char *id = atomic_load(&g_mux.started) ? radio_mux_chan_id(ch) : NULL;
+
+    if (!id) {
         return;
     }
-    mux_call_t *call = call_new(ch->id);
+    mux_call_t *call = call_new(id);
 
     if (!call) {
-        ESP_LOGE(TAG, "%s: lease end lost: no memory", ch->id);
+        ESP_LOGE(TAG, "%s: lease end lost: no memory", id);
         return;
     }
-    call->chan = ch;
+    call->handle = ch;
     snprintf(call->reason, sizeof(call->reason), "%s", fault ? fault : "");
     if (call_owner(MUX_MSG_LEASE_END, call) != ESP_OK) {
-        ESP_LOGW(TAG, "%s: lease end: the owner task did not answer in time", ch->id);
+        ESP_LOGW(TAG, "%s: lease end: the owner task did not answer in time", id);
     }
     mux_call_put(call);
 }

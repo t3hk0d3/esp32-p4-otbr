@@ -579,3 +579,33 @@ bool radio_mux_c6_job_refused(radio_mux_mode_t stored_mode, bool attached, bool 
 {
     return stored_mode == RADIO_MUX_MODE_RCP_PROXY && attached && has_peer;
 }
+
+uint32_t radio_mux_gen_next(uint32_t gen)
+{
+    return gen >= RADIO_MUX_GEN_MAX ? 1 : gen + 1;
+}
+
+uintptr_t radio_mux_handle_pack(size_t slot, uint32_t gen)
+{
+    if (slot >= RADIO_MUX_HANDLE_SLOTS || gen == 0 || gen > RADIO_MUX_GEN_MAX) {
+        return 0;
+    }
+    return ((uintptr_t)gen << RADIO_MUX_HANDLE_SLOT_BITS) | (uintptr_t)slot;
+}
+
+bool radio_mux_handle_unpack(uintptr_t h, size_t *slot, uint32_t *gen)
+{
+    const uintptr_t g = h >> RADIO_MUX_HANDLE_SLOT_BITS;
+
+    if (g == 0 || g > RADIO_MUX_GEN_MAX) {
+        return false;
+    }
+    *slot = (size_t)(h & (RADIO_MUX_HANDLE_SLOTS - 1));
+    *gen = (uint32_t)g;
+    return true;
+}
+
+bool radio_mux_handle_current(uint32_t gen, uint32_t current)
+{
+    return current != 0 && gen == current;
+}

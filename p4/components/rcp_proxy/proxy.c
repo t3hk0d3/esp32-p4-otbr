@@ -354,8 +354,26 @@ void rcp_proxy_peer_lost(proxy_t *p, proxy_state_t st)
 
 /* ---- data paths ---- */
 
+// Whether p's session is the one the latest attach wished for: after a detach (or a new attach) of its channel, until
+// the task closes it, the session neither reads the radio nor writes to it (the mux refuses an earlier attach's handle
+// as well; this covers the time until the next attach).
+static bool session_current(const proxy_t *p)
+{
+    const int i = (int)(p - s_px);
+    bool current;
+
+    taskENTER_CRITICAL(&s_lock);
+    current = p->ch && s_want[i].ch == p->ch && s_want[i].gen == s_gen[i];
+    taskEXIT_CRITICAL(&s_lock);
+    return current;
+}
+
 void rcp_proxy_from_peer(proxy_t *p, const uint8_t *d, size_t n)
 {
+    if (!session_current(p)) {
+        p->discarded += n; // a stale session: never into the next attach's radio
+        return;
+    }
     if (!p->frames) {
         if (radio_mux_tx(p->ch, d, n) == ESP_OK) {
             p->to_radio += n;
@@ -443,6 +461,9 @@ static void radio_in(proxy_t *p)
 {
     radio_mux_ev_t ev;
 
+    if (!session_current(p)) {
+        return; // detached: the task's next reconcile closes the session
+    }
     for (int i = 0; i < EVENTS_PER_WAKE && p->ch && radio_mux_poll(p->ch, &ev); i++) {
         switch (ev.type) {
         case RADIO_MUX_EV_RX_FRAME:

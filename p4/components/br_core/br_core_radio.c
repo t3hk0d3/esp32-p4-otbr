@@ -99,11 +99,14 @@ void core_radio_notify(void)
 }
 
 // The mux operations of MuxSpinelInterface (esp_openthread_mux.h), on the OpenThread task under the OpenThread lock.
+// After `gone` nothing goes to the channel or comes from it any more, whatever the mux would still allow: the mux's
+// generations refuse a handle of an earlier attach, and this belt covers the time between GONE and the next attach.
 static esp_err_t mux_tx(void *ctx, const uint8_t *f, size_t n)
 {
-    radio_mux_chan_t *ch = atomic_load(&((otbr_link_t *)ctx)->ch);
+    const otbr_link_t *link = ctx;
+    radio_mux_chan_t *ch = atomic_load(&link->ch);
 
-    return ch ? radio_mux_tx(ch, f, n) : ESP_ERR_INVALID_STATE;
+    return ch && !atomic_load(&link->gone) ? radio_mux_tx(ch, f, n) : ESP_ERR_INVALID_STATE;
 }
 
 static bool mux_poll(void *ctx, uint8_t **slot, size_t *len)
@@ -112,7 +115,7 @@ static bool mux_poll(void *ctx, uint8_t **slot, size_t *len)
     radio_mux_chan_t *ch = atomic_load(&link->ch);
     radio_mux_ev_t ev;
 
-    while (ch && radio_mux_poll(ch, &ev)) {
+    while (ch && !atomic_load(&link->gone) && radio_mux_poll(ch, &ev)) {
         switch (ev.type) {
         case RADIO_MUX_EV_RX_FRAME:
             *slot = ev.slot;

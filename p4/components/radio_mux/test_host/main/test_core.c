@@ -588,6 +588,82 @@ TEST_CASE("On flow control on: writes ulControlHandshake 0x00000009, ulFlowRepla
     TEST_ASSERT_EQUAL_UINT32(0x00000009, le32(&out[0]));
 }
 
+/* ---- attach handles ---- */
+
+TEST_CASE("On the next generation: returns gen + 1", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL_UINT32(1, radio_mux_gen_next(0));
+    TEST_ASSERT_EQUAL_UINT32(2, radio_mux_gen_next(1));
+    TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_GEN_MAX, radio_mux_gen_next(RADIO_MUX_GEN_MAX - 1));
+}
+
+TEST_CASE("On the next generation after RADIO_MUX_GEN_MAX: wraps to 1, never 0", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL_UINT32(1, radio_mux_gen_next(RADIO_MUX_GEN_MAX));
+    TEST_ASSERT_EQUAL_UINT32(1, radio_mux_gen_next(UINT32_MAX));
+}
+
+TEST_CASE("On a handle packed and unpacked: returns its slot and generation", "[radio_mux]")
+{
+    const size_t slots[] = {0, 1, RADIO_MUX_HANDLE_SLOTS - 1};
+    const uint32_t gens[] = {1, 2, 12345, RADIO_MUX_GEN_MAX};
+
+    for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++) {
+        for (size_t j = 0; j < sizeof(gens) / sizeof(gens[0]); j++) {
+            const uintptr_t h = radio_mux_handle_pack(slots[i], gens[j]);
+            size_t slot = 99;
+            uint32_t gen = 0;
+
+            TEST_ASSERT_NOT_EQUAL(0, h);
+            TEST_ASSERT_TRUE(h <= UINT32_MAX); // fits the board's 32-bit pointers
+            TEST_ASSERT_TRUE(radio_mux_handle_unpack(h, &slot, &gen));
+            TEST_ASSERT_EQUAL(slots[i], slot);
+            TEST_ASSERT_EQUAL_UINT32(gens[j], gen);
+        }
+    }
+}
+
+TEST_CASE("On two attaches of the same slot: returns different handles", "[radio_mux]")
+{
+    TEST_ASSERT_NOT_EQUAL(radio_mux_handle_pack(1, 7), radio_mux_handle_pack(1, radio_mux_gen_next(7)));
+    TEST_ASSERT_NOT_EQUAL(radio_mux_handle_pack(0, 7), radio_mux_handle_pack(1, 7));
+}
+
+TEST_CASE("On a slot or generation out of range: returns the handle value 0", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(0, radio_mux_handle_pack(RADIO_MUX_HANDLE_SLOTS, 1));
+    TEST_ASSERT_EQUAL(0, radio_mux_handle_pack(0, 0));
+    TEST_ASSERT_EQUAL(0, radio_mux_handle_pack(0, RADIO_MUX_GEN_MAX + 1));
+}
+
+TEST_CASE("On unpacking 0 or a generation 0: returns false and sets nothing", "[radio_mux]")
+{
+    size_t slot = 99;
+    uint32_t gen = 99;
+
+    TEST_ASSERT_FALSE(radio_mux_handle_unpack(0, &slot, &gen));
+    TEST_ASSERT_FALSE(radio_mux_handle_unpack(RADIO_MUX_HANDLE_SLOTS - 1, &slot, &gen));
+    TEST_ASSERT_EQUAL(99, slot);
+    TEST_ASSERT_EQUAL_UINT32(99, gen);
+}
+
+TEST_CASE("On a handle of the transport's current attach: returns true", "[radio_mux]")
+{
+    TEST_ASSERT_TRUE(radio_mux_handle_current(5, 5));
+}
+
+TEST_CASE("On a handle of an earlier attach: returns false", "[radio_mux]")
+{
+    TEST_ASSERT_FALSE(radio_mux_handle_current(5, radio_mux_gen_next(5)));
+    TEST_ASSERT_FALSE(radio_mux_handle_current(radio_mux_gen_next(5), 5));
+}
+
+TEST_CASE("On a transport nothing ever attached to: returns false", "[radio_mux]")
+{
+    TEST_ASSERT_FALSE(radio_mux_handle_current(0, 0));
+    TEST_ASSERT_FALSE(radio_mux_handle_current(1, 0));
+}
+
 void app_main(void)
 {
     UNITY_BEGIN();
