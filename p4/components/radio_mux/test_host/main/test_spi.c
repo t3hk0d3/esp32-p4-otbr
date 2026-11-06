@@ -263,3 +263,30 @@ TEST_CASE("On rcp-proxy without a peer, otbr, off, or a detached rcp-proxy: the 
     TEST_ASSERT_FALSE(radio_mux_c6_job_refused(RADIO_MUX_MODE_OFF, false, false));
     TEST_ASSERT_FALSE(radio_mux_c6_job_refused(RADIO_MUX_MODE_RCP_PROXY, false, true));
 }
+
+/* ---- radio_mux_spi_gap_wait_us ---- */
+
+#define GAP_US 100
+
+TEST_CASE("On no transaction yet: may clock now (wait 0)", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL_UINT32(0, radio_mux_spi_gap_wait_us(5, -1, GAP_US));
+}
+
+TEST_CASE("On the gap passed, or exactly reached: may clock now (wait 0)", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL_UINT32(0, radio_mux_spi_gap_wait_us(1000 + GAP_US, 1000, GAP_US));
+    TEST_ASSERT_EQUAL_UINT32(0, radio_mux_spi_gap_wait_us(50000, 1000, GAP_US));
+}
+
+TEST_CASE("On a transaction that just ended: waits the rest of the gap", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL_UINT32(GAP_US, radio_mux_spi_gap_wait_us(1000, 1000, GAP_US));
+    TEST_ASSERT_EQUAL_UINT32(GAP_US - 30, radio_mux_spi_gap_wait_us(1030, 1000, GAP_US));
+    TEST_ASSERT_EQUAL_UINT32(1, radio_mux_spi_gap_wait_us(1000 + GAP_US - 1, 1000, GAP_US));
+}
+
+TEST_CASE("On a clock that went backwards: waits the whole gap", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL_UINT32(GAP_US, radio_mux_spi_gap_wait_us(900, 1000, GAP_US));
+}

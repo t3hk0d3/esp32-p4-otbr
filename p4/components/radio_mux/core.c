@@ -531,6 +531,19 @@ size_t radio_mux_spi_xfer_len(uint16_t tx_len, uint16_t accept)
     return (n + RADIO_MUX_SPI_XFER_ALIGN - 1) / RADIO_MUX_SPI_XFER_ALIGN * RADIO_MUX_SPI_XFER_ALIGN;
 }
 
+uint32_t radio_mux_spi_gap_wait_us(int64_t now_us, int64_t last_end_us, uint32_t gap_us)
+{
+    if (last_end_us < 0) {
+        return 0;
+    }
+    if (now_us < last_end_us) {
+        return gap_us;
+    }
+    const int64_t since = now_us - last_end_us;
+
+    return since >= (int64_t)gap_us ? 0 : (uint32_t)((int64_t)gap_us - since);
+}
+
 bool radio_mux_c6_present(const radio_mux_c6_probe_t *probe, char *reason, size_t cap)
 {
     const char *why = NULL;

@@ -373,6 +373,17 @@ esp_err_t radio_mux_c6_job_begin(void)
     ESP_RETURN_ON_FALSE(call, ESP_ERR_NO_MEM, TAG, "call");
     esp_err_t err = call_owner(MUX_MSG_C6_JOB_BEGIN, call);
 
+    if (err == ESP_ERR_TIMEOUT) {
+        int pending = MUX_CALL_PENDING;
+
+        if (atomic_compare_exchange_strong(&call->claim, &pending, MUX_CALL_ABANDONED)) {
+            mux_call_put(call);
+            return ESP_ERR_TIMEOUT; // the owner skips it when it gets there: nothing ran
+        }
+        // The owner took it just now: it runs to the end, so its result stands.
+        xSemaphoreTake(call->done, portMAX_DELAY);
+        err = ESP_OK;
+    }
     if (err == ESP_OK) {
         err = call->err;
     }

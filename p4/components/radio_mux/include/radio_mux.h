@@ -217,6 +217,9 @@ void radio_mux_set_otbr_mover(esp_err_t (*move)(const char *from, const char *to
 // another job holds it; otherwise c6's consumer gets GONE and is detached, SPI2, the INT pin and the reset GPIO are
 // released (the C6 left running) for rcp_sync, and c6 is listed busy. Waits for the owner task (up to 5 s,
 // ESP_ERR_TIMEOUT). ESP_OK before radio_mux_start (nothing holds the C6 then). Not from the owner task.
+// Every job_begin that returned ESP_OK must be followed by radio_mux_c6_job_end, also when the job failed: until then
+// c6 stays busy. ESP_ERR_TIMEOUT means nothing ran (the owner skips the abandoned begin): do not run the job, and do
+// not call job_end for it.
 esp_err_t radio_mux_c6_job_begin(void);
 // Gives the C6 back after the job: c6 is listed again from rcp_sync_get_last_probe (unavailable with the reason when
 // no RCP, the factory ESP-Hosted firmware or a failed ROM recovery), unavailable as well when !c6_ok, and its stored

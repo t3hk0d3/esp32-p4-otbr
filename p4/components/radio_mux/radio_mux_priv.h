@@ -148,10 +148,16 @@ struct mux_call {
     radio_mux_set_req_t req;
     bool have_mover;
     bool c6_ok; // C6_JOB_END: the job left a working C6
+    atomic_int claim; // C6_JOB_BEGIN: MUX_CALL_PENDING until the owner takes it (TAKEN) or the caller gives up
     radio_mux_verdict_t verdict;
     esp_err_t err;
     char from[RADIO_MUX_ID_MAX];
 };
+
+// mux_call_t.claim (calloc: PENDING).
+#define MUX_CALL_PENDING 0
+#define MUX_CALL_TAKEN 1
+#define MUX_CALL_ABANDONED 2
 
 #define MUX_RX_RING_SIZE (16 * 1024) // raw and detection bytes: a 100 ms burst at 921600 baud stays well inside
 

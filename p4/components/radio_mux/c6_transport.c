@@ -15,6 +15,7 @@
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -27,7 +28,12 @@ static const char *TAG = "radio_mux";
 #define C6_TASK_NAME "radio_mux_c6"
 #define C6_TASK_STACK 4096
 #define C6_TASK_PRIORITY (CONFIG_OPENTHREAD_TASK_PRIORITY + 1) // above the OpenThread task it feeds
-#define C6_RX_PER_WAKE 8        // receive transactions in a row before the task lets a sender have the bus
+// Minimum time between the end of one transaction and the start of the next. The C6's SPI slave (IDF
+// esp_openthread_spi_slave.c) raises INT in its post-transaction ISR, runs the completion callback and only then queues
+// its next transaction: clocking before that reads an unloaded slave. On the 160 MHz C6 that ISR path is a few tens
+// of microseconds; IDF's host loop (select, eventfd, transaction) leaves tens of microseconds or more. 100 us doubles
+// the estimate and costs 6 % of a 1.7 ms receive transaction. Busy-waited (esp_rom_delay_us): a tick is 10 ms.
+#define C6_GAP_US 100
 #define C6_BAD_HDR_RETRY_MS 15  // a header with a bad pattern: wait, then the same transaction once more (as IDF)
 #define C6_TX_TRIES 4           // a frame the RCP did not take (busy): sent again after a tick, this many times in all
 #define C6_RESET_PULSE_MS 20    // as rcp_sync's pulse_reset
@@ -58,9 +64,12 @@ static bool s_bus_up, s_int_ours, s_isr_up;
 static bool s_reset_bit;  // our next transaction carries the reset bit (after open and reset) until a valid header
 static bool s_reset_wait; // RESET goes to the consumer on the RCP's first header with its reset bit
 static int64_t s_reset_deadline_us;
+static int64_t s_last_end_us = -1; // when the previous transaction ended (esp_timer); -1: none yet
 static uint8_t *s_tx; // DMA: our header, then our frame
 
-static bool s_pins_ours; // owner: the mux set UPDATE and the reset GPIO up as outputs
+// Owner: the mux drives UPDATE and the reset GPIO (since its last open or hold). Cleared when it releases them:
+// rcp_sync and c6_hosted reconfigure both pins for their jobs, so every open and hold configures them again.
+static bool s_pins_ours;
 
 /* ---- interrupt ---- */
 
@@ -76,7 +85,8 @@ static void IRAM_ATTR int_isr(void *arg)
 
 // One full-duplex transaction: our header (and the frame already in s_tx after it) out, the RCP's into a slot (the
 // discard buffer when the pool is empty: the RCP is never stalled, its frame counts as a drop). A bad header is tried
-// once more after C6_BAD_HDR_RETRY_MS. ESP_ERR_INVALID_RESPONSE when it stays bad.
+// once more after C6_BAD_HDR_RETRY_MS. ESP_ERR_INVALID_RESPONSE when it stays bad. Never clocks within C6_GAP_US of
+// the previous transaction's end, whoever ran it (the C6 task or a sender), so the slave has re-armed.
 static esp_err_t xfer(uint16_t tx_len, uint16_t accept, bool *tx_taken)
 {
     mux_port_t *p = &g_mux.c6;
@@ -93,7 +103,13 @@ static esp_err_t xfer(uint16_t tx_len, uint16_t accept, bool *tx_taken)
     *tx_taken = false;
     radio_mux_spi_hdr_encode(&h, s_tx);
     for (int attempt = 0;; attempt++) {
+        const uint32_t wait_us = radio_mux_spi_gap_wait_us(esp_timer_get_time(), s_last_end_us, C6_GAP_US);
+
+        if (wait_us > 0) {
+            esp_rom_delay_us(wait_us);
+        }
         err = spi_device_transmit(s_dev, &t);
+        s_last_end_us = esp_timer_get_time();
         if (err != ESP_OK) {
             break;
         }
@@ -130,18 +146,15 @@ static esp_err_t xfer(uint16_t tx_len, uint16_t accept, bool *tx_taken)
     return ESP_OK;
 }
 
-// The C6 task: receive transactions while the RCP asks for them. INT rises at the end of each transaction and falls
-// again when the RCP has the next one ready, so a burst stops when it reads high; a capped burst comes back.
-static void rx_burst(void)
+// The C6 task: one receive transaction per falling edge of INT, as IDF's interface does. The INT level is never read
+// to go on: right after a transaction it can still read low before the slave's done callback raised it. The slave
+// holds one transaction at a time and lowers INT again (a new edge, a new notify) when it has the next one ready, so
+// edges merged into one notify lose nothing.
+static void rx_once(void)
 {
     bool taken;
 
-    for (int i = 0; i < C6_RX_PER_WAKE; i++) {
-        if (xfer(0, RADIO_MUX_FRAME_MAX, &taken) != ESP_OK || gpio_get_level(P4_PIN_RCP_INT) != 0) {
-            return;
-        }
-    }
-    xTaskNotify(s_task, BIT_INT, eSetBits);
+    xfer(0, RADIO_MUX_FRAME_MAX, &taken);
 }
 
 static TickType_t reset_wait_ticks(void)
@@ -175,7 +188,7 @@ static void c6_task(void *arg)
         xTaskNotifyWait(0, UINT32_MAX, &bits, reset_wait_ticks());
         xSemaphoreTake(p->tx_lock, portMAX_DELAY);
         if (atomic_load(&s_open) && (bits & BIT_INT)) {
-            rx_burst();
+            rx_once();
         }
         if (atomic_load(&s_open) && s_reset_wait && esp_timer_get_time() >= s_reset_deadline_us) {
             s_reset_wait = false;
@@ -223,7 +236,7 @@ esp_err_t c6_transport_tx(const uint8_t *frame, size_t n)
 /* ---- open, close, reset (owner) ---- */
 
 // UPDATE high (the C6 boots its boot slot, never its updater: rcp_sync drives it low for its own jobs) and the reset
-// GPIO at `run` (high: the C6 runs). Levels are latched before the pins become outputs.
+// GPIO at `run` (high: the C6 runs). Levels are latched before the pins become outputs; configured on every call.
 static void pins_set(bool run)
 {
     const gpio_config_t out = {
@@ -233,7 +246,7 @@ static void pins_set(bool run)
 
     gpio_set_level(P4_PIN_C6_UPDATE, 1);
     gpio_set_level(P4_PIN_C6_RESET, run ? 1 : 0);
-    if (!s_pins_ours && gpio_config(&out) == ESP_OK) {
+    if (gpio_config(&out) == ESP_OK) {
         s_pins_ours = true;
     }
 }
@@ -375,7 +388,8 @@ static void shut(bool hold_reset)
     if (hold_reset) {
         pins_set(false);
     } else if (s_pins_ours) {
-        pins_set(true);
+        pins_set(true); // the C6 left running, then the pins are someone else's (a job, OpenThread's own path)
+        s_pins_ours = false;
     }
     if (was_open) {
         ESP_LOGI(TAG, "c6: SPI2 closed%s", hold_reset ? ", C6 held in reset" : "");

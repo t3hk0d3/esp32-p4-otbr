@@ -304,6 +304,12 @@ void radio_mux_spi_check(const uint8_t rx_hdr[RADIO_MUX_SPI_HDR_LEN], uint16_t t
 // RADIO_MUX_SPI_XFER_ALIGN.
 size_t radio_mux_spi_xfer_len(uint16_t tx_len, uint16_t accept);
 
+// The C6's SPI slave re-arms after each transaction: its done callback raises INT, then queues the next transaction.
+// Clocking again before that sees an unloaded slave (garbage headers, a misaligned stream). How long to wait before
+// the next transaction: 0 when at least gap_us passed since the previous one ended at last_end_us (negative: none
+// yet), else the rest of the gap. A clock that went backwards counts as "just ended" (the whole gap).
+uint32_t radio_mux_spi_gap_wait_us(int64_t now_us, int64_t last_end_us, uint32_t gap_us);
+
 // What rcp_sync's last probe of the C6 said (the fields of rcp_sync_probe_result_t the mux reads). All false: no probe
 // ran yet.
 typedef struct {

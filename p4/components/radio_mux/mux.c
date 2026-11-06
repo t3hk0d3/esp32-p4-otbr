@@ -562,7 +562,14 @@ static void c6_apply(bool reattach)
     mux_port_t *p = &g_mux.c6;
     char msg[RADIO_MUX_REASON_MAX];
 
-    if (p->busy || p->att.state == RADIO_MUX_AS_ABSENT) {
+    if (p->busy) {
+        refresh(p); // the job owns the C6 and its pins
+        return;
+    }
+    if (p->att.state == RADIO_MUX_AS_ABSENT) { // unavailable: nothing to attach, but off still holds it in reset
+        if (p->chan->mode == RADIO_MUX_MODE_OFF) {
+            c6_transport_close();
+        }
         refresh(p);
         return;
     }
@@ -879,7 +886,7 @@ static void handle_set(mux_call_t *call)
         // As on USB: a new mode or new rcp_proxy settings (in rcp-proxy) re-attach, a PUT of the mode retries a fault.
         // While a job holds the C6 or it is unavailable, the change is stored and applies at the job's end.
         if (mode_changed || (proxy_changed && ch->mode == RADIO_MUX_MODE_RCP_PROXY) || req->has_mode) {
-            c6_apply(mode_changed || proxy_changed);
+            c6_apply(mode_changed || (proxy_changed && ch->mode == RADIO_MUX_MODE_RCP_PROXY));
         }
         return;
     }
@@ -1010,11 +1017,20 @@ static void handle(const mux_msg_t *m)
     case MUX_MSG_NOTE_FW:
         handle_note_fw(m->note.ch, &m->note.fw);
         break;
-    case MUX_MSG_C6_JOB_BEGIN:
-        handle_c6_job_begin(m->call);
+    case MUX_MSG_C6_JOB_BEGIN: {
+        int pending = MUX_CALL_PENDING;
+
+        // A caller that timed out marked the call abandoned and returned ESP_ERR_TIMEOUT: nothing may run then, or c6
+        // would stay busy with no job_end to come.
+        if (atomic_compare_exchange_strong(&m->call->claim, &pending, MUX_CALL_TAKEN)) {
+            handle_c6_job_begin(m->call);
+        } else {
+            ESP_LOGW(TAG, "c6: job begin given up by its caller: skipped");
+        }
         xSemaphoreGive(m->call->done);
         mux_call_put(m->call);
         break;
+    }
     case MUX_MSG_C6_JOB_END:
         handle_c6_job_end(m->call);
         xSemaphoreGive(m->call->done);
