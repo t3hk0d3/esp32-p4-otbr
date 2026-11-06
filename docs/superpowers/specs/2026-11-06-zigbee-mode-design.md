@@ -172,8 +172,9 @@ From the spike and its on-board runs (2026-11-06):
   Requests carry transaction IDs and one timeout; a request that times out counts as a radio fault (below).
 - **Received frames** arrive as slots of the channel's frame pool (zero copies before the client's parse on the C6,
   one on a dongle). The client parses a slot, hands the PSDU to ziggurat (which copies it) and releases the slot at
-  once, so a slow stack never holds the pool. Pool drops are counted by the mux and shown on the Zigbee page. The
-  client needs no TX completion from the mux: the transmit result comes from the RCP's own spinel reply.
+  once, so a slow stack never holds the pool. The receive timestamp ziggurat gets is the µs time the mux takes at the
+  transport. Pool drops are counted by the mux and shown on the Zigbee page. The mux has no TX completion event; the
+  transmit result comes from the RCP's own spinel reply.
 - **Radio resets and loss.** *(Design call.)* The client keeps the last configuration and the source-match table.
   - On RESET from the mux, or an unsolicited spinel reset status from the RCP (it rebooted on its own): the client
     runs its attach sequence again and replays the configuration and the source-match table, then receives again. A
@@ -187,8 +188,8 @@ From the spike and its on-board runs (2026-11-06):
     (`MODE_FSM_MAX_RECOVERIES` within its window, with a count that survives the reboot); past the cap the Ziggurat
     channel stays down, the page shows "radio gone", and Ethernet, the web UI and OTA keep working. Keeping the stack
     up through an unplug and resuming on replug is a later improvement.
-  - C6 jobs (firmware push, ROM recovery) while the C6 is in Ziggurat mode follow the mux design (currently refused with
-    409 `c6_busy`). If the mux later allows a push there, the Zigbee side only needs the board to reboot after it.
+  - C6 jobs (firmware push, ROM recovery) while the C6 is in Ziggurat mode run as the mux design defines, and the board
+    reboots afterwards, which brings the Ziggurat channel back.
 - **Memory in PSRAM.** Ziggurat's heap (its routing, child, neighbour and key tables, packet queues; everything it
   allocates) lives in PSRAM, so the network can grow to the size of a typical ZHA home (100+ devices) without taking
   internal RAM from lwIP, the HTTP server or an OTBR channel. The staticlib's `esp-idf` allocator is hard-wired to
