@@ -28,7 +28,7 @@ static const char *TAG = "diag";
 #define SAMPLER_PERIOD_MS 1000
 #define TASK_HEADROOM 8      // tasks that may appear between uxTaskGetNumberOfTasks and uxTaskGetSystemState
 #define MUTEX_WAIT_MS 100
-#define TSENS_RANGE_MIN_C 20 // the die sits well above 20 C; 20..100 is the +-2 C range of the P4 sensor
+#define TSENS_RANGE_MIN_C 20 // start range only: the driver re-picks the range from the reading
 #define TSENS_RANGE_MAX_C 100
 
 static SemaphoreHandle_t s_mutex;

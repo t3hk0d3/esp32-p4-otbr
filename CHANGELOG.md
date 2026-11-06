@@ -18,7 +18,7 @@ release's `versions.txt`.
   `docs/updates.md`. Not yet checked on a board.
 - Chip temperature: `chip_temperature_c` in `GET /device/diag`, the gauge `br_chip_temperature_celsius` in `/metrics`
   and a "Chip temperature" row in the "Load and memory" card of the Status page. It is the die temperature, not the
-  room temperature: it reads above ambient and rises with load. The sensor measures 20 to 100 °C, about ±2 °C. When it
+  room temperature: it reads above ambient and rises with load. The driver picks the most accurate range for the reading (about ±1 °C up to 80 °C, ±2 °C above), and the value moves in 1 °C steps on a given board even though it is shown with one decimal. When it
   cannot start or a read fails, the value is `null` (`-` on the page, no series in `/metrics`). See `docs/diagnostics.md`.
 
 ## [0.4.0] - 2026-11-05
