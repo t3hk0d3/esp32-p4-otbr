@@ -232,16 +232,17 @@ bool mode_fsm_boot(mode_fsm_t *fsm, const char *otbr_id);
  * `from` again and returns MODE_FSM_ERR_START_FAILED with nothing stored; when that start fails too the mode is
  * RADIO_FAULT. From NO_RADIO (`from` is absent) the stop does nothing and a failed start leaves NO_RADIO. A start on
  * `to` that abandoned OpenThread's init (MODE_FSM_ERR_START_ABANDONED) cannot be followed by another start: the move
- * returns it, nothing stored, the mode stays STARTING, and the caller reboots the board (it boots on `from`).
+ * returns it, nothing stored, the mode stays STARTING, and the caller reboots the board (it boots on `from`). The same
+ * when the start on `from` again abandons the init.
  * ESP_ERR_INVALID_STATE (nothing touched) in STARTING and SNIFFER and during a radio job. A successful start ends in
  * BR_RUNNING through mode_fsm_set_started (the border router start). Blocks for the whole move.
  */
 esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, char *err, size_t cap);
 
 /**
- * The OTBR channel is gone (unplugged, failed, its mode changed): a capture ends (sniffer end callback), OpenThread is
- * torn down (ot_stop), NO_RADIO; RADIO_FAULT when the teardown did not finish. Nothing during a radio job (its own
- * detach).
+ * The OTBR channel is gone (unplugged, failed, its mode changed): NO_RADIO at once (the guards refuse new Thread
+ * sessions while the open ones drain), a capture ends (sniffer end callback), then OpenThread is torn down (ot_stop);
+ * RADIO_FAULT when the teardown did not finish. Nothing during a radio job (its own detach).
  */
 void mode_fsm_on_channel_gone(mode_fsm_t *fsm);
 

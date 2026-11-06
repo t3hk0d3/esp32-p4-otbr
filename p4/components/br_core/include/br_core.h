@@ -151,8 +151,12 @@ void br_core_trel_read_locked(otInstance *instance, br_core_trel_state_t *out, b
  * long waits for OpenThread callbacks. Returns false while OpenThread is not running or a push is about to stop it:
  * then nothing is open and the caller must not touch OpenThread. Does not take the OpenThread lock. Sessions nest.
  * Every task other than the OpenThread task opens one around its OpenThread access. Close it with
- * br_core_ot_session_end; a push waits up to 45 s for the open sessions to close and is refused if they do not. A holder
- * that waits for an OpenThread callback should give up once the Thread REST flag (esp_br_web_openthread_ready) is off.
+ * br_core_ot_session_end. A push, a move or a deliberate stop (the OTBR channel's mode changed) waits up to 45 s for the
+ * open sessions to close and is refused (nothing stopped) if they do not. When the OTBR channel is lost (unplugged,
+ * failed) the mode is NO_RADIO at once and the teardown waits for every open session however long it takes (logged
+ * every 20 s): OpenThread's lock is never deleted under a session. Its radio calls are answered at once meanwhile (as a
+ * refusal or a no-op), so it ends quickly. A holder that waits for an OpenThread callback should give up once the Thread
+ * REST flag (esp_br_web_openthread_ready) is off.
  */
 bool br_core_ot_session_begin(void);
 

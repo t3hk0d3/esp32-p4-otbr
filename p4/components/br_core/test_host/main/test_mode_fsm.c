@@ -24,6 +24,7 @@ typedef struct {
     void *deferred_ctx;
     const char *start_fail_on[2]; /* channel ids whose ot_start fails */
     esp_err_t start_fail_code;    /* what it returns then (ESP_FAIL when 0) */
+    const char *abandon_on;       /* channel id whose ot_start abandons the init (MODE_FSM_ERR_START_ABANDONED) */
     bool start_reaches_running;   /* ot_start ends like the border router start: STARTING to BR_RUNNING */
     char started_on[48];          /* the id of the last ot_start that worked */
     char stored_from[48], stored_to[48];
@@ -142,6 +143,9 @@ static esp_err_t f_ot_start(const char *id)
         if (fake.start_fail_on[i] && strcmp(fake.start_fail_on[i], id) == 0) {
             ret = fake.start_fail_code ? fake.start_fail_code : ESP_FAIL;
         }
+    }
+    if (fake.abandon_on && strcmp(fake.abandon_on, id) == 0) {
+        ret = MODE_FSM_ERR_START_ABANDONED;
     }
     if (ret == ESP_OK) {
         snprintf(fake.started_on, sizeof(fake.started_on), "%s", id);
@@ -1056,6 +1060,21 @@ TEST_CASE("On a target start that abandoned OpenThread's init: no start on the s
     TEST_ASSERT_NOT_NULL(strstr(err, "rebooting"));
 }
 
+TEST_CASE("On a target start failure and a start on the source that abandoned the init: a reboot asked, not a fault",
+          "[mode_fsm]")
+{
+    char err[96] = "";
+
+    setup(BR_MODE_BR_RUNNING);
+    fake.start_fail_on[0] = DST; /* the target fails plainly ... */
+    fake.abandon_on = SRC;       /* ... the start on the source abandons its init */
+    TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_ABANDONED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
+    TEST_ASSERT_EQUAL(2, count_of("ot_start"));
+    TEST_ASSERT_EQUAL(0, count_of("store_otbr"));
+    TEST_ASSERT_NOT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
+    TEST_ASSERT_NOT_NULL(strstr(err, "rebooting"));
+}
+
 TEST_CASE("On a store failure after the target runs: stops it, starts on the source, reports the failure",
           "[mode_fsm]")
 {
@@ -1124,6 +1143,15 @@ TEST_CASE("On the OTBR channel gone: tears OpenThread down, ends in NO_RADIO", "
     mode_fsm_on_channel_gone(&fsm);
     TEST_ASSERT_EQUAL(1, count_of("ot_stop"));
     TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_fsm_get_mode(&fsm));
+}
+
+TEST_CASE("On the OTBR channel gone: NO_RADIO already while OpenThread is torn down (new sessions refused)",
+          "[mode_fsm]")
+{
+    setup(BR_MODE_BR_RUNNING);
+    mode_fsm_on_channel_gone(&fsm);
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, fake.mode_in_stop);
+    TEST_ASSERT_FALSE(mode_fsm_thread_ops_allowed(&fsm));
 }
 
 TEST_CASE("On the OTBR channel gone while sniffing: the capture owner is told, ends in NO_RADIO", "[mode_fsm]")

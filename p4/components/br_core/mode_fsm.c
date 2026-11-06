@@ -410,9 +410,18 @@ esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, 
     // 5. Back on the source, which keeps its stored mode.
     if (prev == BR_MODE_NO_RADIO) {
         set_mode(fsm, BR_MODE_NO_RADIO); // the source is absent: nothing to go back to
-    } else if (start_on(fsm, from) != ESP_OK) {
-        snprintf(err, cap, "OpenThread did not start on %s, nor again on %s", to, from);
-        mode_fsm_set_fault(fsm);
+    } else {
+        const esp_err_t back_err = start_on(fsm, from);
+
+        if (back_err == MODE_FSM_ERR_START_ABANDONED) {
+            // As on the target: nothing starts OpenThread again in this boot; a reboot brings it back on `from`.
+            snprintf(err, cap, "OpenThread did not start on %s, nor again on %s: rebooting", to, from);
+            return MODE_FSM_ERR_START_ABANDONED;
+        }
+        if (back_err != ESP_OK) {
+            snprintf(err, cap, "OpenThread did not start on %s, nor again on %s", to, from);
+            mode_fsm_set_fault(fsm);
+        }
     }
     return MODE_FSM_ERR_START_FAILED;
 }
@@ -422,9 +431,10 @@ void mode_fsm_on_channel_gone(mode_fsm_t *fsm)
     if (fsm->radio_job) {
         return; // the job took the radio: it starts OpenThread again itself
     }
-    const br_core_mode_t before = atomic_exchange(&fsm->mode, BR_MODE_STARTING);
+    // NO_RADIO before the teardown: the guards refuse new Thread sessions (503) at once while the open ones drain.
+    const br_core_mode_t before = atomic_exchange(&fsm->mode, BR_MODE_NO_RADIO);
 
-    ESP_LOGI(TAG, "mode %s (the OTBR channel is gone)", mode_name(BR_MODE_STARTING));
+    ESP_LOGI(TAG, "mode %s (the OTBR channel is gone)", mode_name(BR_MODE_NO_RADIO));
     if (before == BR_MODE_SNIFFER) {
         fsm->thread_stopped_by_capture = false; // OpenThread goes away: nothing to restore
         notify_sniffer_end(fsm);
@@ -432,9 +442,7 @@ void mode_fsm_on_channel_gone(mode_fsm_t *fsm)
     if (fsm->ops->ot_stop() != ESP_OK) {
         ESP_LOGE(TAG, "tearing OpenThread down after the OTBR channel went failed");
         mode_fsm_set_fault(fsm);
-        return;
     }
-    set_mode(fsm, BR_MODE_NO_RADIO);
 }
 
 void mode_fsm_on_channel_back(mode_fsm_t *fsm, const char *id)

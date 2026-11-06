@@ -36,9 +36,12 @@ static const char *TAG = "br_core";
 #define PROBE_ANSWER_WAIT_MS 500 // each property answer
 #define PROBE_POLL_SLICE_MS 50
 #define FAULT_NO_CHANNEL_START "OpenThread did not start on its channel"
-// A channel that is gone answers nothing: its sessions end quickly (mux_spinel_interface.cpp answers their requests),
-// so the teardown waits only this long for them, then goes on.
-#define GONE_DRAIN_MS 5000
+// After the OTBR channel was lost (unplugged, failed), the teardown waits for the open OpenThread sessions in rounds of
+// this long and never deletes the OpenThread lock under one: esp_openthread_deinit frees it, and FreeRTOS does not check
+// for waiters. Longer than httpd's 15 s socket I/O timeout, so a REST handler stuck writing to a slow client ends within
+// one round; the board is NO_RADIO meanwhile (new sessions refused) and the radio calls of the open ones are answered
+// at once (mux_spinel_interface.cpp).
+#define LOST_DRAIN_MS 20000
 _Static_assert(BR_CORE_CHANNEL_ID_MAX == RADIO_MUX_ID_MAX, "br_core_status_t.otbr_channel holds a channel id");
 _Static_assert(OTBR_RADIO_CAP_ACK_TIMEOUT == OT_RADIO_CAPS_ACK_TIMEOUT &&
                OTBR_RADIO_CAP_TRANSMIT_RETRIES == OT_RADIO_CAPS_TRANSMIT_RETRIES &&
@@ -62,6 +65,7 @@ static bool s_move_probe;   // br_radio: the next probe is a move's (its verdict
 static bool s_start_failed; // br_radio: the last start on the attached channel failed (RADIO_FAULT from it)
 static atomic_bool s_booting; // the C6's boot job runs: br_radio stays out until its end attaches the C6
 static char s_no_radio_reason[96]; // br_radio: why the mode is NO_RADIO
+static bool s_lost;                // br_radio: OpenThread's channel was lost, not detached by a deliberate change
 // Owned by the task that starts and stops OpenThread (br_radio, or a radio job while push_busy):
 static radio_mux_chan_t *s_ot_chan; // the channel OpenThread was started on, NULL when it is stopped
 static unsigned s_ot_gen;           // the attach it was started on: another attach since means the channel went
@@ -443,18 +447,17 @@ esp_err_t core_radio_ot_stop(void)
         g_core.ot_ready = false;
         xSemaphoreGive(g_core.mutex);
         esp_openthread_lock_release();
-        const bool gone = atomic_load(&s_link.gone);
-        const bool drained = core_wait_sessions_closed(gone ? GONE_DRAIN_MS : SESSION_DRAIN_MS);
-
-        if (!drained && !gone) {
+        if (s_lost) {
+            // The channel was lost: nothing to go back to, so wait as long as it takes, but never delete the lock under
+            // an open session.
+            while (!core_wait_sessions_closed(LOST_DRAIN_MS)) {
+                ESP_LOGW(TAG, "the OTBR channel is gone: OpenThread waits for its open sessions before it stops");
+            }
+        } else if (!core_wait_sessions_closed(SESSION_DRAIN_MS)) {
             xSemaphoreTake(g_core.mutex, portMAX_DELAY);
             g_core.ot_ready = true;
             xSemaphoreGive(g_core.mutex);
             return ESP_ERR_TIMEOUT; // nothing stopped; the caller puts the REST flag back
-        }
-        if (!drained) {
-            // The radio is gone: OpenThread is useless and the open sessions only see refusals; it goes regardless.
-            ESP_LOGW(TAG, "the OTBR channel is gone: tearing OpenThread down with sessions still open");
         }
     }
     ESP_LOGI(TAG, "stopping OpenThread on %s", s_ot_chan ? radio_mux_chan_id(s_ot_chan) : "its channel");
@@ -503,28 +506,32 @@ static void after_channel_op(void)
 }
 
 // Why there is no OpenThread now (the reason NO_RADIO shows): no channel stored in otbr, it is unplugged, a C6 job
-// holds it, or it left otbr.
-static void note_no_radio_reason(void)
+// holds it, or it left otbr. Returns whether the channel OpenThread ran on (`ran_on`, may be NULL) was lost: it is still
+// the one stored in otbr and no C6 job holds it, so it went by an unplug or a failure, not a deliberate change (a mode
+// change, a move, a C6 job), which keeps the normal drain.
+static bool note_no_radio_reason(radio_mux_chan_t *ran_on)
 {
     const char *otbr = radio_mux_otbr_channel();
     radio_mux_snapshot_t *snap = otbr ? malloc(sizeof(*snap)) : NULL;
     const char *why = "the OTBR channel went away";
+    bool busy = false;
 
     if (!otbr) {
         snprintf(s_no_radio_reason, sizeof(s_no_radio_reason), "no channel in otbr");
-        return;
+        return false;
     }
     if (snap) {
         radio_mux_get_snapshot(snap);
         for (size_t i = 0; i < snap->n; i++) {
             if (strcmp(snap->chans[i].id, otbr) == 0) {
-                why = snap->chans[i].state == RADIO_MUX_STATE_BUSY ? "a C6 job holds the radio" :
-                      !snap->chans[i].present ? "radio unplugged" : why;
+                busy = snap->chans[i].state == RADIO_MUX_STATE_BUSY;
+                why = busy ? "a C6 job holds the radio" : !snap->chans[i].present ? "radio unplugged" : why;
             }
         }
         free(snap);
     }
     snprintf(s_no_radio_reason, sizeof(s_no_radio_reason), "%s (%s)", why, otbr);
+    return ran_on && !busy && strcmp(radio_mux_chan_id(ran_on), otbr) == 0;
 }
 
 // OpenThread follows the otbr channel: torn down when it went (unplug, mode change, a C6 job outside a push), started
@@ -539,10 +546,11 @@ static void reconcile(void)
 
     if ((s_ot_chan && (s_ot_chan != att || s_ot_gen != gen || atomic_load(&s_link.gone))) ||
             (!s_ot_chan && !att && s_start_failed)) {
-        note_no_radio_reason();
-        ESP_LOGW(TAG, "%s: OpenThread stops, NO_RADIO", s_no_radio_reason);
+        s_lost = note_no_radio_reason(s_ot_chan);
+        ESP_LOGW(TAG, "%s: NO_RADIO, OpenThread stops", s_no_radio_reason);
         s_start_failed = false;
-        mode_fsm_on_channel_gone(&g_fsm);
+        mode_fsm_on_channel_gone(&g_fsm); // NO_RADIO first: new sessions are refused while the open ones drain
+        s_lost = false;
         after_channel_op();
     }
     if (!s_ot_chan && att && gen != s_tried_gen) {
