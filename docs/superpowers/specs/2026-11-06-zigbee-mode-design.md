@@ -131,7 +131,8 @@ From the spike and its on-board runs (2026-11-06):
   **Thread**, and **Topology** and **Routing** move into it, so the top bar reads Dashboard, Thread, Zigbee, Device,
   About. The Thread menu holds Network, Topology, Routing, Commissioner, Addresses, Tools and Console. Device keeps the
   board's own pages (Radios, Ethernet, Firmware, Diagnostics) and **Packet capture**, which only needs a radio with RCP
-  firmware, not Thread (the user's call; to be revisited later). **Zigbee** is a top-level link to its one
+  firmware, not Thread (the user's call; to be revisited later). The regrouping itself is implemented by the mux plan
+  (the user's call); this work only adds the Zigbee link. **Zigbee** is a top-level link to its one
   page. The change applies in every mode, so the menu looks the same whether or not Zigbee is in use.
 - With a Ziggurat channel, the **Zigbee** link appears. The Thread pages follow the mux design's shared
   rule: with no channel in `otbr` at all (a deliberate Zigbee-only board), the Thread menu is hidden (Packet capture
