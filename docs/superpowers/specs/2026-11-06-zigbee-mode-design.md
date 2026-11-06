@@ -51,6 +51,8 @@ CC2652P on the rig) works the same way.
 - Packet capture on a Ziggurat channel, Zigbee OTA of end devices, Green Power beyond what ziggurat passes through,
   Zigbee R23.
 - Home Assistant discovery of the Zigbee endpoint (zeroconf). ZHA is set up by hand with the path.
+- Board-side Zigbee settings (access key, allowed clients, takeover policy, TX power cap, own port). The Zigbee page
+  is status only (the user's call, 2026-11-06); ZHA owns the network settings and the Radios page picks the radio.
 - Changing a channel's mode without a reboot.
 
 ### Anti-goals (a failure even if it works)
