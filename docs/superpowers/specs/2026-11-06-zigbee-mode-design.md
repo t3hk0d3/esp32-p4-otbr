@@ -165,9 +165,10 @@ From the spike and its on-board runs (2026-11-06):
 ### Board side: `zigbee` component
 
 - **Mux registration.** At startup the `zigbee` component registers the mux's consumer for the mode `ziggurat`,
-  declaring: firmware type `spinel`; at most one channel; entering or leaving the mode reboots; GONE reboots (capped,
-  below); and its attach and detach, with its event queue handed over at attach. The mux enforces these; a second
-  `ziggurat` channel gets the mux's 409 `mode_taken`.
+  declaring: firmware type `spinel`; at most one channel; entering or leaving the mode reboots; and its attach and
+  detach, with its event queue handed over at attach. The mux enforces these; a second `ziggurat` channel gets the
+  mux's 409 `mode_taken`. The mux only delivers GONE and never reboots for it: the `zigbee` component calls the reboot
+  itself, with its own recovery cap (below).
 - New component `p4/components/zigbee`, prefix `zigbee_` (the staticlib owns `ziggurat_*`). It contains the platform
   layer, the spinel client, the WebSocket transport, the status, the heap shim and the prebuilt staticlib. The spike's
   `zigbee.c` is the reference for the platform functions that are not about the radio.
@@ -291,7 +292,7 @@ zigbee
     registration
         At startup
             - registers the mux consumer for mode ziggurat: firmware spinel, one channel, reboot on enter and leave,
-              reboot on GONE, with attach and detach
+              with attach and detach
     start
         At boot with a channel in Ziggurat mode
             - attaches to the channel through the mux with its own event queue
