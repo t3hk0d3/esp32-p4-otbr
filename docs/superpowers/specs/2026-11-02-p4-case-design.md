@@ -1,6 +1,6 @@
 # 3D-printable case for the ESP32-P4-WIFI6-POE-ETH board: design
 
-Date: 2026-11-02. Status: implemented; fit tested on a printed case with a real board.
+Date: 2026-11-02. Status: implemented; fit tested on a printed case with a real board. The design-review fixes of 2026-11-06 (marked "design review") are not printed yet.
 
 ## 1. Purpose and scope
 
@@ -87,11 +87,11 @@ the result.
 | Parts | two printed parts: **base** and **lid** |
 | Base | one part: flat back plate, all four walls, four board standoffs |
 | Lid | flat honeycomb grille plate with four tabs; sits flush in a rebate on the wall tops |
-| Lid fixing | four corner tabs hang into the inner corners of the base and guide the lid into place; a bump on each, ramped 45° on both sides, clicks into a dent in the side wall: push to close, lever up to open |
+| Lid fixing | four corner tabs hang into the inner corners of the base and guide the lid into place; a bump on each (30° lead-in below, 45° hold face above) clicks into a dent in the side wall that preloads it: push to close, lever up to open |
 | Opening the lid | lever it up through the grille with a small flat screwdriver; no pry cut-outs in this revision |
 | Board fixing | four M2.5 × 6 pan-head screws from the top, through the board into Ø6 × 5 mm standoffs with Ø2.2 pilot holes, where they cut their own thread (print feedback: the first Ø2.8 hole only gripped thick screws). The countersinks in the back plate stay, so countersunk screws with nuts from the back still work if the pilot is drilled out |
 | Board fitting | the board drops straight in from the open top, about 1.7 mm toward the header end, then slides forward (lifted 0.5 mm) so the USB and RJ45 go into their cable-wall holes, and settles onto the standoffs |
-| SMA | D-hole in the right (X = 55) wall, closed on the outside by a 0.45 mm knock-out (one extrusion line) that is cut out with a knife when an SMA is fitted; fitted after the board: the pigtail clips onto the board, the bulkhead goes out through the wall from inside, nut tightened outside |
+| SMA | D-hole in the right (X = 55) wall, with its flat at the bottom and a 45° teardrop top (no support), closed on the outside by a 0.8 mm knock-out (two extrusion lines) that is cut out with a knife when an SMA is fitted; fitted after the board: the pigtail clips onto the board, the bulkhead goes out through the wall from inside, nut tightened outside |
 | 40-pin header | wiring (jumpers or a ribbon cable) leaves through a slot along the top of the header-end wall; no opening in the lid over the header |
 | Wall mounting | two L-shaped keyholes in the flat back plate, 32 mm apart, for either orientation |
 | Table | lies on its back; stick-on rubber feet optional, not modelled |
@@ -118,7 +118,7 @@ Heights are given in *case Z*. Case Z = 0 is the outer back face, and the board 
 | Wall tops and lid top (flush) | 27.6 |
 
 In plan view, the inner outline is the PCB outline plus 0.5 mm on three sides and 2.5 mm at the header end (room to
-drop the board in shifted back before sliding its connectors home), and the outer outline adds 2 mm of wall. The
+drop the board in shifted back before sliding its connectors home), and the outer outline adds the walls: 2 mm at the ends, 4 mm at the sides. The
 outer vertical edges are rounded.
 
 ### 5.1 Base: back plate and keyholes
@@ -129,10 +129,15 @@ outer vertical edges are rounded.
   - an entry hole of Ø8;
   - two arms, 4.3 mm wide and 7 mm long:
     - one toward +Y, used when the case hangs cable end down (the screws are level);
-    - one toward +X, used when it hangs SMA side up (the same screws, one above the other).
-- Sized for 3.5–4 mm screws with pan heads of Ø7.5 or less.
+    - one toward +X, used when it hangs SMA side up (the same screws, one above the other);
+  - a snap neck in each arm, 3.3 mm wide over about 1 mm, 4.5 mm from the entry's centre. A Ø3.5 shank clicks past it
+    and parks at the arm's end, so pushing a plug in (up to about 20 N for an RJ45, against the case's 0.7 N weight)
+    can't slide the case back up to the entry (design review);
+  - a 0.4 mm 45° chamfer on the bed side, which also trims the neck's first 0.4 mm, so first-layer squish narrows
+    neither.
+- Sized for 3.5 mm screws with pan heads of Ø7.5 or less.
 - The head sits inside the case, under the board, and stands at most 2.5 mm proud of the plate's inner face. The docs ask
-  for pan-head screws with heads of 2.5 mm or less, with the screw left 2 mm proud of the wall. The free height under the
+  for pan-head screws with heads of 2.5 mm or less, with the screw left about 2.2 mm proud of the wall. The free height under the
   board is about 5 mm at K1 and 3.0–3.6 mm at K2.
 - If the K2 check fails, both keyholes may move together, keeping 32 mm spacing and the same Y. If that fails too, the
   spacing may shrink to 25 mm or more. Record the final positions in the docs.
@@ -153,7 +158,7 @@ outer vertical edges are rounded.
 ### 5.2 Base: walls
 
 All four walls run full height, to case Z 27.6. A rebate on the inside of their top edge takes the lid: 1 mm deep (lid
-top flush) and half the wall thickness wide. The lid is stepped: a 1 mm flange sits in the rebate and a 1 mm body
+top flush) and 1 mm wide (half the 2 mm end walls; a quarter of the 4 mm side walls). The lid is stepped: a 1 mm flange sits in the rebate and a 1 mm body
 sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 
 - **Cable wall (Y = 0 edge):**
@@ -163,15 +168,18 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
       wide) and no strip above them (it would be 1 mm tall): both were too thin to print well.
     - The lid's lintel (5.3) closes the opening above the connectors.
   - **microSD:** the slot runs from 0.6 mm below the board's top face to 2 mm above it, across X 39.2–51.4. It has a
-    thumb scoop in the outer face above it, where the card's grip edge is (print feedback: below it was useless). Its
-    ceiling slopes back to the face at about 40° from vertical, so it prints without support.
+    thumb scoop in the outer face above it, where the card's grip edge is (print feedback: below it was useless). The
+    scoop starts 0.4 mm above the slot and is 1.2 mm deep, so the slot's top keeps at least two printed lines (design
+    review: a 0.5 mm strand before). Its ceiling slopes back to the face at about 34° from vertical, so it prints
+    without support.
   - The connector faces end up 0.5–0.8 mm behind the outer face.
   - The shared opening has no top, so it needs no bridge; the microSD slot's top bridges 12.2 mm.
 - **Header-end wall (Y = 68 edge):**
-  - A cable slot 54 mm wide (X 0.5–54.5), cut from case Z 22.1 up through the top of the wall so it needs no bridge.
+  - A cable slot the full inner width (X −0.5–55.5), cut from case Z 22.1 up through the top of the wall so it needs no bridge.
     The lid closes it from above. The narrowest point of the path into the case is at the wall's inner face, between
     the slot floor and the lid body's underside: 3.5 mm (case Z 22.1–25.6). Within the wall's thickness it is taller,
-    up to the flange.
+    up to the flange. The slot also takes the cavity's rounded corners above its floor, so no thin sliver stays
+    beside it (design review).
   - 3.5 mm keeps to the "nothing wider than 3.5 mm falls in" rule when this end faces up on the wall. Ribbon cable
     (about 1.3 mm) and Dupont housings (2.5 mm) pass.
   - A 2×20 IDC ribbon plug (about 55.9 × 9 × 9 mm) fits the 56 mm-wide cavity snugly. The walls are not recessed for
@@ -181,14 +189,20 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
   - Two Ø2.5 pin-holes on the plunger axes (Y 5.65 and 12.35 and the plunger's Z, taken from the model), each with a
     90° funnel, Ø4.5 at the outer face.
   - The plungers sit only 0.15 mm from the inner face, so the inner face gets a shallow local recess around both buttons
-    to keep ≥ 0.3 mm clearance as the board slides in. There are no guide tubes.
+    to keep ≥ 0.3 mm clearance as the board slides in. Its ceiling slopes up to the face at 45°, so it needs no bridge.
+    There are no guide tubes.
 - **Right wall (X = 55 edge, SMA):**
-  - A D-shaped hole, Ø6.5 with a flat at 5.9, at board Y ≈ 52 and case Z ≈ 17.6.
+  - A D-shaped hole, Ø6.5 with a flat at 5.9, at board Y ≈ 52 and case Z ≈ 17.6. The flat is at the bottom and the
+    top is a 45° teardrop, so the hole prints without support; the bulkhead is turned so its flat is down.
+  - A long-thread bulkhead (≥ 9.5 mm) is recommended, so enough thread stays outside the 4 mm wall for the antenna. The
+    wall is not recessed around the nut: a recess would weaken it again.
   - The builder checks clearance inside: a 5 mm radius around the axis, out to 12 mm from the wall, must miss the board,
     the capacitors and the lid tabs.
 - **Tab dents:** each side wall has two dents in its inner face, one near each end, on the axis of the corner tabs' side
-  legs (5.3). Their upper and lower faces match the bump's 30° ramps (60° from horizontal), so they print without
-  supports.
+  legs (5.3). They have the bump's profile (30° below, 45° above, both printable without supports), are as deep as
+  the bump reaches past the wall face (0.2 mm) and sit 0.1 mm lower than the bump's crest. So when the lid is home,
+  each dent's hold face presses its bump with 0.1 mm of preload and pulls the lid down onto the rim: no rattle
+  (design review: the first dents left about 0.45 mm of play).
 
 ### 5.3 Lid
 
@@ -207,10 +221,11 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
   - Four identical tabs, hanging from the frame's underside into the four inner corners of the base, against the side
     walls. Each is 10 mm long along the side wall and reaches 3.5 mm below the lid's underside, to about 13.5 mm above the
     board.
-  - **Built for layer strength:** the lid prints top-face down, so each tab's layers stack along its length and the layer
-    bonds take the bending load. To keep that load low and spread out:
+  - **Built for layer strength:** the lid prints top-face down, so each tab's layers stack along its length. Bending the
+    tab pulls across those layer bonds, the weakest direction for a print. To keep that load low and spread out:
     - the tabs are thick: 2.4 mm at the root;
-    - a 1.5 mm fillet joins each tab to the lid frame, so there's no sharp corner for a crack to start from;
+    - a 1.2 mm 45° gusset joins each tab to the lid frame, so there's no sharp corner for a crack to start from (a
+      fillet mostly vanished in the slicer's layers);
     - they're 10 mm wide;
     - the snap is shallow, so the tab barely bends (see the bump below);
     - `docs/case.md` recommends PETG and solid infill for the lid.
@@ -226,11 +241,16 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
       where the snap bump sits. Below that it tapers 0.5 mm inward to the tip.
     - **End face toward the end wall:** the same flat-then-lead-in profile, so each tip narrows in both directions.
     - The tip is about 1.4 mm thick. Its vertical outer corner follows the wall's rounded inner corner, 0.2 mm clear.
-  - **Snap bump:** each tab carries a bump on its side-wall face, 0.5 mm high (0.4 opened too easily) with 30° ramps on both faces, centred
-    1 mm below the lid. It works as a detent rather than a hook: a firm lever pops it out without bending the tab much. The
-    dents in the side walls sit level with the bumps, 1 mm below the lid's underside.
-  - Bump height and angle, dent fit, tab length and drop, wedge thicknesses and the root fillet go into named constants, so
-    they can be tuned after a test print.
+  - **Snap bump:** each tab carries a bump on its side-wall face, 0.4 mm high (0.2 mm past the wall face), crest 0.9 mm
+    below the lid's underside, on a layer centre at 0.2 mm layers. Its lower face is a 30° lead-in; its upper face, the
+    hold face, is 45°, so opening takes about 1.75× the force of closing. It works as a detent rather than a hook: a
+    firm lever pops it out without bending the tab much. History: 0.4 mm with 30° on both faces opened too easily on
+    the first print, mostly because the 2 mm side walls flexed; 0.5 mm followed, then the 4 mm walls, the 45° hold face
+    and the preload brought it back to 0.4 (design review).
+  - Bump height and angles, dent preload, tab length and drop, wedge thicknesses and the root gusset go into named
+    constants, so they can be tuned after a test print.
+  - **Top edge:** the lid's top face prints on the bed, so its edge has a 0.4 mm 45° chamfer: elephant's foot can't widen
+    the flange.
 - **LED:** the power LED (board X 0.3–1.6, Y 17.4–19.1) stays covered by the solid frame. Cells cut into the frame over
   it made the lid edge fragile, and the power LED isn't needed.
 
@@ -239,7 +259,7 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 1. Lower the board flat, pushed toward the header end, slide it forward so the USB and RJ45 go into their cable-wall
    holes, and let it settle onto the standoffs. Drive four M2.5 × 6 screws from the top into the standoffs' pilot holes.
 2. If an SMA antenna is used: cut out the knock-out, clip the pigtail onto the antenna socket, push the SMA bulkhead out
-   through the right wall from inside, and tighten its nut on the outside.
+   through the right wall from inside with its flat down, and tighten its nut snugly over a washer on the outside.
 3. Optional: plug wiring onto the 40-pin header and lead it out through the header-end slot.
 4. Set the lid on so the corner tabs drop into the corners, and press until the four tabs click.
 5. To open: lever the lid up through the grille with a small flat screwdriver, near a tab.
@@ -288,10 +308,15 @@ These are automated checks, run against the vendor STEP:
 - Each board-screw nut circle (Ø6.5 on top of the board around the mounting hole, 2.5 mm tall) is free of board parts.
 - Both keyhole head volumes (the L sweep plus the head radius, 2.5 mm tall) are free of the board and its underside parts.
 - No lid opening, and no gap in the header-end slot, is wider than 3.5 mm.
-- With the lid fitted, the lid and the base do not overlap anywhere.
+- With the lid fitted, the lid and the base do not overlap anywhere except where the bumps press into their dents.
+- At each bump's crest height, the bump reaches at least 0.15 mm past the wall face and presses into its dent by more
+  than 0 and at most 0.15 mm (measured against the wall, so a bump that misses the wall fails).
+- The SMA envelope (5.2) is free of the board's columns.
 - Both parts are watertight solids.
 - Printability: with the stated print orientations, there are no unsupported overhangs past 45°, except bridges of
   18 mm or less (the microSD slot's top, 12.2 mm).
+- Printed width: in every 0.2 mm layer of either part, in its print pose, no strand of material (outside along both
+  long sides) is thinner than 0.8 mm, two 0.4 mm lines. Bumps on walls don't count.
 
 The physical check is the user's: they print both parts, fit the board, plug every connector, press both buttons with a
 pencil, insert and eject a card, fit and remove the lid, and hang the case both ways.
