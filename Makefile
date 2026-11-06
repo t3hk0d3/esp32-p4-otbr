@@ -144,8 +144,9 @@ lan-ping-down: ## Remove the latency tests' LAN container
 case-board: ## Download and verify the vendor 3D model of the board (.artifacts/board/board.stp)
 	tools/fetch_board_model.sh
 
-case: case-board ## Build the case STL/STEP files and previews into dist/case/ and run the fit checks
+case: case-board ## Build the case STL/STEP files and previews into dist/case/, run the fit checks, refresh docs/models/
 	$(CASE_PY) -m p4_case.build --board $(BOARD_STEP) --out $(DIST)/case --check
+	mkdir -p docs/models && cp $(DIST)/case/p4_case_base.stl $(DIST)/case/p4_case_lid.stl docs/models/
 
 case-test: case-board ## Tests of the case model and its fit checks (slow: loads the board model)
 	$(CASE_PY) -m pytest $(or $(TEST),case/tests) -q -p no:cacheprovider
