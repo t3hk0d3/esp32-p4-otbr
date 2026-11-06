@@ -82,6 +82,8 @@ see `.pre-commit-config.yaml`).
   Checks return `CheckResult(name, ok, detail)` and do not raise for a failed check, only for bad input.
 - **Tests:** a pytest class per scenario with the docstring `"<module>.<function>: <scenario>"`, one `test_<effect>`
   method per effect (as in `tools/tests/`).
+- **Committed outputs:** the print STLs in `docs/models/` are the only generated files in git. `make case` refreshes
+  them, and `case/tests/test_build.py` fails while they differ from a fresh build.
 - **Dependencies:** pinned once, in the Makefile's `CASE_PY` (`uv run`); nothing is installed globally.
 
 ## Commands and docs

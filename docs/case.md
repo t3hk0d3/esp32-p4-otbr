@@ -21,6 +21,9 @@ an SMA antenna, and wiring on the 40-pin header.
 
 `make case` renders all of these into `dist/case/`.
 
+Ready-to-print STLs of the current design are in the repository: [base](models/p4_case_base.stl) and
+[lid](models/p4_case_lid.stl). On GitHub, opening either one shows an interactive 3D view.
+
 The model is parametric Python (build123d) in `case/`. Its design is
 `docs/superpowers/specs/2026-11-02-p4-case-design.md`.
 
@@ -28,7 +31,7 @@ The model is parametric Python (build123d) in `case/`. Its design is
 
 ```
 make case-board   # once: download and verify the vendor 3D model of the board (.artifacts/board/)
-make case         # write dist/case/ and run the fit checks
+make case         # write dist/case/, run the fit checks, refresh docs/models/
 make case-test    # the model's tests (about 2.5 min)
 ```
 
@@ -40,6 +43,9 @@ make case-test    # the model's tests (about 2.5 min)
 | `p4_case_lid.stl` | print: top face down (the file is already flipped) |
 | `p4_case_base.step`, `p4_case_lid.step` | CAD, as assembled (Z 0 at the outer back face) |
 | `preview_*.png` | front, back, both ends, button side, exploded |
+
+`make case` also copies the two STLs to `docs/models/`, which is committed; a test fails when they no longer match a
+fresh build, so commit them with every geometry change.
 
 `make case` prints one line per check and fails if any check fails. The checks are:
 
