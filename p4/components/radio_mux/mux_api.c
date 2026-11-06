@@ -100,14 +100,13 @@ esp_err_t radio_mux_tx(radio_mux_chan_t *ch, const uint8_t *data, size_t n)
     if (!data || n == 0 || (p->tx_frames && n > RADIO_MUX_FRAME_MAX)) {
         return n == 0 ? ESP_ERR_INVALID_ARG : ESP_ERR_INVALID_SIZE;
     }
-    if (p->kind != RADIO_MUX_KIND_USB) {
-        return ESP_ERR_INVALID_STATE; // the C6 transport is Task 6's
-    }
     esp_err_t err;
 
     xSemaphoreTake(p->tx_lock, portMAX_DELAY);
     if (!atomic_load(&p->tx_ok) || atomic_load(&p->evq_chan) != ch) {
         err = ESP_ERR_INVALID_STATE;
+    } else if (p->kind == RADIO_MUX_KIND_C6) {
+        err = c6_transport_tx(data, n); // one SPI transaction (frames only, R23)
     } else if (p->tx_frames) {
         const size_t len = radio_mux_hdlc_encode(data, n, p->tx_buf, p->tx_cap);
 
@@ -178,6 +177,23 @@ void radio_mux_get_proxy(const radio_mux_chan_t *ch, radio_mux_proxy_settings_t 
     mux_lock();
     *out = ch->proxy;
     mux_unlock();
+}
+
+void radio_mux_set_busy_peer(radio_mux_chan_t *ch, bool has_peer)
+{
+    if (!ch || !atomic_load(&g_mux.started)) {
+        return;
+    }
+    mux_port_t *p = ch->port;
+
+    // A true from a consumer that is no longer attached (its GONE not yet taken) is dropped: detach cleared the flag.
+    taskENTER_CRITICAL(&p->lock);
+    if (!has_peer) {
+        p->busy_peer = false;
+    } else if (atomic_load(&p->tx_ok) && atomic_load(&p->evq_chan) == ch) {
+        p->busy_peer = true;
+    }
+    taskEXIT_CRITICAL(&p->lock);
 }
 
 void radio_mux_note_firmware(radio_mux_chan_t *ch, const radio_mux_fw_record_t *fw)
@@ -345,6 +361,41 @@ esp_err_t radio_mux_forget(const char *id)
     }
     mux_call_put(call);
     return err;
+}
+
+esp_err_t radio_mux_c6_job_begin(void)
+{
+    if (!atomic_load(&g_mux.started)) {
+        return ESP_OK; // nothing holds the C6
+    }
+    mux_call_t *call = call_new(RADIO_MUX_C6_ID);
+
+    ESP_RETURN_ON_FALSE(call, ESP_ERR_NO_MEM, TAG, "call");
+    esp_err_t err = call_owner(MUX_MSG_C6_JOB_BEGIN, call);
+
+    if (err == ESP_OK) {
+        err = call->err;
+    }
+    mux_call_put(call);
+    return err;
+}
+
+void radio_mux_c6_job_end(bool c6_ok)
+{
+    if (!atomic_load(&g_mux.started)) {
+        return;
+    }
+    mux_call_t *call = call_new(RADIO_MUX_C6_ID);
+
+    if (!call) {
+        ESP_LOGE(TAG, "c6: job end lost: no memory");
+        return;
+    }
+    call->c6_ok = c6_ok;
+    if (call_owner(MUX_MSG_C6_JOB_END, call) != ESP_OK) {
+        ESP_LOGW(TAG, "c6: job end: the owner task did not answer in time");
+    }
+    mux_call_put(call);
 }
 
 const char *radio_mux_otbr_channel(void)

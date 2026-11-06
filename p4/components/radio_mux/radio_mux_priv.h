@@ -1,5 +1,5 @@
-// Shared between the owner task and registry (mux.c) and the USB transport (usb_transport.c). Unless a function says
-// otherwise, only the owner task calls it.
+// Shared between the owner task and registry (mux.c), the USB transport (usb_transport.c) and the C6 transport
+// (c6_transport.c). Unless a function says otherwise, only the owner task calls it.
 #pragma once
 
 #include <stdatomic.h>
@@ -53,6 +53,7 @@ typedef struct mux_port {
     int64_t det_wait_ms;
     uint32_t det_baud;
     int64_t presence_check_us;
+    bool busy; // owner, C6: a C6 job (radio_mux_c6_job_begin) holds the radio
 
     // The channel whose consumer the queue, eventfd, ring and TX belong to: set at attach, kept through detach and
     // close (so the old consumer can still take its GONE), replaced at the next attach. Calls through any other
@@ -78,8 +79,10 @@ typedef struct mux_port {
     portMUX_TYPE lock;
     radio_mux_pool_t pool;
     radio_mux_counters_t ctr;
+    bool busy_peer; // the consumer reported a connected peer (radio_mux_set_busy_peer); cleared at detach
 
-    // Transmit: tx_lock serialises senders and the owner's close; tx_ok is false whenever a sender must fail at once.
+    // Transmit: tx_lock serialises senders and the owner's close (on the C6 also the INT-driven receive transactions:
+    // one SPI transaction at a time); tx_ok is false whenever a sender must fail at once.
     SemaphoreHandle_t tx_lock;
     atomic_bool tx_ok;
     bool tx_frames; // set at attach: the consumer sends frames (HDLC-encoded on USB)
@@ -94,6 +97,8 @@ typedef enum {
     MUX_MSG_FORGET,   // radio_mux_forget
     MUX_MSG_RESET,    // radio_mux_reset
     MUX_MSG_NOTE_FW,  // radio_mux_note_firmware
+    MUX_MSG_C6_JOB_BEGIN, // radio_mux_c6_job_begin
+    MUX_MSG_C6_JOB_END,   // radio_mux_c6_job_end
 } mux_msg_type_t;
 
 typedef struct mux_call mux_call_t;
@@ -103,7 +108,7 @@ typedef struct {
     union {
         mux_usb_dev_t dev;        // NEW_DEV
         const void *hdl;          // GONE: the CDC handle that went away
-        mux_call_t *call;         // SET, FORGET
+        mux_call_t *call;         // SET, FORGET, C6_JOB_BEGIN, C6_JOB_END
         struct radio_mux_chan *ch; // RESET
         struct {
             struct radio_mux_chan *ch;
@@ -142,6 +147,7 @@ struct mux_call {
     char id[RADIO_MUX_ID_MAX];
     radio_mux_set_req_t req;
     bool have_mover;
+    bool c6_ok; // C6_JOB_END: the job left a working C6
     radio_mux_verdict_t verdict;
     esp_err_t err;
     char from[RADIO_MUX_ID_MAX];
@@ -188,10 +194,20 @@ void mux_ring_flush(mux_port_t *p);
 void mux_rearm(mux_port_t *p);
 // Any task: gives back the slot a frame pointer lies in (R12: frames sit at an offset inside their slot).
 void mux_slot_put(mux_port_t *p, uint8_t *frame);
+// Any task: a free slot of the port's pool, NULL when none is (or the pool is not allocated yet).
+uint8_t *mux_slot_take(mux_port_t *p);
+// Frame transport (C6) task, rx_lock held: one received frame of len bytes at slot + MUX_SLOT_HDR, posted as RX_FRAME
+// while a frame consumer is attached (else the slot goes back). slot NULL: the frame went into the discard buffer
+// (the pool was empty) and counts as a drop.
+void mux_rx_frame(mux_port_t *p, uint8_t *slot, size_t len);
+// Frame transport (C6) task, rx_lock held: RESET to the attached consumer; nothing while none is attached.
+void mux_rx_reset(mux_port_t *p);
 // Owner: what the receive path does with incoming bytes; waits for a callback in progress.
 void mux_set_rx(mux_port_t *p, mux_rx_mode_t mode);
 // Owner: GONE or RESET to the attached consumer.
 void mux_post_ctl(mux_port_t *p, radio_mux_ev_type_t type);
+// Counts n receive errors (bad headers, CRC) on the port.
+void mux_count_rx_errors(mux_port_t *p, uint32_t n);
 // Owner: empties the channel's own queue, slots back to the pool.
 void mux_drain_evq(mux_port_t *p);
 
@@ -227,3 +243,28 @@ bool usb_transport_is(const void *hdl);
 esp_err_t usb_transport_write(const uint8_t *data, size_t n);
 // Whether a device with this address is still enumerated (a device that is not open sends no disconnect event).
 bool usb_transport_dev_attached(uint8_t addr);
+
+/* ---- c6_transport.c ---- */
+
+// From radio_mux_start, before the owner task: the C6 task (NET_CORE), which installs the GPIO ISR service on its core.
+esp_err_t c6_transport_start(void);
+// Owner. Opens the C6 for g_mux.c6 (R8: only when a consumer attaches): allocates the port's frame pool on the first
+// open, drives the C6's UPDATE pin high and its reset GPIO high (the C6 runs), SPI2 (mode 0, P4_RCP_SPI_HZ, its ISR on
+// NET_CORE), the INT pin's falling-edge interrupt. The first transaction carries the reset bit. A failure leaves it
+// closed (the reset GPIO as it was) and `err` says why.
+esp_err_t c6_transport_open(char *err, size_t cap);
+// Owner. Closes SPI2 and the INT interrupt (waits for a transaction in progress) and holds the C6 in reset (mode off).
+void c6_transport_close(void);
+// Owner. Closes like c6_transport_close, but the C6 keeps running: its reset GPIO is driven high when the mux set it
+// up, else left alone (rcp_sync or OpenThread's own SPI path may use the C6 then). No-op on SPI when closed.
+void c6_transport_release(void);
+bool c6_transport_is_open(void);
+// With g_mux.c6.tx_lock held. Sends one spinel frame in one full-duplex transaction; a frame the RCP sends in it is
+// delivered like any other. Retries while the RCP does not take it (busy: accept below the length) a few times.
+// ESP_ERR_INVALID_STATE when closed, ESP_ERR_TIMEOUT when the RCP never took it, ESP_ERR_INVALID_RESPONSE when its
+// header stayed invalid.
+esp_err_t c6_transport_tx(const uint8_t *frame, size_t n);
+// Owner. Pulses the reset GPIO; the next transaction carries the reset bit, and the C6 task posts RESET on the RCP's
+// first valid header after it (or, when none comes within C6_RESET_WAIT_MS, posts it anyway). ESP_ERR_INVALID_STATE
+// when closed.
+esp_err_t c6_transport_reset(void);

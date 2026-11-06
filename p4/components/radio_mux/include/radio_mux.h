@@ -105,10 +105,14 @@ void radio_mux_release(radio_mux_chan_t *ch, uint8_t *slot);
 // Sends one spinel frame (frame consumers; HDLC-encoded on USB) or bytes (raw consumers). The data is copied before
 // the call returns. ESP_ERR_INVALID_STATE at once when the channel is not attached (gone, closed, reopening);
 // ESP_ERR_INVALID_SIZE for a frame above RADIO_MUX_FRAME_MAX. Blocks at most radio_mux_tx_timeout_ms (100 ms plus
-// twice the write's wire time at the channel's baud) on a stalled device.
+// twice the write's wire time at the channel's baud) on a stalled device. On the C6: one SPI transaction, sent again a
+// tick apart while the RCP is busy (at most 4 times, ESP_ERR_TIMEOUT), once more 15 ms after a bad header
+// (ESP_ERR_INVALID_RESPONSE); about 60 ms at worst, plus a receive burst in progress.
 esp_err_t radio_mux_tx(radio_mux_chan_t *ch, const uint8_t *data, size_t n);
-// Asks for a reset: a dongle is closed and reopened over USB (never DTR/RTS pulses, never VBUS), the C6 gets its reset
-// GPIO pulse (Task 6). RESET is posted when the radio is back; GONE when it did not come back. Does not wait.
+// Asks for a reset: a dongle is closed and reopened over USB (never DTR/RTS pulses, never VBUS), RESET when it is back,
+// GONE when it did not reopen. The C6 gets a 20 ms pulse of its reset GPIO; the next SPI transaction carries the reset
+// bit, and RESET is posted on the RCP's first header with its own reset bit (before its first frame), or after 2 s
+// without one (the consumer's own timeouts then see a dead RCP). Does not wait.
 esp_err_t radio_mux_reset(radio_mux_chan_t *ch);
 // Raw channels: takes up to cap received bytes without waiting; 0 when there are none.
 size_t radio_mux_read_raw(radio_mux_chan_t *ch, uint8_t *out, size_t cap);
@@ -117,6 +121,10 @@ const char *radio_mux_chan_id(const radio_mux_chan_t *ch);
 // always true on the C6, the consumer's `frames` on a USB channel. Valid from attach (the delivery kind is set before
 // attach is called) until the next attach on the transport.
 bool radio_mux_chan_frames(const radio_mux_chan_t *ch);
+// A consumer with sessions (rcp_proxy) reports whether a peer is connected: while one is, a C6 job is refused
+// (radio_mux_c6_job_begin). Call it on every peer up and down; a true from a consumer that is not attached is ignored,
+// and a detach clears it. Never blocks.
+void radio_mux_set_busy_peer(radio_mux_chan_t *ch, bool has_peer);
 // The channel's stored rcp_proxy settings (for the rcp-proxy consumer, read at attach: a change re-attaches it).
 void radio_mux_get_proxy(const radio_mux_chan_t *ch, radio_mux_proxy_settings_t *out);
 // Passive firmware update (a consumer saw the spinel version): stored with source passive and the time. Does not wait.
@@ -202,6 +210,19 @@ const char *radio_mux_otbr_channel(void);
 
 // br_core: runs a move of OpenThread from channel `from` to `to` (Task 7: probe synchronously, then the long op).
 void radio_mux_set_otbr_mover(esp_err_t (*move)(const char *from, const char *to));
+
+/* ---- C6 jobs (br_core: firmware push, ROM recovery, the probe) ---- */
+
+// Takes the C6 from the mux before a job: ESP_ERR_INVALID_STATE (409 c6_busy) while rcp-proxy on c6 has a peer or
+// another job holds it; otherwise c6's consumer gets GONE and is detached, SPI2, the INT pin and the reset GPIO are
+// released (the C6 left running) for rcp_sync, and c6 is listed busy. Waits for the owner task (up to 5 s,
+// ESP_ERR_TIMEOUT). ESP_OK before radio_mux_start (nothing holds the C6 then). Not from the owner task.
+esp_err_t radio_mux_c6_job_begin(void);
+// Gives the C6 back after the job: c6 is listed again from rcp_sync_get_last_probe (unavailable with the reason when
+// no RCP, the factory ESP-Hosted firmware or a failed ROM recovery), unavailable as well when !c6_ok, and its stored
+// mode's consumer attached again (SPI2 opened). Without a job it refreshes the listing of a c6 nothing is attached to.
+// Waits for the owner task (up to 5 s). No-op before radio_mux_start.
+void radio_mux_c6_job_end(bool c6_ok);
 
 #ifdef __cplusplus
 }

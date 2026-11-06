@@ -472,3 +472,83 @@ bool radio_mux_port_frames(bool c6_port, bool consumer_frames)
 {
     return c6_port || consumer_frames;
 }
+
+/* ---- the C6 over SPI ---- */
+
+static void put_le16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v & 0xFF);
+    p[1] = (uint8_t)(v >> 8);
+}
+
+static uint16_t get_le16(const uint8_t *p)
+{
+    return (uint16_t)(p[0] | (p[1] << 8));
+}
+
+#define SPI_IDX_FLAG 0
+#define SPI_IDX_ACCEPT 1
+#define SPI_IDX_DATA 3
+
+void radio_mux_spi_hdr_encode(const radio_mux_spi_hdr_t *h, uint8_t out[RADIO_MUX_SPI_HDR_LEN])
+{
+    out[SPI_IDX_FLAG] = RADIO_MUX_SPI_FLAG_PATTERN | (h->reset ? RADIO_MUX_SPI_FLAG_RESET : 0);
+    put_le16(&out[SPI_IDX_ACCEPT], h->accept_len);
+    put_le16(&out[SPI_IDX_DATA], h->data_len);
+}
+
+bool radio_mux_spi_hdr_decode(const uint8_t in[RADIO_MUX_SPI_HDR_LEN], radio_mux_spi_hdr_t *out)
+{
+    if ((in[SPI_IDX_FLAG] & RADIO_MUX_SPI_PATTERN_MASK) != RADIO_MUX_SPI_FLAG_PATTERN) {
+        return false;
+    }
+    out->reset = (in[SPI_IDX_FLAG] & RADIO_MUX_SPI_FLAG_RESET) != 0;
+    out->accept_len = get_le16(&in[SPI_IDX_ACCEPT]);
+    out->data_len = get_le16(&in[SPI_IDX_DATA]);
+    return true;
+}
+
+void radio_mux_spi_check(const uint8_t rx_hdr[RADIO_MUX_SPI_HDR_LEN], uint16_t tx_len, uint16_t accept,
+                         uint16_t frame_max, radio_mux_spi_result_t *out)
+{
+    radio_mux_spi_hdr_t h;
+
+    memset(out, 0, sizeof(*out));
+    if (!radio_mux_spi_hdr_decode(rx_hdr, &h) || h.accept_len > frame_max || h.data_len > frame_max) {
+        return;
+    }
+    out->valid = true;
+    out->rcp_reset = h.reset;
+    // As the RCP's own rule (ncp_spi.cpp): a frame counts as sent when its length fits the other side's accept.
+    out->rx_len = h.data_len <= accept ? h.data_len : 0;
+    out->tx_taken = tx_len == 0 || tx_len <= h.accept_len;
+}
+
+size_t radio_mux_spi_xfer_len(uint16_t tx_len, uint16_t accept)
+{
+    const size_t n = RADIO_MUX_SPI_HDR_LEN + (size_t)(tx_len > accept ? tx_len : accept);
+
+    return (n + RADIO_MUX_SPI_XFER_ALIGN - 1) / RADIO_MUX_SPI_XFER_ALIGN * RADIO_MUX_SPI_XFER_ALIGN;
+}
+
+bool radio_mux_c6_present(const radio_mux_c6_probe_t *probe, char *reason, size_t cap)
+{
+    const char *why = NULL;
+
+    if (probe->esp_hosted) {
+        why = "the C6 runs its factory ESP-Hosted firmware";
+    } else if (probe->rom_recovery_failed && !probe->updater_reachable) {
+        why = "the ROM recovery of the C6 failed";
+    } else if (probe->updater_reachable && !probe->installed_valid) {
+        why = "no RCP firmware on the C6";
+    }
+    if (reason && cap > 0) {
+        snprintf(reason, cap, "%s", why ? why : "");
+    }
+    return why == NULL;
+}
+
+bool radio_mux_c6_job_refused(radio_mux_mode_t stored_mode, bool attached, bool has_peer)
+{
+    return stored_mode == RADIO_MUX_MODE_RCP_PROXY && attached && has_peer;
+}

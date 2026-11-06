@@ -263,6 +263,66 @@ const char *radio_mux_fw_source_name(radio_mux_fw_source_t src);
 // listeners); connect needs a host.
 bool radio_mux_proxy_ok(const radio_mux_proxy_settings_t *s);
 
+/* ---- the C6 over SPI (OpenThread's spi_frame.hpp) ---- */
+
+// Every SPI transaction starts with a 5-byte header in both directions: the flag byte (pattern 0x02 in its low two
+// bits, the reset bit 0x80), then the accept length and the data length, both uint16 little-endian.
+#define RADIO_MUX_SPI_HDR_LEN 5
+#define RADIO_MUX_SPI_FLAG_RESET 0x80
+#define RADIO_MUX_SPI_FLAG_PATTERN 0x02
+#define RADIO_MUX_SPI_PATTERN_MASK 0x03
+// Accept length of a transaction that carries a frame of ours (as ESP-IDF's spinel SPI interface does): the frame's
+// length, at least this many bytes.
+#define RADIO_MUX_SPI_SMALL_ACCEPT 32
+// Transactions are clocked in whole cache lines: the receive buffer is DMA'd into in place, without a bounce buffer.
+#define RADIO_MUX_SPI_XFER_ALIGN 64
+
+typedef struct {
+    bool reset;          // the sender (re)started since its previous transaction
+    uint16_t accept_len; // bytes of data the sender takes in this transaction
+    uint16_t data_len;   // bytes of data the sender puts after the header
+} radio_mux_spi_hdr_t;
+
+void radio_mux_spi_hdr_encode(const radio_mux_spi_hdr_t *h, uint8_t out[RADIO_MUX_SPI_HDR_LEN]);
+// false when the flag byte's pattern bits are not 0x02 (the RCP not ready: a floating or held MISO reads 0xFF or 0x00);
+// *out is then left as it was.
+bool radio_mux_spi_hdr_decode(const uint8_t in[RADIO_MUX_SPI_HDR_LEN], radio_mux_spi_hdr_t *out);
+
+// What one full-duplex transaction gave, from the RCP's header (rx_hdr), the data length we sent (tx_len) and the
+// accept length we sent (accept).
+typedef struct {
+    bool valid;     // pattern right and both lengths at most `frame_max`; nothing else is set when false
+    bool rcp_reset; // the RCP's reset bit
+    uint16_t rx_len; // the RCP sent a frame of this many bytes after the header; 0 = none (or more than we accepted)
+    bool tx_taken;   // tx_len was 0, or the RCP accepted that much
+} radio_mux_spi_result_t;
+
+void radio_mux_spi_check(const uint8_t rx_hdr[RADIO_MUX_SPI_HDR_LEN], uint16_t tx_len, uint16_t accept,
+                         uint16_t frame_max, radio_mux_spi_result_t *out);
+
+// Bytes to clock for a transaction: the header plus the larger of tx_len and accept, rounded up to
+// RADIO_MUX_SPI_XFER_ALIGN.
+size_t radio_mux_spi_xfer_len(uint16_t tx_len, uint16_t accept);
+
+// What rcp_sync's last probe of the C6 said (the fields of rcp_sync_probe_result_t the mux reads). All false: no probe
+// ran yet.
+typedef struct {
+    bool updater_reachable;
+    bool installed_valid;
+    bool esp_hosted;
+    bool rom_recovery_failed;
+} radio_mux_c6_probe_t;
+
+// Whether c6 is listed present: not when the C6 runs the factory ESP-Hosted firmware, when a ROM recovery failed and
+// the updater stayed silent, or when the updater answered with no RCP installed; `reason` (may be NULL) then names
+// which, else it is empty. No probe yet, or a silent updater without a failed recovery: present (the installed
+// firmware is tried, as br_core does).
+bool radio_mux_c6_present(const radio_mux_c6_probe_t *probe, char *reason, size_t cap);
+
+// Whether a C6 job (push, recovery, probe) is refused: only while the C6's stored mode is rcp-proxy, its consumer is
+// attached and it reported a connected peer.
+bool radio_mux_c6_job_refused(radio_mux_mode_t stored_mode, bool attached, bool has_peer);
+
 #ifdef __cplusplus
 }
 #endif

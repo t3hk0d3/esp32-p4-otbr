@@ -91,7 +91,7 @@ void mux_slot_put(mux_port_t *p, uint8_t *frame)
     taskEXIT_CRITICAL(&p->lock);
 }
 
-static uint8_t *slot_take(mux_port_t *p)
+uint8_t *mux_slot_take(mux_port_t *p)
 {
     uint8_t *slot = NULL;
 
@@ -133,9 +133,40 @@ static void deliver_frame(mux_port_t *p, uint8_t *frame, size_t len)
 // so the stream stays in sync, and counted as a drop when it completes).
 static void next_dec_buf(mux_port_t *p)
 {
-    p->dec_slot = slot_take(p);
+    p->dec_slot = mux_slot_take(p);
     radio_mux_hdlc_dec_set_buf(&p->dec, p->dec_slot ? p->dec_slot + MUX_SLOT_HDR : p->discard,
                                MUX_SLOT_SIZE - MUX_SLOT_HDR);
+}
+
+void mux_rx_frame(mux_port_t *p, uint8_t *slot, size_t len)
+{
+    if (p->rx_mode != MUX_RX_FRAMES) {
+        mux_slot_put(p, slot); // nobody attached: the frame goes (NULL changes nothing)
+        return;
+    }
+    if (!slot) {
+        taskENTER_CRITICAL(&p->lock);
+        p->ctr.drops++;
+        taskEXIT_CRITICAL(&p->lock);
+        return;
+    }
+    deliver_frame(p, slot + MUX_SLOT_HDR, len);
+}
+
+void mux_rx_reset(mux_port_t *p)
+{
+    const radio_mux_ev_t ev = {.type = RADIO_MUX_EV_RESET, .slot = NULL, .len = 0, .rx_us = esp_timer_get_time()};
+
+    if (p->rx_mode == MUX_RX_FRAMES && !post_ev(p, &ev)) {
+        ESP_LOGE(TAG, "%s: RESET lost, the consumer's queue is full", p->chan ? p->chan->id : "?");
+    }
+}
+
+void mux_count_rx_errors(mux_port_t *p, uint32_t n)
+{
+    taskENTER_CRITICAL(&p->lock);
+    p->ctr.rx_errors += n;
+    taskEXIT_CRITICAL(&p->lock);
 }
 
 void mux_rx_bytes(mux_port_t *p, const uint8_t *data, size_t len)
@@ -185,9 +216,7 @@ void mux_rx_bytes(mux_port_t *p, const uint8_t *data, size_t len)
     const uint32_t errors = p->dec.crc_errors + p->dec.overruns;
 
     if (errors != p->dec_errors) {
-        taskENTER_CRITICAL(&p->lock);
-        p->ctr.rx_errors += errors - p->dec_errors;
-        taskEXIT_CRITICAL(&p->lock);
+        mux_count_rx_errors(p, errors - p->dec_errors);
         p->dec_errors = errors;
     }
 }
@@ -202,8 +231,8 @@ void mux_set_rx(mux_port_t *p, mux_rx_mode_t mode)
     }
     mux_ring_flush(p);
     p->rx_mode = mode;
-    if (mode == MUX_RX_FRAMES) {
-        p->dec_slot = slot_take(p);
+    if (mode == MUX_RX_FRAMES && p->kind == RADIO_MUX_KIND_USB) { // the C6 has frames, not bytes to decode
+        p->dec_slot = mux_slot_take(p);
         radio_mux_hdlc_dec_init(&p->dec, p->dec_slot ? p->dec_slot + MUX_SLOT_HDR : p->discard,
                                 MUX_SLOT_SIZE - MUX_SLOT_HDR);
         p->dec_errors = 0;
