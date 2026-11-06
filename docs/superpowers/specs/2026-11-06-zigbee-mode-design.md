@@ -19,7 +19,7 @@ CC2652P on the rig) works the same way.
 ### Goals
 
 - A channel set to Ziggurat mode runs ziggurat on that radio. The setting is the mux's per-channel mode (stored per
-  device: the C6, or a dongle by VID/PID/serial), chosen on the Device configuration page. Changing a channel into or
+  device: the C6, or a dongle by VID/PID/serial), chosen on the Radios page in the Device group. Changing a channel into or
   out of Ziggurat mode reboots the board, because ziggurat cannot be stopped once started.
 - At most one channel in Ziggurat mode (the staticlib's C ABI drives one radio).
 - Ziggurat mode is a real mode: it starts at boot, survives client disconnects, recovers from radio resets in place,
@@ -95,8 +95,13 @@ From the spike and its on-board runs (2026-11-06):
   (`srcs_ftd_mtd.cmake`), and it is UART-only with no per-frame retry or backoff control.
 - The mux consumer API, as the mux design committed to it (2026-11-06): a consumer exchanges whole spinel frames with
   its channel (HDLC for a dongle is done by the mux; the C6's SPI frames pass through). TX hands over one spinel frame;
-  the mux never keeps the pointer past the call. Events RX_FRAME, TX_DONE, RESET (the transport recovered, the RCP
-  rebooted) and GONE (unplugged or dead) are posted into a queue the consumer hands over at attach time. Nothing in the
+  the mux never keeps the pointer past the call; TX after GONE fails at once. Events RX_FRAME (a frame-pool slot with
+  a µs receive time taken at the transport), RESET (the mux reset or reopened the radio) and GONE (unplugged or dead)
+  are posted into a queue the consumer hands over at attach time. There is no TX completion event. A consumer can ask
+  for a channel reset (C6: GPIO reset; dongle: USB close and reopen), answered by RESET. Per-channel counters,
+  including frame-pool drops, are readable by the consumer. A consumer attaches when its channel is present and in its
+  mode. Spinel-level RCP reboots are not turned into RESET; the consumer sees them in its own parsing. In a build
+  without the `zigbee` component, the mux refuses `ziggurat` (409 `not_available`) and does not offer it. Nothing in the
   mux calls into the consumer from a transport task or an ISR, and nothing in it calls exit() or DieNow.
 - Ziggurat is Apache-2.0; this project is AGPL-3.0-or-later. Apache-2.0 code can be combined into it; `NOTICE` gets
   the attribution.
@@ -107,13 +112,14 @@ From the spike and its on-board runs (2026-11-06):
 
 ### What the user sees
 
-- **Device > Configuration**: the mux's channel list (owned by the mux design) offers Ziggurat as a mode for each
-  channel. Choosing it asks for confirmation ("the board reboots; devices on this radio's current network lose it"),
+- **Device > Radios** (the mux design's page): the channel list offers Ziggurat as a mode for each channel, because
+  the `zigbee` component is built in. Choosing it asks for confirmation ("the board reboots; devices on this radio's current network lose it"),
   saves, and reboots. Offering Ziggurat on a second channel while one already has it is refused with a short reason.
-- With a Ziggurat channel, the navigation gains a **Zigbee** page. With no OTBR channel, the Management group (Network,
+- With a Ziggurat channel, the navigation gains a **Zigbee** page. The Thread pages follow the mux design's shared
+  rule: with no channel in `otbr` at all (a deliberate Zigbee-only board), the Management group (Network,
   Commissioner, Addresses, Tools, Console), Topology, Routing and Packet capture are hidden, and opening one directly
-  shows a short notice with a link to the Device configuration instead of an error. With an OTBR channel too, both
-  sets of pages are shown.
+  shows a notice linking to the Radios page; with an OTBR channel that is absent or faulted, those pages stay and show
+  "no radio in OTBR mode". With a working OTBR channel too, both sets of pages are shown.
 - The **Zigbee page** shows: which channel (radio) it runs on, stack state (starting, waiting for a client, running,
   radio resetting, radio gone), the connected client (address, connected since) or none, the radio as last configured
   by the stack (channel, PAN ID, coordinator IEEE address, short address, TX power), radio counters (frames received,
@@ -252,7 +258,7 @@ From the spike and its on-board runs (2026-11-06):
     light reaches zigpy.
   - zigpy disconnects and reconnects: `hello` within 5 s, the network and the joined device are still there.
   - a second client takes over from the first.
-  - radio reset (the C6: `rcp_glitch`; the dongle: a USB reset the mux can trigger): the stack keeps running, the
+  - radio reset (the C6: `rcp_glitch`; the dongle: the consumer-requested channel reset, a USB close and reopen): the stack keeps running, the
     reset counter goes up, the client stays connected and the joined device still answers.
   - radio gone (the C6: `rcp_kill`; the dongle: unplug or a port power cut if the rig can do it): the board reboots
     back into Ziggurat mode; past the cap it stays up with "radio gone".
@@ -291,7 +297,8 @@ zigbee
             - keeps the table for replay
         transmit
             - sends one raw-stream frame with CSMA, retries, backoffs and channel
-            - on TX_DONE, reports acked, no ack, channel access failure, aborted or failed to the stack
+            - on the RCP's answer to it (parsed from RX_FRAME), reports acked, no ack, channel access failure, aborted
+              or failed to the stack
             - with a frame in flight or longer than the radio allows, returns nonzero without sending
             - on an RCP without rx-on-when-idle, puts the radio back to receive afterwards
         energy scan
@@ -299,11 +306,9 @@ zigbee
         received frame
             - passes the PSDU without FCS, with channel, RSSI, LQI and timestamp, to the stack
             - releases the pool slot before returning
-        unsolicited spinel reset status
-            - is handled like RESET
         request timeout
             - asks the mux to reset the channel, or treats it as gone where the mux cannot
-        On RESET
+        On RESET from the mux, or an unsolicited spinel reset status from the RCP (an RCP reboot the mux did not cause)
             - runs the attach sequence again
             - replays configuration and source-match table and receives again
             - fails a transmit in flight
@@ -370,13 +375,15 @@ web UI
     navigation
         With a Ziggurat channel
             - shows the Zigbee page
-        With no OTBR channel
+        With no channel in otbr at all
             - hides Management, Topology, Routing and Packet capture
+        With the OTBR channel absent or faulted
+            - keeps those pages, showing "no radio in OTBR mode"
         With only OTBR channels
             - is unchanged
     hidden page opened directly
-        - shows a notice with a link to the Device configuration
-    Device configuration, channel mode
+        - shows a notice with a link to the Radios page
+    Radios page, channel mode
         On choosing Ziggurat while another channel has it
             - refuses with a reason
 ```
