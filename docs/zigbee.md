@@ -1,11 +1,15 @@
 # Zigbee coordinator (experimental)
 
+!!! warning "Experimental"
+    The Ziggurat stack ran on a board in a spike. This feature on the board's firmware has been built and host-tested,
+    and its on-board tests are written but have not yet been run on a board. Expect rough edges, and do not rely on it
+    for a network you cannot afford to lose.
+
 In Zigbee mode the board is a Zigbee coordinator instead of a Thread border router. A radio of the board runs
 Ziggurat (a Zigbee stack written in Rust) and Home Assistant's ZHA integration
 talks to it over a WebSocket. The radio is the C6 or a supported USB dongle; the board's own Zigbee stack runs on
 the P4. Nothing else changes: Ethernet, the web UI, updates and the diagnostics work as before.
 
-This is experimental. It was checked on a board while it was built; see Limits below.
 
 ## Choosing it
 

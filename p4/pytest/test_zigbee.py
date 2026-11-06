@@ -36,6 +36,8 @@ C6 = "c6"
 OTBR_MODE = "otbr"
 RESTING_MODE = {C6: OTBR_MODE}  # a dongle rests in `off`
 HELLO_S = 5  # zigpy waits this long for the hello on connect
+HELLO_MARGIN_S = 1
+DROPPED_S = 10
 RUNNING_TIMEOUT_S = 60
 FORM_TIMEOUT_S = 60
 SCAN_TIMEOUT_S = 60
@@ -139,23 +141,48 @@ def set_mode(dut, base_url, channel, mode):
     return body
 
 
+def resting_mode(channel):
+    return RESTING_MODE.get(channel, "off")
+
+
+def restore_channel(dut, base_url, channel):
+    """Put the channel back to its resting mode and check the board really is back; raises when it is not."""
+    if channel_mode(base_url, channel) != resting_mode(channel):
+        set_mode(dut, base_url, channel, resting_mode(channel))
+    assert channel_mode(base_url, channel) == resting_mode(channel)
+    assert get_json(base_url, "/device/status")["zigbee_channel"] is None
+
+
 @pytest.fixture
-def zigbee_mode(dut, base_url):
+def guard_channel(dut, base_url):
+    """guard_channel(channel): call BEFORE changing the channel's mode; the channel is restored when the test ends,
+    on every path. A restore that fails fails the test loudly: a board left in Zigbee mode poisons later suites."""
+    guarded = []
+    yield guarded.append
+    failures = []
+    for channel in guarded:
+        try:
+            restore_channel(dut, base_url, channel)
+        except Exception as error:  # noqa: BLE001  (collected, reported below)
+            failures.append(f"{channel}: {error!r}")
+    if failures:
+        pytest.fail(
+            f"could not restore the radio, the board may stay in Zigbee mode: {failures}"
+        )
+
+
+@pytest.fixture
+def zigbee_mode(dut, base_url, guard_channel):
     """zigbee_mode(radio): switch the radio's channel to ziggurat (reboot) and return its id; restored afterwards."""
-    switched = []
 
     def enter(radio):
         channel = channel_id(base_url, radio)
+        guard_channel(channel)
         set_mode(dut, base_url, channel, ZIGBEE_MODE)
-        switched.append(channel)
         wait_state(base_url, EXPECTED_STATE, RUNNING_TIMEOUT_S)
         return channel
 
-    yield enter
-    for channel in switched:
-        resting = RESTING_MODE.get(channel, "off")
-        with contextlib.suppress(Exception):
-            set_mode(dut, base_url, channel, resting)
+    return enter
 
 
 @contextlib.asynccontextmanager
@@ -166,7 +193,10 @@ async def zigpy_app(address, auto_form=True):
     try:
         yield app
     finally:
-        await app.shutdown()
+        with contextlib.suppress(
+            Exception
+        ):  # a dropped session may fail to close cleanly
+            await app.shutdown()
 
 
 def run(coroutine):
@@ -226,9 +256,14 @@ def trigger_radio_reset(send, radio):
 
 @pytest.mark.parametrize("radio", radio_params())
 class TestZigbeeMode:
-    def test_switch_to_ziggurat_and_back(self, dut, base_url, http, radio):
+    def test_switch_to_ziggurat_and_back(
+        self, dut, base_url, http, guard_channel, radio
+    ):
         """PUT mode, reboot, /device/zigbee running and Thread's API gone; back to otbr with the same dataset."""
         channel = channel_id(base_url, radio)
+        guard_channel(
+            channel
+        )  # restored by the fixture on every path, before anything can fail
         dataset = None
         if radio == C6:
             dataset = http.get("/node/dataset/active")
@@ -238,19 +273,17 @@ class TestZigbeeMode:
                 dataset = None
         body = set_mode(dut, base_url, channel, ZIGBEE_MODE)
         assert body.get("reboot") is True
-        try:
-            status = wait_state(base_url, EXPECTED_STATE, RUNNING_TIMEOUT_S)
-            assert status["channel"] == channel
-            assert get_json(base_url, "/device/status")["zigbee_channel"] == channel
-            assert channel_mode(base_url, channel) == ZIGBEE_MODE
-            # Thread does not run: its REST API does not answer as a running border router.
-            assert (
-                requests.get(f"{base_url}/node/state", timeout=10).status_code
-                != requests.codes.ok
-            )
-            # TODO(hardware pass): the web UI hides the Thread menu entries; look at it by eye.
-        finally:
-            back = set_mode(dut, base_url, channel, RESTING_MODE.get(radio, "off"))
+        status = wait_state(base_url, EXPECTED_STATE, RUNNING_TIMEOUT_S)
+        assert status["channel"] == channel
+        assert get_json(base_url, "/device/status")["zigbee_channel"] == channel
+        assert channel_mode(base_url, channel) == ZIGBEE_MODE
+        # Thread does not run: its REST API does not answer as a running border router.
+        assert (
+            requests.get(f"{base_url}/node/state", timeout=10).status_code
+            != requests.codes.ok
+        )
+        # TODO(hardware pass): the web UI hides the Thread menu entries; look at it by eye.
+        back = set_mode(dut, base_url, channel, resting_mode(channel))
         assert back.get("reboot") is True
         assert requests.get(f"{base_url}/device/zigbee", timeout=10).status_code == (
             requests.codes.conflict
@@ -352,10 +385,22 @@ class TestZigbeeMode:
         async def body():
             async with zigpy_app(address) as app:
                 first = app.state.network_info.pan_id
-            started = time.monotonic()
-            async with zigpy_app(address, auto_form=False) as app:
-                assert time.monotonic() - started < HELLO_S + RUNNING_TIMEOUT_S
+            config = ControllerApplication.SCHEMA(
+                {"device": {"path": f"ws://{address}/zigbee"}, "database_path": None}
+            )
+            app = ControllerApplication(config)
+            try:
+                started = time.monotonic()
+                await (
+                    app.connect()
+                )  # returns once zigpy has the hello (its own wait is 5 s)
+                hello_s = time.monotonic() - started
+                assert hello_s < HELLO_S + HELLO_MARGIN_S, hello_s
+                await app.initialize()
                 assert app.state.network_info.pan_id == first
+            finally:
+                with contextlib.suppress(Exception):
+                    await app.shutdown()
 
         run(body())
         status = zigbee_status(base_url)
@@ -366,10 +411,18 @@ class TestZigbeeMode:
         zigbee_mode(radio)
         address = base_url.removeprefix("http://")
 
+        async def scan(app):
+            return await asyncio.wait_for(
+                app.energy_scan(
+                    channels=zigpy_types.Channels.ALL_CHANNELS, duration_exp=2, count=1
+                ),
+                DROPPED_S,
+            )
+
         async def body():
             async with zigpy_app(address) as first:
                 before = zigbee_status(base_url)["client"]["address"]
-                async with zigpy_app(address, auto_form=False):
+                async with zigpy_app(address, auto_form=False) as second:
                     deadline = time.monotonic() + TAKEOVER_S
                     after = before
                     while time.monotonic() < deadline and after == before:
@@ -377,7 +430,10 @@ class TestZigbeeMode:
                         after = zigbee_status(base_url)["client"]["address"]
                     assert after != before
                     assert zigbee_status(base_url)["last_client"]["address"] == before
-                assert first is not None
+                    # The first client lost its connection: a request on it fails; the second one works.
+                    with pytest.raises(Exception):  # noqa: B017  (ConnectionError or a timeout)
+                        await scan(first)
+                    assert len(await scan(second)) == ENERGY_CHANNELS
 
         run(body())
 
