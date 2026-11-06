@@ -62,11 +62,21 @@ class TestDefaultBase:
         _, _, sz0, sz1 = P.SD_SLOT
         x = sum(P.SCOOP_X) / 2
         y = P.OUTER[2] + 0.3  # just inside the outer face
-        assert not solid_bz(base, x, y, sz1 + 0.5)  # scoop above the slot
+        bottom = sz1 + P.SCOOP_LIP
+        assert not solid_bz(base, x, y, bottom + 0.2)  # scoop above the slot
         assert solid_bz(base, x, y, sz0 - 0.5)  # nothing below it
         assert solid_bz(
-            base, x, P.OUTER[2] + P.SCOOP_DEPTH + 0.2, sz1 + 0.3
+            base, x, P.OUTER[2] + P.SCOOP_DEPTH + 0.2, bottom + 0.1
         )  # only SCOOP_DEPTH deep
+
+    def test_leaves_a_0_4_mm_lip_over_the_slot_under_the_scoop(self, base):
+        _, _, _, sz1 = P.SD_SLOT
+        x = sum(P.SCOOP_X) / 2
+        assert P.SCOOP_LIP == pytest.approx(0.4)
+        assert solid_bz(base, x, P.OUTER[2] + 0.3, sz1 + P.SCOOP_LIP / 2)
+
+    def test_keeps_two_printed_lines_of_wall_behind_the_scoop(self, base):
+        assert P.WALL - P.SCOOP_DEPTH >= 0.8 - 1e-6
 
     def test_has_one_usb_and_rj45_opening_open_to_the_wall_top(self, base):
         y = -1.5
@@ -84,8 +94,16 @@ class TestDefaultBase:
         assert not solid(base, 27.5, y, P.HEADER_SLOT_BOTTOM + 0.1)
         assert not solid(base, 27.5, y, P.TOP - 0.1)  # open to the top: no bridge
         assert solid(base, 27.5, y, P.HEADER_SLOT_BOTTOM - 0.1)
-        assert solid(base, 0.3, y, P.HEADER_SLOT_BOTTOM + 1.0)
-        assert not solid(base, 0.7, y, P.HEADER_SLOT_BOTTOM + 1.0)
+
+    def test_runs_the_header_slot_the_full_inner_width(self, base):
+        y = P.INNER[3] + 1.5
+        z = P.HEADER_SLOT_BOTTOM + 1.0
+        assert not solid(base, P.INNER[0] + 0.1, y, z)  # no sliver at the corners
+        assert not solid(base, P.INNER[1] - 0.1, y, z)
+        # corner rounding gone
+        assert not solid(base, P.INNER[0] + 0.3, P.INNER[3] - 0.3, z)
+        assert solid(base, P.INNER[0] - 0.3, y, z)  # side walls stay
+        assert solid(base, P.INNER[1] + 0.3, y, z)
 
     def test_has_two_pin_holes_on_the_plunger_axes_and_the_button_recess(self, base):
         x = P.INNER[0] - 1.2  # inside the left wall
@@ -97,14 +115,31 @@ class TestDefaultBase:
             assert not solid_bz(base, -0.7, yc, zc)  # inner recess
         assert solid_bz(base, -0.7, 25.0, 1.4)  # no recess away from the buttons
 
-    def test_has_the_sma_d_hole_at_y_52(self, base):
+    def test_chamfers_the_button_recess_ceiling_at_45_degrees(self, base):
+        a, b = P.FACTS["button_a"], P.FACTS["button_b"]
+        y = (a.y0 + b.y1) / 2
+        ceiling = a.z1 + P.BUTTON_RECESS_MARGIN
+        assert not solid_bz(base, -0.6, y, ceiling + 0.2)  # under the 45° slope
+        assert solid_bz(base, -0.9, y, ceiling + 0.2)  # above it
+        assert solid_bz(base, -0.6, y, ceiling + 0.6)  # the slope ends at the face
+
+    def test_has_the_sma_d_hole_at_y_52_with_the_flat_at_the_bottom(self, base):
         x = P.INNER[1] + 1.0  # inside the wall, behind the knock-out
         zc = board_z(P.SMA_CASE_Z)
         assert not solid_bz(base, x, P.SMA_Y, zc)
-        assert not solid_bz(base, x, P.SMA_Y, zc - 3.1)
-        assert not solid_bz(base, x, P.SMA_Y, zc + 2.5)
-        assert solid_bz(base, x, P.SMA_Y, zc + 2.8)  # the flat
+        # round top: an arch, no support
+        assert not solid_bz(base, x, P.SMA_Y, zc + 3.1)
+        assert not solid_bz(base, x, P.SMA_Y, zc - 2.5)
+        assert solid_bz(base, x, P.SMA_Y, zc - 2.8)  # the flat
         assert solid_bz(base, x, P.SMA_Y + 3.5, zc)
+
+    def test_gives_the_sma_hole_a_45_degree_teardrop_top(self, base):
+        x = P.INNER[1] + 1.0
+        zc = board_z(P.SMA_CASE_Z)
+        r = P.SMA_D / 2
+        assert not solid_bz(base, x, P.SMA_Y, zc + r * 2**0.5 - 0.2)  # the roof's peak
+        assert solid_bz(base, x, P.SMA_Y, zc + r * 2**0.5 + 0.2)
+        assert solid_bz(base, x, P.SMA_Y + 1.5, zc + r * 2**0.5 - 0.2)  # 45° sides
 
     def test_makes_the_whole_button_side_wall_4_mm_thick(self, base):
         x = P.INNER[0] - P.BUTTON_WALL + 0.2
@@ -125,8 +160,9 @@ class TestDefaultBase:
             assert solid_bz(base, x, y, 10.0)
         assert not solid_bz(base, P.INNER[1] + P.SMA_WALL + 0.1, 35.0, 10.0)
 
-    def test_closes_the_sma_hole_with_a_one_line_knock_out(self, base):
+    def test_closes_the_sma_hole_with_a_two_line_knock_out(self, base):
         zc = board_z(P.SMA_CASE_Z)
+        assert P.SMA_KNOCKOUT_T == pytest.approx(0.8)
         assert solid_bz(base, P.OUTER[1] - P.SMA_KNOCKOUT_T / 2, P.SMA_Y, zc)
         assert not solid_bz(base, P.OUTER[1] - P.SMA_KNOCKOUT_T - 0.1, P.SMA_Y, zc)
 
@@ -144,15 +180,24 @@ class TestDefaultBase:
             for z in (2.0, 8.0, 12.0):
                 assert solid_bz(base, x, y, z), (x, y, z)
 
-    def test_has_four_tab_dents_level_with_the_bumps(self, base):
-        z = P.BUMP_Z
+    def test_has_four_tab_dents_just_below_the_bumps(self, base):
+        z = P.BUMP_Z - P.DENT_PRELOAD  # the dent's deepest line
         for y in (
             P.INNER[2] + P.TAB_CLEAR + P.TAB_LEN / 2,
             P.INNER[3] - P.TAB_CLEAR - P.TAB_LEN / 2,
         ):
             for x, d in ((P.INNER[0], -1), (P.INNER[1], 1)):
-                assert not solid(base, x + d * 0.3, y, z)  # dent
-                assert solid(base, x + d * 0.3, y, z - 1.5)  # wall below the dent
+                assert not solid(base, x + d * 0.1, y, z)  # dent
+                assert solid(base, x + d * 0.1, y, z - 1.5)  # wall below the dent
+                assert solid(base, x + d * 0.1, y, z + 0.6)  # wall above the dent
+
+    def test_makes_each_dent_as_deep_as_the_bump_reaches_past_the_wall(self, base):
+        depth = P.BUMP_H - P.TAB_CLEAR
+        z = P.BUMP_Z - P.DENT_PRELOAD
+        y = P.INNER[2] + P.TAB_CLEAR + P.TAB_LEN / 2
+        assert P.DENT_DEPTH == pytest.approx(depth)
+        assert not solid(base, P.INNER[0] - (depth - 0.05), y, z)
+        assert solid(base, P.INNER[0] - (depth + 0.05), y, z)
 
     def test_has_four_6_mm_standoffs_5_mm_tall_on_the_hole_axes(self, base):
         for hx, hy in P.SCREW_HOLES:
@@ -166,6 +211,29 @@ class TestDefaultBase:
                 assert not solid(base, hx, hy, cz)
             assert not solid(base, hx + 2.3, hy, 0.25)  # countersink near the surface
             assert solid(base, hx + 1.6, hy, 1.8)  # plain bore deeper in
+
+    def test_narrows_each_keyhole_arm_to_a_snap_neck(self, base):
+        half = P.KEY_NECK_W / 2
+        for kx, ky in P.KEYHOLES:
+            at = P.KEY_NECK_AT
+            # +Y arm, then +X arm
+            assert solid(base, kx + half + 0.1, ky + at, 1.0)
+            assert not solid(base, kx + half - 0.1, ky + at, 1.0)
+            assert solid(base, kx + at, ky - half - 0.1, 1.0)
+            assert not solid(base, kx + at, ky - half + 0.1, 1.0)
+            # full width again where the shank rests
+            assert not solid(base, kx + P.KEY_ARM_W / 2 - 0.1, ky + P.KEY_ARM_L, 1.0)
+
+    def test_parks_the_shank_past_the_neck(self, base):
+        shank_r = 3.5 / 2
+        assert P.KEY_NECK_AT + P.KEY_NECK_LEN / 2 < P.KEY_ARM_L - shank_r
+        assert P.KEY_NECK_AT - P.KEY_NECK_LEN / 2 > P.KEY_ENTRY_D / 2 - 0.5
+
+    def test_chamfers_the_keyholes_on_the_bed_side(self, base):
+        for kx, ky in P.KEYHOLES:
+            edge = P.KEY_ARM_W / 2
+            assert not solid(base, kx + edge + 0.2, ky + 6.5, 0.1)  # chamfer
+            assert solid(base, kx + edge + 0.2, ky + 6.5, P.KEY_CHAMFER + 0.2)
 
     def test_has_two_l_keyholes_with_entry_and_both_arms(self, base):
         for kx, ky in P.KEYHOLES:

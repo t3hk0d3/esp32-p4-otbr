@@ -22,7 +22,7 @@ SIZES_BASE_LABEL ?=
 MKDOCS ?= uvx --with mkdocs-material mkdocs
 SITE ?= site
 CASE_PY ?= PYTHONPATH=case uv run --quiet --python 3.12 --no-project --with build123d==0.13.0 --with trimesh==5.1.1 \
-	--with numpy==2.5.4 --with matplotlib==3.11.2 --with rtree==1.4.1 --with scipy==1.18.1 --with pytest==9.1.1 python
+	--with numpy==2.5.4 --with matplotlib==3.11.2 --with rtree==1.4.1 --with scipy==1.18.1 --with shapely==2.2.0 --with networkx==3.7 --with pytest==9.1.1 python
 BOARD_STEP := .artifacts/board/board.stp
 
 IDF := $(if $(shell command -v idf.py),,. "$(IDF_EXPORT)" >/dev/null &&)

@@ -72,7 +72,7 @@ class TestDefaultLid:
     def test_tapers_each_tab_inner_face_from_2_4_to_1_9(self, lid):
         y = TAB_Y0 + 5.0
         x = TAB_X[-1]
-        top = P.LID_UNDERSIDE - P.TAB_FILLET - 0.2
+        top = P.LID_UNDERSIDE - P.TAB_GUSSET - 0.2
         assert solid(lid, x + 2.3, y, P.LID_UNDERSIDE - 0.05)  # near the root
         assert not solid(lid, x + 2.0, y, P.LID_UNDERSIDE - P.TAB_DROP + 0.05)
         assert solid(lid, x + 1.7, y, P.LID_UNDERSIDE - P.TAB_DROP + 0.05)
@@ -88,11 +88,15 @@ class TestDefaultLid:
         assert solid(lid, x + 1.8, TAB_Y0 + 0.4, P.LID_UNDERSIDE - 1.9)
         assert not solid(lid, x + 1.8, TAB_Y0 + 0.3, P.LID_UNDERSIDE - P.TAB_DROP + 0.1)
 
-    def test_has_a_root_fillet_on_each_tab(self, lid):
+    def test_has_a_45_degree_root_gusset_on_each_tab(self, lid):
         x = TAB_X[-1] + P.TAB_ROOT_T + 0.3
         y = TAB_Y0 + 5.0
+        g = P.TAB_GUSSET
+        assert g == pytest.approx(1.2)
         assert solid(lid, x, y, P.LID_UNDERSIDE - 0.1)
-        assert not solid(lid, x + P.TAB_FILLET, y, P.LID_UNDERSIDE - 0.1)
+        assert solid(lid, x, y, P.LID_UNDERSIDE - (g - 0.3) + 0.1)  # under the slope
+        assert not solid(lid, x, y, P.LID_UNDERSIDE - (g - 0.3) - 0.1)  # past it
+        assert not solid(lid, x + g, y, P.LID_UNDERSIDE - 0.1)
 
     def test_has_a_detent_bump_on_each_side_wall_face(self, lid):
         for yc in tab_y_centres():
@@ -100,6 +104,24 @@ class TestDefaultLid:
                 x = TAB_X[side] + side * (P.BUMP_H - 0.1)
                 assert solid(lid, x, yc, P.BUMP_Z)
                 assert not solid(lid, x, yc, P.BUMP_Z + 1.0)
+
+    def test_gives_each_bump_a_30_degree_lead_in_and_a_45_degree_hold(self, lid):
+        assert P.BUMP_LEAD_ANGLE == pytest.approx(30.0)
+        assert P.BUMP_HOLD_ANGLE == pytest.approx(45.0)
+        yc = tab_y_centres()[0]
+        x = TAB_X[-1] - 0.2  # 0.2 out from the tab face
+        # 0.25 below the crest the 30° lead-in still reaches 0.26; 0.25 above, the 45° hold only 0.15
+        assert solid(lid, x, yc, P.BUMP_Z - 0.25)
+        assert not solid(lid, x, yc, P.BUMP_Z + 0.25)
+
+    def test_puts_the_bump_crest_on_a_printed_layer_centre(self):
+        layers = (P.TOP - P.BUMP_Z) / P.LAYER_H
+        assert layers % 1 == pytest.approx(0.5)
+
+    def test_chamfers_the_top_face_edge_against_elephants_foot(self, lid):
+        edge = IX0 - P.REBATE_W + P.LID_CLEAR
+        assert not solid(lid, edge + 0.1, 34, P.TOP - 0.1)
+        assert solid(lid, edge + 0.1, 34, P.TOP - P.LID_TOP_CHAMFER - 0.1)
 
 
 class TestLidOnBase:
