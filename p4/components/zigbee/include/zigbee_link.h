@@ -24,6 +24,7 @@ typedef struct {
     bool have_hello;   // the stack's first outbound frame was kept by the caller
     bool hello_due;    // the current client has not been sent the hello yet
     bool refused;      // a host_send was refused since the queue last had room
+    uint32_t generation; // bumped on every connect and disconnect
 } zigbee_link_t;
 
 /** Resets the link; `queue_depth` frames fit in the outbound queue. */
@@ -36,7 +37,7 @@ void zigbee_link_init(zigbee_link_t *link, size_t queue_depth);
  */
 bool zigbee_link_host_send(zigbee_link_t *link, size_t len);
 
-/** The sender took one queued frame off the queue (sent, or discarded as stale). */
+/** The sender took one queued frame off the queue (sent, or discarded because zigbee_link_frame_current() said stale). */
 void zigbee_link_sent(zigbee_link_t *link);
 
 /**
@@ -56,6 +57,18 @@ bool zigbee_link_disconnect(zigbee_link_t *link, int fd);
 
 /** true once per connect when the kept hello must be sent to the client before anything else. */
 bool zigbee_link_take_send_hello(zigbee_link_t *link);
+
+/**
+ * The current generation. It changes on every connect (a reused fd included) and every disconnect. The sender tags
+ * each frame it queues with the generation read when it queued the frame, and the hello it sends to a new client.
+ */
+uint32_t zigbee_link_generation(const zigbee_link_t *link);
+
+/**
+ * false: the frame was queued under an older generation, so its client is gone or replaced; the sender discards it
+ * (and still calls zigbee_link_sent() so it frees its slot). true: send it.
+ */
+bool zigbee_link_frame_current(const zigbee_link_t *link, uint32_t generation);
 
 /** The client of the link, or -1. */
 int zigbee_link_client(const zigbee_link_t *link);

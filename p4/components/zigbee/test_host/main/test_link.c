@@ -418,3 +418,125 @@ TEST_CASE("takeover: the newest client gets the hello first and then every later
     TEST_ASSERT_TRUE_MESSAGE(zigbee_link_host_send(&link, 10), "then every later frame");
     TEST_ASSERT_EQUAL(9, zigbee_link_client(&link));
 }
+
+/* ---- generations: stale outbound frames are never sent to a new client ---- */
+
+TEST_CASE("generation after a takeover: frames queued under the old generation are stale", "[zigbee]")
+{
+    zigbee_link_t link;
+
+    zigbee_link_init(&link, 4);
+    zigbee_link_connect(&link, 7);
+    uint32_t old_generation = zigbee_link_generation(&link);
+    TEST_ASSERT_TRUE(zigbee_link_host_send(&link, 10));
+    TEST_ASSERT_TRUE_MESSAGE(zigbee_link_frame_current(&link, old_generation), "current before the takeover");
+    zigbee_link_connect(&link, 9);
+    TEST_ASSERT_FALSE(zigbee_link_frame_current(&link, old_generation));
+}
+
+TEST_CASE("generation after a takeover with a reused fd: frames queued under the old generation are stale", "[zigbee]")
+{
+    zigbee_link_t link;
+
+    zigbee_link_init(&link, 4);
+    zigbee_link_connect(&link, 7);
+    uint32_t old_generation = zigbee_link_generation(&link);
+    TEST_ASSERT_TRUE(zigbee_link_host_send(&link, 10));
+    TEST_ASSERT_EQUAL(-1, zigbee_link_connect(&link, 7));
+    TEST_ASSERT_EQUAL(7, zigbee_link_client(&link));
+    TEST_ASSERT_FALSE(zigbee_link_frame_current(&link, old_generation));
+}
+
+TEST_CASE("generation after a disconnect: frames queued for the client that left are stale", "[zigbee]")
+{
+    zigbee_link_t link;
+
+    zigbee_link_init(&link, 4);
+    zigbee_link_connect(&link, 7);
+    uint32_t old_generation = zigbee_link_generation(&link);
+    TEST_ASSERT_TRUE(zigbee_link_host_send(&link, 10));
+    TEST_ASSERT_TRUE(zigbee_link_disconnect(&link, 7));
+    TEST_ASSERT_FALSE(zigbee_link_frame_current(&link, old_generation));
+}
+
+TEST_CASE("generation after a disconnect of a replaced client: the new client's frames stay current", "[zigbee]")
+{
+    zigbee_link_t link;
+
+    zigbee_link_init(&link, 4);
+    zigbee_link_connect(&link, 7);
+    zigbee_link_connect(&link, 9);
+    uint32_t generation = zigbee_link_generation(&link);
+    TEST_ASSERT_FALSE(zigbee_link_disconnect(&link, 7));
+    TEST_ASSERT_EQUAL(generation, zigbee_link_generation(&link));
+    TEST_ASSERT_TRUE(zigbee_link_frame_current(&link, generation));
+}
+
+TEST_CASE("generation of the new client: its hello and later frames are current", "[zigbee]")
+{
+    zigbee_link_t link;
+
+    zigbee_link_init(&link, 4);
+    zigbee_link_take_hello(&link, FRAME, sizeof(FRAME));
+    zigbee_link_connect(&link, 7);
+    zigbee_link_connect(&link, 9);
+    TEST_ASSERT_TRUE(zigbee_link_take_send_hello(&link));
+    uint32_t hello_generation = zigbee_link_generation(&link);
+    TEST_ASSERT_TRUE(zigbee_link_host_send(&link, 10));
+    uint32_t frame_generation = zigbee_link_generation(&link);
+    TEST_ASSERT_TRUE_MESSAGE(zigbee_link_frame_current(&link, hello_generation), "hello");
+    TEST_ASSERT_TRUE_MESSAGE(zigbee_link_frame_current(&link, frame_generation), "later frame");
+}
+
+TEST_CASE("generation after a reused-fd takeover: the new client's frames are current, the old ones stale", "[zigbee]")
+{
+    zigbee_link_t link;
+
+    zigbee_link_init(&link, 4);
+    zigbee_link_connect(&link, 7);
+    uint32_t old_generation = zigbee_link_generation(&link);
+    zigbee_link_connect(&link, 7);
+    uint32_t new_generation = zigbee_link_generation(&link);
+    TEST_ASSERT_NOT_EQUAL(old_generation, new_generation);
+    TEST_ASSERT_FALSE(zigbee_link_frame_current(&link, old_generation));
+    TEST_ASSERT_TRUE(zigbee_link_frame_current(&link, new_generation));
+}
+
+TEST_CASE("generation counter: stays distinct through many connects", "[zigbee]")
+{
+    zigbee_link_t link;
+    uint32_t first;
+
+    zigbee_link_init(&link, 4);
+    zigbee_link_connect(&link, 7);
+    first = zigbee_link_generation(&link);
+    for (int i = 0; i < 1000; i++) {
+        zigbee_link_connect(&link, 7 + (i % 2));
+        zigbee_link_disconnect(&link, zigbee_link_client(&link));
+    }
+    TEST_ASSERT_FALSE(zigbee_link_frame_current(&link, first));
+}
+
+TEST_CASE("generation takeover with a full queue: discarding the stale frames makes drained fire once", "[zigbee]")
+{
+    zigbee_link_t link;
+    uint32_t tags[2];
+
+    zigbee_link_init(&link, 2);
+    zigbee_link_connect(&link, 7);
+    for (int i = 0; i < 2; i++) {
+        TEST_ASSERT_TRUE(zigbee_link_host_send(&link, 10));
+        tags[i] = zigbee_link_generation(&link);
+    }
+    TEST_ASSERT_FALSE(zigbee_link_host_send(&link, 10));
+    zigbee_link_connect(&link, 7); // reused fd
+    TEST_ASSERT_FALSE_MESSAGE(zigbee_link_drained(&link), "the stale frames still hold the slots");
+    for (int i = 0; i < 2; i++) {
+        TEST_ASSERT_FALSE(zigbee_link_frame_current(&link, tags[i]));
+        zigbee_link_sent(&link); // discarded, slot freed
+    }
+    TEST_ASSERT_TRUE(zigbee_link_drained(&link));
+    TEST_ASSERT_FALSE(zigbee_link_drained(&link));
+    TEST_ASSERT_TRUE(zigbee_link_host_send(&link, 10));
+    TEST_ASSERT_TRUE(zigbee_link_frame_current(&link, zigbee_link_generation(&link)));
+}

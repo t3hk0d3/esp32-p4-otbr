@@ -8,6 +8,7 @@ void zigbee_link_init(zigbee_link_t *link, size_t queue_depth)
     link->have_hello = false;
     link->hello_due = false;
     link->refused = false;
+    link->generation = 0;
 }
 
 bool zigbee_link_host_send(zigbee_link_t *link, size_t len)
@@ -46,6 +47,7 @@ int zigbee_link_connect(zigbee_link_t *link, int fd)
 
     link->client_fd = fd;
     link->hello_due = link->have_hello;
+    link->generation++; // also for a reused fd: frames queued for the old socket are stale
     return previous;
 }
 
@@ -56,6 +58,7 @@ bool zigbee_link_disconnect(zigbee_link_t *link, int fd)
     }
     link->client_fd = -1;
     link->hello_due = false;
+    link->generation++;
     return true;
 }
 
@@ -65,6 +68,16 @@ bool zigbee_link_take_send_hello(zigbee_link_t *link)
 
     link->hello_due = false;
     return due;
+}
+
+uint32_t zigbee_link_generation(const zigbee_link_t *link)
+{
+    return link->generation;
+}
+
+bool zigbee_link_frame_current(const zigbee_link_t *link, uint32_t generation)
+{
+    return generation == link->generation;
 }
 
 int zigbee_link_client(const zigbee_link_t *link)
