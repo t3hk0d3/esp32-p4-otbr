@@ -49,6 +49,7 @@ TEST_CASE("On the status codes device_api sends: the status line has the code an
     TEST_ASSERT_EQUAL_STRING("500 Internal Server Error", device_api_status_line(500));
     TEST_ASSERT_EQUAL_STRING("502 Bad Gateway", device_api_status_line(502));
     TEST_ASSERT_EQUAL_STRING("503 Service Unavailable", device_api_status_line(503));
+    TEST_ASSERT_EQUAL_STRING("504 Gateway Timeout", device_api_status_line(504));
 }
 
 TEST_CASE("On an OTA that is refused as running or committed: 409", "[device_api]")

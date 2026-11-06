@@ -47,6 +47,8 @@ const char *device_api_status_line(int http_status)
         return "502 Bad Gateway";
     case 503:
         return "503 Service Unavailable";
+    case 504:
+        return "504 Gateway Timeout";
     default:
         return "500 Internal Server Error";
     }
