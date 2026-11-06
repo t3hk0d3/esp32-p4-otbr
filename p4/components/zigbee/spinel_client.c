@@ -92,7 +92,8 @@ static int send_prop(zigbee_spinel_t *s, uint8_t tid, unsigned cmd, unsigned key
 /*
  * RadioSpinel::WaitResponse: lets the board deliver frames until the reply came or the request timed out (then
  * RadioSpinel::HandleRcpTimeout's counterpart: a channel reset is requested). Returns 0, the RCP's nonzero status,
- * SPINEL_STATUS_FAILURE for a reply that is not the expected one, or -1 on a timeout.
+ * SPINEL_STATUS_FAILURE for a reply that is not the expected one, ZIGBEE_SPINEL_ERR_TIMEOUT, or
+ * ZIGBEE_SPINEL_ERR_ABORTED (no reset requested: whoever aborted handles the radio).
  */
 static int wait_reply(zigbee_spinel_t *s)
 {
@@ -110,8 +111,11 @@ static int wait_reply(zigbee_spinel_t *s)
     case ZIGBEE_SPINEL_WAIT_FAILED:
         rc = s->reply_status != SPINEL_STATUS_OK ? (int)s->reply_status : SPINEL_STATUS_FAILURE;
         break;
+    case ZIGBEE_SPINEL_WAIT_ABORTED:
+        rc = ZIGBEE_SPINEL_ERR_ABORTED;
+        break;
     default:
-        rc = -1;
+        rc = ZIGBEE_SPINEL_ERR_TIMEOUT;
         break;
     }
     if (!s->wait_for_reset) {
@@ -119,7 +123,7 @@ static int wait_reply(zigbee_spinel_t *s)
     }
     s->wait_state = ZIGBEE_SPINEL_WAIT_IDLE;
     s->wait_for_reset = false;
-    if (rc < 0) {
+    if (rc == ZIGBEE_SPINEL_ERR_TIMEOUT) {
         s->ops.request_reset(s->ops.ctx);
     }
     return rc;
@@ -130,11 +134,11 @@ static int wait_reply(zigbee_spinel_t *s)
 static int request(zigbee_spinel_t *s, unsigned cmd, unsigned key, unsigned expect, const char *fmt, ...)
 {
     if (s->wait_state != ZIGBEE_SPINEL_WAIT_IDLE) {
-        return -1; // one property request at a time
+        return ZIGBEE_SPINEL_ERR_LOCAL; // one property request at a time
     }
     uint8_t tid = take_tid(s);
     if (tid == 0) {
-        return -1;
+        return ZIGBEE_SPINEL_ERR_LOCAL;
     }
     s->wait_tid = tid;
     s->wait_key = key;
@@ -151,7 +155,7 @@ static int request(zigbee_spinel_t *s, unsigned cmd, unsigned key, unsigned expe
     if (rc != 0) {
         free_tid(s, tid);
         s->wait_state = ZIGBEE_SPINEL_WAIT_IDLE;
-        return -1;
+        return ZIGBEE_SPINEL_ERR_LOCAL;
     }
     return wait_reply(s);
 }
@@ -211,11 +215,17 @@ static int send_config(zigbee_spinel_t *s, const zigbee_radio_config_t *c)
     return rc;
 }
 
-/* RadioSpinel::ClearSrcMatchShortEntries / ClearSrcMatchExtEntries: a set with no value. */
-static void send_src_clear(zigbee_spinel_t *s)
+/* RadioSpinel::ClearSrcMatchShortEntries / ClearSrcMatchExtEntries: a set with no value. Stops at a timeout or an
+ * abort; otherwise returns the first refusal. */
+static int send_src_clear(zigbee_spinel_t *s)
 {
-    (void)SET(s, SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES, NULL);
-    (void)SET(s, SPINEL_PROP_MAC_SRC_MATCH_EXTENDED_ADDRESSES, NULL);
+    int rc = SET(s, SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES, NULL);
+
+    if (rc < 0) {
+        return rc;
+    }
+    int rc_ext = SET(s, SPINEL_PROP_MAC_SRC_MATCH_EXTENDED_ADDRESSES, NULL);
+    return rc_ext < 0 || rc == 0 ? rc_ext : rc;
 }
 
 /* RadioSpinel::AddSrcMatchShortEntry: INSERT "S". */
@@ -253,26 +263,45 @@ static bool has_ext(const zigbee_spinel_t *s, const uint8_t ext[8])
     return false;
 }
 
-/* RadioSpinel::RestoreProperties for the tables: clear both, insert what is stored; what the RCP refuses now leaves
- * the stored copy. */
-static void replay_src_match(zigbee_spinel_t *s)
+/* RadioSpinel::RestoreProperties for the tables: clear both, insert what is stored. Entries the RCP refuses (> 0)
+ * leave the stored copy once the whole replay has run; a timeout or an abort stops the replay and leaves the stored
+ * copy as it was. */
+static int replay_src_match(zigbee_spinel_t *s)
 {
+    bool refused_short[ZIGBEE_SPINEL_SRC_MATCH_MAX] = {false};
+    bool refused_ext[ZIGBEE_SPINEL_SRC_MATCH_MAX] = {false};
     size_t kept = 0;
+    int rc = send_src_clear(s);
 
-    send_src_clear(s);
+    if (rc < 0) {
+        return rc;
+    }
     for (size_t i = 0; i < s->src_short_count; i++) {
-        if (send_src_short(s, s->src_short[i]) == 0) {
+        if ((rc = send_src_short(s, s->src_short[i])) < 0) {
+            return rc;
+        }
+        refused_short[i] = rc != 0;
+    }
+    for (size_t i = 0; i < s->src_ext_count; i++) {
+        if ((rc = send_src_ext(s, s->src_ext[i])) < 0) {
+            return rc;
+        }
+        refused_ext[i] = rc != 0;
+    }
+    for (size_t i = 0; i < s->src_short_count; i++) {
+        if (!refused_short[i]) {
             s->src_short[kept++] = s->src_short[i];
         }
     }
     s->src_short_count = kept;
     kept = 0;
     for (size_t i = 0; i < s->src_ext_count; i++) {
-        if (send_src_ext(s, s->src_ext[i]) == 0) {
+        if (!refused_ext[i]) {
             memmove(s->src_ext[kept++], s->src_ext[i], 8);
         }
     }
     s->src_ext_count = kept;
+    return 0;
 }
 
 /* ---- attach ---- */
@@ -430,12 +459,13 @@ void zigbee_spinel_attach(zigbee_spinel_t *s)
     }
     s->attached = true;
 
-    // RadioSpinel::RestoreProperties' counterpart. A refused replay leaves the radio attached; the next edit retries.
-    if (s->have_config) {
-        (void)send_config(s, &s->config);
+    // RadioSpinel::RestoreProperties' counterpart. A refused property leaves the radio attached (the next edit
+    // retries); a timeout or an abort stops here without ready.
+    if (s->have_config && (rc = send_config(s, &s->config)) < 0) {
+        return;
     }
-    if (s->src_short_count > 0 || s->src_ext_count > 0) {
-        replay_src_match(s);
+    if ((s->src_short_count > 0 || s->src_ext_count > 0) && replay_src_match(s) < 0) {
+        return;
     }
     s->sink.ready(s->sink.ctx, true, NULL);
 }
@@ -482,7 +512,7 @@ void zigbee_spinel_src_match_clear(zigbee_spinel_t *s)
     s->src_short_count = 0;
     s->src_ext_count = 0;
     if (s->attached) {
-        send_src_clear(s);
+        (void)send_src_clear(s);
     }
 }
 
@@ -753,6 +783,13 @@ void zigbee_spinel_on_tick(zigbee_spinel_t *s)
     if (s->scanning && t >= s->scan_deadline_us) {
         s->scan_deadline_us = NEVER; // the scan stays in progress until the reset (Task 3)
         s->ops.request_reset(s->ops.ctx);
+    }
+}
+
+void zigbee_spinel_abort_wait(zigbee_spinel_t *s)
+{
+    if (s->wait_state == ZIGBEE_SPINEL_WAIT_PENDING) {
+        s->wait_state = ZIGBEE_SPINEL_WAIT_ABORTED;
     }
 }
 

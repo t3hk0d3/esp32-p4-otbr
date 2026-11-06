@@ -41,6 +41,9 @@ static struct {
     uint8_t reset_iid;
     unsigned fail_key, fail_status;
     unsigned silent_key;
+    unsigned silent_cmd; // 0: silent for every command on silent_key
+    unsigned abort_key; // a request for it gets no reply; the next wait aborts it (Task 3's RESET/GONE)
+    bool abort_pending;
     unsigned wrong_key; // answered with VALUE_IS of another property
     size_t short_limit, ext_limit; // 0 = unlimited
     size_t short_count, ext_count;
@@ -115,7 +118,11 @@ static void respond(const uint8_t *frame, size_t len)
         }
         return;
     }
-    if (key == rcp.silent_key) {
+    if (key == rcp.silent_key && (rcp.silent_cmd == 0 || cmd == rcp.silent_cmd)) {
+        return;
+    }
+    if (key == rcp.abort_key) {
+        rcp.abort_pending = true;
         return;
     }
     if (key == rcp.wrong_key) {
@@ -207,6 +214,11 @@ static int64_t fake_now(void *ctx)
 static int fake_wait(void *ctx, int64_t until_us)
 {
     (void)ctx;
+    if (rcp.abort_pending) {
+        rcp.abort_pending = false;
+        zigbee_spinel_abort_wait(&client);
+        return 0;
+    }
     if (rcp.q_head == rcp.q_tail) {
         if (until_us > rcp.now) {
             rcp.now = until_us;
@@ -278,6 +290,7 @@ static void setup(unsigned radio_caps)
     rcp.silent_key = UINT32_MAX;
     rcp.fail_key = UINT32_MAX;
     rcp.wrong_key = UINT32_MAX;
+    rcp.abort_key = UINT32_MAX;
     zigbee_spinel_init(&client, &OPS, &SINK);
 }
 
@@ -1293,4 +1306,157 @@ TEST_CASE("received garbage: ignored", "[zigbee]")
     zigbee_spinel_on_frame(&client, junk, 0, 1);
     TEST_ASSERT_EQUAL(0, got.rx_count);
     TEST_ASSERT_EQUAL(0, zigbee_spinel_set_channel(&client, 20));
+}
+
+/* ---- timeouts in the replay, and aborts (fix round 1) ---- */
+
+static void stored_three_shorts(void)
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    zigbee_spinel_src_match_add_short(&client, 0x0001);
+    zigbee_spinel_src_match_add_short(&client, 0x0002);
+    zigbee_spinel_src_match_add_short(&client, 0x0003);
+    rcp.sent_count = 0;
+}
+
+static void reattach_answering(void)
+{
+    rcp.silent_key = UINT32_MAX;
+    rcp.silent_cmd = 0;
+    rcp.abort_key = UINT32_MAX;
+    rcp.resets_requested = 0;
+    got.ready_count = 0;
+    rcp.sent_count = 0;
+    zigbee_spinel_attach(&client);
+}
+
+TEST_CASE("attach with a timeout during the source-match replay: keeps the stored table", "[zigbee]")
+{
+    stored_three_shorts();
+    rcp.silent_key = SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES;
+    rcp.silent_cmd = SPINEL_CMD_PROP_VALUE_INSERT; // the clear is answered, the first insert is not
+    zigbee_spinel_attach(&client);
+    reattach_answering();
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_EQUAL(3, count_sent(SPINEL_CMD_PROP_VALUE_INSERT, SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES));
+}
+
+TEST_CASE("attach with a timeout during the source-match replay: reports no ready", "[zigbee]")
+{
+    stored_three_shorts();
+    rcp.silent_key = SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES;
+    rcp.silent_cmd = SPINEL_CMD_PROP_VALUE_INSERT;
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(0, got.ready_count);
+}
+
+TEST_CASE("attach with a timeout during the source-match replay: requests one reset and sends nothing more",
+          "[zigbee]")
+{
+    stored_three_shorts();
+    rcp.silent_key = SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES;
+    rcp.silent_cmd = SPINEL_CMD_PROP_VALUE_INSERT;
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+    assert_sent(rcp.sent_count - 1, SPINEL_CMD_PROP_VALUE_INSERT, SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES);
+    TEST_ASSERT_EQUAL(1, count_sent(SPINEL_CMD_PROP_VALUE_INSERT, SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES));
+}
+
+TEST_CASE("attach with a timeout clearing the tables in the replay: keeps the stored table, one reset", "[zigbee]")
+{
+    stored_three_shorts();
+    rcp.silent_key = SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES;
+    rcp.silent_cmd = SPINEL_CMD_PROP_VALUE_SET;
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(0, got.ready_count);
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+    assert_sent(rcp.sent_count - 1, SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES);
+    reattach_answering();
+    TEST_ASSERT_EQUAL(3, count_sent(SPINEL_CMD_PROP_VALUE_INSERT, SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES));
+}
+
+TEST_CASE("attach with a timeout during the configuration replay: reports no ready and requests one reset",
+          "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    zigbee_spinel_configure(&client, &CONFIG);
+    zigbee_spinel_src_match_add_short(&client, 0x0001);
+    rcp.silent_key = SPINEL_PROP_MAC_15_4_PANID;
+    rcp.sent_count = 0;
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(0, got.ready_count);
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+    assert_sent(rcp.sent_count - 1, SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_MAC_15_4_PANID);
+}
+
+TEST_CASE("src_match_clear with a timeout: stops after the first table and requests one reset", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.silent_key = SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES;
+    zigbee_spinel_src_match_clear(&client);
+    TEST_ASSERT_EQUAL(1, rcp.sent_count);
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+}
+
+TEST_CASE("abort during an attach step: reports neither ready nor incompatible", "[zigbee]")
+{
+    setup(FRAMES_C6_RADIO_CAPS);
+    rcp.abort_key = SPINEL_PROP_RADIO_CAPS;
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(0, got.ready_count);
+}
+
+TEST_CASE("abort during an attach step: requests no reset and sends nothing more", "[zigbee]")
+{
+    setup(FRAMES_C6_RADIO_CAPS);
+    rcp.abort_key = SPINEL_PROP_RADIO_CAPS;
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(0, rcp.resets_requested);
+    TEST_ASSERT_EQUAL(5, rcp.sent_count);
+}
+
+TEST_CASE("abort while waiting for the reset status: reports nothing and requests no reset", "[zigbee]")
+{
+    setup(FRAMES_C6_RADIO_CAPS);
+    rcp.reset_silent = true;
+    rcp.abort_pending = true;
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(0, got.ready_count);
+    TEST_ASSERT_EQUAL(0, rcp.resets_requested);
+    TEST_ASSERT_EQUAL(1, rcp.sent_count);
+}
+
+TEST_CASE("abort during a configure wait: returns nonzero", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.abort_key = SPINEL_PROP_PHY_TX_POWER;
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_ABORTED, zigbee_spinel_configure(&client, &CONFIG));
+    TEST_ASSERT_EQUAL(0, rcp.resets_requested);
+}
+
+TEST_CASE("abort during a configure wait: keeps the stored configuration", "[zigbee]")
+{
+    uint16_t pan = 0;
+
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.abort_key = SPINEL_PROP_PHY_TX_POWER;
+    zigbee_spinel_configure(&client, &CONFIG);
+    reattach_answering();
+    assert_sent(10, SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_MAC_15_4_PANID);
+    spinel_datatype_unpack(sent(10).data, sent(10).len, "S", &pan);
+    TEST_ASSERT_EQUAL_HEX16(0x1a62, pan);
+}
+
+TEST_CASE("abort with no request waiting: changes nothing", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    zigbee_spinel_abort_wait(&client);
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_set_channel(&client, 20));
+}
+
+TEST_CASE("request timeout: returns ZIGBEE_SPINEL_ERR_TIMEOUT, distinct from an abort", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.silent_key = SPINEL_PROP_PHY_CHAN;
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_TIMEOUT, zigbee_spinel_set_channel(&client, 20));
 }
