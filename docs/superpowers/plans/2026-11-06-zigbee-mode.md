@@ -304,6 +304,12 @@ from the spike board or build them with `spinel.c` and document which). The linu
 **[sync] Step 0:** mux Task 4 committed on `feat/radio-mux`: read `radio_mux.h`; confirm with the mux session that
 `radio_mux_ev_t {type, slot, len, rx_us}`, `radio_mux_tx`, `radio_mux_release` and `radio_mux_reset` are final, and
 that a slot holds one complete spinel frame (header byte first, no HDLC, no SPI header). Record the mux commit.
+Already ruled by the mux session (2026-11-06): on `RADIO_MUX_EV_RX_FRAME`, `slot` points at the spinel header byte of
+exactly one frame and `len` is its length (on the C6 the 5-byte SPI header sits before it in the same DMA slot);
+`radio_mux_release(ch, slot)` takes that pointer; `radio_mux_tx` copies one bare spinel frame and returns
+`ESP_ERR_INVALID_STATE` after GONE; a consumer registered before `radio_mux_start` is attached to every present channel
+in its mode whose firmware fits, at start and on every return. This consumer uses `radio_mux_bind_queue`, not an
+eventfd.
 
 **Interfaces (produces, `zigbee_spinel.h`, no ESP-IDF types):**
 - `typedef struct { int (*send)(void *ctx, const uint8_t *frame, size_t len); void (*request_reset)(void *ctx);
