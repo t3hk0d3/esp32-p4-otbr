@@ -442,7 +442,8 @@ Everything above the radio belongs to the Zigbee work: its spinel client, task, 
     stays in the menu and shows "Packet capture needs a radio in Thread border router mode" with a link to the Radios
     page *(design call: a notice, not hiding, since the page belongs to Device)*.
   - Zigbee is the Zigbee work's link.
-  - Which plan carries the rename is still open.
+  - This implementation does the regrouping and the hide rule; the Zigbee work only adds its link, shown when a channel
+    runs `ziggurat` *(the user's decision)*.
 - The Thread menu depends on why Thread is down *(design call, shared with the Zigbee design, which follows it)*:
   - No channel at all in `otbr` (a deliberate choice, for example the board runs only Zigbee): the Thread menu is
     hidden, and opening one of its pages directly shows a short notice linking to the Radios page.

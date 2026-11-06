@@ -699,8 +699,7 @@ mode_fsm.h, CMakeLists.txt, br_core_test.c, test_host/main/test_mode_fsm.c}`, `p
 ### Task 9: Radios page
 
 **Files:** Create `p4/components/esp_ot_br_server/frontend/radios.html`, `frontend/static/radios.js`,
-`tools/tests/test_radios_page.py`. Modify `frontend/static/api.js` (Radios first in the Device group; the Thread-menu rename below only if the user assigns it to
-this plan),
+`tools/tests/test_radios_page.py`. Modify `frontend/static/api.js` (the regrouped navigation below, Radios first in the Device group),
 `status.js` (Dashboard chip "Thread runs on: <label>"; `NO_RADIO` banner), `mgmt.js`, `capture.js`, `routing.js`, `topology.js` (the shared
 `NO_RADIO` rule: the Thread menu hidden when no channel is in `otbr`, a notice on its pages when the OTBR channel is
 unavailable or faulted),
@@ -710,8 +709,8 @@ mockup's CSS), `PATCHES.md` (the frontend files are vendored: add them to entry 
 **Navigation:** decided: top bar Dashboard, Thread, Zigbee, Device, About; Thread menu Network, Topology, Routing,
 Commissioner, Addresses, Tools, Console; Device menu Radios, Ethernet, Firmware, Diagnostics, Packet capture. The hide
 rule hides the whole Thread menu when no channel is in `otbr`; Packet capture stays and shows "Packet capture needs a
-radio in Thread border router mode" with a link to Radios. Whether this task or the Zigbee work implements the
-regrouping is open, so ask before starting this task. The Zigbee link itself is never this plan's.
+radio in Thread border router mode" with a link to Radios. This task implements the regrouping *(the user's decision)*. The Zigbee work adds the
+top-level Zigbee link later, shown when a channel runs `ziggurat`; leave a slot for it in the nav list, nothing more.
 
 **Interfaces:** the page reads `GET /device/channels` and `/device/status`, writes with `PUT` and `DELETE`, polls every
 2 s while a channel is `starting`. Structure, icons and texts follow the mockup; the mode cards come from a list in
