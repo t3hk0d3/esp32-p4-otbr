@@ -124,22 +124,24 @@ From the spike and its on-board runs (2026-11-06):
   protocol in C would be a second implementation to keep in step with upstream. If upstream adds a status entry point
   later, the page can show them.
 - The **Dashboard** shows a Zigbee summary card when a channel runs Ziggurat, next to or instead of the Thread card.
-- With no OTBR channel, the Thread REST API and the Thread Console WebSocket answer 409 with the detail
-  `no thread radio`, the way the sniffer refusals answer today.
+- With no OTBR channel, the board mode is the mux design's `NO_RADIO`, and the Thread REST API and the Thread Console
+  WebSocket answer 503 as that design defines.
 
 ### Settings and API
 
 - The channel's mode is the mux's setting and API; this design adds no stack or radio setting of its own.
 - `GET /device/zigbee`: read-only status (the page's content) when a channel runs Ziggurat; 409 otherwise.
-- `/device/status` reports the Ziggurat channel and its state next to the mux's channel list.
+- `/device/status` gains `zigbee_channel` (the channel id or null), next to the mux design's `otbr_channel`.
+- The channel API itself (`GET /device/channels`, `PUT /device/channels/{id}` with `mode` `ziggurat`, the reply's
+  `"reboot": true`, 409 `ziggurat_taken` and `hybrid_not_supported`) is the mux design's
+  (`2026-11-06-radio-channel-mux-design.md`).
 - `/metrics` gains Zigbee counters with a `zigbee_` prefix, only while a channel runs Ziggurat.
 
 ### Board side: `br_core`
 
 - With no channel in OTBR mode, OpenThread is not initialised at all. Nothing in Ziggurat mode touches the stored
   Thread datasets, because nothing that could is running.
-- The Thread mode guard (patch 2 in `PATCHES.md`) learns "no Thread radio": Thread changes and radio use are refused
-  with 409 `no thread radio`.
+- The board mode and the Thread API's refusals then follow the mux design's `NO_RADIO`.
 - Everything else about which mode starts when, and how `br_core` hands a channel to its consumer, follows the mux
   design.
 
@@ -168,18 +170,25 @@ From the spike and its on-board runs (2026-11-06):
   - energy scan on one channel for a duration, completing with the peak RSSI;
   - received raw-stream frames, FCS stripped, with channel, RSSI, LQI and timestamp.
   Requests carry transaction IDs and one timeout; a request that times out counts as a radio fault (below).
+- **Received frames** arrive as slots of the channel's frame pool (zero copies before the client's parse on the C6,
+  one on a dongle). The client parses a slot, hands the PSDU to ziggurat (which copies it) and releases the slot at
+  once, so a slow stack never holds the pool. Pool drops are counted by the mux and shown on the Zigbee page. The
+  client needs no TX completion from the mux: the transmit result comes from the RCP's own spinel reply.
 - **Radio resets and loss.** *(Design call.)* The client keeps the last configuration and the source-match table.
-  - On RESET from the mux: the client runs its attach sequence again and replays the configuration and the
-    source-match table, then receives again. A transmit in flight completes as failed. The reset is counted and shown;
-    the stack keeps running and the network keeps its children (they retry).
-  - On a request timeout: the client asks the mux to reset the channel (if the mux API offers that) and then handles
-    the RESET as above; otherwise it treats the channel as gone.
+  - On RESET from the mux, or an unsolicited spinel reset status from the RCP (it rebooted on its own): the client
+    runs its attach sequence again and replays the configuration and the source-match table, then receives again. A
+    transmit in flight completes as failed. The reset is counted and shown; the stack keeps running and the network
+    keeps its children (they retry).
+  - On a request timeout: the client asks the mux to reset the channel (the same channel reset OTBR's hardware reset
+    uses: a GPIO reset on the C6, a reopen on a dongle) and then handles the RESET as above.
+  - At boot, a stored Ziggurat channel whose dongle is not plugged in: the stack is not started until the mux attaches
+    the channel when the device appears. So an unplugged dongle leaves a board waiting for it, not a reboot loop.
   - On GONE: the board reboots after a short delay. Reboots for this reason are capped like Thread mode's recoveries
     (`MODE_FSM_MAX_RECOVERIES` within its window, with a count that survives the reboot); past the cap the Ziggurat
     channel stays down, the page shows "radio gone", and Ethernet, the web UI and OTA keep working. Keeping the stack
     up through an unplug and resuming on replug is a later improvement.
-  - C6 jobs (firmware push, ROM recovery) on a Ziggurat channel: the mux decides how a job takes the channel; from the
-    Zigbee side the board reboots after the job.
+  - C6 jobs (firmware push, ROM recovery) while the C6 is in Ziggurat mode follow the mux design (currently refused with
+    409 `c6_busy`). If the mux later allows a push there, the Zigbee side only needs the board to reboot after it.
 - **Memory in PSRAM.** Ziggurat's heap (its routing, child, neighbour and key tables, packet queues; everything it
   allocates) lives in PSRAM, so the network can grow to the size of a typical ZHA home (100+ devices) without taking
   internal RAM from lwIP, the HTTP server or an OTBR channel. The staticlib's `esp-idf` allocator is hard-wired to
@@ -268,6 +277,9 @@ zigbee
             - reports the radio as incompatible on the page and in /device/zigbee
         With no channel in Ziggurat mode
             - does nothing
+        With the Ziggurat channel's dongle absent at boot
+            - does not start the stack
+            - starts it when the mux attaches the channel
     spinel client
         configure
             - sends channel, TX power, PAN ID, short and extended address, promiscuous, source-match enable and receive
@@ -285,6 +297,9 @@ zigbee
             - scans one channel for the duration and reports the peak RSSI to the stack
         received frame
             - passes the PSDU without FCS, with channel, RSSI, LQI and timestamp, to the stack
+            - releases the pool slot before returning
+        unsolicited spinel reset status
+            - is handled like RESET
         request timeout
             - asks the mux to reset the channel, or treats it as gone where the mux cannot
         On RESET
@@ -348,10 +363,7 @@ device_api
         Otherwise
             - answers 409
     GET /device/status
-        - reports the Ziggurat channel and its state
-    Thread REST, Web GUI handlers and the console WebSocket
-        With no channel in OTBR mode
-            - answer 409 with detail "no thread radio"
+        - reports zigbee_channel (the channel id, or null)
 
 web UI
     navigation
