@@ -256,7 +256,7 @@ void mux_call_put(mux_call_t *call);
 // with its new-device callback.
 esp_err_t usb_transport_start(void);
 // Opens `dev` (callbacks bound to `p`), then line coding at baud 8N1 with read-back, flow control (CP210x only) and
-// DTR+RTS asserted together once. On an error the device is closed and `err` says why; `err` may also hold a warning
+// DTR+RTS asserted together once. The first open allocates the port's buffers (pool, discard, TX, ring) for good. On an error the device is closed and `err` says why; `err` may also hold a warning
 // (flow control unsupported, baud read back close) with ESP_OK.
 esp_err_t usb_transport_open(mux_port_t *p, const mux_usb_dev_t *dev, uint32_t baud, bool flow, char *err, size_t cap);
 // New line settings on the open device. A failure (or a baud read back far off) closes the device.

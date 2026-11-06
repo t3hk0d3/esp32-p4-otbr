@@ -13,7 +13,6 @@
 
 #include "board_cores.h"
 #include "esp_check.h"
-#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_vfs_eventfd.h"
@@ -1286,7 +1285,9 @@ static void owner_task(void *arg)
 
 /* ---- start ---- */
 
-static esp_err_t port_init(mux_port_t *p, radio_mux_kind_t kind, bool transport)
+// The queue, locks and eventfd of a transport. Its buffers (frame pool, discard and TX buffers, the USB ring) come with
+// its first open: a board without a dongle never allocates the USB ones.
+static esp_err_t port_init(mux_port_t *p, radio_mux_kind_t kind)
 {
     memset(p, 0, sizeof(*p));
     p->kind = kind;
@@ -1301,19 +1302,6 @@ static esp_err_t port_init(mux_port_t *p, radio_mux_kind_t kind, bool transport)
     ESP_RETURN_ON_FALSE(p->evq && p->rx_lock && p->tx_lock && p->ev_lock, ESP_ERR_NO_MEM, TAG, "port queue and locks");
     p->efd = eventfd(0, 0);
     ESP_RETURN_ON_FALSE(p->efd >= 0, ESP_ERR_NO_MEM, TAG, "eventfd (is the eventfd VFS registered?)");
-    if (!transport) {
-        return ESP_OK;
-    }
-    // Slots are DMA-capable and cache-line aligned (the C6 transport DMAs into them; USB copies in the callback).
-    uint8_t *slots = heap_caps_aligned_alloc(MUX_CACHE_LINE, (size_t)MUX_SLOT_SIZE * RADIO_MUX_POOL_SLOTS,
-                                             MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-
-    p->discard = malloc(MUX_SLOT_SIZE);
-    p->tx_cap = RADIO_MUX_HDLC_ENCODED_MAX(RADIO_MUX_FRAME_MAX);
-    p->tx_buf = malloc(p->tx_cap);
-    p->ring = xRingbufferCreate(MUX_RX_RING_SIZE, RINGBUF_TYPE_BYTEBUF);
-    ESP_RETURN_ON_FALSE(slots && p->discard && p->tx_buf && p->ring, ESP_ERR_NO_MEM, TAG, "port buffers");
-    radio_mux_pool_init(&p->pool, slots, MUX_SLOT_SIZE, RADIO_MUX_POOL_SLOTS);
     return ESP_OK;
 }
 
@@ -1323,8 +1311,8 @@ esp_err_t radio_mux_start(void)
     g_mux.lock = xSemaphoreCreateMutex();
     g_mux.queue = xQueueCreate(QUEUE_LEN, sizeof(mux_msg_t));
     ESP_RETURN_ON_FALSE(g_mux.lock && g_mux.queue, ESP_ERR_NO_MEM, TAG, "queue and lock");
-    ESP_RETURN_ON_ERROR(port_init(&g_mux.c6, RADIO_MUX_KIND_C6, false), TAG, "c6 port");
-    ESP_RETURN_ON_ERROR(port_init(&g_mux.usb, RADIO_MUX_KIND_USB, true), TAG, "USB port");
+    ESP_RETURN_ON_ERROR(port_init(&g_mux.c6, RADIO_MUX_KIND_C6), TAG, "c6 port");
+    ESP_RETURN_ON_ERROR(port_init(&g_mux.usb, RADIO_MUX_KIND_USB), TAG, "USB port");
     mux_load_chans();
     ESP_RETURN_ON_ERROR(c6_transport_start(), TAG, "c6 task");
     atomic_store(&g_mux.started, true);
