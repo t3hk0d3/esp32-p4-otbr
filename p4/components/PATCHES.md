@@ -329,6 +329,13 @@ reason, spec reference.
    28 routes (the console WebSocket included) plus the catch-all, one slot of headroom. The console WebSocket
    (`device_api`, not vendored) answers its handshake with 503 `no radio in OTBR mode` in `NO_RADIO` as well. Host
    tests: `test_host/` (NO_RADIO cases) and `tests/test_rest.c` `test_guard_no_radio`.
+   Task 9 (web UI): new `frontend/radios.html` and `frontend/static/radios.js` (the Radios page: channel table,
+   configure dialog, mode cards, move of Thread); `frontend/static/api.js` builds the regrouped navigation (Dashboard,
+   Thread, an empty hidden `<li id="nav-slot-zigbee">`, Device with Radios first, About) and hides the Thread menu
+   while `/device/status` has `otbr_channel` null; `frontend/static/device_common.js` gains `threadState`,
+   `threadNotice` and the kit's `renderThreadNotice`/`watchThread`; `status.js` (chip "Thread runs on", notice),
+   `mgmt.js` (mode banner), `routing.js`, `topology.js`, `capture.js` and their pages (`#threadNotice`) show the
+   "no radio in OTBR mode" notice; `index.html` text and chip; `static/style.css` appends the Radios classes.
    (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md, sections Board mode and API)
 
 ### REST guard classification (patches 2 and 9)

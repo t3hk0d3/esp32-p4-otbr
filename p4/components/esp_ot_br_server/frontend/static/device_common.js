@@ -177,7 +177,50 @@ function bytesText(bytes) {
   return (bytes / 1024).toFixed(1) + ' KB';
 }
 
+/*
+ * Does a radio run Thread? From /device/status: 'none' (otbr_channel null: no channel is in OTBR mode, on purpose),
+ * 'down' (the OTBR channel is unavailable or faulted: mode NO_RADIO or RADIO_FAULT), 'ok', or 'unknown' (no answer;
+ * a status without otbr_channel is an older board and counts as ok).
+ */
+function threadState(s) {
+  if (!s)
+    return 'unknown';
+  if (s.otbr_channel === null)
+    return 'none';
+  if (s.mode === 'NO_RADIO' || s.mode === 'RADIO_FAULT')
+    return 'down';
+  return 'ok';
+}
+
+/*
+ * The notice of a Thread page while no radio runs Thread: {text, href, label, fault}, or null. `fault` marks a
+ * RADIO_FAULT, which the pages that already explain faults (Dashboard, Thread management) leave to themselves.
+ * `kind` 'capture' is the Packet capture page, which asks for a radio in OTBR mode instead of reporting Thread as off.
+ */
+function threadNotice(s, kind) {
+  var st = threadState(s);
+  if (st === 'none')
+    return {
+      text : kind === 'capture' ? 'Packet capture needs a radio in Thread border router mode.'
+                                : 'No radio is in Thread border router mode, so there is no Thread network.',
+      href : '/radios.html',
+      label : 'Open Radios',
+      fault : false
+    };
+  if (st === 'down')
+    return {
+      text : 'No radio in OTBR mode: the radio that runs Thread is unavailable' +
+                 (s.fault_reason ? ' (' + s.fault_reason + ')' : '') + '.',
+      href : '/radios.html',
+      label : 'Open Radios',
+      fault : s.mode === 'RADIO_FAULT'
+    };
+  return null;
+}
+
 return {
+  threadState : threadState,
+  threadNotice : threadNotice,
   wholeNumber : wholeNumber,
   compatText : compatText,
   errorMessage : errorMessage,
@@ -403,6 +446,39 @@ function waitForBoard(msgId, giveUpText) {
   probe();
 }
 
+/* ---- Thread notice: #threadNotice of a Thread page says why no Thread network runs ---- */
+
+/* Fills #threadNotice from a /device/status body; returns the notice shown (null: none). `skipFault`: leave faults out. */
+function renderThreadNotice(s, kind, skipFault) {
+  var box = doc.getElementById('threadNotice');
+  if (!box)
+    return null;
+  var n = L.threadNotice(s, kind);
+  if (n && skipFault && n.fault)
+    n = null;
+  clear(box);
+  box.classList.toggle('hidden', !n);
+  if (n) {
+    box.appendChild(doc.createTextNode(n.text + ' '));
+    var a = el('a', n.label);
+    a.setAttribute('href', n.href);
+    box.appendChild(a);
+  }
+  return n;
+}
+
+/* Polls /device/status for the notice (pages that do not read the status themselves). */
+function watchThread(kind) {
+  return poller(function() {
+    return request('GET', '/device/status', {timeoutMs : 5000}).then(function(r) {
+      if (r.status !== 200 || !r.body)
+        return false;
+      renderThreadNotice(r.body, kind, false);
+      return true;
+    }, function() { return false; });
+  }, 10000, null);
+}
+
 /* ---- trial banner: the network settings run on trial until they are kept ---- */
 
 function renderTrial(n) {
@@ -469,6 +545,8 @@ return {
   request : request,
   failure : failure,
   poller : poller,
+  renderThreadNotice : renderThreadNotice,
+  watchThread : watchThread,
   setBusy : setBusy,
   runOp : runOp,
   waitForBoard : waitForBoard,

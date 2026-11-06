@@ -2596,6 +2596,7 @@ function wire() {
 
 function init() {
   kit.start();
+  kit.watchThread();
   storage = env.localStorage || null;
   storageOk = probeStorage(storage);
   names = L.loadNames(storage);

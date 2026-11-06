@@ -840,3 +840,46 @@ tr:hover td { background: var(--primary-light); }
 .t-txt caption { text-align: left; font-size: 13px; color: var(--text-light); padding: 4px 0; }
 .t-txt td { border-bottom: 1px solid #f0f0f0; padding: 3px 8px; font-family: ui-monospace, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
 .t-txt td:first-child { color: var(--text-light); width: 160px; }
+
+/* Radios page (radios.html): table, configure dialog and mode cards */
+.nav-links > li[hidden] { display: none; }
+.radios { width: 100%; border-collapse: collapse; }
+.radios td, .radios th { padding: 10px 12px; text-align: left; vertical-align: middle; border-bottom: 1px solid var(--border); }
+.radios th { font-size: 12px; color: var(--text-light); font-weight: 600; }
+.radios tbody tr { cursor: pointer; }
+.radios tbody tr:hover { background: var(--primary-light); }
+.radios tr.gone td { color: var(--text-muted); }
+.sub { display: block; font-size: 12px; color: var(--text-muted); }
+.sub.mono { font-family: 'Courier New', Consolas, monospace; }
+.mode-cell { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.mode-cell svg { width: 20px; height: 20px; flex-shrink: 0; }
+.rd-dialog { border: 0; padding: 0; width: calc(100% - 32px); max-width: 640px; margin: 40px auto; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); background: var(--card); color: var(--text); }
+.rd-dialog::backdrop { background: rgba(0,0,0,0.45); }
+.rd-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 18px 20px 6px; }
+.rd-head h3 { font-size: 18px; }
+.rd-close { border: 0; background: transparent; font-size: 22px; line-height: 1; cursor: pointer; color: var(--text-light); }
+.rd-body { padding: 6px 20px 16px; }
+.rd-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
+.rd-label { font-size: 13px; font-weight: 600; margin: 16px 0 8px; }
+.rd-carousel { position: relative; }
+.rd-track { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; padding: 4px 4px 10px; scrollbar-width: thin; }
+.rd-card { flex: 0 0 168px; scroll-snap-align: start; border: 2px solid var(--border); border-radius: 10px; padding: 14px 12px 12px; background: var(--card); color: inherit; text-align: left; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 6px; transition: border-color .15s, box-shadow .15s, transform .15s; }
+.rd-card:hover:not(:disabled) { border-color: #f3c27f; transform: translateY(-2px); }
+.rd-card[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-light); }
+.rd-card svg { width: 34px; height: 34px; color: var(--primary); }
+.rd-card b { font-size: 14px; }
+.rd-card span { font-size: 12px; color: var(--text-light); line-height: 1.4; }
+.rd-card:disabled { cursor: not-allowed; opacity: 0.55; }
+.rd-card:disabled svg { color: var(--text-muted); }
+.rd-card .why { color: #8a4700; font-size: 11px; }
+.rd-arrow { position: absolute; top: 50%; transform: translateY(-60%); width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--border); background: var(--card); box-shadow: var(--shadow); cursor: pointer; font-size: 16px; line-height: 1; }
+.rd-prev { left: -14px; }
+.rd-next { right: -14px; }
+.rd-dots { display: flex; gap: 6px; justify-content: center; }
+.rd-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--border); }
+.rd-dots i.on { background: var(--primary); }
+.rd-panel { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 4px; }
+.rd-dialog select { min-height: 40px; padding: 8px 10px; border: 1px solid #c9c9c9; border-radius: 6px; font-size: 15px; background: #fff; }
+.rd-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #4a4a4a; align-self: flex-end; padding-bottom: 10px; }
+.rd-note { font-size: 13px; color: var(--text-light); background: var(--muted-bg); border-radius: 6px; padding: 8px 10px; margin-top: 10px; }
+.rd-note.rd-warn { background: var(--primary-light); color: #8a4700; }

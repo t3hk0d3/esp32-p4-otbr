@@ -9,7 +9,7 @@ const path = require('path');
 
 const FRONTEND = path.join(__dirname, '..', '..', 'p4', 'components', 'esp_ot_br_server', 'frontend');
 const Common = require(path.join(FRONTEND, 'static', 'device_common.js'));
-const SCRIPTS = {index: 'status', ethernet: 'ethernet', routing: 'routing', firmware: 'firmware', capture: 'capture',
+const SCRIPTS = {radios: 'radios', index: 'status', ethernet: 'ethernet', routing: 'routing', firmware: 'firmware', capture: 'capture',
                  diagnostics: 'diagnostics', names: 'names', leader: 'leader',
                  topology: 'topology', console: 'console'};
 /* Scripts that live on another script's page: the names section is part of the Ethernet page, the Leader card of Network. */

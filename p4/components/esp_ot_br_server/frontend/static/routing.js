@@ -462,6 +462,7 @@ function init() {
   $('discardBtn').addEventListener('click', discard);
   $('saveBtn').addEventListener('click', save);
   kit.start();
+  kit.watchThread();
   kit.poller(refresh, 5000, 'routingSection');
 }
 

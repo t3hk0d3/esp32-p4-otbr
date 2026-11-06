@@ -18,9 +18,10 @@
         <div>
             <h1 class="page-title">Dashboard</h1>
             <p class="page-desc">What this border router and its Thread network are doing right now. Settings and tools are
-                in the Management and Device menus.</p>
+                in the Thread and Device menus.</p>
         </div>
         <div>
+            <span class="chip hidden" id="h-thread-on"></span>
             <button class="btn btn-outline-danger" id="rebootBtn" type="button">Reboot</button>
             <div class="form-hint" id="rebootMsg" role="status" aria-live="polite"></div>
         </div>
@@ -39,6 +40,7 @@
         <div class="trial-track" aria-hidden="true"><div class="trial-fill" id="trialFill"></div></div>
     </div>
     <div class="form-hint" id="confirmMsg" role="status" aria-live="polite"></div>
+    <div class="disabled-banner hidden" id="threadNotice" role="status" aria-live="polite"></div>
     <div class="disabled-banner hidden" id="s-offline" role="status" aria-live="polite"></div>
 
     <div id="statusSection">
