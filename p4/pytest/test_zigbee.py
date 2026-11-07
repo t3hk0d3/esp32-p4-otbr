@@ -384,10 +384,10 @@ class TestZigbeeMode:
         async def body():
             async with zigpy_app(address) as app:
                 first = app.state.network_info.pan_id
-            config = ControllerApplication.SCHEMA(
+            # The constructor validates the config itself (validating it twice breaks zigpy's OTA provider).
+            app = ControllerApplication(
                 {"device": {"path": f"ws://{address}/zigbee"}, "database_path": None}
             )
-            app = ControllerApplication(config)
             try:
                 started = time.monotonic()
                 await (
@@ -406,7 +406,8 @@ class TestZigbeeMode:
         assert status["last_client"] is not None
 
     def test_second_client_takes_over(self, base_url, zigbee_mode, radio):
-        """A second client connecting replaces the first: the first is dropped, /device/zigbee names the new one."""
+        """A second client connecting replaces the first: the first is dropped, /device/zigbee names the new one.
+        Both clients run on this host, so they differ in `since` (when each connected), not in the address."""
         zigbee_mode(radio)
         address = base_url.removeprefix("http://")
 
@@ -420,15 +421,18 @@ class TestZigbeeMode:
 
         async def body():
             async with zigpy_app(address) as first:
-                before = zigbee_status(base_url)["client"]["address"]
+                before = zigbee_status(base_url)["client"]
                 async with zigpy_app(address, auto_form=False) as second:
                     deadline = time.monotonic() + TAKEOVER_S
                     after = before
                     while time.monotonic() < deadline and after == before:
                         await asyncio.sleep(0.5)
-                        after = zigbee_status(base_url)["client"]["address"]
-                    assert after != before
-                    assert zigbee_status(base_url)["last_client"]["address"] == before
+                        after = zigbee_status(base_url)["client"]
+                    assert after["since"] != before["since"], (before, after)
+                    assert (
+                        zigbee_status(base_url)["last_client"]["address"]
+                        == before["address"]
+                    )
                     # The first client lost its connection: a request on it fails; the second one works.
                     with pytest.raises(Exception):  # noqa: B017  (ConnectionError or a timeout)
                         await scan(first)
