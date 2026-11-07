@@ -300,6 +300,31 @@ class TestZigbeeSection:
         )
         assert r == "Starting"
 
+    def test_late_answer_after_zigbee_stopped_is_dropped(self):
+        # On a /device/zigbee answer arriving after the status said Zigbee stopped: it is dropped, the placeholder
+        # stays and no value of the stopped coordinator comes back (final review).
+        r = run(
+            RUNNING,
+            """
+            const orig = t.env.fetch; let release;
+            t.env.fetch = (u, o) => u === '/device/zigbee'
+                ? new Promise((res) => { release = () => res(orig(u, o)); }) : orig(u, o);
+            const late = t.page.refreshZigbee();
+            t.zc = null; await t.page.refreshStatus();
+            release(); await late;
+            return [t.el('zigbee-off').hidden(), t.el('zigbee-on').hidden(), t.el('zg-radio').textContent];
+        """,
+        )
+        assert r == [False, True, "-"]
+
+    def test_placeholder_shows_before_the_first_status(self):
+        # Before any status answer (or with the board offline at load): the Zigbee section is not a bare heading.
+        r = scenario(
+            page("index", routes(RUNNING))
+            + "return [t.el('zigbee-off').hidden(), t.el('zigbee-on').hidden()];"
+        )
+        assert r == [False, True]
+
     def test_no_zigbee_channel_shows_the_placeholder_and_asks_nothing(self):
         # On zigbee_channel null: placeholder shown with its link, content hidden, /device/zigbee never requested.
         r = scenario(

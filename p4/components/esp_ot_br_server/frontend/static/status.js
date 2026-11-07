@@ -38,14 +38,17 @@ function dongleFaultText(reason) {
          'on the Radios page.';
 }
 
-/* /device/status's mode is Thread's status. Only these RADIO_FAULT reasons concern the whole board (and only while
- * the C6, not a USB radio, is Thread's radio): the board line says them, whatever runs Thread. */
+/* /device/status's mode is Thread's status. Only these RADIO_FAULT reasons concern the whole board: the board line
+ * says them, whatever runs Thread. The two firmware ones are the C6's, so they count only while no USB radio is
+ * Thread's radio; the settings storage is the board's whatever the radio. */
 var BOARD_FAULTS = [ 'storage unavailable', 'esp-hosted firmware', 'no rcp firmware' ];
 
 function isDongle(s) { return !!s.otbr_channel && s.otbr_channel !== 'c6'; }
 
 function boardFault(s) {
-  return s.mode === 'RADIO_FAULT' && !isDongle(s) && BOARD_FAULTS.indexOf(s.fault_reason) >= 0;
+  if (s.mode !== 'RADIO_FAULT' || BOARD_FAULTS.indexOf(s.fault_reason) < 0)
+    return false;
+  return s.fault_reason === 'storage unavailable' || !isDongle(s);
 }
 
 /** The Device and network line: {tone: ok|fault, title, text, link: {href, label} | null}. */
@@ -63,7 +66,7 @@ function boardHealthFor(s) {
 /** Thread runs on a radio, or the board predates otbr_channel (then it always did). */
 function isThreadActive(s) { return s.otbr_channel !== null; }
 
-var MODE_WORDS = {otbr : 'Thread', ziggurat : 'Zigbee', 'rcp-proxy' : 'RCP proxy', off : 'Off'};
+var MODE_WORDS = {otbr : 'Thread', ziggurat : 'Zigbee', 'rcp-proxy' : 'RCP proxy', off : 'Off', unavailable : 'Unavailable'};
 
 /** The Radios card from /device/channels (null: not read): always the two slots, C6 and USB. */
 function radiosView(body) {
@@ -370,7 +373,8 @@ function renderZigbee(s) {
 function refreshZigbee() {
   if (!zigbeeOn)
     return Promise.resolve(true); // asked for again when the status names a Zigbee channel
-  return zigbee.refresh();
+  // Zigbee can stop while the request runs: a late answer from a stopped coordinator is dropped.
+  return zigbee.refresh(function() { return zigbeeOn; });
 }
 
 /* The Radios card: the two slots and their modes from /device/channels; "-" when it cannot be read. */

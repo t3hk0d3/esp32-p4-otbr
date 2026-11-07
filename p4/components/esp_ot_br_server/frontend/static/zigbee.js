@@ -168,8 +168,11 @@ function clear() {
   [ 'zg-client', 'zg-net', 'zg-traffic', 'zg-fw' ].forEach(function(id) { kit.clear($(id)); });
 }
 
-function refresh() {
+/* stillOn (optional): asked when the answer lands; false means the coordinator stopped meanwhile: drop the answer. */
+function refresh(stillOn) {
   return kit.request('GET', '/device/zigbee', {timeoutMs : 5000}).then(function(r) {
+    if (stillOn && !stillOn())
+      return true;
     if (r.status === 200 && r.body) {
       render(r.body);
       return true;
@@ -181,7 +184,8 @@ function refresh() {
     setText('zg-note', kit.failure(r));
     return false;
   }, function(e) {
-    setText('zg-note', e.message);
+    if (!stillOn || stillOn())
+      setText('zg-note', e.message);
     return false;
   });
 }

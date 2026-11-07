@@ -207,6 +207,20 @@ class TestDashboardLogic:
         )
         assert h["title"] == "Board OK"
 
+    def test_storage_unavailable_is_board_wide_even_with_a_dongle(self):
+        # On "storage unavailable" while a USB radio runs Thread: still the board's fault (final review), and Thread's
+        # line points up instead of blaming the dongle's firmware.
+        s = "{mode: 'RADIO_FAULT', fault_reason: 'storage unavailable', otbr_channel: 'usb-10c4-ea60-1'}"
+        assert st(f"L.boardHealthFor({s}).title") == "Board fault"
+        assert st(f"L.threadHeroFor({s}).title") == "Thread cannot start"
+
+    def test_unavailable_c6_reads_unavailable(self):
+        # On the C6 listed as unavailable (no RCP, ESP-Hosted, failed recovery): "Unavailable", not the API word.
+        rows = st(
+            "L.radiosView({channels: [{id: 'c6', kind: 'c6', mode: 'unavailable'}]})"
+        )
+        assert rows[0] == {"slot": "C6 (on board)", "mode": "Unavailable"}
+
     @pytest.mark.parametrize(
         "reason", ["storage unavailable", "esp-hosted firmware", "no rcp firmware"]
     )
