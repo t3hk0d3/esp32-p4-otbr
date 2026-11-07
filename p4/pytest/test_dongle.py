@@ -190,11 +190,28 @@ def spinel_get(prop, tid=1):
     return bytes([SPINEL_HEADER_FLAG | tid, SPINEL_CMD_PROP_VALUE_GET, prop])
 
 
-def read_frame(sock, timeout=2.0):
-    """Read bytes from a stream until one complete HDLC frame; return its raw bytes (flags included)."""
+def read_frame(sock, timeout=2.0, header=None):
+    """Read from a stream until one complete HDLC frame (flags included) and return it. A raw stream can start
+    mid-frame and carries the radio's own frames too (received 802.15.4 frames): bytes before a flag and empty
+    frames (two flags in a row) are skipped, and with `header` only a frame whose first byte (the spinel header,
+    which holds the TID) equals it is returned; bytes after it are kept for the next call on the same socket."""
     deadline = time.monotonic() + timeout
-    data = bytearray()
-    while time.monotonic() < deadline:
+    data = _leftover.pop(sock, bytearray())
+    while True:
+        start = data.find(bytes([HDLC_FLAG]))
+        while start >= 0:
+            end = data.find(bytes([HDLC_FLAG]), start + 1)
+            if end < 0:
+                break
+            frame = bytes(data[start : end + 1])
+            if end > start + 1 and (header is None or frame[1] == header):
+                _leftover[sock] = data[end:]  # the closing flag may open the next frame
+                return frame
+            start = (
+                end  # an empty frame or another one: the closing flag opens the next
+            )
+        if time.monotonic() >= deadline:
+            break
         ready, _, _ = select.select(
             [sock], [], [], max(0.0, deadline - time.monotonic())
         )
@@ -204,12 +221,10 @@ def read_frame(sock, timeout=2.0):
         if not chunk:
             break
         data += chunk
-        start = data.find(bytes([HDLC_FLAG]))
-        if start >= 0:
-            end = data.find(bytes([HDLC_FLAG]), start + 1)
-            if end > start + 1:
-                return bytes(data[start : end + 1])
     pytest.fail(f"no HDLC frame within {timeout} s (got {bytes(data)!r})")
+
+
+_leftover = {}  # bytes after the frame read_frame returned, per socket
 
 
 def connect(host, port, timeout=PROXY_PEER_WAIT_S):
@@ -468,7 +483,7 @@ def test_proxy_listen_tcp_latency(base_url, board_ip, dongle):
         for _ in range(LATENCY_ROUNDS):
             start = time.perf_counter()
             sock.sendall(request)
-            reply = read_frame(sock)
+            reply = read_frame(sock, header=SPINEL_HEADER_FLAG | 1)
             times.append((time.perf_counter() - start) * 1000)
             assert reply[0] == HDLC_FLAG
             time.sleep(0.01)
