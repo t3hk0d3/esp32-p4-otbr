@@ -162,12 +162,15 @@ function loadText(load) {
   return [ pct(load['1s']), pct(load['10s']), pct(load['60s']) ].join(' / ');
 }
 
-/** "Matches this build" of a status rcp object: Yes/No, "unknown" when the probe failed, "-" without firmware. */
+/** "Matches this build" of a status rcp object: Yes/No, "unknown" when the probe failed or compatible is null (not
+ * checked: Thread never ran on the C6 this boot), "-" without firmware. */
 function compatText(rcp) {
   if (!rcp || rcp.installed === null || rcp.installed === undefined)
     return 'unknown';
   if (rcp.installed === '')
     return '-';
+  if (rcp.compatible === null || rcp.compatible === undefined)
+    return 'unknown';
   return rcp.compatible ? 'Yes' : 'No';
 }
 

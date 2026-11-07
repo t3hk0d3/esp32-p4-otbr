@@ -194,6 +194,7 @@ static void set_compatible(bool compatible)
     }
     xSemaphoreTake(g_core.mutex, portMAX_DELAY);
     g_core.rcp_compatible = compatible;
+    g_core.rcp_compatible_known = true;
     xSemaphoreGive(g_core.mutex);
 }
 
@@ -552,6 +553,7 @@ esp_err_t core_c6_boot_steps(bool affects_mode)
     strlcpy(g_core.rcp_installed, probe.installed_version, sizeof(g_core.rcp_installed));
     if (affects_mode) {
         g_core.rcp_compatible = false;
+        g_core.rcp_compatible_known = false; // until OpenThread has judged this RCP
     }
     g_core.rom_recovery_failed = mode_fsm_next_recovery_failed(g_core.rom_recovery_failed,
                                                                probe.rom_recovery_failed || probe.rom_recovered, probe.rom_recovered);
@@ -769,6 +771,7 @@ static void get_status_brief(br_core_status_t *out, bool *ot_ready, bool *border
     strlcpy(out->rcp_installed, g_core.rcp_installed, sizeof(out->rcp_installed));
     out->rcp_installed_known = g_core.rcp_installed_known;
     out->rcp_compatible = g_core.rcp_compatible;
+    out->rcp_compatible_known = g_core.rcp_compatible_known;
     out->rom_recovery_failed = g_core.rom_recovery_failed;
     strlcpy(out->fault_reason, g_core.fault_reason, sizeof(out->fault_reason));
     *ot_ready = g_core.ot_ready && out->mode != BR_MODE_RADIO_FAULT;

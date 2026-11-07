@@ -550,6 +550,7 @@ class TestUxReview:
             ("{installed: '', compatible: false}", "-"),
             ("{installed: '2.1', compatible: false}", "No"),
             ("{installed: '2.1', compatible: true}", "Yes"),
+            ("{installed: '2.1', compatible: null}", "unknown"),
         ],
     )
     def test_compat_text(self, rcp, text):

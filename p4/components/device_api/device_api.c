@@ -368,6 +368,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     s->rcp_installed_known = bs.rcp_installed_known;
     s->rcp_installed = bs.rcp_installed;
     s->rcp_compatible = bs.rcp_compatible;
+    s->rcp_compatible_known = bs.rcp_compatible_known;
     s->jumper_present = rcp_sync_jumper_present();
     s->jumper_recovery_failed = bs.rom_recovery_failed;
     s->base_expected = base_expected;
