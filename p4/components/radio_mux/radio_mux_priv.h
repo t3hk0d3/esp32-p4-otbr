@@ -258,8 +258,8 @@ void mux_call_put(mux_call_t *call);
 
 /* ---- usb_transport.c ---- */
 
-// From the owner task (so the USB interrupt lands on MGMT_CORE): usb_host_install, the usb_lib task, the CDC driver
-// with its new-device callback.
+// From the owner task: the usb_lib task on NET_CORE, which runs usb_host_install there (so the USB interrupt lands on
+// NET_CORE), then the CDC driver (its task on NET_CORE too) with its new-device callback.
 esp_err_t usb_transport_start(void);
 // Opens `dev` (callbacks bound to `p`), then line coding at baud 8N1 with read-back, flow control (CP210x only) and
 // DTR+RTS asserted together once. The first open allocates the port's buffers (pool, discard, TX, ring) for good. On an error the device is closed and `err` says why; `err` may also hold a warning

@@ -10,7 +10,7 @@ Names are the FreeRTOS task names as reported in /device/diag tasks[].name:
 - httpd: esp_http_server (httpd_config_t.core_id, patch 1); thread_rest: upstream REST worker (patch 11)
 - diag, c6_log, pcap_stream, ota_http, radio_fw, rom_recover, radio_mux, radio_mux_c6, rcp_proxy, rcp_resolve, br_radio:
   our tasks, pinned in code
-- usb_lib, USB-CDC: the USB host daemon and the CDC driver task, pinned by radio_mux
+- usb_lib, USB-CDC: the USB host daemon and the CDC driver task, pinned to NET_CORE by radio_mux
 - console_repl: the console REPL (IDF esp_console_repl_chip.c:144; main/console.c pins it)
 Tasks that no knob pins (e.g. the Wi-Fi provisioning DNS task) and tasks outside the table are ignored.
 """
@@ -41,8 +41,8 @@ MANAGEMENT_TASKS = {
     "console_repl": MGMT_CORE,
     # Radio channel mux: the owner task and the USB host, started at every boot.
     "radio_mux": MGMT_CORE,
-    "usb_lib": MGMT_CORE,
-    "USB-CDC": MGMT_CORE,
+    "usb_lib": NET_CORE,  # the USB host daemon; it installs the host, so the USB interrupt is on NET_CORE too
+    "USB-CDC": NET_CORE,
     # RCP proxy (the rcp-proxy mode's sockets) and its name lookups, started at every boot.
     "rcp_proxy": MGMT_CORE,
     "rcp_resolve": MGMT_CORE,

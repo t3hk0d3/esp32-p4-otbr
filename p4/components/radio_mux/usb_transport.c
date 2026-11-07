@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "esp_private/cdc_host_common.h" // cdc_dev_t: the USB device a VCP open picked
 #include "radio_mux_priv.h"
@@ -186,11 +187,33 @@ static void event_cb(const cdc_acm_host_dev_event_data_t *event, void *ctx)
 
 /* ---- usb_lib task ---- */
 
-// The mux never stops the USB host: the task handles events for the life of the firmware.
+typedef struct {
+    SemaphoreHandle_t done;
+    esp_err_t err;
+} lib_start_t;
+
+// Installs the USB host from NET_CORE, so its interrupt is allocated there (esp_intr_alloc takes the calling core),
+// then handles the host's events for the life of the firmware (the mux never stops it). The USB interrupt starts each
+// queued bulk IN transfer: on MGMT_CORE, management code that masks interrupts (the chip temperature read changing its
+// range busy-waits ~600 us in a spinlock) held it off long enough for a CH340 at 460800 to overrun (hardware
+// 2026-11-07). NET_CORE carries the network path and the C6's transport already.
 static void lib_task(void *arg)
 {
+    lib_start_t *start = arg;
+    const usb_host_config_t host_cfg = {
+        .skip_phy_setup = false,
+        .intr_flags = ESP_INTR_FLAG_LOWMED,
+        // peripheral_map 0: the default, the High-Speed OTG peripheral (the console sits on the full-speed PHY)
+    };
     uint32_t flags;
 
+    start->err = usb_host_install(&host_cfg);
+    const bool up = start->err == ESP_OK;
+
+    xSemaphoreGive(start->done); // `start` is the caller's: not touched after this
+    if (!up) {
+        vTaskDelete(NULL);
+    }
     for (;;) {
         flags = 0;
         usb_host_lib_handle_events(pdMS_TO_TICKS(LIB_POLL_MS), &flags);
@@ -202,22 +225,21 @@ esp_err_t usb_transport_start(void)
     if (s_host_up) {
         return ESP_OK;
     }
-    const usb_host_config_t host_cfg = {
-        .skip_phy_setup = false,
-        .intr_flags = ESP_INTR_FLAG_LOWMED,
-        // peripheral_map 0: the default, the High-Speed OTG peripheral (the console sits on the full-speed PHY)
-    };
+    lib_start_t start = {.done = xSemaphoreCreateBinary(), .err = ESP_FAIL};
 
-    ESP_RETURN_ON_ERROR(usb_host_install(&host_cfg), TAG, "usb_host_install");
-    if (xTaskCreatePinnedToCore(lib_task, "usb_lib", LIB_TASK_STACK, NULL, LIB_TASK_PRIORITY, NULL, MGMT_CORE) !=
+    ESP_RETURN_ON_FALSE(start.done, ESP_ERR_NO_MEM, TAG, "usb_lib start semaphore");
+    if (xTaskCreatePinnedToCore(lib_task, "usb_lib", LIB_TASK_STACK, &start, LIB_TASK_PRIORITY, NULL, NET_CORE) !=
             pdPASS) {
-        usb_host_uninstall();
+        vSemaphoreDelete(start.done);
         return ESP_ERR_NO_MEM;
     }
+    xSemaphoreTake(start.done, portMAX_DELAY);
+    vSemaphoreDelete(start.done);
+    ESP_RETURN_ON_ERROR(start.err, TAG, "usb_host_install");
     const cdc_acm_host_driver_config_t cdc_cfg = {
         .driver_task_stack_size = CDC_TASK_STACK,
         .driver_task_priority = CDC_TASK_PRIORITY,
-        .xCoreID = MGMT_CORE,
+        .xCoreID = NET_CORE,
         .new_dev_cb = new_dev_cb,
     };
 
