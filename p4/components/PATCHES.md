@@ -437,6 +437,18 @@ the sequence above.
    CH34x status decision is host-tested in radio_mux (`radio_mux_ch34x_uart_error`).
    (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md; docs/radios.md, counter `uart_errors`)
 
+28. Applied (CH34x late answers, 2026-11-07). `usb_host_cdc_acm`: the bulk IN transfer keeps the length asked for at
+   open. `include/esp_private/cdc_host_common.h`: new field `data.in_xfer_len`; `cdc_acm_host.c`
+   `cdc_acm_transfers_allocate` sets it to the asked length rounded down to whole max packets (below one packet:
+   upstream's length from the allocated buffer) and uses it for the first submit; `cdc_acm_reset_in_transfer` uses it
+   instead of the allocated `data_buffer_size`. Reason: `urb_alloc` rounds transfer buffers up to the cache line (at
+   least 64 bytes on the P4), so a one-packet (32-byte) CH340 IN transfer became two packets after the first
+   completion. A bulk IN transfer completes only on a short packet or when full, and USB serial bridges send no ZLP:
+   a received burst ending on a packet boundary stayed in the transfer until the device sent again, which showed as
+   ~2 s late answers on the OllyZig (CH340) under Zigbee and rcp-proxy load. radio_mux's `usb_transport.c` asks for
+   one max packet (`in_buffer_size` 0), as Linux's usb-serial submits one max packet per URB. Host test: none (no USB
+   host mocks, see patch 27). (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md)
+
 ## Known upstream behaviour (not patches)
 
 - **`GET /api/node` and `/api/devices` can report a stale node** (`state: "disabled"`, `networkName: "OpenThread"`,

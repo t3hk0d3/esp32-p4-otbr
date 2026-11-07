@@ -42,6 +42,7 @@ struct cdc_dev_s {
         cdc_acm_data_callback_t in_cb;    // User's callback for async (non-blocking) data IN
         uint16_t in_mps;                  // IN endpoint Maximum Packet Size
         uint8_t *in_data_buffer_base;     // Pointer to IN data buffer in usb_transfer_t
+        size_t in_xfer_len;               // IN transfer length asked for (the buffer may be larger: cache alignment) [patch 28]
         const usb_intf_desc_t *intf_desc; // Pointer to data interface descriptor
         SemaphoreHandle_t out_mux;        // OUT mutex
         bool in_polling;                  // BULK IN poll transfer is submitted

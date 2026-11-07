@@ -117,10 +117,10 @@ static void cdc_acm_reset_in_transfer(cdc_dev_t *cdc_dev)
     usb_transfer_t *transfer = cdc_dev->data.in_xfer;
     uint8_t **ptr = (uint8_t **)(&(transfer->data_buffer));
     *ptr = cdc_dev->data.in_data_buffer_base;
-    transfer->num_bytes = transfer->data_buffer_size;
-    // This is a hotfix for IDF changes, where 'transfer->data_buffer_size' does not contain actual buffer length,
-    // but *allocated* buffer length, which can be larger if CONFIG_HEAP_POISONING_COMPREHENSIVE is enabled
-    transfer->num_bytes -= transfer->data_buffer_size % cdc_dev->data.in_mps;
+    // [patch 28] The length asked for at open, not the allocated buffer: urb_alloc rounds the buffer up to the cache
+    // line, and a longer transfer waits for more packets (a bridge sends no ZLP), holding a burst that ended on a
+    // packet boundary until the device sends again.
+    transfer->num_bytes = cdc_dev->data.in_xfer_len;
 }
 
 /**
@@ -601,6 +601,13 @@ static esp_err_t cdc_acm_transfers_allocate(cdc_dev_t *cdc_dev, const usb_ep_des
         cdc_dev->data.in_xfer->context = cdc_dev;
         cdc_dev->data.in_mps = USB_EP_DESC_GET_MPS(in_ep_desc);
         cdc_dev->data.in_data_buffer_base = cdc_dev->data.in_xfer->data_buffer;
+        // [patch 28] Whole packets of the length asked for; below one packet, upstream's length (the allocated buffer).
+        cdc_dev->data.in_xfer_len = in_buf_len - in_buf_len % cdc_dev->data.in_mps;
+        if (cdc_dev->data.in_xfer_len == 0) {
+            const size_t allocated = cdc_dev->data.in_xfer->data_buffer_size;
+            cdc_dev->data.in_xfer_len = allocated - allocated % cdc_dev->data.in_mps;
+        }
+        cdc_dev->data.in_xfer->num_bytes = cdc_dev->data.in_xfer_len;
     }
 
     // 4. Setup OUT bulk transfer (if it is required (out_buf_len > 0))
