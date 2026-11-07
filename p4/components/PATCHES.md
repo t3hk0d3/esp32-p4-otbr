@@ -334,13 +334,44 @@ reason, spec reference.
    helpers); the page keeps `update:after` (`{rcpFailed}`) next to `ota:before` across the reload and reports through
    `updMsg`. The manual Install buttons (`otaInstall`, `rcpInstall`) are `btn-outline`. `style.css`: `.facts .was`.
    Tests: `tools/tests/test_firmware_page.py` (`TestUpdateLogic`, `TestUpdatesCard`).
+28. Applied (USB serial proxy, Task 4). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 27 -> 29 (before the self-update merge).
+   `device_api` adds `GET`/`PUT /device/usb_serial`: 27 routes plus the catch-all, one slot of headroom (those two routes
+   are gone again in patch 29).
+   (docs/superpowers/specs/2026-11-05-usb-serial-proxy-design.md)
+29. Applied (radio channel mux, Task 8). `esp_ot_br_server`: the board mode `NO_RADIO` (no radio channel in otbr is
+   present) in the REST guard. `src/esp_br_guard.c`: `READ` and `THREAD_OP` answer 503 in `NO_RADIO` whatever the
+   ready flag says (it may lag while OpenThread is torn down after an unplug); `esp_br_guard_detail(status, mode)`
+   takes the mode and says `no radio in OTBR mode` for 503 in `NO_RADIO` (`radio not available` otherwise, as before).
+   Call sites: `src/esp_br_web.c` (the Thread REST dispatcher reads the mode once for the check and the detail;
+   `guard_refuse_gui` and `guard_refuse_resource` use the guard's detail, the resource format no longer hard-codes
+   it) and `src/esp_br_web_api.c` (`esp_br_thread_rest_request`). `EXTRA_HANDLER_SLOTS` 29 -> 30: `device_api` drops
+   `GET`/`PUT /device/usb_serial` (patch 28) and adds `GET /device/channels`, `PUT` and `DELETE /device/channels/*`:
+   28 routes (the console WebSocket included) plus the catch-all, one slot of headroom. The console WebSocket
+   (`device_api`, not vendored) answers its handshake with 503 `no radio in OTBR mode` in `NO_RADIO` as well. Host
+   tests: `test_host/` (NO_RADIO cases) and `tests/test_rest.c` `test_guard_no_radio`.
+   Task 9 (web UI): new `frontend/radios.html` and `frontend/static/radios.js` (the Radios page: channel table,
+   configure dialog, mode cards, move of Thread); `frontend/static/api.js` builds the regrouped navigation (Dashboard,
+   Thread, an empty hidden `<li id="nav-slot-zigbee">`, Device with Radios first, About) and hides the Thread menu
+   while `/device/status` has `otbr_channel` null; `frontend/static/device_common.js` gains `threadState`,
+   `threadNotice` and the kit's `renderThreadNotice`/`watchThread`; `status.js` (chip "Thread runs on", notice),
+   `mgmt.js` (mode banner), `routing.js`, `topology.js`, `capture.js` and their pages (`#threadNotice`) show the
+   "no radio in OTBR mode" notice; `index.html` text and chip; `static/style.css` appends the Radios classes.
+   Final review fixes: `radios.js` shows a proxy in backoff as a warning with its `last_error`, names `port_taken`,
+   sets a radio that runs `rcp-proxy` off before it takes Thread, and follows a 202 for a start ("Starting Thread on")
+   and a stop of Thread ("Stopping Thread on", then stopped or refused with the reason); `status.js` has a
+   `NO_RADIO` hero linking the Radios page, and the `RADIO_FAULT` hero links Radios instead of Firmware while Thread's
+   radio is a dongle.
+   (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md, sections Board mode and API)
+   Merged with self-update (patch 26, which took `EXTRA_HANDLER_SLOTS` to 30 for `/device/update`): `device_api` now has
+   31 routes (the console WebSocket included) plus the catch-all, so `EXTRA_HANDLER_SLOTS` is 34, two slots of headroom.
 
 ### REST guard classification (patches 2 and 9)
 
 Classes: `NONE` no OpenThread access, always served. `READ` reads OpenThread state: 200 while OpenThread runs (patch 9
 ready flag), 503 otherwise (RADIO_FAULT/STARTING before OpenThread is up, SNIFFER: `br_core` switches the flag off while
 Thread is stopped, so Thread state reads answer 503 there). `THREAD_OP` changes Thread/dataset state or needs the radio:
-only in BR_RUNNING with OpenThread ready; SNIFFER 409, RADIO_FAULT/STARTING 503. THREAD_OP is checked twice: lock-free
+only in BR_RUNNING with OpenThread ready; SNIFFER 409, RADIO_FAULT/STARTING 503. NO_RADIO (patch 29): every `READ`
+and `THREAD_OP` endpoint below answers 503 `no radio in OTBR mode`, as in the RADIO_FAULT / STARTING column. THREAD_OP is checked twice: lock-free
 first (no lock exists before OpenThread is up), then while holding the OpenThread lock where the OpenThread call
 happens.
 
@@ -363,6 +394,126 @@ waiting for the leader (upstream); a sniffer started in that window completes th
 `/*` static file handler and the OPTIONS/404/405 replies of the dispatcher do not touch OpenThread and are not guarded.
 Host tests: `test_host/` (decision table) and `tests/test_rest.c` (dispatcher, run with `tools/run_vendored_rest_tests.sh`);
 target tests: `p4/pytest/test_rest_guard.py`, `test_br_boot.py::test_radio_fault_web_gui_api_answers_503`.
+
+## Generated ESP-IDF copies
+
+`tools/ot_radio_port.cmake` (radio channel mux, Task 7) generates `p4/build/ot_port_components/openthread` at every
+configure, and that component overrides ESP-IDF's `openthread` (`EXTRA_COMPONENT_DIRS`). It holds symlinks to IDF's
+`components/openthread` (v6.1), a real `src/port` and `include` with symlinks to IDF's files plus the project's
+`p4/ot_port/mux_spinel_interface.cpp`, `mux_spinel_interface.hpp`, `mux_gone_answer.{c,h}` (the answers after GONE,
+host-tested in `p4/ot_port/test_host`), `esp_openthread_mux.h` and radio_mux's header-only
+`radio_mux_spinel_uint.h` (the spinel packed-uint codec `mux_gone_answer.c` includes), and two patched copies.
+Each replaced text is looked up with `string(FIND)` first; a text that is not there any more (an IDF update) stops the
+configure with a `FATAL_ERROR` naming the IDF file. Kconfig stays `CONFIG_OPENTHREAD_RADIO_SPINEL_SPI`; the IDF tree is
+not touched. Upstream path: a runtime "custom spinel interface" radio mode with per-interface caps (spec section 5).
+
+- `src/port/esp_openthread_radio_spinel.cpp`:
+  1. After `#include "esp_spi_spinel_interface.hpp"`: `#include "mux_spinel_interface.hpp"`.
+  2. `using esp::openthread::SpiSpinelInterface;` and `static SpinelInterfaceAdapter<SpiSpinelInterface>
+     s_spinel_interface;` become the same with `MuxSpinelInterface`. The concrete-only calls of the port (`Enable` with
+     the SPI config, `AfterRadioInit`, `Disable`, `RegisterRcpFailureHandler`) exist on `MuxSpinelInterface` with the
+     same signatures (the SPI config is ignored: the channel comes from `esp_openthread_mux_set`), so no call site
+     changes.
+  3. The `s_radio_caps` initializer (energy scan, rx-on-when-idle under `CONFIG_OPENTHREAD_RX_ON_WHEN_IDLE`, tx
+     security, rx timing, tx timing, ack timeout, sleep-to-tx, CSMA backoff, tx retries) becomes the caps required from
+     the RCP by the Global Constraints: ack timeout, tx retries, CSMA backoff, tx security, tx timing (the ot-br-posix
+     set for Thread 1.2+). The C6 RCP passes as before; a CC2652P RCP (Koenkk 2025.3.1, caps 0x7f: no rx timing, no
+     rx-on-when-idle) now passes. OpenThread still uses every cap the RCP reports (`otPlatRadioGetCaps`).
+  4. `otPlatRadioGetCaps`: `s_radio_caps = s_radio.GetRadioCaps(); return s_radio_caps;` becomes `return
+     s_radio.GetRadioCaps();`. Upstream assigns the running RCP's caps to the static, so the next `esp_openthread_init`
+     (OpenThread started again on another channel after a move) would require the previous RCP's caps: a move from the
+     C6 to a CC2652P would fail `CheckRadioCapabilities`.
+- `CMakeLists.txt`: the `git rev-parse` for `IDF_VERSION_FOR_OPENTHREAD_PACKAGE` runs in IDF's component directory
+  instead of `${CMAKE_CURRENT_SOURCE_DIR}` (the generated directory lies in this repository, so the package version
+  would show this repository's commit).
+
+## usb_host_cdc_acm
+
+Vendored from:
+
+- Component: `espressif/usb_host_cdc_acm` 2.4.1 (ESP Component Registry; esp-usb commit
+  `eb0f02163be96dfc753cf43d1207329e44f1ca60`, `host/class/cdc/usb_host_cdc_acm`), component hash
+  `5bc1372b46de79ccae1dd17de48e30dfa1e8ab75269c2ebf54da01370f9e42fb`.
+- Copied unchanged from the managed component the build resolved (every file matched the archive's `CHECKSUMS.json`;
+  that file and `.component_hash` are left out) to `p4/components/usb_host_cdc_acm`.
+- `override_path` in `p4/components/radio_mux/idf_component.yml` makes every user (radio_mux, `usb_host_ch34x_vcp`
+  2.2.1, `usb_host_cp210x_vcp` 2.2.0, `esp-serial-flasher`) build this copy; `p4/dependencies.lock` lists it as a
+  `local` source and no `espressif__usb_host_cdc_acm` is downloaded.
+
+Same rules as above: upstream formatting, excluded from pre-commit, every change listed here. Patch numbers continue
+the sequence above.
+
+30. Applied (CH34x status packets, 2026-11-07). `usb_host_cdc_acm`: packets on the notification endpoint that are not
+   CDC notifications. `cdc_acm_host.c` `notif_xfer_cb`: a packet whose first byte (bmRequestType) is not
+   `CDC_NOTIF_BM_REQUEST_TYPE` (0xA1, new in `include/usb/usb_types_cdc.h`), or an empty one, is passed to the user's
+   event callback as the new event `CDC_ACM_HOST_VENDOR_NOTIFICATION` (`include/usb/cdc_host_types.h`: appended to
+   `cdc_acm_host_dev_event_t` after the suspend/resume values, so no upstream value moves; union member
+   `vendor_notification {const uint8_t *data; size_t len;}`, valid only during the callback; `<stddef.h>` included for
+   `size_t`), with no warning and no hex dump; the INTR IN poll is resubmitted as before. Reason: the CH34x driver
+   (`usb_host_ch34x_vcp` 2.2.1) opens the CH340 through `cdc_acm_host_open`, so its 4-byte vendor status packets
+   (`20 ff 0f aa` ...) were read as CDC notifications with code 0xFF and logged with a hex dump, 3-10 per second under
+   traffic, on the CDC driver task that also runs the bulk IN callback: on the 115200 baud console that delayed the bulk
+   IN resubmit while the dongle kept sending at 460800. radio_mux's `usb_transport.c` counts the CH34x's UART errors
+   from these packets. Host test: none here (upstream's `host_test` needs the esp-usb tree's USB host mocks); the
+   CH34x status decision is host-tested in radio_mux (`radio_mux_ch34x_uart_error`).
+   (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md; docs/radios.md, counter `uart_errors`)
+
+31. Applied (CH34x late answers, 2026-11-07). `usb_host_cdc_acm`: the bulk IN transfer keeps the length asked for at
+   open. `include/esp_private/cdc_host_common.h`: new field `data.in_xfer_len`; `cdc_acm_host.c`
+   `cdc_acm_transfers_allocate` sets it to the asked length rounded down to whole max packets (below one packet:
+   upstream's length from the allocated buffer) and uses it for the first submit; `cdc_acm_reset_in_transfer` uses it
+   instead of the allocated `data_buffer_size`. Reason: `urb_alloc` rounds transfer buffers up to the cache line (at
+   least 64 bytes on the P4), so a one-packet (32-byte) CH340 IN transfer became two packets after the first
+   completion. A bulk IN transfer completes only on a short packet or when full, and USB serial bridges send no ZLP:
+   a received burst ending on a packet boundary stayed in the transfer until the device sent again, which showed as
+   ~2 s late answers on the OllyZig (CH340) under Zigbee and rcp-proxy load. radio_mux's `usb_transport.c` asks for
+   one max packet (`in_buffer_size` 0). Linux's usb-serial also reads one max packet per URB, but keeps two read URBs
+   in flight, so the bridge always has a transfer to complete into; this driver has one IN transfer in flight, so
+   every packet now waits for a software turnaround (completion, `data_cb`, resubmit) that the bridge's receive FIFO
+   must cover. Not measured under a sustained stream yet (docs/radios.md, "Verifying on a board"); if `uart_errors`
+   or `drops` move there, the fallback is a longer transfer only for devices known to send ZLPs, or a second IN
+   transfer here. Below one packet (`0 < in_buf_len < MPS` with a buffer still under one MPS after the cache-line
+   rounding, for example an HS device with MPS 512 asked for 100 bytes) `in_xfer_len` comes out 0 and a zero-length
+   IN is submitted, as upstream also did; this project never asks for that (it passes 0). Upstream's `host_test` that
+   opens with `in_buffer_size = 100` (`test_device_interaction.cpp`) would now expect a first submit of 64 bytes, not
+   100: adjust it if that test is ever revived here. Host test: none (no USB host mocks, see patch 30).
+   (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md)
+
+32. Applied (CH34x UART overrun, 2026-11-07). `usb_host_cdc_acm`: `CDC_ACM_IN_XFERS` (8) bulk IN transfers in flight
+   per device. `include/esp_private/cdc_host_common.h`: new `CDC_ACM_IN_XFERS`; `data.in_xfer`,
+   `data.in_data_buffer_base` and `data.in_polling` become arrays of that size (`in_xfer_len` and `in_mps` stay shared:
+   the transfers are allocated alike). `cdc_acm_host.c`: `cdc_acm_transfers_allocate` allocates each transfer (patch
+   28's length for all; a failed allocation frees the ones before it); `cdc_acm_transfers_free` frees each;
+   `cdc_acm_reset_in_transfer` takes the transfer's index; the new `cdc_acm_submit_in_polls` submits every transfer not
+   already polling, in index order, from `cdc_acm_start` and `cdc_acm_resume`; `cdc_acm_suspend_polling` and
+   `cdc_acm_host_close` clear every `in_polling` flag, and close halts, flushes and clears the shared endpoint once
+   (that retires every transfer on it); `in_xfer_cb` finds the transfer's index, calls `data_cb`, resets that transfer
+   and resubmits it, so it queues behind the other one. Order: the USB host queues a pipe's URBs FIFO
+   (`hcd_dwc.c` `hcd_urb_enqueue` appends to `pending_urb_tailq`; the HCD's two DMA buffers execute and retire in
+   order, the next buffer starting in the ISR as the previous completes, into `done_urb_tailq`), and
+   `usb_host.c` `_handle_pending_ep` dequeues them in that order and runs each callback to its end on the CDC driver
+   task (`usb_host_client_handle_events`), so `data_cb` sees the data in arrival order, one call at a time; the
+   resubmit inside the callback goes behind the transfer still in flight. "Data not processed" (`data_cb` returning
+   false): upstream appends the next data into the same buffer (not on the P4: `SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE`
+   only warns there); with more than one transfer the next data already lands in another transfer, so it is treated
+   as processed, with one `ESP_LOGW` per boot; with `CDC_ACM_IN_XFERS` 1 the upstream code is compiled unchanged.
+   radio_mux's `data_cb` always returns true; the ch34x and cp210x VCP drivers pass the user's callback through.
+   Memory: seven more transfers per open device (one max packet each, a 64-byte DMA buffer after the cache-line
+   rounding: 448 bytes).
+   Reason: on the board (CH340 OllyZig at 460800, sustained Zigbee load, 6 minutes) the single 32-byte IN transfer of
+   patch 31 left the CH340 nothing to complete into between a completion and the resubmit (46 bytes/ms at 460800):
+   the channel counted `uart_errors` 9 (the CH340's own UART receive-error/overrun bit, patch 30) and `rx_errors` 5
+   (bad HDLC frames). Linux's usb-serial keeps two one-MPS read URBs in flight (generic driver, `bulk_in_urbs[2]`);
+   two were not enough here. Measured on the board (rcp-proxy over TCP, frame mode, 2 minutes of pipelined spinel
+   requests, 8 per burst, ~15-29 KB/s from the dongle): with 2 transfers 23453 of 23472 replies, 19 with a bad FCS,
+   `uart_errors` 38; with 8 transfers 44808 of 44808, none bad, `uart_errors` 0, at twice the throughput. Linux
+   completes URBs in interrupt context; here the callbacks run on the CDC driver task (priority 7, below lwIP's 18),
+   so the queue must cover its scheduling delay: 8 one-packet transfers are ~5.5 ms at 460800 on a CH340. (Bursts of
+   60 pipelined requests still lose replies, but on the dongle's side: the RCP drops requests it cannot take, with
+   no flow control, and the board counts no error.) Errors: a transfer that fails (stall, error) is not resubmitted, as upstream; the endpoint flush
+   then returns the other one as well (cancelled, no resubmit), and the user may see one `CDC_ACM_HOST_ERROR` per
+   transfer. Upstream's `host_test` fixtures (`common_test_fixtures.cpp`) still use the single `data.in_xfer` and expect
+   one IN submit: adjust them if that test is ever revived here. Host test: none (no USB host mocks, see patch 30).
 
 ## Known upstream behaviour (not patches)
 

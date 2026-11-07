@@ -13,6 +13,8 @@ const char *device_api_mode_name(int mode)
         return "SNIFFER";
     case BR_MODE_RADIO_FAULT:
         return "RADIO_FAULT";
+    case BR_MODE_NO_RADIO:
+        return "NO_RADIO";
     default:
         return "UNKNOWN";
     }
@@ -143,7 +145,11 @@ int device_api_status_json(char *buf, size_t cap, const device_api_status_t *s)
     json_out_raw(&w, "},\"rcp\":{\"installed\":");
     json_out_str(&w, s->rcp_installed_known ? s->rcp_installed : NULL);
     json_out_raw(&w, ",\"compatible\":");
-    json_out_bool(&w, s->rcp_compatible);
+    if (s->rcp_compatible_known) {
+        json_out_bool(&w, s->rcp_compatible);
+    } else {
+        json_out_raw(&w, "null");
+    }
     json_out_raw(&w, "},\"jumper\":{\"present\":");
     json_out_bool(&w, s->jumper_present);
     json_out_raw(&w, ",\"base_expected\":");
@@ -187,6 +193,8 @@ int device_api_status_json(char *buf, size_t cap, const device_api_status_t *s)
     json_out_bool(&w, s->storage_ok);
     json_out_raw(&w, ",\"trel\":");
     trel_json(&w, &s->trel);
+    json_out_raw(&w, ",\"otbr_channel\":");
+    str_or_null(&w, s->otbr_channel);
     json_out_raw(&w, "}");
     return w.overflow ? -1 : (int)w.len;
 }

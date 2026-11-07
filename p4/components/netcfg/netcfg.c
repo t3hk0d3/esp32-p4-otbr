@@ -218,6 +218,78 @@ bool netcfg_request_allowed(httpd_req_t *req, netcfg_service_t svc)
     return false;
 }
 
+#define SOCKET_LOCK_WAIT_MS 100 /* the interface lookup is short; a longer wait means a trial is being applied */
+
+// Logs why netcfg_policy_conn_allowed refused `what`, and returns its verdict.
+static bool conn_verdict(const char *what, netcfg_mode_t mode, bool found, netcfg_side_t side, bool on_mesh,
+                         netcfg_service_t svc)
+{
+    if (netcfg_policy_conn_allowed(mode, found, side, on_mesh, svc)) {
+        return true;
+    }
+    if (on_mesh) {
+        ESP_LOGW(TAG, "refused %s on a mesh address", what);
+    } else if (!found) {
+        ESP_LOGW(TAG, "refused %s: its interface is unknown", what);
+    } else {
+        ESP_LOGW(TAG, "refused %s: service not available on this interface", what);
+    }
+    return false;
+}
+
+// The interface lookup of netcfg_socket_allowed (socket_side: by a socket's local address) or netcfg_peer_allowed
+// (peer_side: by the route to a peer address).
+typedef bool (*side_lookup_fn)(const void *what, netcfg_side_t *side, bool *on_mesh);
+
+// The lookup under the netcfg lock (at most SOCKET_LOCK_WAIT_MS; refused when it cannot get it), then the verdict;
+// `noun` names the refused thing in the log ("a connection", "a source").
+static bool lookup_allowed(side_lookup_fn side_of, const void *what, const char *noun, netcfg_service_t svc)
+{
+    netcfg_side_t side = NETCFG_SIDE_MGMT;
+    bool on_mesh = false;
+    bool found;
+    netcfg_mode_t mode;
+
+    if (s.ready) {
+        if (xSemaphoreTake(s.lock, pdMS_TO_TICKS(SOCKET_LOCK_WAIT_MS)) != pdTRUE) {
+            ESP_LOGW(TAG, "refused %s: the interface lookup did not get the lock in %d ms", noun, SOCKET_LOCK_WAIT_MS);
+            return false;
+        }
+        mode = netcfg_ifaces_mode();
+        found = side_of(what, &side, &on_mesh);
+        xSemaphoreGive(s.lock);
+    } else { /* netcfg not started: no lock, no split mode, only the mesh rule applies */
+        mode = NETCFG_MODE_SINGLE;
+        found = side_of(what, &side, &on_mesh);
+    }
+    return conn_verdict(noun, mode, found, side, on_mesh, svc);
+}
+
+static bool socket_side(const void *what, netcfg_side_t *side, bool *on_mesh)
+{
+    return netcfg_ifaces_socket_side(*(const int *)what, side, on_mesh);
+}
+
+static bool peer_side(const void *what, netcfg_side_t *side, bool *on_mesh)
+{
+    return netcfg_ifaces_peer_side(what, side, on_mesh);
+}
+
+bool netcfg_socket_allowed(int fd, netcfg_service_t svc)
+{
+    return lookup_allowed(socket_side, &fd, "a connection", svc);
+}
+
+bool netcfg_peer_allowed_as(const struct sockaddr *peer, netcfg_service_t svc, const char *noun)
+{
+    return lookup_allowed(peer_side, peer, noun, svc);
+}
+
+bool netcfg_peer_allowed(const struct sockaddr *peer, netcfg_service_t svc)
+{
+    return netcfg_peer_allowed_as(peer, svc, "a source");
+}
+
 esp_err_t netcfg_set_trial(const netcfg_config_t *cfg)
 {
     ESP_RETURN_ON_FALSE(s.ready, ESP_ERR_INVALID_STATE, TAG, "not started");

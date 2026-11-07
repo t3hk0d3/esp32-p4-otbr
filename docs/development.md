@@ -28,6 +28,10 @@ change to them and the link-time mDNS filter for `espressif/mdns` is listed in
 [`p4/components/PATCHES.md`](../p4/components/PATCHES.md) (patches 1 to 21; 4 and 6 were not applied, 13 is the mDNS
 filter), together with the REST guard table (which endpoint answers 409 or 503 in which mode). They stay under Apache-2.0.
 
+`usb_host_cdc_acm` is `espressif/usb_host_cdc_acm` 2.4.1 from the component registry, vendored so the radio mux can
+patch it; `override_path` in `p4/components/radio_mux/idf_component.yml` makes every user of the component (the CH34x
+and CP210x drivers, esp-serial-flasher) build this copy. Its changes are in the same `PATCHES.md`.
+
 ## sdkconfig
 
 `p4/sdkconfig` (like the C6 projects' `sdkconfig`) is generated from `sdkconfig.defaults` and not tracked. ESP-IDF

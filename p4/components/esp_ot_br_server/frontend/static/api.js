@@ -116,42 +116,85 @@ function showLoading(show) {
     o.classList.remove('active');
 }
 
-/* Build navigation bar and highlight current page. */
+/*
+ * Build navigation bar and highlight current page. Top bar: Dashboard, Thread, [Zigbee slot], Device, About. The slot
+ * is an empty hidden <li id="nav-slot-zigbee">: the Zigbee link is put into it by id. The Thread menu is hidden while
+ * no radio is in Thread border router mode (GET /device/status otbr_channel null); the last answer is remembered
+ * in sessionStorage so the menu does not flash on the next page.
+ */
 (function() {
 var pages = [
   {href : '/index.html', label : 'Dashboard'}, {
-    label : 'Management',
+    id : 'nav-thread',
+    label : 'Thread',
     children : [
       {href : '/network.html', label : 'Network'},
+      {href : '/topology.html', label : 'Topology'},
+      {href : '/routing.html', label : 'Routing'},
       {href : '/commission.html', label : 'Commissioner'},
       {href : '/addresses.html', label : 'Addresses'},
       {href : '/tools.html', label : 'Tools'},
       {href : '/console.html', label : 'Console'}
     ]
   },
-  {href : '/topology.html', label : 'Topology'},
-  {
+  {slot : 'nav-slot-zigbee'}, {
     label : 'Device',
     children : [
+      {href : '/radios.html', label : 'Radios'},
       {href : '/ethernet.html', label : 'Ethernet'},
-      {href : '/routing.html', label : 'Routing'},
       {href : '/firmware.html', label : 'Firmware'},
-      {href : '/capture.html', label : 'Packet capture'},
-      {href : '/diagnostics.html', label : 'Diagnostics'}
+      {href : '/diagnostics.html', label : 'Diagnostics'},
+      {href : '/capture.html', label : 'Packet capture'}
     ]
   },
   {href : '/about.html', label : 'About'}
 ];
+var HIDE_KEY = 'navThreadHidden';
+
+/* Shows or hides the Thread menu (also called by the Radios page after a change). */
+function setThreadMenuHidden(hidden) {
+  var li = document.getElementById('nav-thread');
+  if (li)
+    li.hidden = hidden;
+  try {
+    sessionStorage.setItem(HIDE_KEY, hidden ? '1' : '0');
+  } catch (e) {
+  }
+}
+if (typeof window !== 'undefined')
+  window.navSetThreadMenuHidden = setThreadMenuHidden;
+
+/* Asks the board once; no answer, or a board without otbr_channel, leaves the menu as it is. */
+function watchThreadMenu() {
+  if (typeof fetch !== 'function')
+    return;
+  fetch('/device/status')
+      .then(function(r) { return r.ok ? r.text() : null; })
+      .then(function(text) {
+        var s = text ? JSON.parse(text) : null;
+        if (s && s.otbr_channel !== undefined)
+          setThreadMenuHidden(s.otbr_channel === null);
+      })
+      .catch(function() {});
+}
 var nav = document.getElementById('nav');
 if (!nav)
   return;
 var p = location.pathname;
 
+var threadHidden = false;
+try {
+  threadHidden = sessionStorage.getItem(HIDE_KEY) === '1';
+} catch (e) {
+}
+
 var html =
     '<a href="/" class="nav-brand"><img src="/favicon.ico" width="22" height="22" alt=""> Thread Border Router</a><ul class="nav-links">';
 for (var i = 0; i < pages.length; i++) {
   var pg = pages[i];
-  if (pg.children) {
+  if (pg.slot) {
+    html += '<li id="' + pg.slot + '" hidden></li>';
+  } else if (pg.children) {
     /* Check if any child is active */
     var childActive = false;
     for (var c = 0; c < pg.children.length; c++) {
@@ -160,7 +203,8 @@ for (var i = 0; i < pages.length; i++) {
         break;
       }
     }
-    html += '<li class="nav-dropdown">';
+    html += '<li class="nav-dropdown"' + (pg.id ? ' id="' + pg.id + '"' : '') +
+            (pg.id && threadHidden ? ' hidden' : '') + '>';
     html += '<a href="#" aria-haspopup="true" aria-expanded="false" class="nav-dropdown-toggle' +
             (childActive ? ' active' : '') + '">' + pg.label + '</a>';
     html += '<ul class="nav-dropdown-menu">';
@@ -181,6 +225,7 @@ for (var i = 0; i < pages.length; i++) {
 }
 html += '</ul>';
 nav.innerHTML = html;
+watchThreadMenu();
 
 /* A tap opens a menu too (touch screens have no hover); a tap elsewhere closes it. */
 if (!nav.querySelectorAll)

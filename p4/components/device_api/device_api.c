@@ -30,6 +30,7 @@
 #include "board.h"
 #include "driver/gpio.h"
 #endif
+#include "channels_json.h"
 #include "device_api_priv.h"
 #include "diag_handler.h"
 #include "mesh_scan.h"
@@ -46,7 +47,10 @@
 #include "ot_console.h"
 #include "thread_json.h"
 #include "netnames.h"
+#include "radio_mux.h"
+#include "rcp_proxy.h"
 #include "rcp_sync.h"
+#include "reboot_gate.h"
 #include "routing.h"
 #include "sniffer.h"
 
@@ -372,6 +376,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     s->rcp_installed_known = bs.rcp_installed_known;
     s->rcp_installed = bs.rcp_installed;
     s->rcp_compatible = bs.rcp_compatible;
+    s->rcp_compatible_known = bs.rcp_compatible_known;
     s->jumper_present = rcp_sync_jumper_present();
     s->jumper_recovery_failed = bs.rom_recovery_failed;
     s->base_expected = base_expected;
@@ -388,6 +393,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     s->sniffer_duration_s = ss.duration_s;
     s->fault_reason = bs.fault_reason;
     s->storage_ok = !bs.storage_degraded;
+    s->otbr_channel = bs.otbr_channel;
     fill_routing(s);
     fill_trel(&s->trel);
 
@@ -1978,6 +1984,258 @@ static esp_err_t thread_put_handler(httpd_req_t *req)
     return send_json(req, body);
 }
 
+/* ---- /device/channels (spec 2026-11-06 radio channel mux, section API) ---- */
+
+#define CHANNELS_PREFIX "/device/channels/"
+
+// The OTBR channel's id ("" for none), copied out of the mux.
+static void otbr_channel_id(char out[RADIO_MUX_ID_MAX])
+{
+    radio_mux_otbr_channel(out, RADIO_MUX_ID_MAX);
+}
+
+// What the mux leaves to device_api: the proxy's state, peer and last error of channels in rcp-proxy, and the board's
+// view of the OTBR channel (OpenThread failed or still starting on a channel the mux lists running, a refused stop).
+static void fill_channels(radio_mux_snapshot_t *s)
+{
+    char refused_id[RADIO_MUX_ID_MAX];
+    char refused_reason[RADIO_MUX_REASON_MAX];
+    br_core_status_t bs;
+
+    for (size_t i = 0; i < s->n; i++) {
+        radio_mux_chan_info_t *c = &s->chans[i];
+        rcp_proxy_status_t ps;
+
+        if (c->mode == RADIO_MUX_MODE_RCP_PROXY && rcp_proxy_get_status(c->id, &ps) == ESP_OK) {
+            c->proxy_state = ps.state; // a static string
+            strlcpy(c->proxy_peer, ps.peer, sizeof(c->proxy_peer));
+            strlcpy(c->proxy_last_error, ps.last_error, sizeof(c->proxy_last_error));
+        }
+    }
+    br_core_get_status_brief(&bs); // mode, fault reason and the otbr channel; never the OpenThread lock
+    const bool refused = br_core_otbr_refusal(refused_id, sizeof(refused_id), refused_reason, sizeof(refused_reason));
+    const device_api_board_view_t b = {
+        .otbr_id = bs.otbr_channel[0] ? bs.otbr_channel : NULL,
+        .mode = bs.mode,
+        .fault_reason = bs.fault_reason,
+        .moving = br_core_move_running(),
+        .refused_id = refused ? refused_id : NULL,
+        .refused_reason = refused_reason,
+    };
+
+    device_api_channels_overlay_board(s, &b);
+}
+
+static const radio_mux_chan_info_t *find_channel(const radio_mux_snapshot_t *s, const char *id)
+{
+    for (size_t i = 0; i < s->n; i++) {
+        if (strcmp(s->chans[i].id, id) == 0) {
+            return &s->chans[i];
+        }
+    }
+    return NULL;
+}
+
+static esp_err_t channels_get_handler(httpd_req_t *req)
+{
+    radio_mux_snapshot_t *s = malloc(sizeof(*s));
+    char *body = malloc(DEVICE_API_CHANNELS_BODY_MAX);
+    esp_err_t err;
+
+    if (!s || !body) {
+        err = send_error(req, 500, "no_memory", "out of memory", false);
+    } else {
+        radio_mux_get_snapshot(s);
+        fill_channels(s);
+        err = device_api_channels_json(body, DEVICE_API_CHANNELS_BODY_MAX, s) < 0
+              ? send_error(req, 500, "internal", "the reply does not fit its buffer", false) : send_json(req, body);
+    }
+    free(s);
+    free(body);
+    return err;
+}
+
+// The id after CHANNELS_PREFIX (the wildcard route), without a query; false when empty or longer than an id can be.
+static bool channel_id_from_uri(httpd_req_t *req, char id[RADIO_MUX_ID_MAX])
+{
+    const char *p = req->uri + strlen(CHANNELS_PREFIX);
+    const size_t n = strcspn(p, "?#");
+
+    if (strncmp(req->uri, CHANNELS_PREFIX, strlen(CHANNELS_PREFIX)) != 0 || n == 0 || n >= RADIO_MUX_ID_MAX) {
+        return false;
+    }
+    memcpy(id, p, n);
+    id[n] = '\0';
+    return true;
+}
+
+// The 200 reply: the channel as it is after the change (proxy and board state filled in), "reboot" when it reboots.
+static esp_err_t send_channel(httpd_req_t *req, radio_mux_snapshot_t *s, const char *id, bool reboot)
+{
+    char *body = malloc(DEVICE_API_CHANNEL_BODY_MAX);
+    esp_err_t err;
+
+    radio_mux_get_snapshot(s);
+    fill_channels(s);
+    const radio_mux_chan_info_t *c = find_channel(s, id);
+
+    if (!body) {
+        err = send_error(req, 500, "no_memory", "out of memory", false);
+    } else if (!c) { // forgotten in between: the change was made, but there is nothing to show
+        err = send_error(req, 404, "unknown_channel", "no radio with this id", false);
+    } else if (device_api_channel_json(body, DEVICE_API_CHANNEL_BODY_MAX, c, reboot) < 0) {
+        err = send_error(req, 500, "internal", "the reply does not fit its buffer", false);
+    } else {
+        err = send_json(req, body);
+    }
+    free(body);
+    return err;
+}
+
+// Validates against the stored settings, takes the long-operation slot for a move, applies through the mux, kicks the
+// proxy's peer or retries OpenThread's start when asked, and replies. `s` is a scratch snapshot.
+static esp_err_t channel_apply(httpd_req_t *req, radio_mux_snapshot_t *s, const char *id,
+                               const radio_mux_set_req_t *set)
+{
+    char otbr[RADIO_MUX_ID_MAX];
+    char moved_from[RADIO_MUX_ID_MAX] = "";
+    char reason[RADIO_MUX_REASON_MAX] = "";
+
+    radio_mux_get_snapshot(s);
+    const radio_mux_chan_info_t *c = find_channel(s, id);
+
+    if (!c) {
+        return send_error(req, 404, "unknown_channel", "no radio with this id", false);
+    }
+    const char *bad = device_api_channel_proxy_refusal(&c->proxy, set);
+
+    if (bad) {
+        return send_error(req, 400, "bad_value", bad, false);
+    }
+    otbr_channel_id(otbr);
+    const char *mixed = device_api_channel_move_refusal(set, id, otbr[0] ? otbr : NULL);
+
+    if (mixed) { // before port_taken: settings that go with a start, move or stop are never stored
+        return send_error(req, 400, "bad_value", mixed, false);
+    }
+    const char *taken_by = device_api_channel_port_conflict(s, id, set);
+
+    if (taken_by) {
+        char detail[RADIO_MUX_REASON_MAX + RADIO_MUX_ID_MAX];
+        const radio_mux_proxy_settings_t *p = &c->proxy;
+        const uint16_t port = set->has_proxy && (set->proxy_fields & RADIO_MUX_PROXY_F_PORT) ? set->proxy.port : p->port;
+
+        snprintf(detail, sizeof(detail), "rcp_proxy.port %u is taken: %s listens on it", (unsigned)port, taken_by);
+        return send_error(req, 409, "port_taken", detail, false);
+    }
+    const char *moving = device_api_channel_move_busy(set, br_core_move_running() ||
+                                                      device_api_op_holds(DEVICE_API_OP_RADIO_MOVE));
+
+    if (moving) {
+        return send_error(req, 409, "busy", moving, false);
+    }
+    // A move is a long operation: it takes the shared slot before br_core is asked, and br_core gives it back once
+    // the move ended (on_move_done). A refusal before the 202 gives it back at once.
+    const bool move = device_api_channel_is_move(set, id, otbr[0] ? otbr : NULL);
+
+    if (move && !device_api_op_try_begin(DEVICE_API_OP_RADIO_MOVE)) {
+        return send_error(req, 409, "busy", device_api_op_busy_detail(DEVICE_API_OP_RADIO_MOVE), false);
+    }
+    const radio_mux_verdict_t v = radio_mux_set(id, set, moved_from, sizeof(moved_from), reason, sizeof(reason));
+
+    if (move && v != RADIO_MUX_MOVE) {
+        device_api_op_end(DEVICE_API_OP_RADIO_MOVE);
+    } else if (!move && v == RADIO_MUX_MOVE) { // the OTBR channel changed under the request: runs without the slot
+        ESP_LOGW(TAG, "%s: OpenThread moves without the long-operation slot", id);
+    }
+    const bool accepted = v == RADIO_MUX_APPLY || v == RADIO_MUX_APPLY_REBOOT || v == RADIO_MUX_MOVE;
+
+    if (accepted && set->kick) {
+        rcp_proxy_kick(id); // drops the current peer; never stored
+    }
+    if (device_api_channel_retry_otbr(set, v, id, otbr[0] ? otbr : NULL, br_core_get_mode())) {
+        br_core_retry_otbr(); // a PUT of the mode retries a fault (spec: Board mode, faults and status)
+    }
+    int status;
+    const char *code;
+
+    device_api_channel_refusal(v, &status, &code);
+    if (code) {
+        return send_error(req, status, code, reason[0] ? reason : device_api_channel_refusal_detail(v), false);
+    }
+    if (v == RADIO_MUX_MOVE) {
+        char body[96];
+
+        if (device_api_channel_moving_json(body, sizeof(body), moved_from) < 0) {
+            return send_error(req, 500, "internal", "the reply does not fit its buffer", false);
+        }
+        httpd_resp_set_status(req, device_api_status_line(202));
+        return send_json(req, body);
+    }
+    const esp_err_t err = send_channel(req, s, id, v == RADIO_MUX_APPLY_REBOOT);
+
+    if (v == RADIO_MUX_APPLY_REBOOT) {
+        reboot_gate_restart(REBOOT_DELAY_MS); // stored: the mode's consumer takes the change at boot
+    }
+    return err;
+}
+
+static esp_err_t channel_put_handler(httpd_req_t *req)
+{
+    char id[RADIO_MUX_ID_MAX];
+    radio_mux_set_req_t set;
+    const char *bad = NULL;
+
+    if (!channel_id_from_uri(req, id)) {
+        return send_error(req, 404, "unknown_channel", "no radio with this id", true);
+    }
+    const int length_status = device_api_length_check(req->content_len, DEVICE_API_CHANNEL_PUT_MAX);
+
+    if (length_status != 0) {
+        return send_error(req, length_status, length_status == 413 ? "payload_too_large" : "length_required",
+                          "send the change as a JSON body", true);
+    }
+    char *body = read_small_body(req);
+
+    if (!body) {
+        return send_error(req, 400, "invalid_request", "the body could not be read", true);
+    }
+    const esp_err_t parse_err = device_api_channel_put_parse(body, &set, &bad);
+
+    free(body);
+    if (parse_err != ESP_OK) {
+        return send_error(req, 400, "bad_value", bad, false);
+    }
+    radio_mux_snapshot_t *s = malloc(sizeof(*s));
+
+    if (!s) {
+        return send_error(req, 500, "no_memory", "out of memory", false);
+    }
+    const esp_err_t err = channel_apply(req, s, id, &set);
+
+    free(s);
+    return err;
+}
+
+static esp_err_t channel_delete_handler(httpd_req_t *req)
+{
+    char id[RADIO_MUX_ID_MAX];
+    const esp_err_t err = channel_id_from_uri(req, id) ? radio_mux_forget(id) : ESP_ERR_NOT_FOUND;
+    const device_api_error_t e = device_api_channel_forget_error(err, radio_mux_started());
+
+    if (e.http_status != 204) {
+        return send_error(req, e.http_status, e.code, e.detail, false);
+    }
+    httpd_resp_set_status(req, device_api_status_line(204));
+    return httpd_resp_send(req, NULL, 0);
+}
+
+// br_core's radio task: a move that answered 202 has ended; its long-operation slot is free again.
+static void on_move_done(void)
+{
+    device_api_op_end(DEVICE_API_OP_RADIO_MOVE);
+}
+
 /* ---- registration ---- */
 
 typedef struct {
@@ -1997,10 +2255,20 @@ static esp_err_t gated_handler(httpd_req_t *req)
     return route->handler(req);
 }
 
-// A WebSocket route's policy check, before the handshake (its frames then need none).
+// A WebSocket route's policy check, before the handshake (its frames then need none). In NO_RADIO the console has no
+// OpenThread to talk to: 503 as the Thread REST API answers.
 static esp_err_t gated_ws_handshake(httpd_req_t *req)
 {
-    return netcfg_request_allowed(req, NETCFG_SVC_DEVICE_API) ? ESP_OK : ESP_FAIL;
+    if (!netcfg_request_allowed(req, NETCFG_SVC_DEVICE_API)) {
+        return ESP_FAIL;
+    }
+    const int refused = device_api_console_ws_refusal(br_core_get_mode());
+
+    if (refused) {
+        send_error(req, refused, "no_radio", DEVICE_API_NO_RADIO_DETAIL, true);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
 }
 
 esp_err_t device_api_register(httpd_handle_t server)
@@ -2010,6 +2278,7 @@ esp_err_t device_api_register(httpd_handle_t server)
         const esp_timer_create_args_t args = {.callback = reboot_now, .name = "device_reboot"};
         ESP_RETURN_ON_ERROR(esp_timer_create(&args, &s_reboot_timer), TAG, "creating the reboot timer failed");
     }
+    br_core_set_move_done_cb(on_move_done);
     const esp_err_t scan_err = mesh_scan_init();
 
     if (scan_err != ESP_OK) { // the rest of the device API does not depend on it
@@ -2041,6 +2310,9 @@ esp_err_t device_api_register(httpd_handle_t server)
         {"/device/routing", HTTP_PUT, routing_put_handler},
         {"/device/console", HTTP_GET, console_get_handler},
         {"/device/console", HTTP_PUT, console_put_handler},
+        {"/device/channels", HTTP_GET, channels_get_handler},
+        {CHANNELS_PREFIX "*", HTTP_PUT, channel_put_handler},
+        {CHANNELS_PREFIX "*", HTTP_DELETE, channel_delete_handler},
         {"/metrics", HTTP_GET, metrics_get_handler},
     };
 

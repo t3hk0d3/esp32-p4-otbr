@@ -2,6 +2,7 @@
 #include <string.h>
 #include "unity.h"
 #include "unity_test_runner.h"
+#include "br_core_mode.h"
 #include "device_api_priv.h"
 #include "routing_types.h"
 
@@ -14,6 +15,7 @@ static device_api_status_t sample(void)
         .rcp_installed_known = true,
         .rcp_installed = "1.2.3",
         .rcp_compatible = true,
+        .rcp_compatible_known = true,
         .jumper_present = true,
         .base_expected = "b1",
         .base_installed = "b0",
@@ -28,6 +30,7 @@ static device_api_status_t sample(void)
         .sniffer_duration_s = 600,
         .fault_reason = "",
         .storage_ok = true,
+        .otbr_channel = "c6",
     };
     strcpy(s.ipv6[0], "fe80::1");
     strcpy(s.ipv6[1], "fd00::2");
@@ -44,9 +47,9 @@ static void render(const device_api_status_t *s)
 
 TEST_CASE("On any mode: the mode name is written", "[device_api]")
 {
-    const char *names[] = {"STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT"};
+    const char *names[] = {"STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT", "NO_RADIO"};
 
-    for (int m = 0; m < 4; m++) {
+    for (int m = 0; m < 5; m++) {
         device_api_status_t s = sample();
         s.mode = m;
         render(&s);
@@ -82,6 +85,16 @@ TEST_CASE("On no valid RCP firmware: rcp.installed is an empty string", "[device
     s.rcp_compatible = false;
     render(&s);
     TEST_ASSERT_NOT_NULL(strstr(body, "\"rcp\":{\"installed\":\"\",\"compatible\":false}"));
+}
+
+TEST_CASE("On a C6 that OpenThread never judged this boot: rcp.compatible is null", "[device_api]")
+{
+    device_api_status_t s = sample();
+
+    s.rcp_compatible = false;
+    s.rcp_compatible_known = false;
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"rcp\":{\"installed\":\"1.2.3\",\"compatible\":null}"));
 }
 
 TEST_CASE("On a failed probe: rcp.installed is null", "[device_api]")
@@ -214,7 +227,33 @@ TEST_CASE("On a build without TREL: trel is null", "[device_api]")
     device_api_status_t s = sample();
 
     render(&s);
-    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":null}"));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":null,"));
+}
+
+TEST_CASE("On a board in NO_RADIO: mode NO_RADIO, otbr_channel as stored, right after trel", "[device_api]")
+{
+    device_api_status_t s = sample();
+
+    s.mode = BR_MODE_NO_RADIO;
+    s.otbr_channel = "usb-10c4-ea60-0001";
+    s.fault_reason = "radio unplugged (usb-10c4-ea60-0001)";
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"mode\":\"NO_RADIO\""));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":null,\"otbr_channel\":\"usb-10c4-ea60-0001\"}"));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"fault_reason\":\"radio unplugged (usb-10c4-ea60-0001)\""));
+}
+
+TEST_CASE("On no channel stored in otbr: otbr_channel is null", "[device_api]")
+{
+    device_api_status_t s = sample();
+
+    s.mode = BR_MODE_NO_RADIO;
+    s.otbr_channel = "";
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"otbr_channel\":null}"));
+    s.otbr_channel = NULL;
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"otbr_channel\":null}"));
 }
 
 TEST_CASE("On TREL whose state could not be read: enabled is written, the rest is null", "[device_api]")
@@ -313,6 +352,7 @@ TEST_CASE("On a full status (8 TREL peers, 6 IPv6 addresses, BGP routing): fits 
     s.routing_started = true;
     s.routing_method = ROUTING_METHOD_BGP;
     s.routing_omr_mode = ROUTING_OMR_CUSTOM;
+    s.otbr_channel = "usb-ffff-ffff-0123456789abcdef0123456789abcdef0"; // 47 characters, the longest id
     s.routing_announced_count = UINT8_MAX;
     s.routing_peers_established = UINT8_MAX;
     s.routing_peers_configured = UINT8_MAX;

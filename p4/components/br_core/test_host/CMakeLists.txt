@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/.." "${CMAKE_CURRENT_LIST_DIR}/../../rcp_sync"
+                         "${CMAKE_CURRENT_LIST_DIR}/../../radio_mux"
                          "${CMAKE_CURRENT_LIST_DIR}/../../../../common/rcp_sync_proto")
 set(COMPONENTS main)
 

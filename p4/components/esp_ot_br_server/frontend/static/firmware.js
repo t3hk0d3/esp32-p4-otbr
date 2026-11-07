@@ -27,8 +27,13 @@ function checkUpdateUrl(url) {
   return null;
 }
 
-/** Hint for the radio card from status.fault_reason. */
-function faultHint(reason) {
+/**
+ * Hint for the radio card (the C6) from status.fault_reason. A fault while Thread runs on a USB radio
+ * (status.otbr_channel other than 'c6') is that radio's: nothing to install here, no hint.
+ */
+function faultHint(reason, otbrChannel) {
+  if (!!otbrChannel && otbrChannel !== 'c6')
+    return {highlight : false, text : ''};
   if (reason === 'no rcp firmware')
     return {highlight : true, text : 'The radio co-processor has no valid firmware. Install c6_rcp.bin below.'};
   if (reason === 'esp-hosted firmware')
@@ -301,7 +306,7 @@ function render(s) {
   setText('p4-slot', 'Slot ' + s.app.slot);
   setText('rcp-version', L.rcpInstalledText(s.rcp.installed));
   setText('rcp-compat', C.compatText(s.rcp));
-  var hint = L.faultHint(s.fault_reason);
+  var hint = L.faultHint(s.fault_reason, s.otbr_channel);
   setText('radioHint', hint.text);
   show('radioHint', hint.highlight);
   $('rcpCard').style.outline = hint.highlight ? '2px solid var(--primary)' : '';

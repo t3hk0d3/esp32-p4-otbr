@@ -54,10 +54,13 @@ device_api_error_t device_api_map_ota_error(esp_err_t err);
  */
 device_api_error_t device_api_pcap_default_channel_error(bool ot_state_valid, bool has_dataset);
 
-/** Error of br_core_push_radio_firmware. */
+/** Error of br_core_push_radio_firmware (RCP_SYNC_ERR_C6_BUSY: 409 "c6_busy"). */
 device_api_error_t device_api_map_push_error(esp_err_t err);
 
-/** Error of br_core_rom_recover: ESP_ERR_NOT_SUPPORTED (no jumper) 412, ESP_ERR_INVALID_STATE 409, anything else 502. */
+/**
+ * Error of br_core_rom_recover: ESP_ERR_NOT_SUPPORTED (no jumper) 412, RCP_SYNC_ERR_C6_BUSY 409 "c6_busy",
+ * ESP_ERR_INVALID_STATE 409, anything else 502.
+ */
 device_api_error_t device_api_map_recover_error(esp_err_t err);
 
 /**
@@ -108,19 +111,22 @@ typedef enum {
     DEVICE_API_OP_RADIO_PUSH, /**< RCP firmware push */
     DEVICE_API_OP_ROM_RECOVER, /**< ROM recovery of the C6 base image; shares the slot with OTA and the push */
     DEVICE_API_OP_UPDATE_CHECK, /**< versions.txt fetch of GET /device/update?check=true; shares the slot (one HTTP client) */
-    DEVICE_API_OP_PCAP,       /**< pcap stream; independent of the other two */
+    DEVICE_API_OP_PCAP,       /**< pcap stream; independent of the others */
+    DEVICE_API_OP_RADIO_MOVE, /**< OpenThread moving to another radio channel (PUT /device/channels 202); shared slot */
 } device_api_op_t;
 
 /**
- * True and the operation is recorded when nothing conflicts: OTA, RADIO_PUSH, ROM_RECOVER and UPDATE_CHECK exclude each
- * other and themselves.
+ * True and the operation is recorded when nothing conflicts: OTA, RADIO_PUSH, ROM_RECOVER, UPDATE_CHECK and RADIO_MOVE
+ * exclude each other and themselves.
  */
 bool device_api_op_try_begin(device_api_op_t op);
 /**
- * True while an OTA, a firmware push or a ROM recovery holds the shared slot (a successful OTA keeps it until the
- * reboot). False for an update check: it changes nothing and never defers a reboot.
+ * True while an OTA, a firmware push, a ROM recovery or a move holds the shared slot (a successful OTA keeps it until
+ * the reboot). False for an update check: it changes nothing and never defers a reboot.
  */
 bool device_api_op_long_running(void);
+/** True while `op` (not PCAP) holds the shared slot (a read). */
+bool device_api_op_holds(device_api_op_t op);
 /** True while a capture stream holds the pcap slot (a read: the slot is not taken). */
 bool device_api_op_pcap_running(void);
 /** Release the operation. An OTA that succeeded is deliberately never released: the update waits for its reboot. */
@@ -169,6 +175,7 @@ typedef struct {
     bool rcp_installed_known;   /**< false: the probe failed, rcp.installed is null */
     const char *rcp_installed;  /**< "" = no valid RCP firmware */
     bool rcp_compatible;
+    bool rcp_compatible_known;  /**< false: OpenThread never ran on the C6 this boot, rcp.compatible is null */
     bool jumper_present;
     bool jumper_recovery_failed; /**< a ROM recovery failed and none worked since */
     const char *base_expected;
@@ -194,9 +201,10 @@ typedef struct {
     uint8_t routing_peers_established; /**< written only with ROUTING_METHOD_BGP (null otherwise) */
     uint8_t routing_peers_configured;  /**< written only with ROUTING_METHOD_BGP (null otherwise) */
     device_api_trel_t trel;
+    const char *otbr_channel;   /**< id of the channel stored in mode otbr; NULL or "" = none (JSON null) */
 } device_api_status_t;
 
-/** Name of a br_core_mode_t: "STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT" ("UNKNOWN" otherwise). */
+/** Name of a br_core_mode_t: "STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT", "NO_RADIO" ("UNKNOWN" otherwise). */
 const char *device_api_mode_name(int mode);
 
 /** The /device/status body. Returns its length, or -1 when `cap` is too small. */

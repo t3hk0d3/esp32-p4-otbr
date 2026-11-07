@@ -61,6 +61,7 @@ nav:
       - HTTP API and web UI: api.md
       - Networking: networking.md
       - Sniffer: sniffer.md
+      - Radios: radios.md
       - Maintenance jumper: maintenance-jumper.md
       - Diagnostics: diagnostics.md
       - Prometheus metrics: metrics.md
