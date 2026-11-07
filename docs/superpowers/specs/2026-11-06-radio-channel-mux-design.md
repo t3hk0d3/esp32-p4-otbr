@@ -322,9 +322,10 @@ The bridge itself does not depend on either axis:
 
 **TCP**:
 - Listen: first client wins, under the netcfg access rules (the per-VLAN rule, the Thread-mesh refusal), with
-  keepalive.
+  keepalive. In split mode a client is judged by the route back to it.
 - Connect: dials out to `host:port`.
-  - The host is an IP address or a hostname; `.local` names go over mDNS.
+  - The host is an IP address or a hostname; `.local` names go over mDNS. Name lookups run on their own task
+    (`rcp_resolve`), never on the proxy task, so one slot's slow lookup does not stall the other slot's frames.
   - A lost or refused connection retries with back-off (1 s doubling to 30 s) *(design call)*.
   - Keepalive notices a dead peer.
 
@@ -405,7 +406,8 @@ Everything above the radio belongs to the Zigbee work: its spinel client, task, 
   `port`, `host`, `framing`); `connect` without a `host` is refused (400). Replies with the channel; with
   `"reboot": true` when the change reboots; with `"moved_from": "<id>"` when Thread moved. Errors: 404 unknown
   channel, 400 bad value, 409 `unavailable`, `incompatible`, `hybrid_not_supported`, `mode_taken` (a mode at its channel limit), `not_available`, `probe_failed`, `c6_busy`,
-  `drain_timeout`.
+  `drain_timeout`; 503 `mux_busy` when the mux took the change but did not answer within 5 s (a settings change may
+  still be applied, a start, move or stop will not).
 - `DELETE /device/channels/{id}` forgets an unplugged dongle and its settings; it then leaves the list *(design
   call)*. The C6 and attached devices can't be deleted (409).
 - `/device/status` keeps its fields: `mode` (with `NO_RADIO`), `rcp` and `jumper` (the C6), and gains `otbr_channel`
