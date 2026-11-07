@@ -3,9 +3,11 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * ESP Thread Border Router - Zigbee page (GET /device/zigbee; 409 when no radio is a Zigbee coordinator)
+ * ESP Thread Border Router - the Dashboard's Zigbee section (GET /device/zigbee; 409 when no radio is a Zigbee
+ * coordinator)
  *
- * ZigbeeLogic is pure and runs under node too (tools/tests/test_zigbee_page.py). ZigbeePage is the page.
+ * ZigbeeLogic is pure and runs under node too (tools/tests/test_zigbee_page.py). ZigbeeSection renders the section
+ * inside the Dashboard (index.html); StatusPage (status.js) owns its poll and shows it only while a radio runs Zigbee.
  */
 'use strict';
 
@@ -90,10 +92,10 @@ return {
 };
 })();
 
-function ZigbeePage(env) {
+/* env: the page environment (location for the ZHA path, navigator for the clipboard); kit: the Dashboard's DeviceKit. */
+function ZigbeeSection(env, kit) {
 var C = typeof DeviceCommon !== 'undefined' ? DeviceCommon : require('./device_common.js');
 var L = ZigbeeLogic;
-var kit = C.DeviceKit(env, {});
 var $ = kit.$, el = kit.el, setText = kit.setText, show = kit.show;
 var lastState = null;
 
@@ -111,9 +113,8 @@ function dash(v, fn) { return v === null || v === undefined ? '-' : fn ? fn(v) :
 function render(z) {
   lastState = z.state;
   var h = L.heroFor(z);
-  show('zg-none', false);
-  show('zg-hero', true);
-  show('zg-cards', true);
+  show('zigbee-off', false);
+  show('zigbee-on', true);
   $('zg-hero').className = 'card hero hero-' + h.tone;
   setText('zg-title', h.title);
   setText('zg-text', h.text);
@@ -150,12 +151,21 @@ function render(z) {
   setText('zg-note', '');
 }
 
+/* No radio runs the coordinator: the placeholder instead of the content. */
 function renderNone() {
   lastState = null;
-  show('zg-none', true);
-  show('zg-hero', false);
-  show('zg-cards', false);
+  show('zigbee-off', true);
+  show('zigbee-on', false);
   setText('zg-note', '');
+}
+
+/* Zigbee stopped: nothing from the last coordinator stays on screen. */
+function clear() {
+  renderNone();
+  [ 'zg-title', 'zg-text', 'zg-radio', 'zg-since', 'zg-resets', 'zg-heap', 'zg-heap-use' ].forEach(function(id) {
+    setText(id, id === 'zg-text' || id === 'zg-heap-use' ? '' : '-');
+  });
+  [ 'zg-client', 'zg-net', 'zg-traffic', 'zg-fw' ].forEach(function(id) { kit.clear($(id)); });
 }
 
 function refresh() {
@@ -183,22 +193,15 @@ function copyPath() {
       .then(function() { env.setTimeout(function() { b.textContent = 'Copy'; }, L.COPY_RESET_MS); });
 }
 
-function init() {
-  $('zg-copy').addEventListener('click', copyPath);
-  kit.start();
-  kit.poller(refresh, function() { return L.pollMs(lastState); }, 'zigbeeSection');
-}
+function bindCopy() { $('zg-copy').addEventListener('click', copyPath); }
 
-return {init : init, refresh : refresh, render : render, kit : kit};
+/* The poll period for StatusPage's poller: quick while the coordinator starts. */
+function pollMs() { return L.pollMs(lastState); }
+
+return {render : render, renderNone : renderNone, clear : clear, refresh : refresh, bindCopy : bindCopy, pollMs : pollMs};
 }
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = ZigbeeLogic;
-  module.exports.Page = ZigbeePage;
-}
-
-if (typeof document !== 'undefined') {
-  var zigbeeEnv = DeviceCommon.DeviceEnv();
-  zigbeeEnv.navigator = navigator;
-  ZigbeePage(zigbeeEnv).init();
+  module.exports.Section = ZigbeeSection;
 }

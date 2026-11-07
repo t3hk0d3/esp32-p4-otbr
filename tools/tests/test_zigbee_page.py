@@ -56,13 +56,27 @@ def z(expression):
     return logic("zigbee", expression)
 
 
+DASH_STATUS = "Object.assign(H.fixture(H.STATUS), {zigbee_channel: t.zc === undefined ? 'c6' : t.zc})"
+
+
 def routes(b, status=200):
-    """Fake routes: /device/zigbee answers `b` (a JS expression is not needed: the body is data)."""
-    return f"(u) => ({{status: {status}, body: {json.dumps(b)}}})"
+    """Fake Dashboard routes: /device/zigbee answers `b` with `status` (t.zb / t.z409 override it at run time)."""
+    return (
+        "(u) => u === '/device/zigbee' ? (t.zfail ? (() => { throw new Error('down'); })()"
+        f" : t.z409 ? {{status: 409, body: {{}}}} : {{status: {status}, body: t.zb || {json.dumps(b)}}})"
+        " : ({status: 200, body: u === '/device/diag' ? H.DIAG : u === '/device/network' ? H.NETWORK"
+        " : u === '/get_properties' ? H.PROPS : u === '/ipaddr' ? H.IPADDR"
+        f" : u === '/device/channels' ? {{channels: []}} : {DASH_STATUS}}})"
+    )
 
 
 def run(b, tail, status=200):
-    return scenario(page("zigbee", routes(b, status)) + "await t.page.refresh();" + tail)
+    """The Dashboard with a Zigbee channel: one status read, then one /device/zigbee read answering `b`."""
+    return scenario(
+        page("index", routes(b, status))
+        + "await t.page.refreshStatus(); await t.page.refreshZigbee();"
+        + tail
+    )
 
 
 @needs_node
@@ -93,7 +107,9 @@ class TestZigbeeLogic:
     @pytest.mark.parametrize("state", ["idle", "incompatible"])
     def test_idle_and_incompatible_show_the_reason(self, state):
         # On idle / incompatible: tone info, the text is the status reason.
-        h = z(f"L.heroFor({json.dumps(body(state=state, reason='waiting for the radio'))})")
+        h = z(
+            f"L.heroFor({json.dumps(body(state=state, reason='waiting for the radio'))})"
+        )
         assert h["tone"] == "info"
         assert h["text"] == "waiting for the radio"
 
@@ -133,8 +149,8 @@ class TestZigbeeLogic:
 
 
 @needs_node
-class TestZigbeePage:
-    """zigbee.js run against a fake DOM and fetch"""
+class TestZigbeeSection:
+    """ZigbeeSection: the Dashboard's Zigbee section, run against a fake DOM and fetch"""
 
     def test_running_page_is_filled_from_the_body(self):
         # On a running body: hero, radio, network, traffic, memory and firmware cards show its figures.
@@ -144,7 +160,7 @@ class TestZigbeePage:
             return [t.el('zg-title').textContent, t.el('zg-hero').className, t.el('zg-radio').textContent,
                     t.el('zg-resets').textContent, t.el('zg-client').allText(), t.el('zg-net').allText(),
                     t.el('zg-traffic').allText(), t.el('zg-heap').textContent, t.el('zg-heap-use').textContent,
-                    t.el('zg-fw').allText(), t.el('zg-cards').hidden(), t.el('zg-none').hidden()];
+                    t.el('zg-fw').allText(), t.el('zigbee-on').hidden(), t.el('zigbee-off').hidden()];
         """,
         )
         assert r[0] == "Coordinator running"
@@ -201,29 +217,25 @@ class TestZigbeePage:
         )
         assert r[0] == "clock not set" and "clock not set" in r[1]
 
-    def test_409_shows_that_no_radio_is_zigbee(self):
-        # On 409: the info hero "No radio is a Zigbee coordinator" and no cards.
+    def test_409_shows_the_placeholder(self):
+        # On 409 (no Zigbee coordinator although the status named a channel): the section shows its placeholder.
         r = scenario(
-            page("zigbee", routes({"error": "not_zigbee"}, 409))
+            page("index", routes({"error": "not_zigbee"}, 409))
             + """
-            await t.page.refresh();
-            return [t.el('zg-none').hidden(), t.el('zg-cards').hidden(), t.el('zg-hero').hidden()];
+            await t.page.refreshStatus(); await t.page.refreshZigbee();
+            return [t.el('zigbee-off').hidden(), t.el('zigbee-on').hidden()];
         """
         )
-        assert r == [False, True, True]
-        assert "No radio is a Zigbee coordinator" in (FRONTEND / "zigbee.html").read_text()
+        assert r == [False, True]
 
     def test_body_after_409_brings_the_cards_back(self):
-        # On a 409 followed by a running body: the cards show again and the 409 hero hides.
-        r = scenario(
-            page(
-                "zigbee",
-                f"(u) => (t.mode409 ? {{status: 409, body: {{}}}} : {{status: 200, body: {json.dumps(RUNNING)}}})",
-            )
-            + """
-            t.mode409 = true; await t.page.refresh(); t.mode409 = false; await t.page.refresh();
-            return [t.el('zg-none').hidden(), t.el('zg-cards').hidden()];
-        """
+        # On a 409 followed by a running body: the section content shows again and the placeholder hides.
+        r = run(
+            RUNNING,
+            """
+            t.z409 = true; await t.page.refreshZigbee(); t.z409 = false; await t.page.refreshZigbee();
+            return [t.el('zigbee-off').hidden(), t.el('zigbee-on').hidden()];
+        """,
         )
         assert r == [True, False]
 
@@ -232,7 +244,7 @@ class TestZigbeePage:
         r = run(
             RUNNING,
             """
-            t.page.init(); const path = t.el('zg-path').textContent; t.el('zg-copy').click(); await t.advance(10);
+            t.page.init(); await t.advance(10); const path = t.el('zg-path').textContent; t.el('zg-copy').click(); await t.advance(10);
             const shown = t.el('zg-copy').textContent; await t.advance(3000);
             return [path, t.clipboard.written, shown, t.el('zg-copy').textContent];
         """,
@@ -248,26 +260,24 @@ class TestZigbeePage:
         # On a clipboard that refuses: "Copy failed".
         r = run(
             RUNNING,
-            "t.page.init(); t.clipboard.fail = true; t.el('zg-copy').click(); await t.advance(10); return t.el('zg-copy').textContent;",
+            "t.page.init(); await t.advance(10); t.clipboard.fail = true; t.el('zg-copy').click(); await t.advance(10); return t.el('zg-copy').textContent;",
         )
         assert r == "Copy failed"
 
-    def test_page_warns_that_there_is_no_login(self):
-        # On the page: the no-login warning is in the markup.
-        assert "No login" in (FRONTEND / "zigbee.html").read_text()
+    def test_section_warns_that_there_is_no_login(self):
+        # On the Dashboard: the no-login warning is in the Zigbee section's markup.
+        html = (FRONTEND / "index.html").read_text()
+        assert "No login" in html[html.index('id="sec-zigbee"') :]
 
-    def test_page_polls_every_5_s_and_every_2_s_while_starting(self):
+    def test_section_polls_every_5_s_and_every_2_s_while_starting(self):
         # On running: a request about every 5 s; on starting: about every 2 s.
         r = scenario(
-            page(
-                "zigbee",
-                f"(u) => (u === '/device/zigbee' ? {{status: 200, body: t.b}} : {{status: 200, body: {{}}}})",
-            )
+            page("index", routes(RUNNING))
             + f"""
-            t.b = {json.dumps(RUNNING)}; t.page.init(); await t.advance(0);
+            t.page.init(); await t.advance(10);
             const n = () => t.calls.filter((c) => c.url === '/device/zigbee').length;
             const a = n(); await t.advance(5100); const b = n(); await t.advance(5100); const c = n();
-            t.b = {json.dumps(body(state='starting'))}; await t.advance(5100);
+            t.zb = {json.dumps(body(state="starting"))}; await t.advance(5100);
             const d = n(); await t.advance(6100);
             return [a, b - a, c - b, n() - d];
         """
@@ -276,11 +286,11 @@ class TestZigbeePage:
 
     def test_failed_request_says_so(self):
         # On a dropped connection: the note shows the error, the cards stay as they were.
-        r = scenario(
-            page("zigbee", "() => { throw new Error('x'); }")
-            + "await t.page.refresh(); return t.el('zg-note').textContent;"
+        r = run(
+            RUNNING,
+            "t.zfail = true; await t.page.refreshZigbee(); return [t.el('zg-note').textContent, t.el('zg-radio').textContent];",
         )
-        assert r
+        assert r[0] and r[1] == "USB radio usb-303a-1001"
 
     def test_starting_state_hero(self):
         # On starting: the hero reads "Starting".
@@ -289,6 +299,51 @@ class TestZigbeePage:
             "return t.el('zg-title').textContent;",
         )
         assert r == "Starting"
+
+    def test_no_zigbee_channel_shows_the_placeholder_and_asks_nothing(self):
+        # On zigbee_channel null: placeholder shown with its link, content hidden, /device/zigbee never requested.
+        r = scenario(
+            page("index", routes(RUNNING))
+            + """
+            t.zc = null; await t.page.refreshStatus(); await t.page.refreshZigbee();
+            return [t.el('zigbee-off').hidden(), t.el('zigbee-on').hidden(),
+                    t.el('zigbee-off-link').getAttribute('href'),
+                    t.calls.filter((c) => c.url === '/device/zigbee').length];
+        """
+        )
+        assert r == [False, True, "/radios.html", 0]
+        html = " ".join((FRONTEND / "index.html").read_text().split())
+        assert "Zigbee is not active: no radio runs the Zigbee coordinator." in html
+        assert ">Set a radio to Zigbee on the Radios page</a>" in html
+
+    def test_older_firmware_without_the_field_is_treated_as_no_zigbee(self):
+        # On a status without zigbee_channel (older firmware): the placeholder, and no /device/zigbee request.
+        r = scenario(
+            page(
+                "index",
+                "(u) => ({status: 200, body: u === '/device/zigbee' ? {} : u === '/device/channels' ? {channels: []}"
+                " : (() => { const s = H.fixture(H.STATUS); delete s.zigbee_channel; return s; })()})",
+            )
+            + """
+            await t.page.refreshStatus(); await t.page.refreshZigbee();
+            return [t.el('zigbee-off').hidden(), t.calls.filter((c) => c.url === '/device/zigbee').length];
+        """
+        )
+        assert r == [False, 0]
+
+    def test_zigbee_stopping_clears_the_section_and_stops_asking(self):
+        # On zigbee_channel going from set to null: placeholder, values cleared, no further /device/zigbee requests.
+        r = run(
+            RUNNING,
+            """
+            t.zc = null; await t.page.refreshStatus();
+            const before = t.calls.filter((c) => c.url === '/device/zigbee').length;
+            await t.page.refreshZigbee();
+            return [t.el('zigbee-off').hidden(), t.el('zigbee-on').hidden(), t.el('zg-radio').textContent,
+                    t.el('zg-net').allText(), t.calls.filter((c) => c.url === '/device/zigbee').length - before];
+        """,
+        )
+        assert r == [False, True, "-", "", 0]
 
 
 API = STATIC / "api.js"
@@ -337,7 +392,9 @@ class TestZigbeeNav:
     def test_link_is_active_on_the_zigbee_page(self):
         # On /zigbee.html: the link is marked active.
         r = nav_scenario({"zigbee_channel": "c6"}, "/zigbee.html")
-        assert r["slot"]["innerHTML"] == '<a href="/zigbee.html" class="active">Zigbee</a>'
+        assert (
+            r["slot"]["innerHTML"] == '<a href="/zigbee.html" class="active">Zigbee</a>'
+        )
 
     @pytest.mark.parametrize("status", [{"zigbee_channel": None}, {}])
     def test_slot_stays_hidden_and_empty_without_a_zigbee_channel(self, status):
@@ -346,7 +403,10 @@ class TestZigbeeNav:
 
     def test_slot_stays_hidden_when_the_status_cannot_be_read(self):
         # On a failing fetch: the slot stays hidden and empty, and nothing throws.
-        assert nav_scenario(None, fetch_fails=True)["slot"] == {"innerHTML": "", "hidden": True}
+        assert nav_scenario(None, fetch_fails=True)["slot"] == {
+            "innerHTML": "",
+            "hidden": True,
+        }
 
     def test_no_slot_in_the_page_is_not_an_error(self):
         # On a nav without the slot element: nothing throws.
@@ -357,74 +417,3 @@ class TestZigbeeNav:
         html = nav_scenario({"zigbee_channel": None})["html"]
         assert '<li id="nav-slot-zigbee" hidden></li>' in html
         assert "zigbee.html" not in html
-
-
-STATUS_WITH_ZIGBEE = "Object.assign(H.fixture(H.STATUS), {zigbee_channel: 'c6'})"
-
-
-def dashboard_routes(zbody):
-    return (
-        "(u) => ({status: 200, body: u === '/device/diag' ? H.DIAG : u === '/device/network' ? H.NETWORK"
-        f" : u === '/device/zigbee' ? {json.dumps(zbody)} : u === '/get_properties' ? H.PROPS : u === '/ipaddr' ? H.IPADDR"
-        f" : {STATUS_WITH_ZIGBEE}}})"
-    )
-
-
-@needs_node
-class TestDashboardZigbeeCard:
-    """status.js: the Zigbee summary card"""
-
-    def test_card_shows_radio_state_channel_and_client(self):
-        # On zigbee_channel "c6" and a running coordinator with a client: the card is shown with its figures.
-        r = scenario(
-            page("index", dashboard_routes(RUNNING))
-            + """
-            await t.page.refreshStatus(); await t.page.refreshZigbee();
-            return [t.el('t-zg-card').hidden(), t.el('t-zg-radio').textContent, t.el('t-zg-state').textContent,
-                    t.el('t-zg-channel').textContent, t.el('t-zg-client').textContent];
-        """
-        )
-        assert r == [
-            False,
-            "on-board C6",
-            "Running, ZHA connected",
-            "15",
-            "192.168.1.20:51234",
-        ]
-
-    def test_card_says_waiting_without_a_client(self):
-        # On a running coordinator without a client: state "Waiting for Home Assistant", client "-".
-        r = scenario(
-            page("index", dashboard_routes(WAITING))
-            + """
-            await t.page.refreshStatus(); await t.page.refreshZigbee();
-            return [t.el('t-zg-state').textContent, t.el('t-zg-client').textContent];
-        """
-        )
-        assert r == ["Waiting for Home Assistant", "-"]
-
-    def test_card_is_hidden_and_not_polled_without_a_zigbee_channel(self):
-        # On zigbee_channel null: the card stays hidden and /device/zigbee is never asked.
-        r = scenario(
-            page("index", "(u) => ({status: 200, body: H.STATUS})")
-            + """
-            await t.page.refreshStatus(); await t.page.refreshZigbee();
-            return [t.el('t-zg-card').hidden(), t.calls.filter((c) => c.url === '/device/zigbee').length];
-        """
-        )
-        assert r == [True, 0]
-
-    def test_card_reports_an_unreadable_coordinator(self):
-        # On a refused /device/zigbee: the state reads "unknown" and the channel and client are dashes.
-        r = scenario(
-            page(
-                "index",
-                "(u) => u === '/device/zigbee' ? ({status: 500, body: {}}) : ({status: 200, body: "
-                f"{STATUS_WITH_ZIGBEE}}})",
-            )
-            + """
-            await t.page.refreshStatus(); await t.page.refreshZigbee();
-            return [t.el('t-zg-state').textContent, t.el('t-zg-channel').textContent, t.el('t-zg-client').textContent];
-        """
-        )
-        assert r == ["unknown", "-", "-"]

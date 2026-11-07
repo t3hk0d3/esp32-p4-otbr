@@ -123,21 +123,6 @@ function threadHeroFor(s) {
   return {tone : 'idle', title : String(s.mode), text : '', link : null};
 }
 
-/** The Dashboard card's state line for a /device/zigbee body (null when it could not be read). */
-function zigbeeStateText(z) {
-  if (!z)
-    return 'unknown';
-  if (z.state === 'running')
-    return z.client ? 'Running, ZHA connected' : 'Waiting for Home Assistant';
-  if (z.state === 'no_radio')
-    return 'No radio';
-  if (z.state === 'starting')
-    return 'Starting';
-  if (z.state === 'incompatible')
-    return 'Radio not compatible';
-  return 'Not running';
-}
-
 function snifferText(sn) {
   if (sn.active)
     return {state : 'Capturing on channel ' + sn.channel, detail : sn.frames + ' frames, ' + sn.drops + ' dropped'};
@@ -244,7 +229,6 @@ return {
   isThreadActive : isThreadActive,
   radiosView : radiosView,
   snifferText : snifferText,
-  zigbeeStateText : zigbeeStateText,
   pdText : pdText,
   threadView : threadView,
   roleLine : roleLine,
@@ -257,6 +241,7 @@ return {
 function StatusPage(env) {
 var C = typeof DeviceCommon !== 'undefined' ? DeviceCommon : require('./device_common.js');
 var L = StatusLogic;
+var ZigbeeLib = typeof ZigbeeLogic !== 'undefined' ? {Section : ZigbeeSection} : require('./zigbee.js');
 var kit = C.DeviceKit(env, {
   actionIds : [ 'rebootBtn' ],
   trial : false,
@@ -271,7 +256,8 @@ var pskcShown = false;
 var lastStatus = null; // for the Home Assistant tile, which also needs /device/network
 var lastNet = null;
 var lastNames = null;
-var lastZigbee; // undefined until the first answer
+var zigbee = ZigbeeLib.Section(env, kit);
+var zigbeeOn = false; // a radio runs the coordinator (zigbee_channel in the last status)
 var zigbeePoll = null;
 
 function rcpText(installed) {
@@ -369,35 +355,22 @@ function refreshNetwork() {
   });
 }
 
-/* ---- Zigbee card: only while a radio channel runs the Zigbee coordinator (zigbee_channel in /device/status) ---- */
+/* ---- Zigbee section: content only while a radio channel runs the coordinator (zigbee_channel in /device/status) ---- */
 
 function renderZigbee(s) {
-  show('t-zg-card', !!s.zigbee_channel);
-  if (!s.zigbee_channel)
-    return;
-  setText('t-zg-radio', s.zigbee_channel === 'c6' ? 'on-board C6' : 'USB radio ' + s.zigbee_channel);
-  if (lastZigbee === undefined && zigbeePoll)
+  var on = !!s.zigbee_channel;
+  if (!on) {
+    zigbee.clear(); // the placeholder; nothing from a stopped coordinator stays
+  } else if (!zigbeeOn && zigbeePoll) {
     zigbeePoll.wake();
-}
-
-function renderZigbeeBody(z) {
-  lastZigbee = z;
-  setText('t-zg-state', L.zigbeeStateText(z));
-  setText('t-zg-channel', z && z.radio ? String(z.radio.channel) : '-');
-  setText('t-zg-client', z && z.client ? z.client.address : '-');
+  }
+  zigbeeOn = on;
 }
 
 function refreshZigbee() {
-  if (!lastStatus || !lastStatus.zigbee_channel)
-    return Promise.resolve(true);
-  return kit.request('GET', '/device/zigbee', {timeoutMs : 5000}).then(function(r) {
-    var ok = r.status === 200 && !!r.body;
-    renderZigbeeBody(ok ? r.body : null);
-    return ok;
-  }, function() {
-    renderZigbeeBody(null);
-    return false;
-  });
+  if (!zigbeeOn)
+    return Promise.resolve(true); // asked for again when the status names a Zigbee channel
+  return zigbee.refresh();
 }
 
 /* The Radios card: the two slots and their modes from /device/channels; "-" when it cannot be read. */
@@ -569,6 +542,7 @@ function reboot() {
 
 function init() {
   $('rebootBtn').addEventListener('click', reboot);
+  zigbee.bindCopy();
   $('pskcBtn').addEventListener('click', function() {
     pskcShown = !pskcShown;
     showPskc();
@@ -583,7 +557,7 @@ function init() {
   threadPoll = kit.poller(refreshThread, 10000, 'statusSection');
   kit.poller(refreshNetwork, 10000, null);
   kit.poller(refreshChannels, 10000, 'statusSection');
-  zigbeePoll = kit.poller(refreshZigbee, 5000, 'statusSection');
+  zigbeePoll = kit.poller(refreshZigbee, function() { return zigbee.pollMs(); }, 'statusSection');
 }
 
 return {
@@ -604,5 +578,8 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports.Page = StatusPage;
 }
 
-if (typeof document !== 'undefined')
-  StatusPage(DeviceCommon.DeviceEnv()).init();
+if (typeof document !== 'undefined') {
+  var statusEnv = DeviceCommon.DeviceEnv();
+  statusEnv.navigator = navigator; // the Zigbee section's Copy button
+  StatusPage(statusEnv).init();
+}

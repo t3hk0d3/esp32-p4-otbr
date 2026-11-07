@@ -186,21 +186,64 @@
 
         <section class="dash-section" id="sec-zigbee">
             <h2 class="dash-heading">Zigbee</h2>
-            <section class="card hidden" id="t-zg-card">
-                <div class="tile-head"><h3>Zigbee</h3><a href="/zigbee.html">Open</a></div>
-                <dl class="facts">
-                    <dt>Radio</dt><dd id="t-zg-radio">-</dd>
-                    <dt>State</dt><dd id="t-zg-state">-</dd>
-                    <dt>Channel</dt><dd id="t-zg-channel">-</dd>
-                    <dt>ZHA client</dt><dd class="mono" id="t-zg-client">-</dd>
-                </dl>
-            </section>
+            <p class="card dash-off hidden" id="zigbee-off">Zigbee is not active: no radio runs the Zigbee coordinator.
+                <a id="zigbee-off-link" href="/radios.html">Set a radio to Zigbee on the Radios page</a></p>
+            <div class="hidden" id="zigbee-on">
+                <section class="card hero" id="zg-hero">
+                    <div class="hero-main">
+                        <span class="hero-dot" aria-hidden="true"></span>
+                        <div>
+                            <h3 class="hero-title" id="zg-title">-</h3>
+                            <p class="hero-text" id="zg-text"></p>
+                        </div>
+                    </div>
+                    <dl class="facts hero-facts">
+                        <dt>Radio</dt><dd id="zg-radio">-</dd>
+                        <dt>Running since</dt><dd id="zg-since">-</dd>
+                        <dt>Radio resets</dt><dd id="zg-resets">-</dd>
+                    </dl>
+                </section>
+                <div class="tile-grid">
+                    <section class="card">
+                        <div class="tile-head"><h3>Connect Home Assistant</h3></div>
+                        <p class="zg-why">Add the ZHA integration, choose <b>Ziggurat</b> as the radio type and enter this path:</p>
+                        <div class="zg-path" id="zg-path">-</div>
+                        <button class="btn btn-outline btn-sm" id="zg-copy" type="button" aria-controls="zg-path">Copy</button>
+                        <p class="zg-why mt-8">One client at a time; a new connection takes over. No login: anyone on your
+                            network can reach it.</p>
+                    </section>
+                    <section class="card">
+                        <div class="tile-head"><h3>Client</h3><span class="chip" id="zg-client-chip">-</span></div>
+                        <dl class="facts" id="zg-client"></dl>
+                    </section>
+                    <section class="card">
+                        <div class="tile-head"><h3>Network</h3><span class="zg-why">as ZHA set it</span></div>
+                        <dl class="facts" id="zg-net"></dl>
+                        <p class="zg-why mt-8">Devices, pairing and the extended PAN ID are in ZHA.</p>
+                    </section>
+                    <section class="card">
+                        <div class="tile-head"><h3>Radio traffic</h3><span class="zg-why">since start</span></div>
+                        <dl class="facts" id="zg-traffic"></dl>
+                    </section>
+                    <section class="card">
+                        <div class="tile-head"><h3>Memory</h3><span class="zg-why">PSRAM</span></div>
+                        <div class="zg-big" id="zg-heap">-</div>
+                        <p class="zg-why" id="zg-heap-use"></p>
+                    </section>
+                    <section class="card">
+                        <div class="tile-head"><h3>Firmware</h3></div>
+                        <dl class="facts" id="zg-fw"></dl>
+                    </section>
+                </div>
+            </div>
+            <div class="form-hint" id="zg-note" role="status" aria-live="polite"></div>
         </section>
     </div>
 </div>
 <div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
 <script src="/static/api.js"></script>
 <script src="/static/device_common.js"></script>
+<script src="/static/zigbee.js"></script>
 <script src="/static/status.js"></script>
 </body>
 </html>
