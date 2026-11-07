@@ -31,6 +31,12 @@ class TestMetrics:
         families = scrape(base_url)
         assert [s.value for s in families["br_mode"].samples].count(1.0) == 1
 
+    def test_metrics_has_the_chip_temperature(self, base_url):
+        families = scrape(base_url)
+        assert families["br_chip_temperature_celsius"].samples, (
+            "br_chip_temperature_celsius has no samples"
+        )
+
     def test_metrics_in_br_running_with_a_network_has_fresh_thread_series(
         self, base_url
     ):

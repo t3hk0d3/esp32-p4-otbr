@@ -48,11 +48,14 @@ The path is the Prometheus default, so no `metrics_path` is needed.
 | `br_task_stack_free_min_bytes` | gauge | `task` |
 | `br_tasks_untracked` | gauge | |
 | `br_heap_free_bytes`, `br_heap_min_free_bytes`, `br_heap_largest_free_block_bytes` | gauge | `region` = internal/psram |
+| `br_chip_temperature_celsius` | gauge | |
 | `br_ot_lock_acquisitions_total`, `br_ot_lock_hold_seconds_total`, `br_ot_lock_wait_seconds_total` | counter | |
 | `br_ot_lock_hold_max_seconds`, `br_ot_lock_wait_max_seconds` | gauge | `window` = boot/60s |
 | `br_storage_ok`, `br_sniffer_active`, `br_eth_up`, `br_network_trial_pending` | gauge 0/1 | |
 | `br_sniffer_frames_total`, `br_sniffer_drops_total` | counter (current or last capture) | |
 | `br_scrape_partial` | gauge 0/1 | |
+
+`br_chip_temperature_celsius` is the die temperature, not the room temperature: it reads above ambient and rises with load. It has one decimal and is left out while the sensor has no reading; that does not set `br_scrape_partial`.
 
 Task names are FreeRTOS names. When two tasks share a name, the second one is labelled `<name>#2`.
 
@@ -119,6 +122,9 @@ groups:
         for: 5m
       - alert: BorderRouterLowMemory
         expr: br_heap_min_free_bytes{region="internal"} < 20000
+      - alert: BorderRouterHot
+        expr: br_chip_temperature_celsius > 85
+        for: 10m
       - alert: BorderRouterBgpDown
         expr: br_bgp_peer_state{state="established"} == 0
         for: 5m

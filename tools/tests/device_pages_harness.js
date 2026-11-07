@@ -284,7 +284,7 @@ const STATUS = {
 };
 
 const DIAG = {
-  uptime_s: 27303, reset_reason: 'software',
+  uptime_s: 27303, reset_reason: 'software', chip_temperature_c: 47.3,
   cpu: [{core: 0, load_pct: {'1s': 0.4, '10s': 0.5, '60s': 0.4}}, {core: 1, load_pct: {'1s': 0.6, '10s': 0.6, '60s': 0.5}}],
   memory: {internal: {free: 418713, min_free: 359116, largest_free_block: 249856},
            psram: {free: 31666995, min_free: 31352422, largest_free_block: 31457280}},

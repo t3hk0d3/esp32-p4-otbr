@@ -31,11 +31,11 @@
     }                                                               \
 })
 
-// [patch 29] Bulk IN transfers kept in flight per device: while one completes into the user's data callback and is
+// [patch 32] Bulk IN transfers kept in flight per device: while one completes into the user's data callback and is
 // resubmitted, the next is already queued on the pipe, so a USB serial bridge always has a transfer to complete into.
 // With 1 the driver behaves as upstream (including appending unprocessed data into the same buffer). 8: two left the
 // CH340 overrunning under sustained load (the callbacks run on a priority-7 task that lwIP preempts); 8 one-packet
-// transfers are ~5.5 ms at 460800 baud (hardware 2026-11-07, PATCHES.md patch 29).
+// transfers are ~5.5 ms at 460800 baud (hardware 2026-11-07, PATCHES.md patch 32).
 #define CDC_ACM_IN_XFERS 8
 
 typedef struct cdc_dev_s cdc_dev_t;
@@ -45,14 +45,14 @@ struct cdc_dev_s {
     void *cb_arg;                         // Common argument for user's callbacks (data IN and Notification)
     struct {
         usb_transfer_t *out_xfer;         // OUT data transfer
-        usb_transfer_t *in_xfer[CDC_ACM_IN_XFERS]; // IN data transfers, submitted in index order [patch 29]
+        usb_transfer_t *in_xfer[CDC_ACM_IN_XFERS]; // IN data transfers, submitted in index order [patch 32]
         cdc_acm_data_callback_t in_cb;    // User's callback for async (non-blocking) data IN
         uint16_t in_mps;                  // IN endpoint Maximum Packet Size
-        uint8_t *in_data_buffer_base[CDC_ACM_IN_XFERS]; // Pointer to each IN transfer's data buffer [patch 29]
-        size_t in_xfer_len;               // IN transfer length asked for (the buffer may be larger: cache alignment) [patch 28]
+        uint8_t *in_data_buffer_base[CDC_ACM_IN_XFERS]; // Pointer to each IN transfer's data buffer [patch 32]
+        size_t in_xfer_len;               // IN transfer length asked for (the buffer may be larger: cache alignment) [patch 31]
         const usb_intf_desc_t *intf_desc; // Pointer to data interface descriptor
         SemaphoreHandle_t out_mux;        // OUT mutex
-        bool in_polling[CDC_ACM_IN_XFERS]; // Each BULK IN poll transfer is submitted [patch 29]
+        bool in_polling[CDC_ACM_IN_XFERS]; // Each BULK IN poll transfer is submitted [patch 32]
     } data;
 
     struct {

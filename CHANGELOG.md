@@ -9,11 +9,22 @@ release's `versions.txt`.
 
 ### Added
 
+- Update from GitHub: the board checks the latest release (`versions.txt`) and installs it, the bundle first, then the
+  radio firmware when it differs, then one reboot. New `GET`/`POST /device/update` (`check=true`, `force=1`; see
+  `docs/api.md`) and an "Updates" card on the Firmware page that checks when the page opens, never in the background.
+  A dev build newer than the release can go back to it with "Install anyway". `/device/ota/url` and
+  `/device/radio/firmware?from_url=` now accept `https://` (verified against the built-in certificate bundle) and follow
+  redirects. Bundles are not signed; trust is TLS to GitHub. Test builds add the console command `update_source`. See
+  `docs/updates.md`. Not yet checked on a board.
+- Chip temperature: `chip_temperature_c` in `GET /device/diag`, the gauge `br_chip_temperature_celsius` in `/metrics`
+  and a "Chip temperature" row in the "Load and memory" card of the Status page. It is the die temperature, not the
+  room temperature: it reads above ambient and rises with load. The driver picks the most accurate range for the reading (about ±1 °C up to 80 °C, ±2 °C above), and the value moves in 1 °C steps on a given board even though it is shown with one decimal. When it
+  cannot start or a read fails, the value is `null` (`-` on the page, no series in `/metrics`). See `docs/diagnostics.md`.
 - Radio channels: every radio is a channel with a stored mode. The on-board C6 and one USB dongle (cp210x, ch34x or
   plain CDC-ACM driver) are listed; a channel runs `off`, `otbr` (Thread border router) or `rcp-proxy`; `ziggurat` is
   reserved for the Zigbee work. A dongle's firmware is detected at every plug-in (spinel, Ziggurat, Z-Stack ZNP, EZSP,
   or unknown, within 3 s). `GET /device/channels`, `PUT` and `DELETE /device/channels/{id}`; the Radios page. See
-  `docs/radios.md`. Not yet checked on a board.
+  `docs/radios.md`. Checked on a board with the C6 and a ZigStar OllyZig.
 - Thread on a USB dongle: OpenThread runs on the C6 or on a spinel RCP dongle (design target: ZigStar OllyZig,
   CC2652P), and moves between them at runtime without a reboot and with the stored network (`PUT` `otbr` on the other
   channel answers 202; a start and a stop of Thread run the same way). Unplugging the OTBR dongle leaves the board up

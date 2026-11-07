@@ -26,6 +26,7 @@ CATALOGUE = {
     "br_heap_free_bytes": "gauge",
     "br_heap_min_free_bytes": "gauge",
     "br_heap_largest_free_block_bytes": "gauge",
+    "br_chip_temperature_celsius": "gauge",
     "br_ot_lock_acquisitions": "counter",
     "br_ot_lock_hold_seconds": "counter",
     "br_ot_lock_wait_seconds": "counter",

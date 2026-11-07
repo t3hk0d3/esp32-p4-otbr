@@ -399,7 +399,7 @@ device_api channels_json (pure)
         On a board in NO_RADIO
             - mode "NO_RADIO", otbr_channel as stored
 
-esp_br_guard (vendored, patch 26)
+esp_br_guard (vendored, patch 29)
     esp_br_guard_status
         On BR_MODE_NO_RADIO and THREAD_OP or READ
             - returns 503, detail "no radio in OTBR mode"

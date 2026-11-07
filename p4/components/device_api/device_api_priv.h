@@ -84,8 +84,8 @@ device_api_error_t device_api_map_network_confirm_error(esp_err_t err);
 int device_api_length_check(size_t len, size_t max);
 
 /**
- * Check a from_url / ota url: error.http_status 0 = acceptable (http://), 400 "https_not_supported" (no certificate bundle
- * is built in) or 400 "invalid_request" (empty, other scheme).
+ * Check a from_url / ota url: error.http_status 0 = acceptable (http:// or https://, the latter verified against the
+ * certificate bundle), or 400 "invalid_request" (empty, other scheme, no host).
  */
 device_api_error_t device_api_check_url(const char *url);
 
@@ -110,16 +110,20 @@ typedef enum {
     DEVICE_API_OP_OTA,        /**< bundle update (upload or URL) */
     DEVICE_API_OP_RADIO_PUSH, /**< RCP firmware push */
     DEVICE_API_OP_ROM_RECOVER, /**< ROM recovery of the C6 base image; shares the slot with OTA and the push */
+    DEVICE_API_OP_UPDATE_CHECK, /**< versions.txt fetch of GET /device/update?check=true; shares the slot (one HTTP client) */
     DEVICE_API_OP_PCAP,       /**< pcap stream; independent of the others */
     DEVICE_API_OP_RADIO_MOVE, /**< OpenThread moving to another radio channel (PUT /device/channels 202); shared slot */
 } device_api_op_t;
 
 /**
- * True and the operation is recorded when nothing conflicts: OTA, RADIO_PUSH, ROM_RECOVER and RADIO_MOVE exclude each
- * other and themselves.
+ * True and the operation is recorded when nothing conflicts: OTA, RADIO_PUSH, ROM_RECOVER, UPDATE_CHECK and RADIO_MOVE
+ * exclude each other and themselves.
  */
 bool device_api_op_try_begin(device_api_op_t op);
-/** True while an OTA, a firmware push, a ROM recovery or a move holds the shared slot (a successful OTA keeps it until the reboot). */
+/**
+ * True while an OTA, a firmware push, a ROM recovery or a move holds the shared slot (a successful OTA keeps it until
+ * the reboot). False for an update check: it changes nothing and never defers a reboot.
+ */
 bool device_api_op_long_running(void);
 /** True while `op` (not PCAP) holds the shared slot (a read). */
 bool device_api_op_holds(device_api_op_t op);

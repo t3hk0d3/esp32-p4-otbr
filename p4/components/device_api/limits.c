@@ -11,20 +11,18 @@ int device_api_length_check(size_t len, size_t max)
 
 device_api_error_t device_api_check_url(const char *url)
 {
-    static const device_api_error_t invalid = {400, "invalid_request", "the URL must start with http://"};
-    static const device_api_error_t https = {400, "https_not_supported", "https URLs are not supported (no certificate bundle)"};
+    static const device_api_error_t invalid = {400, "invalid_request", "the URL must start with http:// or https://"};
     static const device_api_error_t ok = {0, NULL, NULL};
 
-    if (url == NULL || url[0] == '\0') {
+    if (url == NULL) {
         return invalid;
     }
-    if (strncmp(url, "https://", 8) == 0) {
-        return https;
+    const char *host = strncmp(url, "https://", 8) == 0 ? url + 8 : strncmp(url, "http://", 7) == 0 ? url + 7 : NULL;
+
+    if (host == NULL || host[0] == '\0' || strchr("/?#", host[0]) != NULL) {
+        return invalid;
     }
-    if (strncmp(url, "http://", 7) == 0 && url[7] != '\0') {
-        return ok;
-    }
-    return invalid;
+    return ok;
 }
 
 int device_api_installed_json(char *buf, size_t cap, bool known, const char *version)

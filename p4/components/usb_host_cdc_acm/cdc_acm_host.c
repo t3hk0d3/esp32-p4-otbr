@@ -110,7 +110,7 @@ static void usb_event_cb(const usb_host_client_event_msg_t *event_msg, void *arg
  * In in_xfer_cb() we can modify IN transfer parameters, this function resets the transfer to its defaults
  *
  * @param[in] cdc_dev Pointer to CDC device
- * @param[in] idx     Index of the IN transfer [patch 29]
+ * @param[in] idx     Index of the IN transfer [patch 32]
  */
 static void cdc_acm_reset_in_transfer(cdc_dev_t *cdc_dev, int idx)
 {
@@ -118,7 +118,7 @@ static void cdc_acm_reset_in_transfer(cdc_dev_t *cdc_dev, int idx)
     usb_transfer_t *transfer = cdc_dev->data.in_xfer[idx];
     uint8_t **ptr = (uint8_t **)(&(transfer->data_buffer));
     *ptr = cdc_dev->data.in_data_buffer_base[idx];
-    // [patch 28] The length asked for at open, not the allocated buffer: urb_alloc rounds the buffer up to the cache
+    // [patch 31] The length asked for at open, not the allocated buffer: urb_alloc rounds the buffer up to the cache
     // line, and a longer transfer waits for more packets (a bridge sends no ZLP), holding a burst that ended on a
     // packet boundary until the device sends again.
     transfer->num_bytes = cdc_dev->data.in_xfer_len;
@@ -210,7 +210,7 @@ static esp_err_t cdc_acm_submit_poll(usb_transfer_t *xfer, bool *polling_active,
 }
 
 /**
- * @brief Submit every BULK IN poll transfer that is not already active [patch 29]
+ * @brief Submit every BULK IN poll transfer that is not already active [patch 32]
  *
  * The transfers are submitted in index order; the USB host completes the transfers of one pipe in the order they
  * were queued, and in_xfer_cb() resubmits each one behind the others, so received data keeps its order.
@@ -531,7 +531,7 @@ static void cdc_acm_transfers_free(cdc_dev_t *cdc_dev)
         usb_host_transfer_free(cdc_dev->notif.xfer);
         cdc_dev->notif.xfer = NULL;
     }
-    for (int i = 0; i < CDC_ACM_IN_XFERS; i++) { // [patch 29] every IN transfer
+    for (int i = 0; i < CDC_ACM_IN_XFERS; i++) { // [patch 32] every IN transfer
         if (cdc_dev->data.in_xfer[i] != NULL) {
             cdc_acm_reset_in_transfer(cdc_dev, i);
             usb_host_transfer_free(cdc_dev->data.in_xfer[i]);
@@ -610,7 +610,7 @@ static esp_err_t cdc_acm_transfers_allocate(cdc_dev_t *cdc_dev, const usb_ep_des
     ESP_GOTO_ON_FALSE(cdc_dev->ctrl_mux, ESP_ERR_NO_MEM, err, TAG,);
 
     // 3. Setup IN data transfers (if it is required (in_buf_len > 0))
-    // [patch 29] CDC_ACM_IN_XFERS transfers of the same length, each with its own buffer.
+    // [patch 32] CDC_ACM_IN_XFERS transfers of the same length, each with its own buffer.
     if (in_buf_len != 0) {
         for (int i = 0; i < CDC_ACM_IN_XFERS; i++) {
             ESP_GOTO_ON_ERROR(
@@ -626,7 +626,7 @@ static esp_err_t cdc_acm_transfers_allocate(cdc_dev_t *cdc_dev, const usb_ep_des
             in_xfer->context = cdc_dev;
             cdc_dev->data.in_mps = USB_EP_DESC_GET_MPS(in_ep_desc);
             cdc_dev->data.in_data_buffer_base[i] = in_xfer->data_buffer;
-            // [patch 28] Whole packets of the length asked for; below one packet, upstream's length (the allocated buffer).
+            // [patch 31] Whole packets of the length asked for; below one packet, upstream's length (the allocated buffer).
             // The transfers are allocated alike, so they all get the same length.
             cdc_dev->data.in_xfer_len = in_buf_len - in_buf_len % cdc_dev->data.in_mps;
             if (cdc_dev->data.in_xfer_len == 0) {
@@ -778,7 +778,7 @@ esp_err_t cdc_acm_host_close(cdc_acm_dev_hdl_t cdc_hdl)
     CDC_ACM_EXIT_CRITICAL();
 
     // Cancel polling of BULK IN and INTERRUPT IN
-    // [patch 29] The IN transfers share one endpoint: halting and flushing it once retires all of them.
+    // [patch 32] The IN transfers share one endpoint: halting and flushing it once retires all of them.
     for (int i = 0; i < CDC_ACM_IN_XFERS; i++) {
         cdc_dev->data.in_polling[i] = false;
     }
@@ -862,7 +862,7 @@ static void in_xfer_cb(usb_transfer_t *transfer)
 {
     ESP_LOGD(TAG, "in xfer cb");
     cdc_dev_t *cdc_dev = (cdc_dev_t *)transfer->context;
-    // [patch 29] Which of the IN transfers completed. Callbacks run one at a time on the CDC driver task
+    // [patch 32] Which of the IN transfers completed. Callbacks run one at a time on the CDC driver task
     // (usb_host_client_handle_events), in the order the transfers were queued on the pipe.
     int idx = 0;
     while (idx < CDC_ACM_IN_XFERS - 1 && cdc_dev->data.in_xfer[idx] != transfer) {
@@ -882,7 +882,7 @@ static void in_xfer_cb(usb_transfer_t *transfer)
         // In order to save RAM and CPU time, the application can indicate that the received data was not processed and that the application expects more data.
         // In this case, the next received data must be appended to the existing buffer.
         // Since the data_buffer in usb_transfer_t is a constant pointer, we must cast away to const qualifier.
-        // [patch 29] Appending needs the next data to land in this same transfer. With more than one IN transfer in
+        // [patch 32] Appending needs the next data to land in this same transfer. With more than one IN transfer in
         // flight the next data is already queued into another one, so "not processed" is treated as processed
         // (warned once): the user gets every transfer's data once, in order, and must keep what it has not consumed.
         if (!data_processed) {
@@ -928,7 +928,7 @@ static void in_xfer_cb(usb_transfer_t *transfer)
         }
     }
 
-    // [patch 29] Resubmit this transfer: it queues behind the other IN transfers still in flight.
+    // [patch 32] Resubmit this transfer: it queues behind the other IN transfers still in flight.
     ESP_LOGD(TAG, "Submitting poll for BULK IN transfer %d", idx);
     cdc_acm_submit_poll(cdc_dev->data.in_xfer[idx], &cdc_dev->data.in_polling[idx], "BULK IN");
 }
@@ -941,7 +941,7 @@ static void notif_xfer_cb(usb_transfer_t *transfer)
 
     if (cdc_acm_is_transfer_completed(transfer)) {
         cdc_notification_t *notif = (cdc_notification_t *)transfer->data_buffer;
-        // Patch 27 (p4/components/PATCHES.md): a packet that does not start with the CDC class notification
+        // Patch 30 (p4/components/PATCHES.md): a packet that does not start with the CDC class notification
         // bmRequestType (0xA1) is not a CDC notification (e.g. the CH34x's vendor status packets): it goes to the
         // user's event callback as it is, without a warning.
         if (transfer->actual_num_bytes < 1 || notif->bmRequestType != CDC_NOTIF_BM_REQUEST_TYPE) {
@@ -1021,7 +1021,7 @@ static void cdc_acm_resume(cdc_dev_t *cdc_dev)
 
     if (cdc_dev->data.in_xfer[0]) {
         ESP_LOGD(TAG, "Submitting poll for BULK IN transfers");
-        ESP_ERROR_CHECK(cdc_acm_submit_in_polls(cdc_dev)); // [patch 29]
+        ESP_ERROR_CHECK(cdc_acm_submit_in_polls(cdc_dev)); // [patch 32]
     }
 
     if (cdc_dev->notif.xfer) {
@@ -1042,7 +1042,7 @@ static void cdc_acm_suspend_polling(cdc_dev_t *cdc_dev)
 {
     assert(cdc_dev);
 
-    for (int i = 0; i < CDC_ACM_IN_XFERS; i++) { // [patch 29]
+    for (int i = 0; i < CDC_ACM_IN_XFERS; i++) { // [patch 32]
         cdc_dev->data.in_polling[i] = false;
     }
 

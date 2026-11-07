@@ -1,5 +1,6 @@
 #include "render.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "diag.h"
@@ -281,6 +282,24 @@ static void window_family(metrics_writer_t *w, const char *name, const char *hel
     end_usec(&b, last_60s_us);
 }
 
+// One decimal, rounded half away from zero. A value that rounds to zero is written "0.0": the sign comes from the
+// rounded tenths, so never "-0.0". A non-finite or out-of-range reading writes no series.
+static void chip_temperature_family(metrics_writer_t *w, const diag_metrics_view_t *g)
+{
+    if (!g->chip_temperature_valid || !isfinite(g->chip_temperature_c) || fabsf(g->chip_temperature_c) > 1000.0f) {
+        return;
+    }
+    const float scaled = g->chip_temperature_c * 10.0f;
+    const int32_t tenths = (int32_t)(scaled < 0.0f ? scaled - 0.5f : scaled + 0.5f);
+
+    family(w, "br_chip_temperature_celsius", "gauge", "Chip (die) temperature.");
+    sample_t s = begin(w, "br_chip_temperature_celsius");
+
+    close_labels(&s);
+    metrics_writer_tenths(w, tenths);
+    metrics_writer_raw(w, "\n");
+}
+
 static void render_diag(metrics_writer_t *w, const diag_metrics_view_t *g)
 {
     render_cpu(w, g);
@@ -290,6 +309,7 @@ static void render_diag(metrics_writer_t *w, const diag_metrics_view_t *g)
     heap_family(w, "br_heap_min_free_bytes", "Least free heap since boot.", g->internal.min_free, g->psram.min_free);
     heap_family(w, "br_heap_largest_free_block_bytes", "Largest free heap block.", g->internal.largest_free_block,
                 g->psram.largest_free_block);
+    chip_temperature_family(w, g);
     single(w, "br_ot_lock_acquisitions_total", "counter", "OpenThread lock acquisitions.", g->lock.acquisitions);
     single_usec(w, "br_ot_lock_hold_seconds_total", "counter", "Time the OpenThread lock was held.",
                 g->lock.hold_us_total);

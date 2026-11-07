@@ -37,6 +37,32 @@
     <div class="form-hint" id="confirmMsg" role="status" aria-live="polite"></div>
     <div class="form-hint hidden" id="fw-stale" role="status" aria-live="polite"></div>
 
+    <section class="card mb-16" id="updCard">
+        <div class="tile-head">
+            <h2 class="card-title">Updates from GitHub</h2>
+            <span class="chip" id="updChip">Not checked</span>
+        </div>
+        <p class="card-sub">The latest release of <a id="updRepo">the repository</a>.</p>
+        <dl class="facts">
+            <dt>Latest release</dt><dd id="updRelease">-</dd>
+            <dt>Border Router</dt><dd class="mono" id="updApp">-</dd>
+            <dt>Radio firmware</dt><dd class="mono" id="updRcp">-</dd>
+            <dt>Checked</dt><dd id="updChecked">-</dd>
+        </dl>
+        <div class="editor">
+            <fieldset>
+                <legend>Install the release</legend>
+                <p class="form-hint" id="updHint">The board downloads the bundle and, when it differs, the radio firmware from the same
+                    release, then reboots.</p>
+                <div>
+                    <button class="btn btn-primary hidden" id="updInstall" type="button">Install and reboot</button>
+                    <button class="btn btn-outline" id="updCheck" type="button">Check again</button>
+                </div>
+                <div class="form-hint" id="updMsg" role="status" aria-live="polite"></div>
+            </fieldset>
+        </div>
+    </section>
+
     <div class="tile-grid" id="firmwareSection">
         <section class="card">
             <h2 class="card-title">Border Router</h2>
@@ -60,11 +86,11 @@
                             <input type="file" id="otaFile">
                         </label>
                     </div>
-                    <label class="field hidden" id="ota-url-pane" for="otaUrl" style="width: 100%">Download address (http only)
-                        <input type="text" id="otaUrl" placeholder="http://host/otbr.bundle">
+                    <label class="field hidden" id="ota-url-pane" for="otaUrl" style="width: 100%">Download address (http or https)
+                        <input type="text" id="otaUrl" placeholder="https://host/otbr.bundle">
                     </label>
                     <p class="form-hint">The board writes the bundle to the other slot and reboots into it.</p>
-                    <button class="btn btn-primary" id="otaInstall" type="button">Install and reboot</button>
+                    <button class="btn btn-outline" id="otaInstall" type="button">Install and reboot</button>
                     <div class="form-hint" id="otaMsg" role="status" aria-live="polite"></div>
                 </fieldset>
             </div>
@@ -94,12 +120,12 @@
                             <input type="file" id="rcpFile">
                         </label>
                     </div>
-                    <label class="field hidden" id="rcp-url-pane" for="rcpUrl" style="width: 100%">Download address (http only)
-                        <input type="text" id="rcpUrl" placeholder="http://host/c6_rcp.bin">
+                    <label class="field hidden" id="rcp-url-pane" for="rcpUrl" style="width: 100%">Download address (http or https)
+                        <input type="text" id="rcpUrl" placeholder="https://host/c6_rcp.bin">
                     </label>
                     <p class="form-hint">The Thread network stops for about half a minute while the radio is rewritten. Not
                         possible during a packet capture.</p>
-                    <button class="btn btn-primary" id="rcpInstall" type="button">Install radio firmware</button>
+                    <button class="btn btn-outline" id="rcpInstall" type="button">Install radio firmware</button>
                     <div class="form-hint" id="rcpMsg" role="status" aria-live="polite"></div>
                 </fieldset>
             </div>

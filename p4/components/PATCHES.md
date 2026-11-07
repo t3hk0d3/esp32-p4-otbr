@@ -61,6 +61,8 @@ reason, spec reference.
    2026-11-03: `frontend/ethernet.html` gets the "Thread over Ethernet" (TREL) card, `static/ethernet.js` its logic
    (`trelOnly`, `trelView`, `setTrel`); it also polls `/device/status` for the TREL state. No CSS change.
    (docs/superpowers/specs/2026-11-03-trel-design.md)
+   2026-11-06: `frontend/index.html` and `static/status.js` get a "Chip temperature" row (`t-chip-temp`) in the "Load and memory"
+   card, read from `chip_temperature_c` of `/device/diag`. No CSS change.
 4. Not applied. Not needed: Phase 0 showed `esp_ot_br_server` links without Wi-Fi. (spec 5.8)
 5. Applied (part a Task 11B, part b Task 13). `esp_br_http_ota`: (a) minimal RCP strip: removed the
    `esp_rcp_ota_*` / `esp_rcp_firmware.h` use and the `esp_rcp_update` entry in `REQUIRES`. Reason: the RCP firmware
@@ -116,7 +118,8 @@ reason, spec reference.
    `EXTRA_HANDLER_SLOTS` (the handlers the callback and the catch-all may add to `max_uri_handlers`) was 20 since the
    network names (`GET`/`PUT /device/names`, spec 2026-11-03-network-names-design.md) and is 24 since mesh routing
    (patch 19). The leader weight (`GET`/`PUT /device/thread`) uses 2 of them: 22 routes plus the catch-all. It is 27
-   since the Thread console (patch 24): 25 routes plus the catch-all.
+   since the Thread console (patch 24): 25 routes plus the catch-all. It is 30 since self-update (patch 26): 27 routes
+   plus the catch-all.
 11. Applied (Task 18). `esp_ot_br_server`: the Thread REST background worker `thread_rest` (`rest_process_task`,
    `src/esp_br_web_api.c`) is created with `xTaskCreatePinnedToCore(..., 1)` instead of `xTaskCreate`. Reason: it takes
    the OpenThread lock every 100 ms and was unpinned, so it could run on core 0 next to the network path; it belongs to
@@ -315,18 +318,34 @@ reason, spec reference.
 24. Applied (Thread console, Task 3). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 24 -> 27. `device_api`
    adds `GET`/`PUT /device/console` and the WebSocket `GET /device/console/ws`: 25 routes plus the catch-all, one slot
    of headroom. (docs/superpowers/specs/2026-11-04-thread-console-design.md)
-25. Applied (USB serial proxy, Task 4). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 27 -> 29.
+25. Applied (self-update, Task 1). `esp_ot_br_server` frontend, `frontend/static/firmware.js` and `frontend/firmware.html`:
+   the device downloads over https now (certificate bundle, `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y`).
+   `checkUpdateUrl` accepts `https://` as well as `http://` (message: "The URL must start with http:// or https://"),
+   both URL labels read "Download address (http or https)", and the placeholders are `https://host/...`. Tests:
+   `tools/tests/test_firmware_page.py` (`test_https_update_url_is_accepted`).
+26. Applied (self-update, Task 5). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 27 -> 30. `device_api`
+   adds `GET`/`POST /device/update`: 27 routes plus the catch-all (28), which 27 slots no longer cover. 30 leaves 2
+   slots of headroom. (docs/superpowers/plans/2026-11-05-self-update.md, Task 5)
+27. Applied (self-update, Task 6). `esp_ot_br_server` frontend, `frontend/firmware.html`, `frontend/static/firmware.js` and
+   `frontend/static/style.css`: the Updates card (`#updCard`, above `#firmwareSection`) shows the latest GitHub release from
+   `GET /device/update`, checks (`?check=true`, polled with the page's refresh timer) and installs (`POST /device/update`,
+   `?force=1` for a build newer than the release). `FirmwareLogic` gains `updateNeedsCheck`, `updateChip`, `versionRow`,
+   `checkedText`, `updateAction`, `updateHint`, `updateQuestion`, `checkFailedText`, `updateReplyText`, `repoLabel` (and
+   helpers); the page keeps `update:after` (`{rcpFailed}`) next to `ota:before` across the reload and reports through
+   `updMsg`. The manual Install buttons (`otaInstall`, `rcpInstall`) are `btn-outline`. `style.css`: `.facts .was`.
+   Tests: `tools/tests/test_firmware_page.py` (`TestUpdateLogic`, `TestUpdatesCard`).
+28. Applied (USB serial proxy, Task 4). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 27 -> 29 (before the self-update merge).
    `device_api` adds `GET`/`PUT /device/usb_serial`: 27 routes plus the catch-all, one slot of headroom (those two routes
-   are gone again in patch 26).
+   are gone again in patch 29).
    (docs/superpowers/specs/2026-11-05-usb-serial-proxy-design.md)
-26. Applied (radio channel mux, Task 8). `esp_ot_br_server`: the board mode `NO_RADIO` (no radio channel in otbr is
+29. Applied (radio channel mux, Task 8). `esp_ot_br_server`: the board mode `NO_RADIO` (no radio channel in otbr is
    present) in the REST guard. `src/esp_br_guard.c`: `READ` and `THREAD_OP` answer 503 in `NO_RADIO` whatever the
    ready flag says (it may lag while OpenThread is torn down after an unplug); `esp_br_guard_detail(status, mode)`
    takes the mode and says `no radio in OTBR mode` for 503 in `NO_RADIO` (`radio not available` otherwise, as before).
    Call sites: `src/esp_br_web.c` (the Thread REST dispatcher reads the mode once for the check and the detail;
    `guard_refuse_gui` and `guard_refuse_resource` use the guard's detail, the resource format no longer hard-codes
    it) and `src/esp_br_web_api.c` (`esp_br_thread_rest_request`). `EXTRA_HANDLER_SLOTS` 29 -> 30: `device_api` drops
-   `GET`/`PUT /device/usb_serial` (patch 25) and adds `GET /device/channels`, `PUT` and `DELETE /device/channels/*`:
+   `GET`/`PUT /device/usb_serial` (patch 28) and adds `GET /device/channels`, `PUT` and `DELETE /device/channels/*`:
    28 routes (the console WebSocket included) plus the catch-all, one slot of headroom. The console WebSocket
    (`device_api`, not vendored) answers its handshake with 503 `no radio in OTBR mode` in `NO_RADIO` as well. Host
    tests: `test_host/` (NO_RADIO cases) and `tests/test_rest.c` `test_guard_no_radio`.
@@ -343,13 +362,15 @@ reason, spec reference.
    `NO_RADIO` hero linking the Radios page, and the `RADIO_FAULT` hero links Radios instead of Firmware while Thread's
    radio is a dongle.
    (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md, sections Board mode and API)
+   Merged with self-update (patch 26, which took `EXTRA_HANDLER_SLOTS` to 30 for `/device/update`): `device_api` now has
+   31 routes (the console WebSocket included) plus the catch-all, so `EXTRA_HANDLER_SLOTS` is 34, two slots of headroom.
 
 ### REST guard classification (patches 2 and 9)
 
 Classes: `NONE` no OpenThread access, always served. `READ` reads OpenThread state: 200 while OpenThread runs (patch 9
 ready flag), 503 otherwise (RADIO_FAULT/STARTING before OpenThread is up, SNIFFER: `br_core` switches the flag off while
 Thread is stopped, so Thread state reads answer 503 there). `THREAD_OP` changes Thread/dataset state or needs the radio:
-only in BR_RUNNING with OpenThread ready; SNIFFER 409, RADIO_FAULT/STARTING 503. NO_RADIO (patch 26): every `READ`
+only in BR_RUNNING with OpenThread ready; SNIFFER 409, RADIO_FAULT/STARTING 503. NO_RADIO (patch 29): every `READ`
 and `THREAD_OP` endpoint below answers 503 `no radio in OTBR mode`, as in the RADIO_FAULT / STARTING column. THREAD_OP is checked twice: lock-free
 first (no lock exists before OpenThread is up), then while holding the OpenThread lock where the OpenThread call
 happens.
@@ -422,7 +443,7 @@ Vendored from:
 Same rules as above: upstream formatting, excluded from pre-commit, every change listed here. Patch numbers continue
 the sequence above.
 
-27. Applied (CH34x status packets, 2026-11-07). `usb_host_cdc_acm`: packets on the notification endpoint that are not
+30. Applied (CH34x status packets, 2026-11-07). `usb_host_cdc_acm`: packets on the notification endpoint that are not
    CDC notifications. `cdc_acm_host.c` `notif_xfer_cb`: a packet whose first byte (bmRequestType) is not
    `CDC_NOTIF_BM_REQUEST_TYPE` (0xA1, new in `include/usb/usb_types_cdc.h`), or an empty one, is passed to the user's
    event callback as the new event `CDC_ACM_HOST_VENDOR_NOTIFICATION` (`include/usb/cdc_host_types.h`: appended to
@@ -437,7 +458,7 @@ the sequence above.
    CH34x status decision is host-tested in radio_mux (`radio_mux_ch34x_uart_error`).
    (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md; docs/radios.md, counter `uart_errors`)
 
-28. Applied (CH34x late answers, 2026-11-07). `usb_host_cdc_acm`: the bulk IN transfer keeps the length asked for at
+31. Applied (CH34x late answers, 2026-11-07). `usb_host_cdc_acm`: the bulk IN transfer keeps the length asked for at
    open. `include/esp_private/cdc_host_common.h`: new field `data.in_xfer_len`; `cdc_acm_host.c`
    `cdc_acm_transfers_allocate` sets it to the asked length rounded down to whole max packets (below one packet:
    upstream's length from the allocated buffer) and uses it for the first submit; `cdc_acm_reset_in_transfer` uses it
@@ -455,10 +476,10 @@ the sequence above.
    rounding, for example an HS device with MPS 512 asked for 100 bytes) `in_xfer_len` comes out 0 and a zero-length
    IN is submitted, as upstream also did; this project never asks for that (it passes 0). Upstream's `host_test` that
    opens with `in_buffer_size = 100` (`test_device_interaction.cpp`) would now expect a first submit of 64 bytes, not
-   100: adjust it if that test is ever revived here. Host test: none (no USB host mocks, see patch 27).
+   100: adjust it if that test is ever revived here. Host test: none (no USB host mocks, see patch 30).
    (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md)
 
-29. Applied (CH34x UART overrun, 2026-11-07). `usb_host_cdc_acm`: `CDC_ACM_IN_XFERS` (8) bulk IN transfers in flight
+32. Applied (CH34x UART overrun, 2026-11-07). `usb_host_cdc_acm`: `CDC_ACM_IN_XFERS` (8) bulk IN transfers in flight
    per device. `include/esp_private/cdc_host_common.h`: new `CDC_ACM_IN_XFERS`; `data.in_xfer`,
    `data.in_data_buffer_base` and `data.in_polling` become arrays of that size (`in_xfer_len` and `in_mps` stay shared:
    the transfers are allocated alike). `cdc_acm_host.c`: `cdc_acm_transfers_allocate` allocates each transfer (patch
@@ -480,8 +501,8 @@ the sequence above.
    Memory: seven more transfers per open device (one max packet each, a 64-byte DMA buffer after the cache-line
    rounding: 448 bytes).
    Reason: on the board (CH340 OllyZig at 460800, sustained Zigbee load, 6 minutes) the single 32-byte IN transfer of
-   patch 28 left the CH340 nothing to complete into between a completion and the resubmit (46 bytes/ms at 460800):
-   the channel counted `uart_errors` 9 (the CH340's own UART receive-error/overrun bit, patch 27) and `rx_errors` 5
+   patch 31 left the CH340 nothing to complete into between a completion and the resubmit (46 bytes/ms at 460800):
+   the channel counted `uart_errors` 9 (the CH340's own UART receive-error/overrun bit, patch 30) and `rx_errors` 5
    (bad HDLC frames). Linux's usb-serial keeps two one-MPS read URBs in flight (generic driver, `bulk_in_urbs[2]`);
    two were not enough here. Measured on the board (rcp-proxy over TCP, frame mode, 2 minutes of pipelined spinel
    requests, 8 per burst, ~15-29 KB/s from the dongle): with 2 transfers 23453 of 23472 replies, 19 with a bad FCS,
@@ -492,7 +513,7 @@ the sequence above.
    no flow control, and the board counts no error.) Errors: a transfer that fails (stall, error) is not resubmitted, as upstream; the endpoint flush
    then returns the other one as well (cancelled, no resubmit), and the user may see one `CDC_ACM_HOST_ERROR` per
    transfer. Upstream's `host_test` fixtures (`common_test_fixtures.cpp`) still use the single `data.in_xfer` and expect
-   one IN submit: adjust them if that test is ever revived here. Host test: none (no USB host mocks, see patch 27).
+   one IN submit: adjust them if that test is ever revived here. Host test: none (no USB host mocks, see patch 30).
 
 ## Known upstream behaviour (not patches)
 

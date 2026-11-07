@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -41,6 +42,8 @@ esp_err_t diag_snapshot_json(char **out_json);
 typedef struct {
     uint32_t uptime_s;
     const char *reset_reason; /**< static string */
+    bool chip_temperature_valid; /**< false: the sensor is unavailable or its last read failed */
+    float chip_temperature_c;    /**< die temperature in degrees Celsius, meaningful only when chip_temperature_valid */
     struct {
         uint64_t wall_us; /**< run time counter total of the core */
         uint64_t idle_us; /**< of that, the core's idle task: busy = wall - idle */
