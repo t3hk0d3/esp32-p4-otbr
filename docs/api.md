@@ -248,13 +248,13 @@ websocat ws://<board>/device/console/ws
 
 ### Radio channels
 
-Every radio is a channel: the on-board C6 (`c6`) and a USB dongle (`usb-<vid>-<pid>`, plus `-<serial>` when the device
+Every radio is a channel: the ESP32-C6 (built-in) (`c6`) and a USB dongle (`usb-<vid>-<pid>`, plus `-<serial>` when the device
 reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /device/channels` answers
 
 ```
 {"available_modes": ["off", "otbr", "rcp-proxy"],
  "channels": [
-  {"id": "c6", "kind": "c6", "label": "ESP32-C6 (on board)", "mode": "otbr", "stored_mode": "otbr",
+  {"id": "c6", "kind": "c6", "label": "ESP32-C6 (built-in)", "mode": "otbr", "stored_mode": "otbr",
    "state": "running", "error": null, "line": {"baud": 460800, "flow_control": false}, "usb": null,
    "caps": {"firmware_update": true, "hw_reset": true, "flow_control": false},
    "rcp_proxy": {"direction": "listen", "adapter": "tcp", "port": 6638, "host": "", "framing": "hdlc",
@@ -371,7 +371,7 @@ recovery with the jumper), `/capture.html` (packet capture) and `/diagnostics.ht
 banner with **Keep new settings** while network settings are on trial. They use only `/device/*`, so they also work in
 `RADIO_FAULT` and while sniffing.
 
-<img src="images/dashboard.png" width="640" alt="Dashboard in three sections. Device and network: Board OK, the Radios card (C6 runs Zigbee, USB radio off), Ethernet, board firmware, load and memory. Thread: not active, with a link to the Radios page. Zigbee: Waiting for Home Assistant on the on-board C6, with cards for Connect Home Assistant (the ws:// path and a Copy button), the client (not connected), the network (set by ZHA once it connects), radio traffic, memory and the radio firmware">
+<img src="images/dashboard.png" width="640" alt="Dashboard in three sections. Device and network: Board OK, the Radios card (C6 runs Zigbee, USB radio off), Ethernet, board firmware, load and memory. Thread: not active, with a link to the Radios page. Zigbee: Coordinator running on channel 25 on the on-board C6, ZHA connected; cards for Connect Home Assistant (the ws:// path and a Copy button), the connected client, the network as ZHA set it, radio traffic, memory and the radio firmware">
 
 ## Creating a Thread network
 
