@@ -94,7 +94,7 @@ httpd_handle_t esp_br_web_get_server(void)
 #define REST_PATH_COUNT     4 /* esp_otbr_thread_rest_register: paths x methods, asserted there */
 #define REST_METHOD_COUNT   7
 #define REST_ROUTE_SLOTS    (REST_PATH_COUNT * REST_METHOD_COUNT)
-#define EXTRA_HANDLER_SLOTS 32      /* device_api (29: 28 routes and the console WebSocket), /zigbee and the catch-all, plus one slot of headroom (patches 19, 24, 25, 26, 27) */
+#define EXTRA_HANDLER_SLOTS 32      /* device_api (29: 28 routes and the console WebSocket), /zigbee and the catch-all, plus one slot of headroom (patches 19, 24, 25, 26, 28) */
 /* Patch 12: per-interface policy (spec 5.13). netcfg_request_allowed sends the 403 itself; failing the handler makes the
  * server close the connection. Single mode (the default) allows everything. */
 #define NETCFG_GATE(req, svc)                       \

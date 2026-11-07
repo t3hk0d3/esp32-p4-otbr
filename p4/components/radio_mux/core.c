@@ -486,20 +486,198 @@ const char *radio_mux_fw_source_name(radio_mux_fw_source_t src)
 
 #define PORT_HTTP 80
 #define PORT_BGP 179
+#define PROXY_HOST_NAME_MAX_LEN 63
+#define LABEL_MAX_LEN 63
+#define IP4_PARTS 4
+#define IP4_PART_MAX 255
+#define IP6_GROUPS 8
+#define IP6_GROUP_DIGITS 4
 
-bool radio_mux_proxy_ok(const radio_mux_proxy_settings_t *s)
+static bool is_digit(char c)
 {
-    const size_t host_len = strnlen(s->host, sizeof(s->host));
+    return c >= '0' && c <= '9';
+}
 
+static bool is_hex(char c)
+{
+    return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+// Dotted quad of n bytes at s: four decimal parts 0..255, one to three digits each.
+static bool ip4_ok(const char *s, size_t n)
+{
+    size_t parts = 0;
+    size_t i = 0;
+
+    while (parts < IP4_PARTS) {
+        unsigned value = 0;
+        size_t digits = 0;
+
+        while (i < n && is_digit(s[i]) && digits < 3) {
+            value = value * 10 + (unsigned)(s[i] - '0');
+            digits++;
+            i++;
+        }
+        if (digits == 0 || value > IP4_PART_MAX) {
+            return false;
+        }
+        parts++;
+        if (parts < IP4_PARTS) {
+            if (i >= n || s[i] != '.') {
+                return false;
+            }
+            i++;
+        }
+    }
+    return i == n;
+}
+
+// RFC 4291 text form: up to eight groups of one to four hex digits, one "::" for a run of zero groups, an optional
+// dotted-quad tail counting as two groups. No zone.
+static bool ip6_ok(const char *s)
+{
+    const size_t n = strlen(s);
+    size_t groups = 0;
+    bool gap = false;
+    size_t i = 0;
+
+    if (n >= 2 && s[0] == ':' && s[1] == ':') {
+        gap = true;
+        i = 2;
+    } else if (n >= 1 && s[0] == ':') {
+        return false;
+    }
+    while (i < n) {
+        size_t digits = 0;
+        const size_t start = i;
+
+        while (i < n && is_hex(s[i])) {
+            digits++;
+            i++;
+        }
+        if (i < n && s[i] == '.') { // an IPv4 tail ends the address
+            if (!ip4_ok(&s[start], n - start)) {
+                return false;
+            }
+            groups += 2;
+            i = n;
+            break;
+        }
+        if (digits == 0 || digits > IP6_GROUP_DIGITS) {
+            return false;
+        }
+        groups++;
+        if (i == n) {
+            break;
+        }
+        if (s[i] != ':') {
+            return false;
+        }
+        i++;
+        if (i < n && s[i] == ':') {
+            if (gap) {
+                return false; // a second "::"
+            }
+            gap = true;
+            i++;
+        } else if (i == n) {
+            return false; // a trailing single ':'
+        }
+    }
+    return gap ? groups < IP6_GROUPS : groups == IP6_GROUPS;
+}
+
+// Labels of letters, digits and inner hyphens, 1..63 each; the last label is not all digits (it would be a broken
+// IPv4 literal). A trailing dot is not accepted.
+static bool name_ok(const char *s, size_t n)
+{
+    size_t label = 0;
+    bool all_digits = true;
+
+    for (size_t i = 0; i <= n; i++) {
+        const char c = i < n ? s[i] : '.';
+
+        if (c == '.') {
+            if (label == 0 || label > LABEL_MAX_LEN || s[i - 1] == '-') {
+                return false;
+            }
+            if (i == n && all_digits) {
+                return false;
+            }
+            label = 0;
+            all_digits = true;
+            continue;
+        }
+        if (!is_alnum(c) && c != '-') {
+            return false;
+        }
+        if (c == '-' && label == 0) {
+            return false;
+        }
+        all_digits = all_digits && is_digit(c);
+        label++;
+    }
+    return true;
+}
+
+static bool host_ok(const char *host, size_t n)
+{
+    if (n == 0 || n > PROXY_HOST_NAME_MAX_LEN) {
+        return false;
+    }
+    if (strchr(host, ':')) {
+        return ip6_ok(host);
+    }
+    return ip4_ok(host, n) || name_ok(host, n);
+}
+
+radio_mux_proxy_check_t radio_mux_proxy_check(const radio_mux_proxy_settings_t *s)
+{
     if ((s->dir != RADIO_MUX_PROXY_LISTEN && s->dir != RADIO_MUX_PROXY_CONNECT) ||
             (s->adapter != RADIO_MUX_PROXY_TCP && s->adapter != RADIO_MUX_PROXY_UDP) ||
             (s->framing != RADIO_MUX_PROXY_HDLC && s->framing != RADIO_MUX_PROXY_RAW)) {
-        return false;
+        return RADIO_MUX_PROXY_CHECK_BAD_KIND;
     }
-    if (s->port == 0 || s->port == PORT_HTTP || s->port == PORT_BGP || host_len == sizeof(s->host)) {
-        return false;
+    if (s->port == 0 || s->port == PORT_HTTP || s->port == PORT_BGP) {
+        return RADIO_MUX_PROXY_CHECK_BAD_PORT;
     }
-    return s->dir != RADIO_MUX_PROXY_CONNECT || host_len > 0;
+    const size_t n = strnlen(s->host, sizeof(s->host));
+
+    if (n == sizeof(s->host)) {
+        return RADIO_MUX_PROXY_CHECK_BAD_HOST; // no terminator
+    }
+    if (s->dir == RADIO_MUX_PROXY_CONNECT && n == 0) {
+        return RADIO_MUX_PROXY_CHECK_NEED_HOST;
+    }
+    if (n > 0 && !host_ok(s->host, n)) {
+        return RADIO_MUX_PROXY_CHECK_BAD_HOST;
+    }
+    return RADIO_MUX_PROXY_CHECK_OK;
+}
+
+radio_mux_proxy_check_t radio_mux_proxy_merge(const radio_mux_proxy_settings_t *stored, uint8_t fields,
+                                              const radio_mux_proxy_settings_t *given, radio_mux_proxy_settings_t *out)
+{
+    *out = *stored;
+    if (fields == 0) {
+        return RADIO_MUX_PROXY_CHECK_OK;
+    }
+    if (fields & RADIO_MUX_PROXY_F_DIR) {
+        out->dir = given->dir;
+    }
+    if (fields & RADIO_MUX_PROXY_F_ADAPTER) {
+        out->adapter = given->adapter;
+    }
+    if (fields & RADIO_MUX_PROXY_F_PORT) {
+        out->port = given->port;
+    }
+    if (fields & RADIO_MUX_PROXY_F_HOST) {
+        memcpy(out->host, given->host, sizeof(out->host));
+    }
+    if (fields & RADIO_MUX_PROXY_F_FRAMING) {
+        out->framing = given->framing;
+    }
+    return radio_mux_proxy_check(out);
 }
 
 #define TX_BITS_PER_BYTE 10 // 8N1: start, 8 data, stop
@@ -513,6 +691,25 @@ uint32_t radio_mux_tx_timeout_ms(size_t n, uint32_t baud)
     const uint64_t bits_ms = (uint64_t)n * TX_BITS_PER_BYTE * TX_MARGIN * MS_PER_S;
 
     return RADIO_MUX_TX_BASE_MS + (uint32_t)((bits_ms + b - 1) / b);
+}
+
+bool radio_mux_reset_count_request(radio_mux_reset_count_t *c)
+{
+    if (++c->unanswered < RADIO_MUX_USB_DEAD_RESETS) {
+        return false;
+    }
+    c->unanswered = 0;
+    return true;
+}
+
+void radio_mux_reset_count_clear(radio_mux_reset_count_t *c)
+{
+    c->unanswered = 0;
+}
+
+bool radio_mux_ch34x_uart_error(const uint8_t *pkt, size_t len)
+{
+    return pkt != NULL && len >= RADIO_MUX_CH34X_STATUS_LEN && (pkt[0] & RADIO_MUX_CH34X_UART_ERR_MASK) != 0;
 }
 
 bool radio_mux_port_frames(bool c6_port, bool consumer_frames)

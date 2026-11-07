@@ -1,40 +1,11 @@
 #include "mux_gone_answer.h"
 
+#include "radio_mux_spinel_uint.h"
 #include "spinel.h"
 
 // The 2.4 GHz IEEE 802.15.4 channels: what a CHANNELS answer reports as supported and preferred.
 #define OT_MUX_GONE_CHANNEL_MIN 11
 #define OT_MUX_GONE_CHANNEL_MAX 26
-
-// Spinel packed unsigned integer (EXI): 7 bits a byte, low first, the high bit set on all but the last.
-static size_t unpack_uint(const uint8_t *p, size_t len, uint32_t *out)
-{
-    uint32_t value = 0;
-
-    for (size_t i = 0; i < len && i < 4; i++) {
-        value |= (uint32_t)(p[i] & 0x7F) << (7 * i);
-        if (!(p[i] & 0x80)) {
-            *out = value;
-            return i + 1;
-        }
-    }
-    return 0;
-}
-
-static size_t pack_uint(uint32_t value, uint8_t *out)
-{
-    size_t n = 0;
-
-    do {
-        out[n] = value & 0x7F;
-        value >>= 7;
-        if (value) {
-            out[n] |= 0x80;
-        }
-        n++;
-    } while (value);
-    return n;
-}
 
 // GETs whose callers in RadioSpinel and ESP-IDF's port take an error (they log it and return it, or a default value).
 // The channel masks (GetRadioChannelMask, e.g. the CLI's `channel supported` in any task) end in SuccessOrDie on an
@@ -91,12 +62,12 @@ bool ot_mux_gone_parse(const uint8_t *frame, size_t len, uint8_t *tid, uint32_t 
         return false;
     }
     *tid = SPINEL_HEADER_GET_TID(frame[0]);
-    n = unpack_uint(&frame[at], len - at, cmd);
+    n = radio_mux_spinel_uint_unpack(&frame[at], len - at, cmd);
     if (n == 0) {
         return false;
     }
     at += n;
-    return unpack_uint(&frame[at], len - at, key) > 0;
+    return radio_mux_spinel_uint_unpack(&frame[at], len - at, key) > 0;
 }
 
 bool ot_mux_gone_is_reset(const uint8_t *frame, size_t len)
@@ -111,7 +82,7 @@ size_t ot_mux_gone_reset_frame(uint8_t out[OT_MUX_GONE_FRAME_MAX])
     out[n++] = SPINEL_HEADER_FLAG; // TID 0: a notification
     out[n++] = SPINEL_CMD_PROP_VALUE_IS;
     out[n++] = SPINEL_PROP_LAST_STATUS;
-    n += pack_uint(SPINEL_STATUS_RESET_UNKNOWN, &out[n]);
+    n += radio_mux_spinel_uint_pack(SPINEL_STATUS_RESET_UNKNOWN, &out[n]);
     return n;
 }
 
@@ -121,7 +92,7 @@ bool ot_mux_gone_is_reset_notification(const uint8_t *frame, size_t len)
 
     return frame && len >= 4 && (frame[0] & 0xC0) == SPINEL_HEADER_FLAG && SPINEL_HEADER_GET_TID(frame[0]) == 0 &&
            frame[1] == SPINEL_CMD_PROP_VALUE_IS && frame[2] == SPINEL_PROP_LAST_STATUS &&
-           unpack_uint(&frame[3], len - 3, &status) > 0 && status >= SPINEL_STATUS_RESET__BEGIN &&
+           radio_mux_spinel_uint_unpack(&frame[3], len - 3, &status) > 0 && status >= SPINEL_STATUS_RESET__BEGIN &&
            status <= SPINEL_STATUS_RESET__END;
 }
 
@@ -138,7 +109,7 @@ size_t ot_mux_gone_frame(ot_mux_gone_t answer, uint8_t tid, uint32_t key, uint8_
     if (answer == OT_MUX_GONE_CHANNELS) {
         out[n++] = (uint8_t)(SPINEL_HEADER_FLAG | (tid & SPINEL_HEADER_TID_MASK));
         out[n++] = SPINEL_CMD_PROP_VALUE_IS;
-        n += pack_uint(key, &out[n]);
+        n += radio_mux_spinel_uint_pack(key, &out[n]);
         for (uint8_t channel = OT_MUX_GONE_CHANNEL_MIN; channel <= OT_MUX_GONE_CHANNEL_MAX; channel++) {
             out[n++] = channel;
         }
@@ -160,7 +131,7 @@ size_t ot_mux_gone_frame(ot_mux_gone_t answer, uint8_t tid, uint32_t key, uint8_
     out[n++] = (uint8_t)(SPINEL_HEADER_FLAG | (tid & SPINEL_HEADER_TID_MASK));
     out[n++] = SPINEL_CMD_PROP_VALUE_IS;
     out[n++] = SPINEL_PROP_LAST_STATUS;
-    n += pack_uint(status, &out[n]);
+    n += radio_mux_spinel_uint_pack(status, &out[n]);
     if (answer == OT_MUX_GONE_TX_ABORT) {
         out[n++] = 0; // frame pending
         out[n++] = 0; // header updated

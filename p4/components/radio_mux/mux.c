@@ -265,6 +265,9 @@ static void do_attach(mux_port_t *p)
     }
     radio_mux_chan_t *h = mux_new_attach(p);
 
+    xSemaphoreTake(p->rx_lock, portMAX_DELAY);
+    radio_mux_reset_count_clear(&p->reset_count); // a new attach starts with no unanswered reset
+    xSemaphoreGive(p->rx_lock);
     p->consumer = c;
     p->tx_frames = radio_mux_port_frames(p->kind == RADIO_MUX_KIND_C6, c->frames); // the C6 ignores c->frames
     mux_set_rx(p, p->tx_frames ? MUX_RX_FRAMES : MUX_RX_RAW);
@@ -745,6 +748,9 @@ static void handle_lease(mux_call_t *call)
     atomic_store(&p->tx_ok, true);
     p->leased = true;
     p->fault[0] = '\0';
+    xSemaphoreTake(p->rx_lock, portMAX_DELAY);
+    radio_mux_reset_count_clear(&p->reset_count); // a lease is an attach: no unanswered reset carries over
+    xSemaphoreGive(p->rx_lock);
     refresh(p);
     call->handle = h;
     call->err = ESP_OK;
@@ -994,32 +1000,15 @@ static void check_presence(mux_port_t *p)
 static radio_mux_verdict_t check_req(const struct radio_mux_chan *ch, const radio_mux_set_req_t *req,
                                      radio_mux_proxy_settings_t *proxy)
 {
-    *proxy = ch->proxy;
+    if (radio_mux_proxy_merge(&ch->proxy, req->has_proxy ? req->proxy_fields : 0, &req->proxy, proxy) !=
+            RADIO_MUX_PROXY_CHECK_OK) {
+        return RADIO_MUX_REFUSE_BAD_VALUE;
+    }
     if (ch->kind == RADIO_MUX_KIND_C6 && (req->has_baud || req->has_flow)) {
         return RADIO_MUX_REFUSE_BAD_VALUE; // SPI: the C6 has no line settings
     }
     if (req->has_baud && !radio_mux_baud_ok(req->baud)) {
         return RADIO_MUX_REFUSE_BAD_VALUE;
-    }
-    if (req->has_proxy) {
-        if (req->proxy_fields & RADIO_MUX_PROXY_F_DIR) {
-            proxy->dir = req->proxy.dir;
-        }
-        if (req->proxy_fields & RADIO_MUX_PROXY_F_ADAPTER) {
-            proxy->adapter = req->proxy.adapter;
-        }
-        if (req->proxy_fields & RADIO_MUX_PROXY_F_PORT) {
-            proxy->port = req->proxy.port;
-        }
-        if (req->proxy_fields & RADIO_MUX_PROXY_F_HOST) {
-            memcpy(proxy->host, req->proxy.host, sizeof(proxy->host));
-        }
-        if (req->proxy_fields & RADIO_MUX_PROXY_F_FRAMING) {
-            proxy->framing = req->proxy.framing;
-        }
-        if (!radio_mux_proxy_ok(proxy)) {
-            return RADIO_MUX_REFUSE_BAD_VALUE;
-        }
     }
     return RADIO_MUX_APPLY;
 }
@@ -1165,8 +1154,9 @@ static void handle_forget(mux_call_t *call)
     }
 }
 
-// A reset: a dongle is closed and reopened over USB, then RESET; GONE (detach) when it does not reopen. The C6 gets its
-// reset GPIO pulse.
+// A reset: a dongle is closed and reopened over USB, then RESET; GONE (detach) when it does not reopen, or when this is
+// the RADIO_MUX_USB_DEAD_RESETS-th reset in a row with nothing received in between (closed, fault "no answer after 3
+// resets"; an unplug or a PUT of the mode opens it again). The C6 gets its reset GPIO pulse.
 static void handle_reset(radio_mux_chan_t *h)
 {
     mux_port_t *p;
@@ -1186,9 +1176,19 @@ static void handle_reset(radio_mux_chan_t *h)
         }
         return;
     }
+    xSemaphoreTake(p->rx_lock, portMAX_DELAY);
+    const bool give_up = radio_mux_reset_count_request(&p->reset_count);
+    xSemaphoreGive(p->rx_lock);
+
     atomic_store(&p->tx_ok, false);
     mux_set_rx(p, MUX_RX_DISCARD);
     usb_transport_close(p);
+    if (give_up) {
+        snprintf(p->fault, sizeof(p->fault), "%s", RADIO_MUX_USB_DEAD_REASON);
+        ESP_LOGW(TAG, "%s: %s: closed (unplug it or PUT its mode to open it again)", ch->id, p->fault);
+        feed(p, RADIO_MUX_AEV_MODE_SET); // not open: the machine detaches the consumer (GONE), the channel shows fault
+        return;
+    }
     if (!open_dev(p, mux_eff_baud(ch))) {
         feed(p, RADIO_MUX_AEV_MODE_SET); // not open: the machine detaches the consumer (GONE)
         return;

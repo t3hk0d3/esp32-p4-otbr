@@ -26,7 +26,7 @@ static radio_mux_chan_info_t c6_chan(void)
         .line = {.baud = 460800, .flow_control = false},
         .caps = {.firmware_update = true, .hw_reset = true, .flow_control = false},
         .firmware = {.rec = {.type = RADIO_MUX_FW_SPINEL, .baud = 0}, .source = RADIO_MUX_FW_SRC_PASSIVE, .at = 1762430000},
-        .counters = {.frames_in = 10, .frames_out = 9, .bytes_in = 1000, .bytes_out = 900, .drops = 1, .resets = 2, .rx_errors = 3},
+        .counters = {.frames_in = 10, .frames_out = 9, .bytes_in = 1000, .bytes_out = 900, .drops = 1, .resets = 2, .rx_errors = 3, .uart_errors = 4},
     };
 
     strcpy(c.id, "c6");
@@ -96,7 +96,7 @@ TEST_CASE("On the registry snapshot: the C6 has the spec's fields in order, usb 
         "\"firmware\":{\"type\":\"spinel\",\"version\":\"1.4.0\",\"chip\":\"esp32c6\",\"baud\":null,\"source\":\"passive\","
         "\"at\":1762430000},"
         "\"counters\":{\"frames_in\":10,\"frames_out\":9,\"bytes_in\":1000,\"bytes_out\":900,\"drops\":1,\"resets\":2,"
-        "\"rx_errors\":3}}]}",
+        "\"rx_errors\":3,\"uart_errors\":4}}]}",
         body);
 }
 
@@ -115,7 +115,7 @@ TEST_CASE("On the registry snapshot: a dongle in rcp-proxy has usb, the proxy's 
         "\"state\":\"connected\",\"peer\":\"192.168.1.20:9999\",\"last_error\":null},"
         "\"firmware\":{\"type\":\"znp\",\"version\":\"20240710\",\"chip\":null,\"baud\":115200,\"source\":\"probe\",\"at\":null},"
         "\"counters\":{\"frames_in\":0,\"frames_out\":0,\"bytes_in\":0,\"bytes_out\":0,\"drops\":0,\"resets\":0,"
-        "\"rx_errors\":0}}]}",
+        "\"rx_errors\":0,\"uart_errors\":0}}]}",
         body);
 }
 
@@ -358,7 +358,7 @@ TEST_CASE("On the largest snapshot (8 channels, every text at its longest): fits
         c.firmware.rec.chip[sizeof(c.firmware.rec.chip) - 1] = '\0';
         c.firmware.at = INT64_MAX;
         c.counters = (radio_mux_counters_t) {
-            UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX,
+            UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX,
         };
         c.line.baud = 2000000;
         s.chans[i] = c;
@@ -638,7 +638,7 @@ TEST_CASE("On all fields together: each is set", "[device_api]")
     TEST_ASSERT_EQUAL_UINT16(7000, req.proxy.port);
 }
 
-/* ---- device_api_channel_proxy_refusal: rcp_proxy_settings_check on the merged settings ---- */
+/* ---- device_api_channel_proxy_refusal: radio_mux_proxy_merge (the mux's own check) ---- */
 
 static radio_mux_set_req_t proxy_req(const char *json)
 {
@@ -721,6 +721,7 @@ TEST_CASE("On each verdict: its status and code", "[device_api]")
         {RADIO_MUX_REFUSE_FAILED, 500, "failed"},
         {RADIO_MUX_REFUSE_PROBE_FAILED, 409, "probe_failed"},
         {RADIO_MUX_REFUSE_BUSY, 409, "busy"},
+        {RADIO_MUX_REFUSE_PENDING, 503, "mux_busy"},
     };
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
@@ -737,6 +738,13 @@ TEST_CASE("On each verdict: its status and code", "[device_api]")
             TEST_ASSERT_NULL(code);
         }
     }
+}
+
+TEST_CASE("On a change the mux took but did not answer in time: 503 mux_busy, the change may still be applied",
+          "[device_api]")
+{
+    TEST_ASSERT_EQUAL_STRING("the radio mux is busy; a settings change may still apply, a start, move or stop will not",
+                             device_api_channel_refusal_detail(RADIO_MUX_REFUSE_PENDING));
 }
 
 TEST_CASE("On a verdict out of range: 500 failed", "[device_api]")
@@ -785,6 +793,16 @@ TEST_CASE("On a forget: 204, 404 unknown channel, 409 for the C6 or a present ch
     TEST_ASSERT_EQUAL(500, e.http_status);
     TEST_ASSERT_EQUAL_STRING("failed", e.code);
     TEST_ASSERT_EQUAL_STRING("204 No Content", device_api_status_line(204));
+}
+
+TEST_CASE("On a forget the mux took but did not answer in time: 503 mux_busy, never failed", "[device_api]")
+{
+    const device_api_error_t e = device_api_channel_forget_error(ESP_ERR_NOT_FINISHED, true);
+
+    TEST_ASSERT_EQUAL(503, e.http_status);
+    TEST_ASSERT_EQUAL_STRING("mux_busy", e.code);
+    TEST_ASSERT_EQUAL_STRING("the radio mux is busy; a settings change may still apply, a start, move or stop will not",
+                             e.detail);
 }
 
 TEST_CASE("On a forget while the radio mux is not running: 503 not_started, not in_use", "[device_api]")

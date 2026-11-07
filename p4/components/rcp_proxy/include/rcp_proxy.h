@@ -1,8 +1,8 @@
 // RCP proxy: the consumer of the rcp-proxy mode (spec 2026-11-06 radio channel mux, section RCP proxy mode). A channel
 // in rcp-proxy is served to one network peer: listen or connect, over TCP or UDP. One task owns every socket; it waits
 // in one select() over the adapters' sockets, the channels' eventfds and its own kick eventfd. The netcfg access rules
-// apply to every peer: TCP listen clients by their socket (netcfg_socket_allowed), UDP sources and the connect target
-// of both adapters by address (netcfg_peer_allowed; the mesh is refused). A frame channel's radio is reset when a new
+// apply to every peer: TCP listen clients by their socket (netcfg_socket_allowed) and by address, UDP sources and the
+// connect target of both adapters by address (netcfg_peer_allowed; the mesh is refused). A frame channel's radio is reset when a new
 // peer session starts (TCP accept or connect; UDP connect once per socket; UDP listen when the source differs from the
 // previous peer), never when a quiet peer sends again.
 #pragma once

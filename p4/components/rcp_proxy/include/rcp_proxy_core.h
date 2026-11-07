@@ -21,18 +21,6 @@ extern "C" {
 // UDP framing raw: the largest datagram towards the peer.
 #define RCP_PROXY_UDP_RAW_MAX 1024
 
-typedef enum {
-    RCP_PROXY_OK,
-    RCP_PROXY_NEED_HOST, // connect without a host
-    RCP_PROXY_BAD_PORT,  // 0, 80 or 179 (the board's own listeners)
-    RCP_PROXY_BAD_HOST,  // not an IPv4 or IPv6 literal, nor a DNS or .local name of at most 63 characters
-} rcp_proxy_check_t;
-
-// The full check of the rcp_proxy settings (device_api runs it before radio_mux_set): port, then a host for connect,
-// then the host's syntax when one is given (in either direction: a host kept for a later switch to connect is valid).
-// The framing is not checked against the adapter: it is kept with tcp for a later switch to udp.
-rcp_proxy_check_t rcp_proxy_settings_check(const radio_mux_proxy_settings_t *s);
-
 // True for "<name>.local" (any case) with a non-empty name: copies the name without ".local" into out.
 bool rcp_proxy_host_mdns(const char *host, char *out, size_t cap);
 
@@ -81,13 +69,34 @@ void rcp_proxy_peer_memo_init(rcp_proxy_peer_memo_t *m);
 // Records peer; true when it starts a new peer session (no peer before, or a different one).
 bool rcp_proxy_peer_new(rcp_proxy_peer_memo_t *m, const rcp_proxy_addr_t *peer);
 
+// Connect: the target's name lookup runs off the proxy task (rcp_resolve) and its answer comes back later. A session
+// waits for the answer to its latest ask only: an answer to an earlier ask, or one that comes after the session
+// stopped waiting (a retry, a close, new settings: rcp_proxy_lookup_cancel, or a new session), is discarded.
+typedef struct {
+    uint32_t pending; // the ask the session waits for; 0 none
+} rcp_proxy_lookup_t;
+
+// A new ask: its number (never 0) from the counter *seq, which every session of the task shares so a number is never
+// reused by a later session; the session now waits for it (an earlier ask is forgotten).
+uint32_t rcp_proxy_lookup_ask(rcp_proxy_lookup_t *l, uint32_t *seq);
+// The session stops waiting: any answer that comes is discarded.
+void rcp_proxy_lookup_cancel(rcp_proxy_lookup_t *l);
+// Whether the session waits for an answer.
+bool rcp_proxy_lookup_waiting(const rcp_proxy_lookup_t *l);
+// An answer to ask `seq` came: true (and the session no longer waits) when it is the one the session waits for; false
+// when it is to be discarded.
+bool rcp_proxy_lookup_answer(rcp_proxy_lookup_t *l, uint32_t seq);
+
 typedef enum {
     RCP_PROXY_TAKE,
     RCP_PROXY_REFUSE,
 } rcp_proxy_accept_t;
 
-// TCP listen: the first client keeps the port; a connection while one is connected is refused.
-rcp_proxy_accept_t rcp_proxy_accept(bool peer_connected);
+// TCP listen: the first client keeps the port; a connection while one is connected is refused. A connection must also
+// pass both netcfg access rules: by the local address it came in on (local_allowed, netcfg_socket_allowed) and by the
+// route back to the client (peer_allowed, netcfg_peer_allowed: a client on the Thread mesh is refused even when it
+// connected to an infrastructure address).
+rcp_proxy_accept_t rcp_proxy_accept(bool peer_connected, bool local_allowed, bool peer_allowed);
 
 // Byte FIFO over caller-owned storage. Not thread-safe: one task owns it.
 typedef struct {

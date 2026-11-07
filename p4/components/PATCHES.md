@@ -343,7 +343,7 @@ reason, spec reference.
    `NO_RADIO` hero linking the Radios page, and the `RADIO_FAULT` hero links Radios instead of Firmware while Thread's
    radio is a dongle.
    (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md, sections Board mode and API)
-27. Applied (Zigbee mode, Task 5). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 30 -> 32 (on top of patch
+28. Applied (Zigbee mode, Task 5). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 30 -> 32 (on top of patch
    26: `GET /device/zigbee` and `GET /zigbee`, one slot of headroom kept). The extra-handlers callback (`app_main.c`
    `register_extra_handlers`) also registers the WebSocket `GET /zigbee` (`zigbee_register_ws`) after the device API,
    before the catch-all. Frontend (Task 7): new page `frontend/zigbee.html` and `frontend/static/zigbee.js`;
@@ -388,7 +388,8 @@ target tests: `p4/pytest/test_rest_guard.py`, `test_br_boot.py::test_radio_fault
 configure, and that component overrides ESP-IDF's `openthread` (`EXTRA_COMPONENT_DIRS`). It holds symlinks to IDF's
 `components/openthread` (v6.1), a real `src/port` and `include` with symlinks to IDF's files plus the project's
 `p4/ot_port/mux_spinel_interface.cpp`, `mux_spinel_interface.hpp`, `mux_gone_answer.{c,h}` (the answers after GONE,
-host-tested in `p4/ot_port/test_host`) and `esp_openthread_mux.h`, and two patched copies.
+host-tested in `p4/ot_port/test_host`), `esp_openthread_mux.h` and radio_mux's header-only
+`radio_mux_spinel_uint.h` (the spinel packed-uint codec `mux_gone_answer.c` includes), and two patched copies.
 Each replaced text is looked up with `string(FIND)` first; a text that is not there any more (an IDF update) stops the
 configure with a `FATAL_ERROR` naming the IDF file. Kconfig stays `CONFIG_OPENTHREAD_RADIO_SPINEL_SPI`; the IDF tree is
 not touched. Upstream path: a runtime "custom spinel interface" radio mode with per-interface caps (spec section 5).
@@ -412,6 +413,37 @@ not touched. Upstream path: a runtime "custom spinel interface" radio mode with 
 - `CMakeLists.txt`: the `git rev-parse` for `IDF_VERSION_FOR_OPENTHREAD_PACKAGE` runs in IDF's component directory
   instead of `${CMAKE_CURRENT_SOURCE_DIR}` (the generated directory lies in this repository, so the package version
   would show this repository's commit).
+
+## usb_host_cdc_acm
+
+Vendored from:
+
+- Component: `espressif/usb_host_cdc_acm` 2.4.1 (ESP Component Registry; esp-usb commit
+  `eb0f02163be96dfc753cf43d1207329e44f1ca60`, `host/class/cdc/usb_host_cdc_acm`), component hash
+  `5bc1372b46de79ccae1dd17de48e30dfa1e8ab75269c2ebf54da01370f9e42fb`.
+- Copied unchanged from the managed component the build resolved (every file matched the archive's `CHECKSUMS.json`;
+  that file and `.component_hash` are left out) to `p4/components/usb_host_cdc_acm`.
+- `override_path` in `p4/components/radio_mux/idf_component.yml` makes every user (radio_mux, `usb_host_ch34x_vcp`
+  2.2.1, `usb_host_cp210x_vcp` 2.2.0, `esp-serial-flasher`) build this copy; `p4/dependencies.lock` lists it as a
+  `local` source and no `espressif__usb_host_cdc_acm` is downloaded.
+
+Same rules as above: upstream formatting, excluded from pre-commit, every change listed here. Patch numbers continue
+the sequence above.
+
+27. Applied (CH34x status packets, 2026-11-07). `usb_host_cdc_acm`: packets on the notification endpoint that are not
+   CDC notifications. `cdc_acm_host.c` `notif_xfer_cb`: a packet whose first byte (bmRequestType) is not
+   `CDC_NOTIF_BM_REQUEST_TYPE` (0xA1, new in `include/usb/usb_types_cdc.h`), or an empty one, is passed to the user's
+   event callback as the new event `CDC_ACM_HOST_VENDOR_NOTIFICATION` (`include/usb/cdc_host_types.h`: appended to
+   `cdc_acm_host_dev_event_t` after the suspend/resume values, so no upstream value moves; union member
+   `vendor_notification {const uint8_t *data; size_t len;}`, valid only during the callback; `<stddef.h>` included for
+   `size_t`), with no warning and no hex dump; the INTR IN poll is resubmitted as before. Reason: the CH34x driver
+   (`usb_host_ch34x_vcp` 2.2.1) opens the CH340 through `cdc_acm_host_open`, so its 4-byte vendor status packets
+   (`20 ff 0f aa` ...) were read as CDC notifications with code 0xFF and logged with a hex dump, 3-10 per second under
+   traffic, on the CDC driver task that also runs the bulk IN callback: on the 115200 baud console that delayed the bulk
+   IN resubmit while the dongle kept sending at 460800. radio_mux's `usb_transport.c` counts the CH34x's UART errors
+   from these packets. Host test: none here (upstream's `host_test` needs the esp-usb tree's USB host mocks); the
+   CH34x status decision is host-tested in radio_mux (`radio_mux_ch34x_uart_error`).
+   (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md; docs/radios.md, counter `uart_errors`)
 
 ## Known upstream behaviour (not patches)
 

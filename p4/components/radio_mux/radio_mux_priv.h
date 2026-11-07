@@ -81,6 +81,9 @@ typedef struct mux_port {
     uint8_t *dec_slot;   // slot the decoder writes into (at MUX_SLOT_HDR); NULL = into `discard`
     uint8_t *discard;    // decoder target while the pool is empty: the frame is parsed and dropped
     uint32_t dec_errors; // crc_errors + overruns already added to the counters
+    // USB: reset requests with nothing received since (RADIO_MUX_USB_DEAD_RESETS); cleared by every RX frame or raw
+    // byte and at every attach, counted by the owner's handle_reset.
+    radio_mux_reset_count_t reset_count;
     RingbufHandle_t ring; // raw and detection bytes
 
     // Pool and counters: under `lock` (taken by the transport, the consumers' release and tx, and the snapshot).
@@ -88,6 +91,7 @@ typedef struct mux_port {
     radio_mux_pool_t pool;
     radio_mux_counters_t ctr;
     bool busy_peer; // the consumer reported a connected peer (radio_mux_set_busy_peer); cleared at detach
+    int64_t uart_err_log_us; // USB, the CDC driver task only: when the last UART error warning was logged (0: never)
 
     // Transmit: tx_lock serialises senders and the owner's close (on the C6 also the INT-driven receive transactions:
     // one SPI transaction at a time); tx_ok is false whenever a sender must fail at once.

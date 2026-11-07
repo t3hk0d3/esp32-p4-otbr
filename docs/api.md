@@ -31,8 +31,8 @@ below, any of them can answer 500 `internal` or `no_memory`.
 | `PUT /device/console` | body `{"enabled": bool}`; stored, off by default; turning it off closes the session (4003); replies like GET | 400 `invalid_request` (`enabled` missing or not a boolean), `length_required`; 413 `payload_too_large`; 500 `storage_failed`; 503 `not_started` (the console did not start at boot) |
 | `GET /device/console/ws` | WebSocket: the board's OpenThread CLI, see [Thread console](#thread-console) | 403 on an interface that does not serve the device API |
 | `GET /device/channels` | every radio channel and the modes the board offers, see [Radio channels](#radio-channels) | |
-| `PUT /device/channels/{id}` | any of `mode`, `baud`, `flow_control` and an `rcp_proxy` object; replies with the channel (`"reboot": true` when the mode's consumer reboots), or 202 `{"moving": true, "moved_from": "<id>"}` when Thread moves to this channel (also for a start, `moved_from` null, and a stop of Thread, `moved_from` the channel itself) | 400 `bad_value` (`detail` names the field), `length_required`; 404 `unknown_channel`; 409 `unavailable`, `not_available`, `incompatible`, `mode_taken`, `hybrid_not_supported`, `probe_failed`, `port_taken`, `busy`; 413 `payload_too_large` (over 512 bytes); 500 `failed` |
-| `DELETE /device/channels/{id}` | forget an unplugged radio and its settings; 204 | 404 `unknown_channel`; 409 `in_use` (the C6 or a plugged-in radio); 500 `failed`; 503 `not_started` |
+| `PUT /device/channels/{id}` | any of `mode`, `baud`, `flow_control` and an `rcp_proxy` object; replies with the channel (`"reboot": true` when the mode's consumer reboots), or 202 `{"moving": true, "moved_from": "<id>"}` when Thread moves to this channel (also for a start, `moved_from` null, and a stop of Thread, `moved_from` the channel itself) | 400 `bad_value` (`detail` names the field), `length_required`; 404 `unknown_channel`; 409 `unavailable`, `not_available`, `incompatible`, `mode_taken`, `hybrid_not_supported`, `probe_failed`, `port_taken`, `busy`; 413 `payload_too_large` (over 512 bytes); 500 `failed`; 503 `mux_busy` (the radio mux took the change but did not answer in time: a mode, speed or proxy change may still be applied, a start, move or stop will not) |
+| `DELETE /device/channels/{id}` | forget an unplugged radio and its settings; 204 | 404 `unknown_channel`; 409 `in_use` (the C6 or a plugged-in radio); 500 `failed`; 503 `not_started`, `mux_busy` (taken but not answered in time: the radio may still be forgotten) |
 | `GET /device/zigbee` | Zigbee mode status, see [Zigbee coordinator](#zigbee-coordinator-experimental) | 409 `not_zigbee` (no channel runs `ziggurat`) |
 | `POST /device/reboot` | reboot | 409 `busy` while an update or push runs (other reboots, such as the network trial revert, `net reset` and `DELETE /node`, wait until it ends) |
 | `GET /metrics` | device health and Thread figures in the Prometheus text format, see [metrics](metrics.md) | 500 `no_memory` |
@@ -258,7 +258,8 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
    "rcp_proxy": {"direction": "listen", "adapter": "tcp", "port": 6638, "host": "", "framing": "hdlc",
                  "state": null, "peer": null, "last_error": null},
    "firmware": {"type": "spinel", "version": "1.4.0", "chip": "esp32c6", "baud": null, "source": "passive", "at": 1762430000},
-   "counters": {"frames_in": 10, "frames_out": 9, "bytes_in": 1000, "bytes_out": 900, "drops": 1, "resets": 2, "rx_errors": 3}},
+   "counters": {"frames_in": 10, "frames_out": 9, "bytes_in": 1000, "bytes_out": 900, "drops": 1, "resets": 2, "rx_errors": 3,
+               "uart_errors": 0}},
   {"id": "usb-10c4-ea60-abc123", "kind": "usb", "label": "Sonoff Zigbee 3.0 USB Dongle Plus", "mode": "rcp-proxy",
    "stored_mode": "rcp-proxy", "state": "running", "error": null, "line": {"baud": 115200, "flow_control": true},
    "usb": {"vid": "10c4", "pid": "ea60", "serial": "abc123", "driver": "cp210x"},
@@ -266,7 +267,8 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
    "rcp_proxy": {"direction": "connect", "adapter": "udp", "port": 9999, "host": "host.local", "framing": "raw",
                  "state": "connected", "peer": "192.168.1.20:9999", "last_error": null},
    "firmware": {"type": "znp", "version": "20240710", "chip": null, "baud": 115200, "source": "probe", "at": null},
-   "counters": {"frames_in": 0, "frames_out": 0, "bytes_in": 0, "bytes_out": 0, "drops": 0, "resets": 0, "rx_errors": 0}}
+   "counters": {"frames_in": 0, "frames_out": 0, "bytes_in": 0, "bytes_out": 0, "drops": 0, "resets": 0, "rx_errors": 0,
+               "uart_errors": 0}}
  ]}
 ```
 
@@ -283,6 +285,10 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
   channel's `error`.
 - `firmware` is `null` before a detection; `type` is `spinel`, `ziggurat`, `znp`, `ezsp` or `unknown`; `source` is
   `probe` or `passive`; `version`, `chip`, `baud` and `at` are `null` when unknown.
+- `counters` count since boot: `drops` are frames (raw: chunks) lost to a full pool or queue, `resets` the radio's
+  resets, `rx_errors` HDLC frames with a bad CRC or too long, `uart_errors` receive errors the USB bridge itself
+  reported (a CH34x status packet with an overrun, parity, framing or receive error bit, as the ch34x driver's defines read it, not confirmed against a datasheet; 0 on other bridges and the
+  C6). A dongle that sends them is also logged, at most once per 10 s.
 
 `PUT /device/channels/{id}` takes a body of at most 512 bytes with any of: `mode` (`off`, `otbr`, `ziggurat`,
 `rcp-proxy`), `baud` (38400, 57600, 115200, 230400, 460800, 921600, 1000000, 2000000; refused on the C6),
@@ -303,6 +309,7 @@ settings are stored and applied at once, also for an unplugged radio.
 | 409 `port_taken` | the channel would listen in `rcp-proxy` on the adapter and port another channel stored in `rcp-proxy` listens on (also an unplugged one); `detail` names the port and that channel; nothing changed |
 | 409 `busy` | an update, a firmware push, a recovery or another move runs, a mode is changed during a move, or the board is stopping or starting OpenThread on its radio (after an unplug, a plug-in) |
 | 500 `failed` | the mux is not started, storage failed or a probe took too long |
+| 503 `mux_busy` | the radio mux took the change but did not answer within 5 s; a mode, speed or proxy change may still be applied, a start, move or stop will not (read the channel again) |
 
 A move that fails after the 202 (the target does not start, or open Thread sessions do not end within 45 s) leaves
 Thread on the old channel and shows on the target as `"state": "fault"` with the reason in `error` (`drain_timeout`

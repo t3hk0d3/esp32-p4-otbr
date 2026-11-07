@@ -7,7 +7,11 @@
 
 #include "br_core_mode.h"
 #include "cJSON.h"
-#include "rcp_proxy_core.h"
+
+// The mux took the change but did not answer in time (radio_mux_set's REFUSE_PENDING, radio_mux_forget's
+// ESP_ERR_NOT_FINISHED): it is not refused. A mode, speed or proxy change may still be applied; a start, move or stop
+// of Thread never is (the mover is not called once the caller has been answered).
+#define MUX_BUSY_DETAIL "the radio mux is busy; a settings change may still apply, a start, move or stop will not"
 
 /* ---- GET ---- */
 
@@ -123,6 +127,8 @@ static void counters_json(json_out_t *w, const radio_mux_counters_t *k)
     json_out_uint(w, k->resets);
     json_out_raw(w, ",\"rx_errors\":");
     json_out_uint(w, k->rx_errors);
+    json_out_raw(w, ",\"uart_errors\":");
+    json_out_uint(w, k->uart_errors);
     json_out_raw(w, "}");
 }
 
@@ -370,44 +376,26 @@ esp_err_t device_api_channel_put_parse(const char *body, radio_mux_set_req_t *ou
     return ESP_OK;
 }
 
-// `stored` with the settings the request gives over it.
-static radio_mux_proxy_settings_t merged_proxy(const radio_mux_proxy_settings_t *stored, const radio_mux_set_req_t *req)
+// radio_mux_proxy_merge of the request's rcp_proxy settings over `stored` (the one merge and check, also the mux's).
+static radio_mux_proxy_check_t merged_proxy(const radio_mux_proxy_settings_t *stored, const radio_mux_set_req_t *req,
+                                            radio_mux_proxy_settings_t *out)
 {
-    radio_mux_proxy_settings_t m = *stored;
-    const uint8_t f = req->has_proxy ? req->proxy_fields : 0;
-
-    if (f & RADIO_MUX_PROXY_F_DIR) {
-        m.dir = req->proxy.dir;
-    }
-    if (f & RADIO_MUX_PROXY_F_ADAPTER) {
-        m.adapter = req->proxy.adapter;
-    }
-    if (f & RADIO_MUX_PROXY_F_PORT) {
-        m.port = req->proxy.port;
-    }
-    if (f & RADIO_MUX_PROXY_F_HOST) {
-        strlcpy(m.host, req->proxy.host, sizeof(m.host));
-    }
-    if (f & RADIO_MUX_PROXY_F_FRAMING) {
-        m.framing = req->proxy.framing;
-    }
-    return m;
+    return radio_mux_proxy_merge(stored, req->has_proxy ? req->proxy_fields : 0, &req->proxy, out);
 }
 
 const char *device_api_channel_proxy_refusal(const radio_mux_proxy_settings_t *stored, const radio_mux_set_req_t *req)
 {
-    if (!req->has_proxy) {
-        return NULL;
-    }
-    const radio_mux_proxy_settings_t m = merged_proxy(stored, req);
+    radio_mux_proxy_settings_t m;
 
-    switch (rcp_proxy_settings_check(&m)) {
-    case RCP_PROXY_OK:
+    switch (merged_proxy(stored, req, &m)) {
+    case RADIO_MUX_PROXY_CHECK_OK:
         return NULL;
-    case RCP_PROXY_BAD_PORT:
+    case RADIO_MUX_PROXY_CHECK_BAD_KIND:
+        return "rcp_proxy"; // the parser only gives known names: not reached from a PUT
+    case RADIO_MUX_PROXY_CHECK_BAD_PORT:
         return "rcp_proxy.port";
-    case RCP_PROXY_NEED_HOST:
-    case RCP_PROXY_BAD_HOST:
+    case RADIO_MUX_PROXY_CHECK_NEED_HOST:
+    case RADIO_MUX_PROXY_CHECK_BAD_HOST:
     default:
         return "rcp_proxy.host";
     }
@@ -433,7 +421,9 @@ const char *device_api_channel_port_conflict(const radio_mux_snapshot_t *s, cons
         return NULL;
     }
     const radio_mux_mode_t mode = req->has_mode ? req->mode : self->stored_mode;
-    const radio_mux_proxy_settings_t want = merged_proxy(&self->proxy, req);
+    radio_mux_proxy_settings_t want;
+
+    merged_proxy(&self->proxy, req, &want); // settings it refuses were answered 400 before (proxy_refusal)
 
     if (!listens_on(mode, &want, want.adapter, want.port)) {
         return NULL;
@@ -504,6 +494,10 @@ static verdict_reply_t verdict_reply(radio_mux_verdict_t v)
         return (verdict_reply_t) {
             409, "busy", "the radio or OpenThread is busy, try again"
         };
+    case RADIO_MUX_REFUSE_PENDING:
+        return (verdict_reply_t) {
+            503, "mux_busy", MUX_BUSY_DETAIL
+        };
     case RADIO_MUX_REFUSE_FAILED:
     default:
         return (verdict_reply_t) {
@@ -544,6 +538,10 @@ device_api_error_t device_api_channel_forget_error(esp_err_t err, bool mux_start
     case ESP_ERR_INVALID_STATE:
         return (device_api_error_t) {
             409, "in_use", "only an unplugged USB radio can be forgotten"
+        };
+    case ESP_ERR_NOT_FINISHED:
+        return (device_api_error_t) {
+            503, "mux_busy", MUX_BUSY_DETAIL
         };
     default:
         return (device_api_error_t) {

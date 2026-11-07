@@ -74,6 +74,7 @@ typedef enum {
     RADIO_MUX_REFUSE_FAILED,          // the mux could not store or apply the change (not started, NVS, timeout: 500)
     RADIO_MUX_REFUSE_PROBE_FAILED,    // a move of otbr: the target's RCP probe failed, nothing changed (409 probe_failed)
     RADIO_MUX_REFUSE_BUSY,            // the channel or OpenThread is busy (a move or a radio job runs): try again (409)
+    RADIO_MUX_REFUSE_PENDING,         // posted, but the owner did not answer in time: the change may still be applied (503)
 } radio_mux_verdict_t;
 
 typedef enum {
@@ -123,11 +124,12 @@ typedef enum {
 } radio_mux_fw_source_t;
 
 // Per-channel counters. drops: frames (raw: chunks) lost because the pool, the event queue or the raw ring was full;
-// rx_errors: HDLC frames with a bad CRC or too long for a slot.
+// rx_errors: HDLC frames with a bad CRC or too long for a slot; uart_errors: receive errors the USB bridge itself
+// reported (CH34x status packets with an overrun, parity, framing or receive error bit, radio_mux_ch34x_uart_error).
 typedef struct {
     uint32_t frames_in, frames_out;
     uint64_t bytes_in, bytes_out;
-    uint32_t drops, resets, rx_errors;
+    uint32_t drops, resets, rx_errors, uart_errors;
 } radio_mux_counters_t;
 
 typedef enum {
@@ -270,14 +272,55 @@ bool radio_mux_port_frames(bool c6_port, bool consumer_frames);
 #define RADIO_MUX_TX_BASE_MS 100
 uint32_t radio_mux_tx_timeout_ms(size_t n, uint32_t baud);
 
+// A CH34x status packet (the bridge's interrupt IN endpoint, e.g. `20 ff 0f aa`): byte 0 carries the UART state, whose
+// transient bits (the ch34x driver's CH34X_UART_STATE_TRANSIENT_MASK: overrun, parity, framing, receive error) mean
+// one UART error (as the driver's defines read it; not confirmed against a datasheet). Packets shorter than RADIO_MUX_CH34X_STATUS_LEN are not status packets.
+#define RADIO_MUX_CH34X_STATUS_LEN 4
+#define RADIO_MUX_CH34X_UART_ERR_MASK 0x07
+// Whether the packet reports a UART error: false for no error bit, a short packet or NULL.
+bool radio_mux_ch34x_uart_error(const uint8_t *pkt, size_t len);
+
+// A USB dongle's reset is a close and reopen. One that gets nothing back is not reset forever: the
+// RADIO_MUX_USB_DEAD_RESETS-th reset request in a row with nothing received in between (no RX frame, no raw byte) is
+// not carried out; the channel goes to fault with RADIO_MUX_USB_DEAD_REASON and its consumer gets GONE. Unplug and
+// replug, or a PUT of its mode, opens it again.
+#define RADIO_MUX_USB_DEAD_RESETS 3
+#define RADIO_MUX_USB_DEAD_REASON "no answer after 3 resets"
+
+typedef struct {
+    uint8_t unanswered; // reset requests since the last thing received
+} radio_mux_reset_count_t;
+
+// A reset request: counts it. True when it is the RADIO_MUX_USB_DEAD_RESETS-th in a row (give up, no reopen; the count
+// starts again from 0), false when the device is to be reopened.
+bool radio_mux_reset_count_request(radio_mux_reset_count_t *c);
+// Something was received from the device, or a new attach starts: the count starts again from 0.
+void radio_mux_reset_count_clear(radio_mux_reset_count_t *c);
+
 // "idle", "starting", "running", "fault", "busy"; NULL for anything else.
 const char *radio_mux_state_name(radio_mux_state_t state);
 // "probe", "passive"; NULL for NONE.
 const char *radio_mux_fw_source_name(radio_mux_fw_source_t src);
 
-// Stored rcp_proxy settings: known direction, adapter and framing; port 1..65535 except 80 and 179 (the board's own
-// listeners); connect needs a host.
-bool radio_mux_proxy_ok(const radio_mux_proxy_settings_t *s);
+typedef enum {
+    RADIO_MUX_PROXY_CHECK_OK,
+    RADIO_MUX_PROXY_CHECK_BAD_KIND,  // an unknown direction, adapter or framing
+    RADIO_MUX_PROXY_CHECK_BAD_PORT,  // 0, 80 or 179 (the board's own listeners)
+    RADIO_MUX_PROXY_CHECK_NEED_HOST, // connect without a host
+    RADIO_MUX_PROXY_CHECK_BAD_HOST,  // not an IPv4 or IPv6 literal, nor a DNS or .local name of at most 63 characters
+} radio_mux_proxy_check_t;
+
+// The one check of rcp_proxy settings (a PUT, the stored settings at load, rcp_proxy at attach): known direction,
+// adapter and framing, then the port (1..65535 except 80 and 179), then a host for connect, then the host's syntax
+// when one is given (in either direction: a host kept for a later switch to connect is valid). The framing is not
+// checked against the adapter: it is kept with tcp for a later switch to udp.
+radio_mux_proxy_check_t radio_mux_proxy_check(const radio_mux_proxy_settings_t *s);
+
+// The settings a change leaves: `stored` with the fields of `given` that `fields` (RADIO_MUX_PROXY_F_* bits) names
+// over it, into *out; then radio_mux_proxy_check on them. No field given: *out is `stored` and the result
+// RADIO_MUX_PROXY_CHECK_OK (a change without rcp_proxy settings never fails on settings stored earlier).
+radio_mux_proxy_check_t radio_mux_proxy_merge(const radio_mux_proxy_settings_t *stored, uint8_t fields,
+                                              const radio_mux_proxy_settings_t *given, radio_mux_proxy_settings_t *out);
 
 /* ---- the C6 over SPI (OpenThread's spi_frame.hpp) ---- */
 

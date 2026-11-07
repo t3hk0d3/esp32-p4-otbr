@@ -68,7 +68,7 @@ static void chan_from_blob(struct radio_mux_chan *ch, const chan_blob_t *b)
     }
     ch->baud = radio_mux_baud_ok(b->baud) ? b->baud : 0;
     ch->flow = b->flow != 0;
-    if (radio_mux_proxy_ok(&b->proxy)) {
+    if (radio_mux_proxy_check(&b->proxy) == RADIO_MUX_PROXY_CHECK_OK) {
         ch->proxy = b->proxy;
     }
     if (b->fw_source == RADIO_MUX_FW_SRC_PROBE || b->fw_source == RADIO_MUX_FW_SRC_PASSIVE) {

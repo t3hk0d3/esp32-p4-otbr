@@ -18,6 +18,11 @@ Without a dongle the board behaves as before: the C6 channel in `otbr` mode.
 - One dongle is supported at a time. Two identical bridges without serial numbers share an id; the second cannot be
   opened while the first is attached.
 - Supported USB drivers: cp210x, ch34x and plain CDC-ACM. Anything else (FTDI, for example) is listed as `unavailable`.
+- A CH34x bridge (CH340, the OllyZig) reports receive errors on the dongle's UART (overrun, parity, framing) in its
+  status packets: each one counts in the channel's `uart_errors` counter, and the log shows at most one warning per
+  10 s with the packet's bytes. Rising `uart_errors` with `rx_errors` points at the bridge losing bytes, not the RCP.
+  The decoding of the packet follows the ch34x driver's own defines (`CH34X_UART_STATE_TRANSIENT_MASK`, byte 0) and is
+  not confirmed against a datasheet; confirm it on a board.
 - A channel's `state` is `idle` (mode `off`), `starting`, `running`, `fault` (with a reason) or `busy` (a C6 job runs).
 - `DELETE /device/channels/{id}` (the page's "Forget this radio") removes an unplugged dongle and its settings. The C6
   and attached radios cannot be forgotten (409 `in_use`).
@@ -84,7 +89,11 @@ under `rcp_proxy`:
 | listen | The first client wins; later ones are refused with a reset. TCP keepalive notices a dead client. | The first source that sends becomes the peer. Other sources are dropped and counted until the peer has been silent for 30 s, or you kick it. |
 | connect | Retries with back-off 1, 2, 4, 8, 16, then 30 s; the back-off resets to 1 s after a connection that lasted 60 s. A connect that gets no answer gives up after 10 s. | Datagrams go to `host:port`; only datagrams from that address are accepted. |
 
-Listen sockets and UDP sources follow the [network access rules](networking.md) (per-VLAN rule, Thread-mesh refusal).
+Listen sockets, TCP clients (by the address they came in on and by their own address), UDP sources and connect targets
+follow the [network access rules](networking.md) (per-VLAN rule, Thread-mesh refusal). In split mode a TCP or UDP proxy
+client is judged by the route back to it, so a routed client that reached the management address is refused when its
+route back leaves on an interface that does not serve the proxy. A connect host that is a name is
+looked up in the background: the channel shows `connecting` meanwhile, and the other radio's proxy keeps running.
 Ports 80 and 179 are refused. Two channels cannot listen on the same adapter and port: a PUT that would make a second
 channel in `rcp-proxy` listen where another one (also an unplugged one) is stored listening is refused with 409
 `port_taken`, naming the port and that channel.
@@ -162,6 +171,16 @@ When the dongle that runs OpenThread is unplugged:
 - Unplugging a dongle in any other mode drops its proxy peer or stops it, and nothing else changes.
 - A dongle that stays plugged in but goes silent gets a close and reopen, then a spinel reset; after three failed recoveries
   the board enters `RADIO_FAULT` with the reason (no abort). A PUT of `otbr` on that channel starts it again.
+- In `otbr` a dongle that stays plugged in but does not answer its reset ends in `RADIO_FAULT` "RCP did not answer its
+  reset": OpenThread's own recovery tries a spinel reset, then one reopen, then reports the reset failure. A proxy on a
+  dongle (`rcp-proxy`) never resets the radio over USB (raw bytes), so it is not affected.
+- A dongle's reset (a close and reopen over USB) is not repeated forever for a consumer that resets on its own
+  timeouts (the Zigbee consumer, not part of `otbr` or `rcp-proxy`): the third reset request in a row with nothing
+  received from the dongle in between (no frame, in a raw proxy no byte) is not carried out. The dongle is closed, the
+  channel shows `fault` "no answer after 3 resets", and its consumer is detached as for an unplug. Anything received
+  clears the count, as does a new attach. To recover, unplug and replug the dongle (it is detected again, as a new
+  device), or PUT the channel's mode again (the same mode: it opens the dongle and attaches its consumer again). The
+  C6 is not affected: its reset is the reset GPIO.
 - Requests to the radio that are in flight when it goes, or that come before OpenThread is torn down (the console's
   `channel supported`, a REST call), are answered by the board itself: settings "work", reads that can fail fail, the
   channel masks read as 11 to 26, and a recovery that resets the radio completes against those answers instead of
@@ -219,17 +238,22 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
 - **Drain timeout**: hold a REST session for more than 45 s during a move: the target shows `fault` `drain_timeout`, Thread
   stays on the source.
 - **Silent dongle**: the recovery ladder (reopen, spinel reset), and after three recoveries `RADIO_FAULT` without abort.
+- **Dead dongle after a reset** (the CH340 OllyZig that stops answering after a reopen), OpenThread on it: one reopen,
+  then `RADIO_FAULT` "RCP did not answer its reset", no more reopens in the log; a PUT of `otbr` on the channel starts it
+  again, and an unplug and replug detects it again. The "no answer after 3 resets" give-up is checked only with a
+  consumer that resets on its own timeouts (Zigbee mode, on the merged branch). `uart_errors` counts, and at most one
+  CH34x warning per 10 s, with no "Unsupported notification type" lines.
 - **C6 jobs**: a firmware push with OpenThread on the dongle leaves OpenThread alone; with a proxy peer on the C6 it gives
   409 `c6_busy`.
 - **Boot**: a stored dongle that is unplugged gives `NO_RADIO` without a fault; plugging it in gives `BR_RUNNING`.
 - **Heap**: about 21 KB of internal DMA RAM is taken at the first C6 open, about 39 KB (pool, buffers, 16 KB ring) at
   the first dongle open (never on a board without a dongle); a proxy session takes an 8 KB ring (TCP) plus codec
   buffers. Compare the free and the minimum free internal heap (`GET /device/diag`) after boot with no dongle against
-  v0.4.0 on the same board: at most 40 KB less (the six new tasks, below, the queues and the C6 buffers). This is a
+  v0.4.0 on the same board: at most 40 KB less (the seven new tasks, below, the queues and the C6 buffers). This is a
   limit to measure in the hardware pass, not a measured number yet.
 - **Task stacks** (not shrunk: no high-water marks measured yet): `radio_mux` 6144, `usb_lib` 4096, `USB-CDC` 4096,
-  `c6` transport 4096, `rcp_proxy` 6144, `br_radio` 6144 bytes. Read their high-water marks after the checks below
-  (a C6 move, a dongle detection, a proxy with a `.local` connect host) before shrinking any.
+  `c6` transport 4096, `rcp_proxy` 6144, `rcp_resolve` 4096, `br_radio` 6144 bytes. Read their high-water marks after
+  the checks below (a C6 move, a dongle detection, a proxy with a `.local` connect host) before shrinking any.
 - **C6 drops under REST load**: with Thread on the C6 and the REST load of `test_unplug_during_rest_load` (without the
   unplug) for 5 minutes, the C6 channel's `drops` and `rx_errors` stay at or near 0 and pings to a Thread device do not
   get lost more than without the load (compare v0.4.0's open ping-loss note).

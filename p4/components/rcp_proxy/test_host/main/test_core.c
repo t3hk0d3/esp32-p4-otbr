@@ -7,155 +7,11 @@
 
 #define RING_CAP RCP_PROXY_RING_MIN
 
-static radio_mux_proxy_settings_t defaults(void)
-{
-    radio_mux_proxy_settings_t s;
-
-    radio_mux_proxy_defaults(&s);
-    return s;
-}
-
-static radio_mux_proxy_settings_t connect_to(const char *host)
-{
-    radio_mux_proxy_settings_t s = defaults();
-
-    s.dir = RADIO_MUX_PROXY_CONNECT;
-    strncpy(s.host, host, sizeof(s.host) - 1);
-    return s;
-}
-
 static rcp_proxy_addr_t addr(uint8_t last, uint16_t port)
 {
     rcp_proxy_addr_t a = {.ip = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 192, 168, 1, last}, .port = port};
 
     return a;
-}
-
-/* ---- rcp_proxy_settings_check ---- */
-
-TEST_CASE("On the defaults (listen, tcp, 6638): returns RCP_PROXY_OK", "[rcp_proxy]")
-{
-    radio_mux_proxy_settings_t s = defaults();
-
-    TEST_ASSERT_EQUAL(RCP_PROXY_OK, rcp_proxy_settings_check(&s));
-}
-
-TEST_CASE("On connect without a host: returns RCP_PROXY_NEED_HOST", "[rcp_proxy]")
-{
-    radio_mux_proxy_settings_t s = connect_to("");
-
-    TEST_ASSERT_EQUAL(RCP_PROXY_NEED_HOST, rcp_proxy_settings_check(&s));
-    s.adapter = RADIO_MUX_PROXY_UDP;
-    TEST_ASSERT_EQUAL(RCP_PROXY_NEED_HOST, rcp_proxy_settings_check(&s));
-}
-
-TEST_CASE("On listen without a host: returns RCP_PROXY_OK", "[rcp_proxy]")
-{
-    radio_mux_proxy_settings_t s = defaults();
-
-    s.adapter = RADIO_MUX_PROXY_UDP;
-    TEST_ASSERT_EQUAL(RCP_PROXY_OK, rcp_proxy_settings_check(&s));
-}
-
-TEST_CASE("On framing with tcp: ignores it (kept for a later switch to udp)", "[rcp_proxy]")
-{
-    radio_mux_proxy_settings_t s = defaults();
-
-    s.framing = RADIO_MUX_PROXY_RAW;
-    TEST_ASSERT_EQUAL(RCP_PROXY_OK, rcp_proxy_settings_check(&s));
-    s.framing = RADIO_MUX_PROXY_HDLC;
-    TEST_ASSERT_EQUAL(RCP_PROXY_OK, rcp_proxy_settings_check(&s));
-}
-
-TEST_CASE("On port 80, 179 or 0: returns RCP_PROXY_BAD_PORT (above 65535 does not fit the uint16_t port)",
-          "[rcp_proxy]")
-{
-    const uint16_t bad[] = {80, 179, 0};
-
-    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
-        radio_mux_proxy_settings_t s = defaults();
-
-        s.port = bad[i];
-        TEST_ASSERT_EQUAL(RCP_PROXY_BAD_PORT, rcp_proxy_settings_check(&s));
-        s = connect_to("10.0.0.1");
-        s.port = bad[i];
-        TEST_ASSERT_EQUAL(RCP_PROXY_BAD_PORT, rcp_proxy_settings_check(&s));
-    }
-}
-
-TEST_CASE("On port 1 and port 65535: returns RCP_PROXY_OK", "[rcp_proxy]")
-{
-    radio_mux_proxy_settings_t s = defaults();
-
-    s.port = 1;
-    TEST_ASSERT_EQUAL(RCP_PROXY_OK, rcp_proxy_settings_check(&s));
-    s.port = 65535;
-    TEST_ASSERT_EQUAL(RCP_PROXY_OK, rcp_proxy_settings_check(&s));
-}
-
-TEST_CASE("On a bad port and no host for connect: returns RCP_PROXY_BAD_PORT first", "[rcp_proxy]")
-{
-    radio_mux_proxy_settings_t s = connect_to("");
-
-    s.port = 80;
-    TEST_ASSERT_EQUAL(RCP_PROXY_BAD_PORT, rcp_proxy_settings_check(&s));
-}
-
-TEST_CASE("On an IPv4 or IPv6 literal host: returns RCP_PROXY_OK", "[rcp_proxy]")
-{
-    const char *good[] = {"192.168.1.10", "0.0.0.0", "255.255.255.255", "fd00::1", "::1", "::",
-                          "2001:db8:0:0:1:0:0:1", "fe80::1:2:3:4", "::ffff:192.168.1.10", "2001:DB8::A"
-                         };
-
-    for (size_t i = 0; i < sizeof(good) / sizeof(good[0]); i++) {
-        radio_mux_proxy_settings_t s = connect_to(good[i]);
-
-        TEST_ASSERT_EQUAL_MESSAGE(RCP_PROXY_OK, rcp_proxy_settings_check(&s), good[i]);
-    }
-}
-
-TEST_CASE("On a DNS or .local name host: returns RCP_PROXY_OK", "[rcp_proxy]")
-{
-    const char *good[] = {"otbr-host.local", "pi.LOCAL", "agent.example.com", "a", "x-1.y2",
-                          // 63 characters, the longest that fits
-                          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example"
-                         };
-
-    for (size_t i = 0; i < sizeof(good) / sizeof(good[0]); i++) {
-        radio_mux_proxy_settings_t s = connect_to(good[i]);
-
-        TEST_ASSERT_EQUAL_MESSAGE(RCP_PROXY_OK, rcp_proxy_settings_check(&s), good[i]);
-    }
-}
-
-TEST_CASE("On a host that is neither a literal nor a valid name: returns RCP_PROXY_BAD_HOST", "[rcp_proxy]")
-{
-    const char *bad[] = {"bad host", "a..b", ".a", "a.", "-a.com", "a-.com", "under_score.local", "1.2.3.256",
-                         "1.2.3", "fd00:::1", "1::2::3", "fd00::1%eth0", "[fd00::1]", "host:6638", "1:2:3:4:5:6:7:8:9",
-                         "12345::1", "a/b"
-                        };
-
-    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
-        radio_mux_proxy_settings_t s = connect_to(bad[i]);
-
-        TEST_ASSERT_EQUAL_MESSAGE(RCP_PROXY_BAD_HOST, rcp_proxy_settings_check(&s), bad[i]);
-    }
-}
-
-TEST_CASE("On a host that fills the buffer without a terminator: returns RCP_PROXY_BAD_HOST", "[rcp_proxy]")
-{
-    radio_mux_proxy_settings_t s = connect_to("");
-
-    memset(s.host, 'a', sizeof(s.host));
-    TEST_ASSERT_EQUAL(RCP_PROXY_BAD_HOST, rcp_proxy_settings_check(&s));
-}
-
-TEST_CASE("On a bad host in listen mode: returns RCP_PROXY_BAD_HOST (a kept host stays valid)", "[rcp_proxy]")
-{
-    radio_mux_proxy_settings_t s = defaults();
-
-    strcpy(s.host, "bad host");
-    TEST_ASSERT_EQUAL(RCP_PROXY_BAD_HOST, rcp_proxy_settings_check(&s));
 }
 
 /* ---- rcp_proxy_host_mdns ---- */
@@ -375,16 +231,90 @@ TEST_CASE("On TCP accept or connect (init before each): every peer session repla
     }
 }
 
+/* ---- rcp_proxy_lookup (connect target, resolved off the proxy task) ---- */
+
+TEST_CASE("On the answer to the pending ask: it is taken once and the session no longer waits", "[rcp_proxy]")
+{
+    rcp_proxy_lookup_t l = {0};
+    uint32_t seq = 0;
+    const uint32_t ask = rcp_proxy_lookup_ask(&l, &seq);
+
+    TEST_ASSERT_NOT_EQUAL(0, ask);
+    TEST_ASSERT_TRUE(rcp_proxy_lookup_waiting(&l));
+    TEST_ASSERT_TRUE(rcp_proxy_lookup_answer(&l, ask));
+    TEST_ASSERT_FALSE(rcp_proxy_lookup_waiting(&l));
+    TEST_ASSERT_FALSE(rcp_proxy_lookup_answer(&l, ask));
+}
+
+TEST_CASE("On an answer to an earlier ask of the session: it is discarded, the latest still taken", "[rcp_proxy]")
+{
+    rcp_proxy_lookup_t l = {0};
+    uint32_t seq = 0;
+    const uint32_t first = rcp_proxy_lookup_ask(&l, &seq);
+    const uint32_t second = rcp_proxy_lookup_ask(&l, &seq);
+
+    TEST_ASSERT_NOT_EQUAL(first, second);
+    TEST_ASSERT_FALSE(rcp_proxy_lookup_answer(&l, first));
+    TEST_ASSERT_TRUE(rcp_proxy_lookup_waiting(&l));
+    TEST_ASSERT_TRUE(rcp_proxy_lookup_answer(&l, second));
+}
+
+TEST_CASE("On an answer after the session stopped waiting (retry, close, new settings): it is discarded",
+          "[rcp_proxy]")
+{
+    rcp_proxy_lookup_t l = {0};
+    uint32_t seq = 0;
+    const uint32_t ask = rcp_proxy_lookup_ask(&l, &seq);
+
+    rcp_proxy_lookup_cancel(&l);
+    TEST_ASSERT_FALSE(rcp_proxy_lookup_waiting(&l));
+    TEST_ASSERT_FALSE(rcp_proxy_lookup_answer(&l, ask));
+}
+
+TEST_CASE("On an answer for an ended session arriving at the next session: it is discarded", "[rcp_proxy]")
+{
+    rcp_proxy_lookup_t old = {0};
+    rcp_proxy_lookup_t next = {0};
+    uint32_t seq = 0; // shared by every session of the task
+    const uint32_t stale = rcp_proxy_lookup_ask(&old, &seq);
+    const uint32_t ask = rcp_proxy_lookup_ask(&next, &seq);
+
+    TEST_ASSERT_FALSE(rcp_proxy_lookup_answer(&next, stale));
+    TEST_ASSERT_TRUE(rcp_proxy_lookup_answer(&next, ask));
+}
+
+TEST_CASE("On the counter wrapping: an ask is never 0, and answer 0 is never taken", "[rcp_proxy]")
+{
+    rcp_proxy_lookup_t l = {0};
+    uint32_t seq = UINT32_MAX;
+
+    TEST_ASSERT_EQUAL_UINT32(1, rcp_proxy_lookup_ask(&l, &seq));
+    rcp_proxy_lookup_cancel(&l);
+    TEST_ASSERT_FALSE(rcp_proxy_lookup_answer(&l, 0));
+}
+
 /* ---- rcp_proxy_accept (TCP listen) ---- */
 
-TEST_CASE("On a connection with no peer: returns RCP_PROXY_TAKE", "[rcp_proxy]")
+TEST_CASE("On a connection with no peer that both access rules allow: returns RCP_PROXY_TAKE", "[rcp_proxy]")
 {
-    TEST_ASSERT_EQUAL(RCP_PROXY_TAKE, rcp_proxy_accept(false));
+    TEST_ASSERT_EQUAL(RCP_PROXY_TAKE, rcp_proxy_accept(false, true, true));
 }
 
 TEST_CASE("On a connection while a peer is connected: returns RCP_PROXY_REFUSE (first client wins)", "[rcp_proxy]")
 {
-    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(true));
+    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(true, true, true));
+}
+
+TEST_CASE("On a connection whose local address the access rules refuse: returns RCP_PROXY_REFUSE", "[rcp_proxy]")
+{
+    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(false, false, true));
+}
+
+TEST_CASE("On a client routed over the Thread mesh to an infrastructure address: returns RCP_PROXY_REFUSE",
+          "[rcp_proxy]")
+{
+    // The local address (mgmt or thread_bb) passes netcfg_socket_allowed; netcfg_peer_allowed refuses the mesh route.
+    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(false, true, false));
 }
 
 /* ---- rcp_proxy_ring ---- */

@@ -15,6 +15,7 @@ static device_api_status_t sample(void)
         .rcp_installed_known = true,
         .rcp_installed = "1.2.3",
         .rcp_compatible = true,
+        .rcp_compatible_known = true,
         .jumper_present = true,
         .base_expected = "b1",
         .base_installed = "b0",
@@ -84,6 +85,16 @@ TEST_CASE("On no valid RCP firmware: rcp.installed is an empty string", "[device
     s.rcp_compatible = false;
     render(&s);
     TEST_ASSERT_NOT_NULL(strstr(body, "\"rcp\":{\"installed\":\"\",\"compatible\":false}"));
+}
+
+TEST_CASE("On a C6 that OpenThread never judged this boot: rcp.compatible is null", "[device_api]")
+{
+    device_api_status_t s = sample();
+
+    s.rcp_compatible = false;
+    s.rcp_compatible_known = false;
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"rcp\":{\"installed\":\"1.2.3\",\"compatible\":null}"));
 }
 
 TEST_CASE("On a failed probe: rcp.installed is null", "[device_api]")

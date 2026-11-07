@@ -570,15 +570,17 @@ static void after_channel_op(void)
 }
 
 // Why there is no OpenThread now (the reason NO_RADIO shows): no channel stored in otbr, it is unplugged, a C6 job
-// holds it, or it left otbr. Returns whether the channel OpenThread ran on (`ran_on`, may be NULL) was lost: it is still
-// the one stored in otbr and no C6 job holds it, so it went by an unplug or a failure, not a deliberate change (a mode
-// change, a move, a C6 job), which keeps the normal drain.
+// holds it, it is in fault (its own reason; the mux's "no answer after 3 resets" give-up lands here if an otbr flow ever
+// reaches it), or it left otbr. Returns whether the channel OpenThread ran on (`ran_on`, may be NULL) was lost: it is
+// still the one stored in otbr and no C6 job holds it, so it went by an unplug or a failure, not a deliberate change (a
+// mode change, a move, a C6 job), which keeps the normal drain.
 static bool note_no_radio_reason(radio_mux_chan_t *ran_on)
 {
     char otbr[RADIO_MUX_ID_MAX];
     const bool stored = radio_mux_otbr_channel(otbr, sizeof(otbr));
     radio_mux_snapshot_t *snap = stored ? malloc(sizeof(*snap)) : NULL;
     const char *why = "the OTBR channel went away";
+    char fault[RADIO_MUX_REASON_MAX] = "";
     bool busy = false;
 
     if (!stored) {
@@ -591,11 +593,20 @@ static bool note_no_radio_reason(radio_mux_chan_t *ran_on)
             if (strcmp(snap->chans[i].id, otbr) == 0) {
                 busy = snap->chans[i].state == RADIO_MUX_STATE_BUSY;
                 why = busy ? "a C6 job holds the radio" : !snap->chans[i].present ? "radio unplugged" : why;
+                if (!busy && snap->chans[i].present && snap->chans[i].state == RADIO_MUX_STATE_FAULT &&
+                        snap->chans[i].reason[0] != '\0') {
+                    strlcpy(fault, snap->chans[i].reason, sizeof(fault)); // the snapshot is freed below
+                    why = fault;
+                }
             }
         }
         free(snap);
     }
-    snprintf(s_no_radio_reason, sizeof(s_no_radio_reason), "%s (%s)", why, otbr);
+    // "<why> (<id>)", cut to fit: a channel's own fault reason can fill the buffer by itself.
+    strlcpy(s_no_radio_reason, why, sizeof(s_no_radio_reason));
+    strlcat(s_no_radio_reason, " (", sizeof(s_no_radio_reason));
+    strlcat(s_no_radio_reason, otbr, sizeof(s_no_radio_reason));
+    strlcat(s_no_radio_reason, ")", sizeof(s_no_radio_reason));
     return ran_on && !busy && strcmp(radio_mux_chan_id(ran_on), otbr) == 0;
 }
 

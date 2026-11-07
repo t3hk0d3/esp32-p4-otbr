@@ -8,11 +8,13 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "radio_mux_priv.h"
 
 static const char *TAG = "radio_mux";
 
 #define CALL_WAIT_MS 5000
+#define END_ALLOC_RETRY_MS 100
 
 /* ---- registration ---- */
 
@@ -323,21 +325,37 @@ void radio_mux_get_snapshot(radio_mux_snapshot_t *out)
     mux_unlock();
 }
 
-// Posts a call to the owner and waits for it. ESP_ERR_TIMEOUT when the owner did not answer in time: the record is
-// then freed by the owner when it gets to it.
+// Posts a call to the owner and waits for it. ESP_ERR_TIMEOUT when it could not be posted in time: the owner never
+// sees it. ESP_ERR_NOT_FINISHED when it was posted but not answered in time: the owner still runs it when it gets to
+// it (unless the caller abandons a claimable call) and frees the record then.
 static esp_err_t call_owner(mux_msg_type_t type, mux_call_t *call)
 {
     const mux_msg_t m = {.type = type, .call = call};
 
     if (xQueueSend(g_mux.queue, &m, pdMS_TO_TICKS(CALL_WAIT_MS)) != pdTRUE) {
         mux_call_put(call); // the owner's reference
+        ESP_LOGW(TAG, "%s: the owner task's queue stayed full for %d ms: not posted", call->id, CALL_WAIT_MS);
         return ESP_ERR_TIMEOUT;
     }
     if (xSemaphoreTake(call->done, pdMS_TO_TICKS(CALL_WAIT_MS)) != pdTRUE) {
-        ESP_LOGW(TAG, "the owner task did not answer in %d ms", CALL_WAIT_MS);
-        return ESP_ERR_TIMEOUT;
+        ESP_LOGW(TAG, "%s: the owner task did not answer in %d ms", call->id, CALL_WAIT_MS);
+        return ESP_ERR_NOT_FINISHED;
     }
     return ESP_OK;
+}
+
+// An end message (C6 job end, lease end) must reach the owner, or c6 stays busy or the channel leased until a reboot:
+// its record is allocated until it can be (call_new_end), the post waits as long as it takes, and only the answer may
+// time out (logged; the owner runs it later).
+static void call_owner_end(mux_msg_type_t type, mux_call_t *call, const char *what)
+{
+    const mux_msg_t m = {.type = type, .call = call};
+
+    xQueueSend(g_mux.queue, &m, portMAX_DELAY);
+    if (xSemaphoreTake(call->done, pdMS_TO_TICKS(CALL_WAIT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "%s: %s: the owner task did not answer in %d ms; it runs when the owner gets to it", call->id,
+                 what, CALL_WAIT_MS);
+    }
 }
 
 static mux_call_t *call_new(const char *id)
@@ -354,6 +372,20 @@ static mux_call_t *call_new(const char *id)
     }
     atomic_store(&call->refs, 2);
     snprintf(call->id, sizeof(call->id), "%s", id);
+    return call;
+}
+
+static mux_call_t *call_new_end(const char *id)
+{
+    mux_call_t *call = call_new(id);
+
+    if (!call) {
+        ESP_LOGE(TAG, "%s: no memory for an end message: trying again until there is", id);
+    }
+    while (!call) {
+        vTaskDelay(pdMS_TO_TICKS(END_ALLOC_RETRY_MS));
+        call = call_new(id);
+    }
     return call;
 }
 
@@ -375,9 +407,13 @@ radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req
     call->req = *req;
     call->req.kick = false; // never stored; device_api kicks through rcp_proxy (R6)
     call->have_mover = mover != NULL;
-    if (call_owner(MUX_MSG_SET, call) != ESP_OK) {
+    const esp_err_t posted = call_owner(MUX_MSG_SET, call);
+
+    if (posted != ESP_OK) {
         mux_call_put(call);
-        return RADIO_MUX_REFUSE_FAILED;
+        // Not posted: nothing happens. Posted but not answered: the owner still applies it later (a MOVE it finds
+        // then does nothing: the mover is never called).
+        return posted == ESP_ERR_NOT_FINISHED ? RADIO_MUX_REFUSE_PENDING : RADIO_MUX_REFUSE_FAILED;
     }
     radio_mux_verdict_t v = call->verdict;
     char from[RADIO_MUX_ID_MAX];
@@ -440,6 +476,10 @@ esp_err_t radio_mux_c6_job_begin(void)
     esp_err_t err = call_owner(MUX_MSG_C6_JOB_BEGIN, call);
 
     if (err == ESP_ERR_TIMEOUT) {
+        mux_call_put(call);
+        return ESP_ERR_TIMEOUT; // not posted: nothing ran
+    }
+    if (err == ESP_ERR_NOT_FINISHED) {
         int pending = MUX_CALL_PENDING;
 
         if (atomic_compare_exchange_strong(&call->claim, &pending, MUX_CALL_ABANDONED)) {
@@ -462,16 +502,10 @@ void radio_mux_c6_job_end(bool c6_ok)
     if (!atomic_load(&g_mux.started)) {
         return;
     }
-    mux_call_t *call = call_new(RADIO_MUX_C6_ID);
+    mux_call_t *call = call_new_end(RADIO_MUX_C6_ID);
 
-    if (!call) {
-        ESP_LOGE(TAG, "c6: job end lost: no memory");
-        return;
-    }
     call->c6_ok = c6_ok;
-    if (call_owner(MUX_MSG_C6_JOB_END, call) != ESP_OK) {
-        ESP_LOGW(TAG, "c6: job end: the owner task did not answer in time");
-    }
+    call_owner_end(MUX_MSG_C6_JOB_END, call, "job end");
     mux_call_put(call);
 }
 
@@ -507,6 +541,9 @@ static esp_err_t call_owner_claimed(mux_msg_type_t type, mux_call_t *call)
     esp_err_t err = call_owner(type, call);
 
     if (err == ESP_ERR_TIMEOUT) {
+        return ESP_ERR_TIMEOUT; // not posted: nothing ran
+    }
+    if (err == ESP_ERR_NOT_FINISHED) {
         int pending = MUX_CALL_PENDING;
 
         if (atomic_compare_exchange_strong(&call->claim, &pending, MUX_CALL_ABANDONED)) {
@@ -546,17 +583,11 @@ void radio_mux_lease_end(radio_mux_chan_t *ch, const char *fault)
     if (!id) {
         return;
     }
-    mux_call_t *call = call_new(id);
+    mux_call_t *call = call_new_end(id);
 
-    if (!call) {
-        ESP_LOGE(TAG, "%s: lease end lost: no memory", id);
-        return;
-    }
     call->handle = ch;
     snprintf(call->reason, sizeof(call->reason), "%s", fault ? fault : "");
-    if (call_owner(MUX_MSG_LEASE_END, call) != ESP_OK) {
-        ESP_LOGW(TAG, "%s: lease end: the owner task did not answer in time", id);
-    }
+    call_owner_end(MUX_MSG_LEASE_END, call, "lease end");
     mux_call_put(call);
 }
 

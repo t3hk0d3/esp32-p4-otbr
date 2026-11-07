@@ -63,6 +63,10 @@ file(CREATE_LINK "${ot_port_src}/mux_spinel_interface.cpp" "${ot_shadow}/src/por
 file(CREATE_LINK "${ot_port_src}/mux_spinel_interface.hpp" "${ot_shadow}/src/port/mux_spinel_interface.hpp" SYMBOLIC)
 file(CREATE_LINK "${ot_port_src}/mux_gone_answer.c" "${ot_shadow}/src/port/mux_gone_answer.c" SYMBOLIC)
 file(CREATE_LINK "${ot_port_src}/mux_gone_answer.h" "${ot_shadow}/src/port/mux_gone_answer.h" SYMBOLIC)
+# The spinel packed-uint helper of radio_mux (header-only), next to mux_gone_answer.c that includes it: the generated
+# component does not depend on radio_mux.
+file(CREATE_LINK "${CMAKE_CURRENT_LIST_DIR}/../p4/components/radio_mux/include/radio_mux_spinel_uint.h"
+     "${ot_shadow}/src/port/radio_mux_spinel_uint.h" SYMBOLIC)
 file(CREATE_LINK "${ot_port_src}/esp_openthread_mux.h" "${ot_shadow}/include/esp_openthread_mux.h" SYMBOLIC)
 
 # --- src/port/esp_openthread_radio_spinel.cpp ---

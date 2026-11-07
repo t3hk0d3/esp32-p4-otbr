@@ -180,6 +180,10 @@ void mux_rx_bytes(mux_port_t *p, const uint8_t *data, size_t len)
     case MUX_RX_RAW: {
         const bool kept = xRingbufferSend(p->ring, data, len, 0) == pdTRUE;
 
+        if (len > 0) {
+            radio_mux_reset_count_clear(&p->reset_count); // the device answers
+        }
+
         taskENTER_CRITICAL(&p->lock);
         if (kept) {
             p->ctr.bytes_in += len;
@@ -204,6 +208,7 @@ void mux_rx_bytes(mux_port_t *p, const uint8_t *data, size_t len)
         if (!done) {
             continue;
         }
+        radio_mux_reset_count_clear(&p->reset_count); // a whole frame (also one the pool had no room for)
         if (p->dec_slot) {
             deliver_frame(p, p->dec_slot + MUX_SLOT_HDR, p->dec.len);
         } else {

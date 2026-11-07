@@ -145,7 +145,11 @@ int device_api_status_json(char *buf, size_t cap, const device_api_status_t *s)
     json_out_raw(&w, "},\"rcp\":{\"installed\":");
     json_out_str(&w, s->rcp_installed_known ? s->rcp_installed : NULL);
     json_out_raw(&w, ",\"compatible\":");
-    json_out_bool(&w, s->rcp_compatible);
+    if (s->rcp_compatible_known) {
+        json_out_bool(&w, s->rcp_compatible);
+    } else {
+        json_out_raw(&w, "null");
+    }
     json_out_raw(&w, "},\"jumper\":{\"present\":");
     json_out_bool(&w, s->jumper_present);
     json_out_raw(&w, ",\"base_expected\":");

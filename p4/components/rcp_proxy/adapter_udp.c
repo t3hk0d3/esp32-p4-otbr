@@ -61,6 +61,20 @@ static int bind_listen(proxy_t *p, uint16_t port)
     return fd;
 }
 
+// Connect, once p->dst is resolved and allowed.
+static esp_err_t udp_dial(proxy_t *p)
+{
+    p->fd = socket(p->dst.ss_family, SOCK_DGRAM, IPPROTO_UDP);
+    if (p->fd < 0) {
+        ESP_LOGE(TAG, "socket: errno %d", errno);
+        rcp_proxy_note_error(p, "udp socket: %s", strerror(errno));
+        return ESP_FAIL;
+    }
+    rcp_proxy_set_nonblocking(p->fd);
+    ESP_LOGI(TAG, "%s: sending UDP to %s:%u", p->id, p->set.host, p->set.port);
+    return ESP_OK;
+}
+
 static esp_err_t udp_open(proxy_t *p)
 {
     p->fd = -1;
@@ -75,20 +89,12 @@ static esp_err_t udp_open(proxy_t *p)
         ESP_LOGI(TAG, "%s: listening on UDP port %u", p->id, p->set.port);
         return ESP_OK;
     }
-    const esp_err_t err = rcp_proxy_resolve(p, SOCK_DGRAM); // resolves and applies netcfg_peer_allowed
+    const esp_err_t err = rcp_proxy_resolve(p, SOCK_DGRAM); // a literal at once; a name: the resolver task answers
 
-    if (err != ESP_OK) {
-        return err;
+    if (err == ESP_ERR_NOT_FINISHED) {
+        return ESP_OK; // waits for the answer; proxy.c calls udp_dial then
     }
-    p->fd = socket(p->dst.ss_family, SOCK_DGRAM, IPPROTO_UDP);
-    if (p->fd < 0) {
-        ESP_LOGE(TAG, "socket: errno %d", errno);
-        rcp_proxy_note_error(p, "udp socket: %s", strerror(errno));
-        return ESP_FAIL;
-    }
-    rcp_proxy_set_nonblocking(p->fd);
-    ESP_LOGI(TAG, "%s: sending UDP to %s:%u", p->id, p->set.host, p->set.port);
-    return ESP_OK;
+    return err == ESP_OK ? udp_dial(p) : err;
 }
 
 static void udp_close(proxy_t *p)
@@ -202,6 +208,7 @@ const rcp_proxy_adapter_t rcp_proxy_adapter_udp = {
     .name = "udp",
     .datagram = true,
     .open = udp_open,
+    .dial = udp_dial,
     .close = udp_close,
     .fds = udp_fds,
     .ready = udp_ready,

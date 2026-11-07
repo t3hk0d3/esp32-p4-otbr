@@ -105,25 +105,9 @@ static void lose_peer(proxy_t *p, const char *why)
     rcp_proxy_peer_lost(p, PROXY_LISTENING);
 }
 
-static esp_err_t tcp_open(proxy_t *p)
+// Connect, once p->dst is resolved and allowed.
+static esp_err_t tcp_dial(proxy_t *p)
 {
-    p->lfd = -1;
-    p->fd = -1;
-    if (p->set.dir == RADIO_MUX_PROXY_LISTEN) {
-        p->lfd = listen_on(p, p->set.port);
-        if (p->lfd < 0) {
-            return ESP_FAIL;
-        }
-        p->state = PROXY_LISTENING;
-        ESP_LOGI(TAG, "%s: listening on TCP port %u", p->id, p->set.port);
-        return ESP_OK;
-    }
-    p->state = PROXY_CONNECTING;
-    const esp_err_t err = rcp_proxy_resolve(p, SOCK_STREAM); // resolves and applies netcfg_peer_allowed
-
-    if (err != ESP_OK) {
-        return err;
-    }
     p->fd = socket(p->dst.ss_family, SOCK_STREAM, IPPROTO_TCP);
     if (p->fd < 0) {
         ESP_LOGE(TAG, "socket: errno %d", errno);
@@ -144,6 +128,28 @@ static esp_err_t tcp_open(proxy_t *p)
     }
     p->conn_deadline_ms = rcp_proxy_now_ms() + CONNECT_TIMEOUT_MS;
     return ESP_OK;
+}
+
+static esp_err_t tcp_open(proxy_t *p)
+{
+    p->lfd = -1;
+    p->fd = -1;
+    if (p->set.dir == RADIO_MUX_PROXY_LISTEN) {
+        p->lfd = listen_on(p, p->set.port);
+        if (p->lfd < 0) {
+            return ESP_FAIL;
+        }
+        p->state = PROXY_LISTENING;
+        ESP_LOGI(TAG, "%s: listening on TCP port %u", p->id, p->set.port);
+        return ESP_OK;
+    }
+    p->state = PROXY_CONNECTING;
+    const esp_err_t err = rcp_proxy_resolve(p, SOCK_STREAM); // a literal at once; a name: the resolver task answers
+
+    if (err == ESP_ERR_NOT_FINISHED) {
+        return ESP_OK; // waits for the answer; proxy.c calls tcp_dial then
+    }
+    return err == ESP_OK ? tcp_dial(p) : err;
 }
 
 static void tcp_close(proxy_t *p)
@@ -246,7 +252,14 @@ static void accept_one(proxy_t *p)
     if (fd < 0) {
         return;
     }
-    if (rcp_proxy_accept(p->fd >= 0) == RCP_PROXY_REFUSE || !netcfg_socket_allowed(fd, NETCFG_SVC_RCP_PROXY)) {
+    // Both access rules: the local address the client came in on, and the route back to it (a Thread mesh node that
+    // dials an infrastructure address passes the first and is refused by the second).
+    const bool busy = p->fd >= 0;
+    const bool local_ok = !busy && netcfg_socket_allowed(fd, NETCFG_SVC_RCP_PROXY);
+    const bool peer_ok = local_ok &&
+                         netcfg_peer_allowed_as((const struct sockaddr *)&sa, NETCFG_SVC_RCP_PROXY, "a client");
+
+    if (rcp_proxy_accept(busy, local_ok, peer_ok) == RCP_PROXY_REFUSE) {
         refuse(fd);
         p->refused++;
         ESP_LOGI(TAG, "%s: connection refused (%lu so far)", p->id, (unsigned long)p->refused);
@@ -307,6 +320,7 @@ const rcp_proxy_adapter_t rcp_proxy_adapter_tcp = {
     .name = "tcp",
     .datagram = false,
     .open = tcp_open,
+    .dial = tcp_dial,
     .close = tcp_close,
     .fds = tcp_fds,
     .ready = tcp_ready,

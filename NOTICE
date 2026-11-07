@@ -30,6 +30,11 @@ p4/components/esp_ot_br_server, p4/components/esp_br_http_ota
     Copyright Espressif Systems (Shanghai) CO LTD. Licensed under the Apache License 2.0 (see the LICENSE file in
     each directory). Modified; every change is listed in p4/components/PATCHES.md.
 
+p4/components/usb_host_cdc_acm
+    espressif/usb_host_cdc_acm 2.4.1 from the ESP Component Registry (esp-usb, https://github.com/espressif/esp-usb,
+    commit eb0f02163be96dfc753cf43d1207329e44f1ca60). Copyright Espressif Systems (Shanghai) CO LTD. Licensed under
+    the Apache License 2.0 (see its LICENSE file). Modified; every change is listed in p4/components/PATCHES.md.
+
 p4/components/zigbee/ziggurat
     Git submodule: ziggurat (https://github.com/zigpy/ziggurat), pinned to commit
     f917f9898a1c7da2e5e5aa9add7c6d9d6a48ee76. Licensed under the Apache License 2.0 (see LICENSE.md in the submodule).

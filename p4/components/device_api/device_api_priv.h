@@ -171,6 +171,7 @@ typedef struct {
     bool rcp_installed_known;   /**< false: the probe failed, rcp.installed is null */
     const char *rcp_installed;  /**< "" = no valid RCP firmware */
     bool rcp_compatible;
+    bool rcp_compatible_known;  /**< false: OpenThread never ran on the C6 this boot, rcp.compatible is null */
     bool jumper_present;
     bool jumper_recovery_failed; /**< a ROM recovery failed and none worked since */
     const char *base_expected;

@@ -33,7 +33,8 @@ typedef struct {
     bool storage_degraded;        /**< NVS did not initialise: OpenThread does not start (RADIO_FAULT "storage unavailable"), everything else runs */
     char rcp_installed[32];       /**< version of the RCP firmware installed in the C6; "" = none (or unknown) */
     bool rcp_installed_known;     /**< false when the boot-time probe could not read the version */
-    bool rcp_compatible;          /**< OpenThread accepted the RCP at the last start */
+    bool rcp_compatible;          /**< OpenThread accepted the C6's RCP at its last start on the C6 (a dongle never sets it) */
+    bool rcp_compatible_known;    /**< OpenThread judged the C6's RCP this boot; false: not checked (Thread never ran there) */
     bool rom_recovery_failed;     /**< a ROM recovery failed and none worked since (the boot went on with the installed RCP, or RADIO_FAULT) */
     uint8_t channel;     /**< channel of the active dataset; 0 without one */
     bool ot_state_valid; /**< channel, has_dataset and pd_* were read from OpenThread; false when it is not up or its lock was not free within 100 ms (then they are unknown, not "none") */

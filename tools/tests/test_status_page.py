@@ -67,6 +67,14 @@ class TestStatusLogic:
         )
         assert h["link"] == {"href": "/radios.html", "label": "Open Radios"}
 
+    def test_fault_hero_of_a_dongle_does_not_ask_for_c6_firmware(self):
+        # On "rcp incompatible" while Thread's radio is a dongle: the text names the USB radio, never c6_rcp.bin.
+        h = st(
+            "L.heroFor({mode: 'RADIO_FAULT', fault_reason: 'rcp incompatible', otbr_channel: 'usb-10c4-ea60-1', sniffer: {}})"
+        )
+        assert "c6_rcp.bin" not in h["text"]
+        assert "USB radio" in h["text"] and "rcp incompatible" in h["text"]
+
     def test_fault_hero_of_the_c6_still_links_firmware(self):
         # On RADIO_FAULT with the C6 as Thread's radio: the firmware page, as before.
         h = st(
@@ -542,6 +550,7 @@ class TestUxReview:
             ("{installed: '', compatible: false}", "-"),
             ("{installed: '2.1', compatible: false}", "No"),
             ("{installed: '2.1', compatible: true}", "Yes"),
+            ("{installed: '2.1', compatible: null}", "unknown"),
         ],
     )
     def test_compat_text(self, rcp, text):

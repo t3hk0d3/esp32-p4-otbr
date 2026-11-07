@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "radio_mux_detect.h"
+#include "radio_mux_spinel_uint.h"
 
 enum {
     ST_START,
@@ -57,33 +58,6 @@ static const uint8_t ASH_RST[] = {0x1A, 0xC0, 0x38, 0xBC, 0x7E};
 #define ASH_RSTACK 0xC1
 #define ASH_RSTACK_LEN 5
 
-static size_t pack_uint(uint32_t v, uint8_t *out)
-{
-    size_t n = 0;
-
-    while (v >= 0x80) {
-        out[n++] = (uint8_t)(v | 0x80);
-        v >>= 7;
-    }
-    out[n++] = (uint8_t)v;
-    return n;
-}
-
-// Bytes consumed, 0 when the input ends inside the number or it doesn't fit 32 bits.
-static size_t unpack_uint(const uint8_t *p, size_t n, uint32_t *v)
-{
-    uint32_t r = 0;
-
-    for (size_t i = 0; i < n && i < 5; i++) {
-        r |= (uint32_t)(p[i] & 0x7F) << (7 * i);
-        if (!(p[i] & 0x80)) {
-            *v = r;
-            return i + 1;
-        }
-    }
-    return 0;
-}
-
 static int64_t cap_end(const radio_mux_detect_t *d)
 {
     return d->start_ms + RADIO_MUX_DETECT_CAP_MS;
@@ -96,7 +70,7 @@ static void tx_spinel_get(radio_mux_detect_t *d, uint32_t prop)
 
     f[n++] = SPINEL_HEADER;
     f[n++] = SPINEL_CMD_GET;
-    n += pack_uint(prop, f + n);
+    n += radio_mux_spinel_uint_pack(prop, f + n);
     d->tx_n = radio_mux_hdlc_encode(f, n, d->tx, sizeof(d->tx));
 }
 
@@ -214,12 +188,12 @@ static void spinel_frame(radio_mux_detect_t *d, int64_t now, const uint8_t *f, s
     if (n < 3 || f[0] != SPINEL_HEADER) { // answers to our requests only: TID 1; TID 0 is unsolicited
         return;
     }
-    used = unpack_uint(f + at, n - at, &cmd);
+    used = radio_mux_spinel_uint_unpack(f + at, n - at, &cmd);
     if (used == 0) {
         return;
     }
     at += used;
-    used = unpack_uint(f + at, n - at, &prop);
+    used = radio_mux_spinel_uint_unpack(f + at, n - at, &prop);
     if (used == 0 || cmd != SPINEL_CMD_IS) {
         return;
     }

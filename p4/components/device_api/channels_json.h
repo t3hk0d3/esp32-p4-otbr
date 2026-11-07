@@ -29,7 +29,7 @@ extern "C" {
  *  "usb":{"vid","pid","serial","driver"}|null,"caps":{"firmware_update","hw_reset","flow_control"},
  *  "rcp_proxy":{"direction","adapter","port","host","framing","state","peer","last_error"}|null,
  *  "firmware":{"type","version","chip","baud","source","at"}|null,
- *  "counters":{"frames_in","frames_out","bytes_in","bytes_out","drops","resets","rx_errors"}}.
+ *  "counters":{"frames_in","frames_out","bytes_in","bytes_out","drops","resets","rx_errors","uart_errors"}}.
  * kind "c6" or "usb"; error, usb.serial, usb.driver, rcp_proxy.state, .peer and .last_error, firmware.version, .chip,
  * .baud (0) and .at (0: the clock was not set) are null when empty; error is the channel's reason, or, when it has none
  * and its proxy is in backoff, the proxy's last_error; usb.vid and .pid are 4 lowercase hex digits; usb is null for
@@ -55,8 +55,8 @@ int device_api_channel_moving_json(char *buf, size_t cap, const char *moved_from
 esp_err_t device_api_channel_put_parse(const char *body, radio_mux_set_req_t *out, const char **bad_field);
 
 /**
- * rcp_proxy_settings_check on `stored` with the request's given settings over it: NULL when the request gives none or
- * the merged settings pass, else the field to name in the 400 ("rcp_proxy.port", "rcp_proxy.host").
+ * radio_mux_proxy_merge of the request's given settings over `stored`: NULL when the request gives none or the merged
+ * settings pass, else the field to name in the 400 ("rcp_proxy.port", "rcp_proxy.host").
  */
 const char *device_api_channel_proxy_refusal(const radio_mux_proxy_settings_t *stored, const radio_mux_set_req_t *req);
 

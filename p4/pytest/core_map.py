@@ -8,8 +8,8 @@ Names are the FreeRTOS task names as reported in /device/diag tasks[].name:
 - mdns: mDNS service task (CONFIG_MDNS_TASK_AFFINITY_CPU0)
 - esp_timer: esp_timer task, always core 0
 - httpd: esp_http_server (httpd_config_t.core_id, patch 1); thread_rest: upstream REST worker (patch 11)
-- diag, c6_log, pcap_stream, ota_http, radio_fw, rom_recover, radio_mux, radio_mux_c6, rcp_proxy, br_radio, zigbee,
-  zigbee_tx: our tasks, pinned in code (the two zigbee tasks exist only once a channel in mode ziggurat was
+- diag, c6_log, pcap_stream, ota_http, radio_fw, rom_recover, radio_mux, radio_mux_c6, rcp_proxy, rcp_resolve, br_radio,
+  zigbee, zigbee_tx: our tasks, pinned in code (the two zigbee tasks exist only once a channel in mode ziggurat was
   attached)
 - usb_lib, USB-CDC: the USB host daemon and the CDC driver task, pinned by radio_mux
 - console_repl: the console REPL (IDF esp_console_repl_chip.c:144; main/console.c pins it)
@@ -46,8 +46,9 @@ MANAGEMENT_TASKS = {
     "radio_mux": MGMT_CORE,
     "usb_lib": MGMT_CORE,
     "USB-CDC": MGMT_CORE,
-    # RCP proxy (the rcp-proxy mode's sockets), started at every boot.
+    # RCP proxy (the rcp-proxy mode's sockets) and its name lookups, started at every boot.
     "rcp_proxy": MGMT_CORE,
+    "rcp_resolve": MGMT_CORE,
     # br_core's radio task: OpenThread on the OTBR channel (start, stop, moves), started at every boot.
     "br_radio": MGMT_CORE,
     # Zigbee mode: the WebSocket sender, made with the zigbee task.
@@ -71,5 +72,6 @@ ALWAYS_PRESENT = {
     "usb_lib",
     "USB-CDC",
     "rcp_proxy",
+    "rcp_resolve",
     "br_radio",
 }

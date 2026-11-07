@@ -438,65 +438,6 @@ TEST_CASE("firmware source names: probe and passive", "[radio_mux]")
     TEST_ASSERT_NULL(radio_mux_fw_source_name(RADIO_MUX_FW_SRC_NONE));
 }
 
-/* ---- stored rcp_proxy settings ---- */
-
-TEST_CASE("rcp_proxy defaults: valid", "[radio_mux]")
-{
-    radio_mux_proxy_settings_t s;
-
-    radio_mux_proxy_defaults(&s);
-    TEST_ASSERT_TRUE(radio_mux_proxy_ok(&s));
-}
-
-TEST_CASE("rcp_proxy port 0, 80 or 179: invalid", "[radio_mux]")
-{
-    const uint16_t bad[] = {0, 80, 179};
-    radio_mux_proxy_settings_t s;
-
-    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
-        radio_mux_proxy_defaults(&s);
-        s.port = bad[i];
-        TEST_ASSERT_FALSE(radio_mux_proxy_ok(&s));
-    }
-    s.port = 65535;
-    TEST_ASSERT_TRUE(radio_mux_proxy_ok(&s));
-}
-
-TEST_CASE("rcp_proxy connect: needs a host", "[radio_mux]")
-{
-    radio_mux_proxy_settings_t s;
-
-    radio_mux_proxy_defaults(&s);
-    s.dir = RADIO_MUX_PROXY_CONNECT;
-    TEST_ASSERT_FALSE(radio_mux_proxy_ok(&s));
-    strcpy(s.host, "192.168.1.10");
-    TEST_ASSERT_TRUE(radio_mux_proxy_ok(&s));
-}
-
-TEST_CASE("rcp_proxy unknown direction, adapter or framing: invalid", "[radio_mux]")
-{
-    radio_mux_proxy_settings_t s;
-
-    radio_mux_proxy_defaults(&s);
-    s.dir = (radio_mux_proxy_dir_t)7;
-    TEST_ASSERT_FALSE(radio_mux_proxy_ok(&s));
-    radio_mux_proxy_defaults(&s);
-    s.adapter = (radio_mux_proxy_adapter_t)7;
-    TEST_ASSERT_FALSE(radio_mux_proxy_ok(&s));
-    radio_mux_proxy_defaults(&s);
-    s.framing = (radio_mux_proxy_framing_t)7;
-    TEST_ASSERT_FALSE(radio_mux_proxy_ok(&s));
-}
-
-TEST_CASE("rcp_proxy host without its NUL: invalid", "[radio_mux]")
-{
-    radio_mux_proxy_settings_t s;
-
-    radio_mux_proxy_defaults(&s);
-    memset(s.host, 'a', sizeof(s.host));
-    TEST_ASSERT_FALSE(radio_mux_proxy_ok(&s));
-}
-
 /* ---- TX timeout ---- */
 
 TEST_CASE("TX timeout of a small write: the base", "[radio_mux]")
