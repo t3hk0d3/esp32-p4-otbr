@@ -380,25 +380,14 @@ def nav_scenario(status_body, path="/index.html", fetch_fails=False, slot=True):
 
 @needs_node
 class TestZigbeeNav:
-    """api.js: the Zigbee link in the nav slot"""
+    """api.js: no Zigbee link (the Dashboard has the Zigbee section); the radio-mux slot stays empty"""
 
-    def test_slot_gets_the_link_and_is_shown_when_a_channel_is_zigbee(self):
-        # On /device/status with zigbee_channel "c6": one status request; the slot holds a Zigbee link and is shown.
-        r = nav_scenario({"otbr_channel": None, "zigbee_channel": "c6"})
-        assert r["fetched"] == ["/device/status"]
-        assert r["slot"]["hidden"] is False
-        assert r["slot"]["innerHTML"] == '<a href="/zigbee.html">Zigbee</a>'
-
-    def test_link_is_active_on_the_zigbee_page(self):
-        # On /zigbee.html: the link is marked active.
-        r = nav_scenario({"zigbee_channel": "c6"}, "/zigbee.html")
-        assert (
-            r["slot"]["innerHTML"] == '<a href="/zigbee.html" class="active">Zigbee</a>'
-        )
-
-    @pytest.mark.parametrize("status", [{"zigbee_channel": None}, {}])
-    def test_slot_stays_hidden_and_empty_without_a_zigbee_channel(self, status):
-        # On a null or missing zigbee_channel: the slot stays hidden and empty.
+    @pytest.mark.parametrize(
+        "status",
+        [{"otbr_channel": None, "zigbee_channel": "c6"}, {"zigbee_channel": None}, {}],
+    )
+    def test_slot_stays_hidden_and_empty_for_any_status(self, status):
+        # On any status, Zigbee running or not: the slot stays hidden and empty.
         assert nav_scenario(status)["slot"] == {"innerHTML": "", "hidden": True}
 
     def test_slot_stays_hidden_when_the_status_cannot_be_read(self):
@@ -413,7 +402,21 @@ class TestZigbeeNav:
         assert nav_scenario({"zigbee_channel": "c6"}, slot=False)["slot"] is None
 
     def test_static_menu_has_the_empty_hidden_slot_and_no_link(self):
-        # On the static nav: the slot is an empty hidden <li>; the Zigbee link is not in the markup.
-        html = nav_scenario({"zigbee_channel": None})["html"]
+        # On the static nav: the slot is an empty hidden <li>; no Zigbee link.
+        html = nav_scenario({"zigbee_channel": "c6"})["html"]
         assert '<li id="nav-slot-zigbee" hidden></li>' in html
         assert "zigbee.html" not in html
+
+
+class TestZigbeePageGone:
+    """The Zigbee page is removed (web partition space): its content is the Dashboard's Zigbee section"""
+
+    def test_the_page_file_is_gone(self):
+        # zigbee.html does not exist.
+        assert not (FRONTEND / "zigbee.html").exists()
+
+    def test_no_frontend_file_links_to_it(self):
+        # No HTML or script in the frontend names zigbee.html.
+        files = list(FRONTEND.glob("*.html")) + list(STATIC.glob("*.js"))
+        assert files
+        assert [f.name for f in files if "zigbee.html" in f.read_text()] == []

@@ -118,9 +118,9 @@ function showLoading(show) {
 
 /*
  * Build navigation bar and highlight current page. Top bar: Dashboard, Thread, [Zigbee slot], Device, About. The slot
- * is an empty hidden <li id="nav-slot-zigbee">: the Zigbee link is put into it by id. The Thread menu is hidden while
- * no radio is in Thread border router mode (GET /device/status otbr_channel null); the last answer is remembered
- * in sessionStorage so the menu does not flash on the next page.
+ * is an empty hidden <li id="nav-slot-zigbee"> (radio-mux, patch 29) that stays empty: Zigbee status is a section of
+ * the Dashboard. The Thread menu is hidden while no radio is in Thread border router mode (GET /device/status
+ * otbr_channel null); the last answer is remembered in sessionStorage so the menu does not flash on the next page.
  */
 (function() {
 var pages = [
@@ -164,22 +164,7 @@ function setThreadMenuHidden(hidden) {
 if (typeof window !== 'undefined')
   window.navSetThreadMenuHidden = setThreadMenuHidden;
 
-/*
- * The Zigbee page is in the menu only while a radio channel runs the Zigbee coordinator (GET /device/status
- * zigbee_channel not null): its link goes into the hidden slot, which is then shown.
- */
-function showZigbeeSlot(s) {
-  var li = document.getElementById('nav-slot-zigbee');
-  if (!li || !s || !s.zigbee_channel)
-    return;
-  li.innerHTML = '<a href="/zigbee.html"' + (p === '/zigbee.html' ? ' class="active"' : '') + '>Zigbee</a>';
-  li.hidden = false;
-}
-
-/*
- * Asks the board once; no answer, or a board without otbr_channel, leaves the Thread menu as it is. The same answer
- * fills the Zigbee slot.
- */
+/* Asks the board once; no answer, or a board without otbr_channel, leaves the Thread menu as it is. */
 function watchThreadMenu() {
   if (typeof fetch !== 'function')
     return;
@@ -189,7 +174,6 @@ function watchThreadMenu() {
         var s = text ? JSON.parse(text) : null;
         if (s && s.otbr_channel !== undefined)
           setThreadMenuHidden(s.otbr_channel === null);
-        showZigbeeSlot(s);
       })
       .catch(function() {});
 }
