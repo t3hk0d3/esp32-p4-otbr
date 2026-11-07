@@ -74,6 +74,7 @@ typedef enum {
     RADIO_MUX_REFUSE_FAILED,          // the mux could not store or apply the change (not started, NVS, timeout: 500)
     RADIO_MUX_REFUSE_PROBE_FAILED,    // a move of otbr: the target's RCP probe failed, nothing changed (409 probe_failed)
     RADIO_MUX_REFUSE_BUSY,            // the channel or OpenThread is busy (a move or a radio job runs): try again (409)
+    RADIO_MUX_REFUSE_PENDING,         // posted, but the owner did not answer in time: the change may still be applied (503)
 } radio_mux_verdict_t;
 
 typedef enum {

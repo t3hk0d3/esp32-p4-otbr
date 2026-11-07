@@ -8,6 +8,10 @@
 #include "br_core_mode.h"
 #include "cJSON.h"
 
+// The mux took the change but did not answer in time (radio_mux_set's REFUSE_PENDING, radio_mux_forget's
+// ESP_ERR_NOT_FINISHED): it is not refused, it may still be applied.
+#define MUX_BUSY_DETAIL "the radio mux is busy; the change may still be applied"
+
 /* ---- GET ---- */
 
 // "" (or NULL) is written as null: no value.
@@ -487,6 +491,10 @@ static verdict_reply_t verdict_reply(radio_mux_verdict_t v)
         return (verdict_reply_t) {
             409, "busy", "the radio or OpenThread is busy, try again"
         };
+    case RADIO_MUX_REFUSE_PENDING:
+        return (verdict_reply_t) {
+            503, "mux_busy", MUX_BUSY_DETAIL
+        };
     case RADIO_MUX_REFUSE_FAILED:
     default:
         return (verdict_reply_t) {
@@ -527,6 +535,10 @@ device_api_error_t device_api_channel_forget_error(esp_err_t err, bool mux_start
     case ESP_ERR_INVALID_STATE:
         return (device_api_error_t) {
             409, "in_use", "only an unplugged USB radio can be forgotten"
+        };
+    case ESP_ERR_NOT_FINISHED:
+        return (device_api_error_t) {
+            503, "mux_busy", MUX_BUSY_DETAIL
         };
     default:
         return (device_api_error_t) {

@@ -230,13 +230,16 @@ void radio_mux_get_snapshot(radio_mux_snapshot_t *out);
 // text, "" otherwise. A channel being moved to (leased) refuses every change with REFUSE_BUSY. On MOVE, moved_from gets
 // the id OpenThread leaves ("" for a start, `id` itself for a stop; may be NULL). A start, move or stop goes alone:
 // with line or rcp_proxy settings in the same request it is refused (REFUSE_BAD_VALUE, nothing stored, the mover not
-// called). Waits for the owner task (up to 5 s); REFUSE_FAILED when it can't.
+// called). Waits for the owner task (up to 5 s to post, 5 s for the answer): REFUSE_FAILED when it could not post
+// (nothing changes), REFUSE_PENDING when the answer did not come in time (the owner still applies the change when it
+// gets to it; a start, move or stop does not run then).
 radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req, char *moved_from, size_t cap,
                                   char *reason, size_t reason_cap);
 
 // Forgets an unplugged USB channel: erases its settings and removes it from the list. ESP_ERR_INVALID_STATE for the
 // C6 or a present channel (and before radio_mux_start: radio_mux_started tells them apart), ESP_ERR_NOT_FOUND for an
-// unknown id.
+// unknown id. Waits for the owner task: ESP_ERR_TIMEOUT when it could not post (nothing changes), ESP_ERR_NOT_FINISHED
+// when the answer did not come in 5 s (the owner may still forget the channel).
 esp_err_t radio_mux_forget(const char *id);
 
 // Whether radio_mux_start has run (the API calls answer). Any task.
@@ -266,7 +269,8 @@ void radio_mux_set_otbr_mover(esp_err_t (*move)(const char *from, const char *to
 esp_err_t radio_mux_lease(const char *id, radio_mux_chan_t **out, char *err, size_t cap);
 // Gives a leased channel back (no-op once committed or gone): delivery stops, the C6 returns to its stored mode (off:
 // held in reset). `fault` (NULL or "" for none, e.g. after a refused probe) stays as the channel's reason, state fault,
-// until its next mode change, plug-in or C6 job (drain_timeout, a start failure after the 202). Waits for the owner.
+// until its next mode change, plug-in or C6 job (drain_timeout, a start failure after the 202). Never dropped: it waits
+// as long as it takes to post (and to allocate its record); the answer is waited for up to 5 s (later: logged).
 void radio_mux_lease_end(radio_mux_chan_t *ch, const char *fault);
 // The end of a move, once OpenThread runs on the leased channel `to`: stores `to` in otbr and `from` (may be NULL or
 // "", e.g. forgotten) in off, then detaches `from`'s otbr consumer (GONE) and turns the lease into the otbr consumer's
@@ -290,7 +294,8 @@ esp_err_t radio_mux_c6_job_begin(void);
 // Gives the C6 back after the job: c6 is listed again from rcp_sync_get_last_probe (unavailable with the reason when
 // no RCP, the factory ESP-Hosted firmware or a failed ROM recovery), unavailable as well when !c6_ok, and its stored
 // mode's consumer attached again (SPI2 opened). Without a job it refreshes the listing of a c6 nothing is attached to.
-// Waits for the owner task (up to 5 s). No-op before radio_mux_start.
+// Never dropped: it waits as long as it takes to post (and to allocate its record); the answer is waited for up to
+// 5 s (later: logged). No-op before radio_mux_start.
 void radio_mux_c6_job_end(bool c6_ok);
 
 #ifdef __cplusplus

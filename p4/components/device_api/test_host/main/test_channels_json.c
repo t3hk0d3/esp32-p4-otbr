@@ -721,6 +721,7 @@ TEST_CASE("On each verdict: its status and code", "[device_api]")
         {RADIO_MUX_REFUSE_FAILED, 500, "failed"},
         {RADIO_MUX_REFUSE_PROBE_FAILED, 409, "probe_failed"},
         {RADIO_MUX_REFUSE_BUSY, 409, "busy"},
+        {RADIO_MUX_REFUSE_PENDING, 503, "mux_busy"},
     };
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
@@ -737,6 +738,13 @@ TEST_CASE("On each verdict: its status and code", "[device_api]")
             TEST_ASSERT_NULL(code);
         }
     }
+}
+
+TEST_CASE("On a change the mux took but did not answer in time: 503 mux_busy, the change may still be applied",
+          "[device_api]")
+{
+    TEST_ASSERT_EQUAL_STRING("the radio mux is busy; the change may still be applied",
+                             device_api_channel_refusal_detail(RADIO_MUX_REFUSE_PENDING));
 }
 
 TEST_CASE("On a verdict out of range: 500 failed", "[device_api]")
@@ -785,6 +793,15 @@ TEST_CASE("On a forget: 204, 404 unknown channel, 409 for the C6 or a present ch
     TEST_ASSERT_EQUAL(500, e.http_status);
     TEST_ASSERT_EQUAL_STRING("failed", e.code);
     TEST_ASSERT_EQUAL_STRING("204 No Content", device_api_status_line(204));
+}
+
+TEST_CASE("On a forget the mux took but did not answer in time: 503 mux_busy, never failed", "[device_api]")
+{
+    const device_api_error_t e = device_api_channel_forget_error(ESP_ERR_NOT_FINISHED, true);
+
+    TEST_ASSERT_EQUAL(503, e.http_status);
+    TEST_ASSERT_EQUAL_STRING("mux_busy", e.code);
+    TEST_ASSERT_EQUAL_STRING("the radio mux is busy; the change may still be applied", e.detail);
 }
 
 TEST_CASE("On a forget while the radio mux is not running: 503 not_started, not in_use", "[device_api]")
