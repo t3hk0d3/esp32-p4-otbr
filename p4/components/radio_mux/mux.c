@@ -748,6 +748,9 @@ static void handle_lease(mux_call_t *call)
     atomic_store(&p->tx_ok, true);
     p->leased = true;
     p->fault[0] = '\0';
+    xSemaphoreTake(p->rx_lock, portMAX_DELAY);
+    radio_mux_reset_count_clear(&p->reset_count); // a lease is an attach: no unanswered reset carries over
+    xSemaphoreGive(p->rx_lock);
     refresh(p);
     call->handle = h;
     call->err = ESP_OK;

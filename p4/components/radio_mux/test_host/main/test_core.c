@@ -716,14 +716,6 @@ TEST_CASE("On a transport nothing ever attached to: returns false", "[radio_mux]
     TEST_ASSERT_FALSE(radio_mux_handle_current(1, 0));
 }
 
-void app_main(void)
-{
-    UNITY_BEGIN();
-    unity_run_all_tests();
-    int failures = (int)UNITY_END();
-    exit(failures == 0 ? 0 : 1);
-}
-
 /* ---- CH34x status packets ---- */
 
 TEST_CASE("On a CH34x status packet without an error bit (0x20): returns false", "[radio_mux]")
@@ -803,4 +795,12 @@ TEST_CASE("On the give-up reason: names the number of resets", "[radio_mux]")
 
     snprintf(want, sizeof(want), "no answer after %d resets", RADIO_MUX_USB_DEAD_RESETS);
     TEST_ASSERT_EQUAL_STRING(want, RADIO_MUX_USB_DEAD_REASON);
+}
+
+void app_main(void)
+{
+    UNITY_BEGIN();
+    unity_run_all_tests();
+    int failures = (int)UNITY_END();
+    exit(failures == 0 ? 0 : 1);
 }
