@@ -26,8 +26,8 @@ the board had stored.
 ## Connecting Home Assistant
 
 1. Add the ZHA integration and choose to set it up manually.
-2. Radio type: **Ziggurat**. Serial device path: `ws://<board>/zigbee` (the Zigbee page shows the exact address and a
-   Copy button).
+2. Radio type: **Ziggurat**. Serial device path: `ws://<board>/zigbee` (the Dashboard's Zigbee section shows the
+   exact address and a Copy button).
 3. ZHA forms a new network (the stack keeps no state of its own: ZHA's database holds the network settings) or
    restores one from a backup.
 
@@ -42,11 +42,13 @@ page and `GET /device/zigbee` show the current client and the last one.
     policy as the device API (`/device/`): on an interface where the device API is not allowed, the upgrade is refused
     with 403.
 
-## The Zigbee page
+## The Dashboard's Zigbee section
 
-`/zigbee.html` shows the state (`starting`, `running`, `no_radio`, `incompatible`, `idle`), the connected client, the
-network (channel, PAN ID, addresses, TX power), the radio traffic counters, the memory the stack uses and the radio
-firmware. The Dashboard has a short Zigbee card. Both poll `GET /device/zigbee`.
+The Dashboard (`/`) has three sections: Device and network, Thread and Zigbee. While a radio runs Zigbee, the Zigbee
+section shows the state (`starting`, `running`, `no_radio`, `incompatible`, `idle`), the Home Assistant connection
+path with a Copy button, the connected or last client, the network (channel, PAN ID, addresses, TX power), the radio
+traffic counters, the memory the stack uses and the radio firmware; it polls `GET /device/zigbee`. While no radio
+runs Zigbee it says so in one line and links the Radios page, and nothing is polled.
 
 ## Radio resets and loss
 

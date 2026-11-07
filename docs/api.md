@@ -357,9 +357,14 @@ connects to `http://<board>`: `tools/otbr_compat.py` checks the `python-otbr-api
 ## Web UI
 
 `http://<board>/` serves the upstream pages (Dashboard, Network to form or join, Commissioner, Addresses, Tools, Topology,
-About) and the Thread Console (`/console.html`, under Management). The Topology page runs a mesh scan (`/device/topology`) and shows a map of the routers and their links, a device table with search and filters, and a device dialog with its addresses and a ping; the last result is kept in the browser. The Dashboard (`/`) is the status page: mode, versions, radio, Ethernet, prefix delegation, load, chip temperature, and while the
-border router runs the Thread network, identifiers and Thread addresses. Its Home Assistant tile shows the URL to enter
-in the integration (the Thread backbone address in split mode) and the mDNS name. The "Device" menu holds `/ethernet.html` (single or split setup,
+About) and the Thread Console (`/console.html`, under Management). The Topology page runs a mesh scan (`/device/topology`) and shows a map of the routers and their links, a device table with search and filters, and a device dialog with its addresses and a ping; the last result is kept in the browser. The Dashboard (`/`) is the status page, in three sections. **Device and network**: the board's
+status (a board-wide fault such as unavailable settings storage shows here whatever runs Thread), uptime, last reset,
+Reboot, the two radio slots (C6 and USB radio, with their modes or "Not connected"), Ethernet, board firmware, load,
+memory and chip temperature. **Thread**: Thread's status (`mode` in `/device/status`), and while the border router runs
+the Thread network, identifiers, radio co-processor, Home Assistant, prefix delegation, packet capture and Thread
+addresses; its Home Assistant tile shows the URL to enter in the integration (the Thread backbone address in split
+mode) and the mDNS name. **Zigbee**: the coordinator (see [Zigbee](zigbee.md)). A section whose stack is not running
+says so in one line and links the Radios page. The "Device" menu holds `/ethernet.html` (single or split setup,
 VLANs and addresses, with a review step before the reboot), `/routing.html` (route method, OMR prefix, BGP peers and
 sessions, RIPng status; saved live), `/firmware.html` (P4 bundle and C6 radio firmware, radio
 recovery with the jumper), `/capture.html` (packet capture) and `/diagnostics.html`. Every device page shows the trial

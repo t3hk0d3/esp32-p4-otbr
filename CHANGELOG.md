@@ -34,7 +34,7 @@ release's `versions.txt`.
   connecting out (back-off 1 to 30 s, `last_error` says why), with `hdlc` or `raw` framing on UDP. Two channels on one
   listen port are refused (409 `port_taken`). Replaces the experimental USB serial proxy.
 - Zigbee mode (experimental): a radio set to `ziggurat` runs the Ziggurat Zigbee stack and serves Home Assistant's ZHA
-  (radio type Ziggurat, `ws://<board>/zigbee`) to one client; a new **Zigbee** page, `GET /device/zigbee`,
+  (radio type Ziggurat, `ws://<board>/zigbee`) to one client; a **Zigbee** section on the Dashboard, `GET /device/zigbee`,
   `zigbee_channel` in `/device/status` and `zigbee_*` metrics. Radio resets are survived and a lost radio shows as
   `no_radio` without a reboot. On-board tests (`p4/pytest/test_zigbee.py`) are written, not yet run. See
   `docs/zigbee.md`.
@@ -42,6 +42,10 @@ release's `versions.txt`.
 ### Changed
 
 - The experimental `/device/usb_serial` API (never released) is removed in favour of the channel API.
+- The Dashboard has three sections: Device and network (board status with board-wide faults, Reboot, the two radio
+  slots, Ethernet, firmware, load), Thread and Zigbee. A stack that is not running shows one line pointing at the
+  Radios page. The "Thread runs on" chip and the Mode row are replaced by the Radios card and Thread's own status
+  line.
 - Navigation: Dashboard, Thread (Network, Topology, Routing, Commissioner, Addresses, Tools, Console), Device (Radios,
   Ethernet, Firmware, Diagnostics, Packet capture), About. The Thread menu is hidden when no channel is in `otbr`.
 - OpenThread accepts any RCP with the ot-br-posix capability set (ack timeout, tx retries, CSMA backoff, tx security,
