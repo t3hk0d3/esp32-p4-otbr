@@ -31,6 +31,11 @@
     }                                                               \
 })
 
+// [patch 29] Bulk IN transfers kept in flight per device: while one completes into the user's data callback and is
+// resubmitted, the next is already queued on the pipe, so a USB serial bridge always has a transfer to complete into.
+// With 1 the driver behaves as upstream (including appending unprocessed data into the same buffer).
+#define CDC_ACM_IN_XFERS 2
+
 typedef struct cdc_dev_s cdc_dev_t;
 struct cdc_dev_s {
     cdc_acm_intf_t intf_func;             // CDC interface function table
@@ -38,14 +43,14 @@ struct cdc_dev_s {
     void *cb_arg;                         // Common argument for user's callbacks (data IN and Notification)
     struct {
         usb_transfer_t *out_xfer;         // OUT data transfer
-        usb_transfer_t *in_xfer;          // IN data transfer
+        usb_transfer_t *in_xfer[CDC_ACM_IN_XFERS]; // IN data transfers, submitted in index order [patch 29]
         cdc_acm_data_callback_t in_cb;    // User's callback for async (non-blocking) data IN
         uint16_t in_mps;                  // IN endpoint Maximum Packet Size
-        uint8_t *in_data_buffer_base;     // Pointer to IN data buffer in usb_transfer_t
+        uint8_t *in_data_buffer_base[CDC_ACM_IN_XFERS]; // Pointer to each IN transfer's data buffer [patch 29]
         size_t in_xfer_len;               // IN transfer length asked for (the buffer may be larger: cache alignment) [patch 28]
         const usb_intf_desc_t *intf_desc; // Pointer to data interface descriptor
         SemaphoreHandle_t out_mux;        // OUT mutex
-        bool in_polling;                  // BULK IN poll transfer is submitted
+        bool in_polling[CDC_ACM_IN_XFERS]; // Each BULK IN poll transfer is submitted [patch 29]
     } data;
 
     struct {

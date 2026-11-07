@@ -100,8 +100,9 @@ From the spike (`spike/dongle-rcp`) and the research (merged notes in the sessio
   netif and border router torn down, `esp_openthread_deinit`, then `init` again). The dataset and frame counters are
   host settings and survive; the EUI-64 comes from the RCP and changes with it. An incompatible RCP parks the task
   inside `esp_openthread_init` (`init_abandoned`, reboot only), so a radio must be probed before OpenThread gets it.
-- The CDC-ACM driver (2.4.1) hands `data_cb` a pointer into its one IN transfer buffer, valid only until the callback
-  returns (append is unsupported on the P4). TX always copies into its one OUT buffer and blocks. Unplug arrives as a
+- The CDC-ACM driver (2.4.1) hands `data_cb` a pointer into the buffer of the IN transfer that completed, valid only
+  until the callback returns (append is unsupported on the P4; with PATCHES.md patch 29's two IN transfers in flight,
+  not at all). TX always copies into its one OUT buffer and blocks. Unplug arrives as a
   DEVICE_DISCONNECTED event; `cdc_acm_host_close` must then run exactly once, from one task.
 - Flow control: CP210x through the proxy's own vendor request, CH34x none, plain CDC none. DTR and RTS are set together
   in one request to avoid half-pulses on auto-reset circuits.
