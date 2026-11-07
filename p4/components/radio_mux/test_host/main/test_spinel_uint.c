@@ -33,16 +33,27 @@ TEST_CASE("On a known encoding: pack writes the spinel bytes (low 7 bits first, 
     TEST_ASSERT_EQUAL_HEX8(0x78, buf[1]);
 }
 
-TEST_CASE("On the largest value: three bytes FF FF 7F", "[radio_mux]")
+TEST_CASE("On the largest value (one below SPINEL_MAX_UINT_PACKED): three bytes FE FF 7F", "[radio_mux]")
 {
-    const uint8_t max[] = {0xFF, 0xFF, 0x7F};
+    const uint8_t max[] = {0xFE, 0xFF, 0x7F};
     uint8_t buf[RADIO_MUX_SPINEL_UINT_LEN_MAX];
     uint32_t v = 0;
 
     TEST_ASSERT_EQUAL(3, radio_mux_spinel_uint_pack(RADIO_MUX_SPINEL_UINT_MAX, buf));
     TEST_ASSERT_EQUAL_HEX8_ARRAY(max, buf, sizeof(max));
     TEST_ASSERT_EQUAL(3, radio_mux_spinel_uint_unpack(max, sizeof(max), &v));
-    TEST_ASSERT_EQUAL_UINT32(2097151, v);
+    TEST_ASSERT_EQUAL_UINT32(2097150, v);
+}
+
+TEST_CASE("On SPINEL_MAX_UINT_PACKED itself: pack and unpack refuse it as OpenThread does", "[radio_mux]")
+{
+    const uint8_t at_limit[] = {0xFF, 0xFF, 0x7F};
+    uint8_t buf[RADIO_MUX_SPINEL_UINT_LEN_MAX];
+    uint32_t v = 77;
+
+    TEST_ASSERT_EQUAL(0, radio_mux_spinel_uint_pack(2097151, buf));
+    TEST_ASSERT_EQUAL(0, radio_mux_spinel_uint_unpack(at_limit, sizeof(at_limit), &v));
+    TEST_ASSERT_EQUAL_UINT32(77, v);
 }
 
 TEST_CASE("On a value above the spinel limit: pack writes nothing and returns 0", "[radio_mux]")
