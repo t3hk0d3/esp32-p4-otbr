@@ -71,6 +71,11 @@ static bool s_lost;                // br_radio: OpenThread's channel was lost, n
 // br_radio runs a channel operation (OpenThread torn down after GONE, or started after an attach): a move, start or
 // stop asked for meanwhile is refused at once (br_core_move_otbr) instead of waiting for its probe.
 static atomic_bool s_radio_busy;
+// What br_radio waits for inside that operation, and since when (ticks): the refusal says it, and a refusal after
+// RADIO_BUSY_WARN_MS logs it, so a wait that never ends shows on the board instead of a bare 409.
+#define RADIO_BUSY_WARN_MS 30000
+static const char *_Atomic s_radio_step = "";
+static atomic_uint s_radio_busy_since;
 // The last refused stop of OpenThread (its sessions did not end): the channel, which runs otbr on, and why. Kept until
 // the next accepted move, start or stop, or channel operation; under s_refusal_lock (device_api reads it).
 static portMUX_TYPE s_refusal_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -96,6 +101,25 @@ static struct {
 } s_move;
 
 // ---- OpenThread on a radio mux channel: the otbr consumer, the probe, start, stop, moves (spec section 3) ----
+
+// The blocking step br_radio is in (a string literal).
+static void radio_step(const char *step)
+{
+    atomic_store(&s_radio_step, step);
+}
+
+static void radio_busy_begin(const char *step)
+{
+    radio_step(step);
+    atomic_store(&s_radio_busy_since, (unsigned)xTaskGetTickCount());
+    atomic_store(&s_radio_busy, true);
+}
+
+static void radio_busy_end(void)
+{
+    atomic_store(&s_radio_busy, false);
+    radio_step("");
+}
 
 void core_radio_notify(void)
 {
@@ -438,12 +462,15 @@ esp_err_t core_radio_ot_start(const char *id)
     g_core.bringup_started = false;
     g_core.fault_reason[0] = '\0';
     xSemaphoreGive(g_core.mutex);
-    xSemaphoreTake(g_core.boot_done, 0);
+    xSemaphoreTake(g_core.init_done, 0);
     xSemaphoreTake(g_core.bringup_done, 0);
 
     esp_err_t err = core_start_ot_task();
 
-    if (err == ESP_OK && xSemaphoreTake(g_core.boot_done, pdMS_TO_TICKS(BOOT_WAIT_MS)) != pdTRUE) {
+    radio_step("OpenThread's init");
+    // init_done, not boot_done: br_core_start waits for boot_done during the boot, and of two waiters on one binary
+    // semaphore only one wakes (the other waited BOOT_WAIT_MS, then abandoned a running OpenThread).
+    if (err == ESP_OK && xSemaphoreTake(g_core.init_done, pdMS_TO_TICKS(BOOT_WAIT_MS)) != pdTRUE) {
         g_core.init_abandoned = true; // still inside esp_openthread_init: never torn down under it
         return MODE_FSM_ERR_START_ABANDONED;
     }
@@ -451,6 +478,7 @@ esp_err_t core_radio_ot_start(const char *id)
         err = ESP_FAIL; // the fault mode was entered during the init
     }
     if (err == ESP_OK && core_backbone_has_ip6()) { // without an address the border router starts once one comes
+        radio_step("the border router start");
         err = xSemaphoreTake(g_core.bringup_done, pdMS_TO_TICKS(BRINGUP_WAIT_MS)) == pdTRUE && g_core.border_router_up
               ? ESP_OK : ESP_FAIL;
     }
@@ -591,20 +619,23 @@ static void reconcile(void)
 
     if ((s_ot_chan && (s_ot_chan != att || s_ot_gen != gen || atomic_load(&s_link.gone))) ||
             (!s_ot_chan && !att && s_start_failed)) {
-        atomic_store(&s_radio_busy, true);
+        radio_busy_begin("OpenThread's stop");
         note_refusal(NULL, NULL);
         s_lost = note_no_radio_reason(s_ot_chan);
         ESP_LOGW(TAG, "%s: NO_RADIO, OpenThread stops", s_no_radio_reason);
         s_start_failed = false;
         mode_fsm_on_channel_gone(&g_fsm); // NO_RADIO first: new sessions are refused while the open ones drain
         s_lost = false;
+        // Again after the teardown: GONE reaches us before the mux lists an unplugged dongle absent, so the first
+        // reason said "went away" where it is "radio unplugged" (hardware pass 2026-11-07).
+        note_no_radio_reason(NULL);
         after_channel_op();
-        atomic_store(&s_radio_busy, false);
+        radio_busy_end();
     }
     const bool retry = atomic_exchange(&s_retry, false) && s_start_failed; // a PUT of mode otbr (device_api)
 
     if (!s_ot_chan && att && (gen != s_tried_gen || retry)) {
-        atomic_store(&s_radio_busy, true);
+        radio_busy_begin("the RCP probe");
         note_refusal(NULL, NULL);
         s_tried_gen = gen;
         s_probe_err[0] = '\0';
@@ -612,7 +643,7 @@ static void reconcile(void)
         mode_fsm_on_channel_back(&g_fsm, radio_mux_chan_id(att));
         s_start_failed = br_core_get_mode() == BR_MODE_RADIO_FAULT;
         after_channel_op();
-        atomic_store(&s_radio_busy, false);
+        radio_busy_end();
     }
 }
 
@@ -779,7 +810,14 @@ esp_err_t br_core_move_otbr(const char *from, const char *to, char *reason, size
         return ESP_ERR_INVALID_STATE;
     }
     if (atomic_load(&s_radio_busy)) { // a lost channel's drain or a start runs: its probe would wait for it
-        snprintf(reason, cap, "OpenThread is stopping or starting on its radio");
+        const unsigned busy_s = (unsigned)(xTaskGetTickCount() - atomic_load(&s_radio_busy_since)) /
+                                configTICK_RATE_HZ;
+        const char *step = atomic_load(&s_radio_step);
+
+        snprintf(reason, cap, "OpenThread is stopping or starting on its radio (%s, %u s)", step, busy_s);
+        if (busy_s * 1000 > RADIO_BUSY_WARN_MS) {
+            ESP_LOGW(TAG, "br_radio has been busy for %u s, waiting for %s", busy_s, step);
+        }
         return ESP_ERR_INVALID_STATE;
     }
     if (!atomic_compare_exchange_strong(&s_move.running, &idle, true)) {

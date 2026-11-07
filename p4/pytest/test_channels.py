@@ -274,6 +274,11 @@ def test_put_validation_c6_busy(base_url, c6_in_otbr):
             assert time.monotonic() < deadline, "the proxy never saw the peer"
             time.sleep(0.5)
         recover = requests.post(f"{base_url}/device/radio/recover", timeout=30)
+        # c6_in_otbr restores the C6 after this skip as well.
+        if recover.status_code == 412 and recover.json().get("error") == "no_jumper":
+            pytest.skip(
+                "the C6 maintenance jumper is not fitted: c6_busy can't be reached"
+            )
         assert recover.status_code == 409, recover.text
         assert recover.json()["error"] == "c6_busy"
         assert get_channel(base_url)["rcp_proxy"]["peer"] is not None
