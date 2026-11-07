@@ -30,6 +30,11 @@ p4/components/esp_ot_br_server, p4/components/esp_br_http_ota
     Copyright Espressif Systems (Shanghai) CO LTD. Licensed under the Apache License 2.0 (see the LICENSE file in
     each directory). Modified; every change is listed in p4/components/PATCHES.md.
 
+p4/components/usb_host_cdc_acm
+    espressif/usb_host_cdc_acm 2.4.1 from the ESP Component Registry (esp-usb, https://github.com/espressif/esp-usb,
+    commit eb0f02163be96dfc753cf43d1207329e44f1ca60). Copyright Espressif Systems (Shanghai) CO LTD. Licensed under
+    the Apache License 2.0 (see its LICENSE file). Modified; every change is listed in p4/components/PATCHES.md.
+
 c6_rcp/main/esp_ot_rcp.c, c6_rcp/main/esp_ot_config.h and other files marked CC0-1.0 or Unlicense
     Derived from ESP-IDF examples, released into the public domain by Espressif Systems.
 

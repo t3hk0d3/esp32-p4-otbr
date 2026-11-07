@@ -8,7 +8,8 @@ see `.pre-commit-config.yaml`).
 - **C:** ESP-IDF's astyle rules (`tools/astyle-rules.yml`, copied from ESP-IDF v6.1
   `tools/ci/astyle-rules.yml`), run through `pre-commit` (`astyle_py`).
 - **Python (tools, pytest):** `ruff` lint and `ruff format`.
-- **Vendored code** (`p4/components/esp_ot_br_server/`, `p4/components/esp_br_http_ota/`) keeps
+- **Vendored code** (`p4/components/esp_ot_br_server/`, `p4/components/esp_br_http_ota/`,
+  `p4/components/usb_host_cdc_acm/`) keeps
   upstream formatting and is excluded from formatting. Every change to it is listed in
   `p4/components/PATCHES.md`.
 

@@ -406,6 +406,22 @@ not touched. Upstream path: a runtime "custom spinel interface" radio mode with 
   instead of `${CMAKE_CURRENT_SOURCE_DIR}` (the generated directory lies in this repository, so the package version
   would show this repository's commit).
 
+## usb_host_cdc_acm
+
+Vendored from:
+
+- Component: `espressif/usb_host_cdc_acm` 2.4.1 (ESP Component Registry; esp-usb commit
+  `eb0f02163be96dfc753cf43d1207329e44f1ca60`, `host/class/cdc/usb_host_cdc_acm`), component hash
+  `5bc1372b46de79ccae1dd17de48e30dfa1e8ab75269c2ebf54da01370f9e42fb`.
+- Copied unchanged from the managed component the build resolved (every file matched the archive's `CHECKSUMS.json`;
+  that file and `.component_hash` are left out) to `p4/components/usb_host_cdc_acm`.
+- `override_path` in `p4/components/radio_mux/idf_component.yml` makes every user (radio_mux, `usb_host_ch34x_vcp`
+  2.2.1, `usb_host_cp210x_vcp` 2.2.0, `esp-serial-flasher`) build this copy; `p4/dependencies.lock` lists it as a
+  `local` source and no `espressif__usb_host_cdc_acm` is downloaded.
+
+Same rules as above: upstream formatting, excluded from pre-commit, every change listed here. Patch numbers continue
+the sequence above.
+
 ## Known upstream behaviour (not patches)
 
 - **`GET /api/node` and `/api/devices` can report a stale node** (`state: "disabled"`, `networkName: "OpenThread"`,

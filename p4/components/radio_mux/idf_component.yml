@@ -5,8 +5,10 @@ dependencies:
     version: "==1.6.0"
     rules:
       - if: "target != linux"
+  # Vendored (p4/components/usb_host_cdc_acm, 2.4.1 plus the patches in p4/components/PATCHES.md); override_path makes
+  # every user of the component (the CH34x and CP210x drivers, esp-serial-flasher) build this copy.
   espressif/usb_host_cdc_acm:
-    version: "==2.4.1"
+    override_path: "../usb_host_cdc_acm"
     rules:
       - if: "target != linux"
   espressif/usb_host_cp210x_vcp:
