@@ -102,7 +102,7 @@ bool device_api_channel_is_move(const radio_mux_set_req_t *req, const char *id, 
  * before or after it. NULL when the PUT may go on.
  */
 const char *device_api_channel_move_refusal(const radio_mux_set_req_t *req, const char *id, const char *otbr_id,
-                                           uint32_t reboot_modes, radio_mux_mode_t current);
+                                            uint32_t reboot_modes, radio_mux_mode_t current);
 
 /**
  * While a move of Thread runs (`move_running`: br_core_move_running, or the long-operation slot held by RADIO_MOVE), a
