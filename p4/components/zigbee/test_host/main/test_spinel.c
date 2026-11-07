@@ -95,7 +95,6 @@ static const zigbee_radio_config_t CONFIG = {
 };
 static const uint8_t CONFIG_EXT_REVERSED[8] = {0x04, 0x03, 0x02, 0x01, 0x00, 0x4b, 0x12, 0x00};
 static const uint8_t EXT_A[8] = {0x00, 0x15, 0x8d, 0x00, 0x00, 0x00, 0x00, 0x01};
-static const uint8_t EXT_A_REVERSED[8] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x8d, 0x15, 0x00};
 static const uint8_t EXT_B[8] = {0x00, 0x15, 0x8d, 0x00, 0x00, 0x00, 0x00, 0x02};
 
 static void queue_frame(const uint8_t *buf, size_t len)
@@ -521,7 +520,7 @@ TEST_CASE("attach after a configuration and source-match edits: replays them aft
     assert_sent(18, SPINEL_CMD_PROP_VALUE_INSERT, SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES);
     assert_sent(19, SPINEL_CMD_PROP_VALUE_INSERT, SPINEL_PROP_MAC_SRC_MATCH_EXTENDED_ADDRESSES);
     TEST_ASSERT_EQUAL(20, rcp.sent_count);
-    TEST_ASSERT_EQUAL_UINT8_ARRAY(EXT_A_REVERSED, sent(19).data, 8);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(EXT_A, sent(19).data, 8);
     TEST_ASSERT_EQUAL(1, got.ready_count);
     TEST_ASSERT_TRUE(got.compatible);
 }
@@ -861,13 +860,13 @@ TEST_CASE("src_match_add_short: inserts the address and returns 0", "[zigbee]")
     TEST_ASSERT_EQUAL_HEX16(0x1234, addr);
 }
 
-TEST_CASE("src_match_add_ext: inserts the address in the RCP's byte order and returns 0", "[zigbee]")
+TEST_CASE("src_match_add_ext: inserts the address in the order ziggurat gives it (otLinkRawSrcMatchAddExtEntry's, which reaches the RCP unreversed) and returns 0", "[zigbee]")
 {
     attached(FRAMES_C6_RADIO_CAPS);
     TEST_ASSERT_EQUAL(0, zigbee_spinel_src_match_add_ext(&client, EXT_A));
     assert_sent(0, SPINEL_CMD_PROP_VALUE_INSERT, SPINEL_PROP_MAC_SRC_MATCH_EXTENDED_ADDRESSES);
     TEST_ASSERT_EQUAL(8, sent(0).len);
-    TEST_ASSERT_EQUAL_UINT8_ARRAY(EXT_A_REVERSED, sent(0).data, 8);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(EXT_A, sent(0).data, 8);
 }
 
 TEST_CASE("src_match_clear: empties the stored copy", "[zigbee]")
@@ -928,7 +927,7 @@ TEST_CASE("frame-pending table full: an add the RCP refuses is not replayed", "[
             TEST_ASSERT_NOT_EQUAL(0x0003, addr);
         }
         if (r.cmd == SPINEL_CMD_PROP_VALUE_INSERT && r.key == SPINEL_PROP_MAC_SRC_MATCH_EXTENDED_ADDRESSES) {
-            TEST_ASSERT_EQUAL_UINT8_ARRAY(EXT_A_REVERSED, r.data, 8);
+            TEST_ASSERT_EQUAL_UINT8_ARRAY(EXT_A, r.data, 8);
         }
     }
     TEST_ASSERT_EQUAL(1, got.ready_count);
@@ -2209,7 +2208,7 @@ static size_t ext_a_inserts(void)
         req_t r = sent(i);
 
         if (r.cmd == SPINEL_CMD_PROP_VALUE_INSERT && r.key == SPINEL_PROP_MAC_SRC_MATCH_EXTENDED_ADDRESSES &&
-                r.len == 8 && memcmp(r.data, EXT_A_REVERSED, 8) == 0) {
+                r.len == 8 && memcmp(r.data, EXT_A, 8) == 0) {
             n++;
         }
     }

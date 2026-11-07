@@ -260,13 +260,12 @@ static int send_src_short(zigbee_spinel_t *s, uint16_t address)
     return INSERT(s, SPINEL_PROP_MAC_SRC_MATCH_SHORT_ADDRESSES, "S", address);
 }
 
-/* RadioSpinel::AddSrcMatchExtEntry: INSERT "E" of the address Radio::AddSrcMatchExtEntry reversed. */
+/* RadioSpinel::AddSrcMatchExtEntry: INSERT "E" of the address as ziggurat gives it. Ziggurat's order is
+ * otLinkRawSrcMatchAddExtEntry's, and on that path LinkRaw and Radio each reverse it, so the RCP gets it unreversed
+ * (on the board an RCP sets frame pending only for this order: hardware pass 2026-11-07). */
 static int send_src_ext(zigbee_spinel_t *s, const uint8_t ext[8])
 {
-    uint8_t rev[8];
-
-    reversed(rev, ext);
-    return INSERT(s, SPINEL_PROP_MAC_SRC_MATCH_EXTENDED_ADDRESSES, "E", rev);
+    return INSERT(s, SPINEL_PROP_MAC_SRC_MATCH_EXTENDED_ADDRESSES, "E", ext);
 }
 
 static bool has_short(const zigbee_spinel_t *s, uint16_t address)
