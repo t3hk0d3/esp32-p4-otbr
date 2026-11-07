@@ -9,8 +9,9 @@
 #include "cJSON.h"
 
 // The mux took the change but did not answer in time (radio_mux_set's REFUSE_PENDING, radio_mux_forget's
-// ESP_ERR_NOT_FINISHED): it is not refused, it may still be applied.
-#define MUX_BUSY_DETAIL "the radio mux is busy; the change may still be applied"
+// ESP_ERR_NOT_FINISHED): it is not refused. A mode, speed or proxy change may still be applied; a start, move or stop
+// of Thread never is (the mover is not called once the caller has been answered).
+#define MUX_BUSY_DETAIL "the radio mux is busy; a settings change may still apply, a start, move or stop will not"
 
 /* ---- GET ---- */
 

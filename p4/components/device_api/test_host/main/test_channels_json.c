@@ -743,7 +743,7 @@ TEST_CASE("On each verdict: its status and code", "[device_api]")
 TEST_CASE("On a change the mux took but did not answer in time: 503 mux_busy, the change may still be applied",
           "[device_api]")
 {
-    TEST_ASSERT_EQUAL_STRING("the radio mux is busy; the change may still be applied",
+    TEST_ASSERT_EQUAL_STRING("the radio mux is busy; a settings change may still apply, a start, move or stop will not",
                              device_api_channel_refusal_detail(RADIO_MUX_REFUSE_PENDING));
 }
 
@@ -801,7 +801,8 @@ TEST_CASE("On a forget the mux took but did not answer in time: 503 mux_busy, ne
 
     TEST_ASSERT_EQUAL(503, e.http_status);
     TEST_ASSERT_EQUAL_STRING("mux_busy", e.code);
-    TEST_ASSERT_EQUAL_STRING("the radio mux is busy; the change may still be applied", e.detail);
+    TEST_ASSERT_EQUAL_STRING("the radio mux is busy; a settings change may still apply, a start, move or stop will not",
+                             e.detail);
 }
 
 TEST_CASE("On a forget while the radio mux is not running: 503 not_started, not in_use", "[device_api]")
