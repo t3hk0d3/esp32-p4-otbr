@@ -142,6 +142,19 @@ def set_mode(dut, base_url, channel, mode):
     return body
 
 
+def wait_mode(base_url, channel, mode, timeout=RUNNING_TIMEOUT_S):
+    """A start or stop of Thread answers 202 and is stored once it ran: poll until the channel shows `mode`."""
+    deadline = time.monotonic() + timeout
+    current = None
+    while time.monotonic() < deadline:
+        with contextlib.suppress(requests.RequestException):
+            current = channel_mode(base_url, channel)
+            if current == mode:
+                return
+        time.sleep(1)
+    pytest.fail(f"{channel} never reached mode {mode!r}; last {current!r}")
+
+
 def resting_mode(channel):
     return RESTING_MODE.get(channel, "off")
 
@@ -150,7 +163,7 @@ def restore_channel(dut, base_url, channel):
     """Put the channel back to its resting mode and check the board really is back; raises when it is not."""
     if channel_mode(base_url, channel) != resting_mode(channel):
         set_mode(dut, base_url, channel, resting_mode(channel))
-    assert channel_mode(base_url, channel) == resting_mode(channel)
+    wait_mode(base_url, channel, resting_mode(channel))
     assert get_json(base_url, "/device/status")["zigbee_channel"] is None
 
 
@@ -161,7 +174,9 @@ def guard_channel(dut, base_url):
     guarded = []
     yield guarded.append
     failures = []
-    for channel in guarded:
+    for channel in reversed(
+        guarded
+    ):  # newest first: a dongle leaves ziggurat before the C6 takes otbr back
         try:
             restore_channel(dut, base_url, channel)
         except Exception as error:  # noqa: BLE001  (collected, reported below)
@@ -172,12 +187,22 @@ def guard_channel(dut, base_url):
         )
 
 
+def make_room(dut, base_url, guard_channel, channel):
+    """otbr and ziggurat never run together: before a dongle takes ziggurat, the C6 leaves otbr (off), restored by
+    guard_channel after the dongle."""
+    if channel != C6 and channel_mode(base_url, C6) == OTBR_MODE:
+        guard_channel(C6)
+        set_mode(dut, base_url, C6, "off")
+        wait_mode(base_url, C6, "off")
+
+
 @pytest.fixture
 def zigbee_mode(dut, base_url, guard_channel):
     """zigbee_mode(radio): switch the radio's channel to ziggurat (reboot) and return its id; restored afterwards."""
 
     def enter(radio):
         channel = channel_id(base_url, radio)
+        make_room(dut, base_url, guard_channel, channel)
         guard_channel(channel)
         set_mode(dut, base_url, channel, ZIGBEE_MODE)
         wait_state(base_url, EXPECTED_STATE, RUNNING_TIMEOUT_S)
@@ -264,6 +289,7 @@ class TestZigbeeMode:
     ):
         """PUT mode, reboot, /device/zigbee running and Thread's API gone; back to otbr with the same dataset."""
         channel = channel_id(base_url, radio)
+        make_room(dut, base_url, guard_channel, channel)
         guard_channel(
             channel
         )  # restored by the fixture on every path, before anything can fail
