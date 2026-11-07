@@ -888,30 +888,28 @@ class TestHideRule:
         assert r[3] is None
         assert r[4]["fault"] is True
 
-    def test_dashboard_shows_the_notice_and_the_radio_chip(self):
-        # On the Dashboard with no OTBR channel: the notice with its link shows and the chip says no radio; with c6: the chip names it.
+    def test_dashboard_shows_the_thread_placeholder_and_the_radios_card(self):
+        # On the Dashboard with no OTBR channel: the Thread section's placeholder shows (it replaces the shared
+        # notice); with c6 running Thread: the content shows and the Radios card names Thread on the C6.
         r = scenario(
             page("index", ROUTES)
             + f"t.snap = {json.dumps(SNAP)}; t.status = {json.dumps(NO_RADIO)}; t.page.init(); await t.advance(100);"
-            + "const a = [t.el('threadNotice').hidden(), t.el('threadNotice').allText(), t.el('h-thread-on').hidden()];"
-            + f"t.status = {json.dumps(RUNNING)}; await t.advance(4000);"
-            + "return [a, t.el('threadNotice').hidden(), t.el('h-thread-on').hidden(), t.el('h-thread-on').textContent];"
+            + "const a = [t.el('thread-off').hidden(), t.el('thread-on').hidden()];"
+            + f"t.status = {json.dumps(RUNNING)}; await t.advance(11000);"
+            + "return [a, t.el('thread-off').hidden(), t.el('thread-on').hidden(), t.el('t-radio-c6').textContent];"
         )
-        assert r[0][0] is False
-        assert "Open Radios" in r[0][1]
-        assert r[0][2] is False
-        assert r[1] is True
-        assert r[2] is False
-        assert r[3] == "Thread runs on: ESP32-C6 (on board)"
+        assert r[0] == [False, True]
+        assert r[1:] == [True, False, "Thread"]
 
-    def test_dashboard_leaves_a_radio_fault_to_its_hero(self):
-        # On RADIO_FAULT: the hero explains it and the notice stays hidden.
+    def test_dashboard_leaves_a_radio_fault_to_its_status_lines(self):
+        # On RADIO_FAULT with no RCP firmware on the C6: the board line says it, the Thread content stays shown.
         r = scenario(
             page("index", ROUTES)
             + "t.snap = {channels: []}; t.status = {mode: 'RADIO_FAULT', otbr_channel: 'c6', fault_reason: 'no rcp firmware'};"
-            + "t.page.init(); await t.advance(100); return t.el('threadNotice').hidden();"
+            + "t.page.init(); await t.advance(100);"
+            + "return [t.el('b-title').textContent, t.el('thread-off').hidden()];"
         )
-        assert r is True
+        assert r == ["Board fault", True]
 
     def test_management_banner_for_no_radio(self):
         # On NO_RADIO and on otbr_channel null: modeBanner links the Radios page.
@@ -946,8 +944,9 @@ class TestHideRule:
         assert "Open Radios" in r[1]
 
     def test_every_thread_page_has_the_notice_slot(self):
-        # On the Thread pages and Packet capture: a hidden #threadNotice live region.
-        for name in ["index", "routing", "topology", "capture"]:
+        # On the Thread pages and Packet capture: a hidden #threadNotice live region (the Dashboard has its
+        # Thread section placeholder instead).
+        for name in ["routing", "topology", "capture"]:
             html = (FRONTEND / f"{name}.html").read_text()
             assert 'id="threadNotice"' in html, name
             assert (
@@ -1076,9 +1075,14 @@ class TestSharedBehaviour:
 
     @pytest.mark.parametrize("name", THREAD_PAGES)
     def test_every_thread_page_has_a_notice_slot_or_the_mode_guard(self, name):
-        # On each Thread-menu page and the Dashboard: a #threadNotice live region, or MgmtPage.guard (whose banner says it).
+        # On each Thread-menu page and the Dashboard: a #threadNotice live region, MgmtPage.guard (whose banner says
+        # it), or the Dashboard's Thread section placeholder.
         html = (FRONTEND / f"{name}.html").read_text()
-        assert 'id="threadNotice"' in html or "MgmtPage.guard(" in html
+        assert (
+            'id="threadNotice"' in html
+            or "MgmtPage.guard(" in html
+            or 'id="thread-off"' in html
+        )
 
     @pytest.mark.parametrize("name", ["network", "commission", "addresses", "tools"])
     @needs_node
