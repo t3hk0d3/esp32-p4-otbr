@@ -27,7 +27,7 @@ class TestStatusLogic:
 
     def test_running_hero_is_green_without_a_link(self):
         # On BR_RUNNING: "Border router running", tone ok, no link.
-        h = st("L.heroFor({mode: 'BR_RUNNING', fault_reason: null, sniffer: {}})")
+        h = st("L.threadHeroFor({mode: 'BR_RUNNING', fault_reason: null, sniffer: {}})")
         assert (h["title"], h["tone"], h["link"]) == (
             "Border router running",
             "ok",
@@ -37,7 +37,7 @@ class TestStatusLogic:
     def test_sniffer_hero_names_channel_and_frames_and_links_the_capture(self):
         # On SNIFFER: "Capturing packets", the text names channel 15 and 1284 frames, link capture.html.
         h = st(
-            "L.heroFor({mode: 'SNIFFER', sniffer: {active: true, channel: 15, frames: 1284}})"
+            "L.threadHeroFor({mode: 'SNIFFER', sniffer: {active: true, channel: 15, frames: 1284}})"
         )
         assert (h["title"], h["tone"]) == ("Capturing packets", "info")
         assert "15" in h["text"] and "1284" in h["text"]
@@ -46,7 +46,6 @@ class TestStatusLogic:
     @pytest.mark.parametrize(
         ("reason", "word"),
         [
-            ("'no rcp firmware'", "no firmware"),
             ("'rcp incompatible'", "does not match"),
             ("'spinel timeout'", "spinel timeout"),
         ],
@@ -54,7 +53,7 @@ class TestStatusLogic:
     def test_fault_hero_explains_the_reason_and_links_firmware(self, reason, word):
         # On RADIO_FAULT: "Radio fault", the text explains the reason, link firmware.html.
         h = st(
-            f"L.heroFor({{mode: 'RADIO_FAULT', fault_reason: {reason}, sniffer: {{}}}})"
+            f"L.threadHeroFor({{mode: 'RADIO_FAULT', fault_reason: {reason}, sniffer: {{}}}})"
         )
         assert (h["title"], h["tone"]) == ("Radio fault", "fault")
         assert word in h["text"]
@@ -63,14 +62,14 @@ class TestStatusLogic:
     def test_fault_hero_of_a_dongle_links_the_radios_page(self):
         # On RADIO_FAULT while Thread's radio is a dongle: the link goes to Radios, not Firmware (no update there).
         h = st(
-            "L.heroFor({mode: 'RADIO_FAULT', fault_reason: 'spinel timeout', otbr_channel: 'usb-10c4-ea60-1', sniffer: {}})"
+            "L.threadHeroFor({mode: 'RADIO_FAULT', fault_reason: 'spinel timeout', otbr_channel: 'usb-10c4-ea60-1', sniffer: {}})"
         )
         assert h["link"] == {"href": "/radios.html", "label": "Open Radios"}
 
     def test_fault_hero_of_a_dongle_does_not_ask_for_c6_firmware(self):
         # On "rcp incompatible" while Thread's radio is a dongle: the text names the USB radio, never c6_rcp.bin.
         h = st(
-            "L.heroFor({mode: 'RADIO_FAULT', fault_reason: 'rcp incompatible', otbr_channel: 'usb-10c4-ea60-1', sniffer: {}})"
+            "L.threadHeroFor({mode: 'RADIO_FAULT', fault_reason: 'rcp incompatible', otbr_channel: 'usb-10c4-ea60-1', sniffer: {}})"
         )
         assert "c6_rcp.bin" not in h["text"]
         assert "USB radio" in h["text"] and "rcp incompatible" in h["text"]
@@ -78,14 +77,14 @@ class TestStatusLogic:
     def test_fault_hero_of_the_c6_still_links_firmware(self):
         # On RADIO_FAULT with the C6 as Thread's radio: the firmware page, as before.
         h = st(
-            "L.heroFor({mode: 'RADIO_FAULT', fault_reason: 'no rcp firmware', otbr_channel: 'c6', sniffer: {}})"
+            "L.threadHeroFor({mode: 'RADIO_FAULT', fault_reason: 'rcp incompatible', otbr_channel: 'c6', sniffer: {}})"
         )
         assert h["link"]["href"] == "/firmware.html"
 
     def test_no_radio_hero_says_why_and_links_the_radios_page(self):
         # On NO_RADIO: "No Thread radio", the reason, a link to Radios; never the raw mode name.
         h = st(
-            "L.heroFor({mode: 'NO_RADIO', fault_reason: 'radio unplugged (usb-10c4-ea60-1)', otbr_channel: 'usb-10c4-ea60-1', sniffer: {}})"
+            "L.threadHeroFor({mode: 'NO_RADIO', fault_reason: 'radio unplugged (usb-10c4-ea60-1)', otbr_channel: 'usb-10c4-ea60-1', sniffer: {}})"
         )
         assert h["title"] == "No Thread radio"
         assert h["tone"] == "idle"
@@ -96,13 +95,13 @@ class TestStatusLogic:
     def test_no_radio_hero_without_a_reason_still_explains(self):
         # On NO_RADIO without a reason: a text that says Thread has no radio.
         h = st(
-            "L.heroFor({mode: 'NO_RADIO', fault_reason: null, otbr_channel: null, sniffer: {}})"
+            "L.threadHeroFor({mode: 'NO_RADIO', fault_reason: null, otbr_channel: null, sniffer: {}})"
         )
         assert "Thread" in h["text"] and "radio" in h["text"]
 
     def test_starting_hero_is_grey(self):
         # On STARTING: "Starting", tone idle.
-        h = st("L.heroFor({mode: 'STARTING', sniffer: {}})")
+        h = st("L.threadHeroFor({mode: 'STARTING', sniffer: {}})")
         assert (h["title"], h["tone"]) == ("Starting", "idle")
 
     def test_sniffer_text_for_active_idle_and_fault(self):
@@ -136,6 +135,148 @@ class TestStatusLogic:
             == "None received"
         )
         assert "unknown" in st("L.pdText({state: null, prefix: null})")["state"]
+
+
+CHANNELS = {
+    "channels": [
+        {"id": "c6", "kind": "c6", "mode": "otbr", "state": "running"},
+        {"id": "usb-1a86-7523", "kind": "usb", "mode": "ziggurat", "state": "running"},
+    ]
+}
+
+
+def channels(*usb):
+    """A /device/channels body: the C6 in otbr plus the given (id, mode) USB channels."""
+    return {
+        "channels": [CHANNELS["channels"][0]]
+        + [{"id": i, "kind": "usb", "mode": m, "state": "idle"} for i, m in usb]
+    }
+
+
+@needs_node
+class TestDashboardLogic:
+    """StatusLogic: the board line, the Thread line and the Radios card (one Dashboard, 2026-11-07 spec)"""
+
+    @pytest.mark.parametrize("mode", ["BR_RUNNING", "STARTING", "SNIFFER", "NO_RADIO"])
+    def test_board_is_ok_outside_radio_fault(self, mode):
+        # On any mode other than RADIO_FAULT: "Board OK", tone ok, no text, no link.
+        h = st(
+            f"L.boardHealthFor({{mode: '{mode}', fault_reason: null, sniffer: {{}}}})"
+        )
+        assert h == {"tone": "ok", "title": "Board OK", "text": "", "link": None}
+
+    @pytest.mark.parametrize(
+        ("reason", "link", "word"),
+        [
+            ("storage unavailable", None, "settings storage"),
+            (
+                "esp-hosted firmware",
+                {"href": "/firmware.html", "label": "Open firmware"},
+                "c6_installer.bin",
+            ),
+            (
+                "no rcp firmware",
+                {"href": "/firmware.html", "label": "Open firmware"},
+                "no firmware",
+            ),
+        ],
+    )
+    def test_board_wide_fault_is_on_the_board_line(self, reason, link, word):
+        # On RADIO_FAULT with a board-wide reason: tone fault, "Board fault", today's fault text for the reason,
+        # firmware link for the two firmware reasons and none for storage.
+        h = st(
+            f"L.boardHealthFor({{mode: 'RADIO_FAULT', fault_reason: '{reason}', sniffer: {{}}}})"
+        )
+        assert (h["tone"], h["title"], h["link"]) == ("fault", "Board fault", link)
+        assert word in h["text"]
+
+    @pytest.mark.parametrize(
+        "reason", ["rcp incompatible", "spinel timeout", "rom recovery failed"]
+    )
+    def test_other_radio_faults_leave_the_board_ok(self, reason):
+        # On RADIO_FAULT with any other reason: the board line stays "Board OK" (the fault is Thread's).
+        h = st(
+            f"L.boardHealthFor({{mode: 'RADIO_FAULT', fault_reason: '{reason}', sniffer: {{}}}})"
+        )
+        assert h["title"] == "Board OK"
+
+    def test_no_rcp_firmware_on_a_dongle_is_thread_s(self):
+        # On "no rcp firmware" while Thread runs on a USB radio: not the C6's firmware, so the board stays OK.
+        h = st(
+            "L.boardHealthFor({mode: 'RADIO_FAULT', fault_reason: 'no rcp firmware', otbr_channel: 'usb-10c4-ea60-1'})"
+        )
+        assert h["title"] == "Board OK"
+
+    @pytest.mark.parametrize(
+        "reason", ["storage unavailable", "esp-hosted firmware", "no rcp firmware"]
+    )
+    def test_thread_line_points_up_on_a_board_wide_fault(self, reason):
+        # On RADIO_FAULT with a board-wide reason: Thread's line is "Thread cannot start", pointing at the board.
+        h = st(
+            f"L.threadHeroFor({{mode: 'RADIO_FAULT', fault_reason: '{reason}', sniffer: {{}}}})"
+        )
+        assert h == {
+            "tone": "fault",
+            "title": "Thread cannot start",
+            "text": "See the board status above.",
+            "link": None,
+        }
+
+    def test_board_faults_lists_the_three_reasons(self):
+        # BOARD_FAULTS: exactly the three board-wide reasons.
+        assert sorted(st("L.BOARD_FAULTS")) == [
+            "esp-hosted firmware",
+            "no rcp firmware",
+            "storage unavailable",
+        ]
+
+    def test_thread_is_inactive_without_a_thread_channel(self):
+        # On otbr_channel null: false.
+        assert st("L.isThreadActive({otbr_channel: null})") is False
+
+    @pytest.mark.parametrize("status", ["{otbr_channel: 'c6'}", "{}"])
+    def test_thread_is_active_with_a_channel_or_on_older_firmware(self, status):
+        # On otbr_channel set, or the field missing (older firmware): true.
+        assert st(f"L.isThreadActive({status})") is True
+
+    def test_radios_rows_name_both_slots_and_their_modes(self):
+        # On c6 and a present USB channel: two rows, fixed slot names, mode words.
+        assert st(f"L.radiosView({json.dumps(CHANNELS)})") == [
+            {"slot": "C6 (on board)", "mode": "Thread"},
+            {"slot": "USB radio", "mode": "Zigbee"},
+        ]
+
+    @pytest.mark.parametrize(
+        ("mode", "word"),
+        [("rcp-proxy", "RCP proxy"), ("off", "Off"), ("otbr", "Thread")],
+    )
+    def test_radio_mode_words(self, mode, word):
+        # Mode words: rcp-proxy "RCP proxy", off "Off", otbr "Thread".
+        rows = st(f"L.radiosView({json.dumps(channels(('usb-1', mode)))})")
+        assert rows[1]["mode"] == word
+
+    @pytest.mark.parametrize("usb", [(), (("usb-1", "unavailable"),)])
+    def test_usb_row_is_not_connected_without_a_present_usb_radio(self, usb):
+        # On no USB channel, or only one in mode unavailable: the USB row reads "Not connected".
+        rows = st(f"L.radiosView({json.dumps(channels(*usb))})")
+        assert rows == [
+            {"slot": "C6 (on board)", "mode": "Thread"},
+            {"slot": "USB radio", "mode": "Not connected"},
+        ]
+
+    def test_unread_channels_show_dashes(self):
+        # On null (the request failed): both rows read "-".
+        assert st("L.radiosView(null)") == [
+            {"slot": "C6 (on board)", "mode": "-"},
+            {"slot": "USB radio", "mode": "-"},
+        ]
+
+    def test_usb_row_shows_the_first_present_radio(self):
+        # On two USB channels, the first unavailable: the row shows the first present one.
+        rows = st(
+            f"L.radiosView({json.dumps(channels(('usb-a', 'unavailable'), ('usb-b', 'rcp-proxy'), ('usb-c', 'otbr')))})"
+        )
+        assert rows[1]["mode"] == "RCP proxy"
 
 
 @needs_node
@@ -176,10 +317,10 @@ class TestStatusPage:
         ]
 
     def test_fault_hero_links_the_firmware_page(self):
-        # On RADIO_FAULT with no RCP firmware: hero-fault, its text and the link.
+        # On RADIO_FAULT with an incompatible RCP (a Thread fault): hero-fault, its text and the link.
         r = scenario(
             page("index", ROUTES)
-            + f"t.s = {status(mode='RADIO_FAULT', fault_reason='no rcp firmware')};"
+            + f"t.s = {status(mode='RADIO_FAULT', fault_reason='rcp incompatible')};"
             + "await t.page.refreshStatus(); return [t.el('hero').className, t.el('h-link').hidden(), t.el('h-link').getAttribute('href')];"
         )
         assert r == ["card hero hero-fault", False, "/firmware.html"]
@@ -221,7 +362,9 @@ class TestStatusPage:
             "47.3 \u00b0C",
         ]
 
-    @pytest.mark.parametrize("patch", ["{chip_temperature_c: null}", "{}", "{chip_temperature_c: 'hot'}"])
+    @pytest.mark.parametrize(
+        "patch", ["{chip_temperature_c: null}", "{}", "{chip_temperature_c: 'hot'}"]
+    )
     def test_diag_without_a_chip_temperature_shows_a_dash(self, patch):
         # On null, a missing field (older firmware) or a non-number: the chip temperature is a dash.
         r = scenario(
@@ -552,8 +695,10 @@ class TestUxReview:
         ],
     )
     def test_first_boot_faults_say_what_to_do(self, reason, word):
+        # The board-wide reasons say it on the board line, the others on Thread's line.
+        fn = "threadHeroFor" if reason == "rom recovery failed" else "boardHealthFor"
         h = st(
-            f"L.heroFor({{mode: 'RADIO_FAULT', fault_reason: '{reason}', sniffer: {{}}}})"
+            f"L.{fn}({{mode: 'RADIO_FAULT', fault_reason: '{reason}', sniffer: {{}}}})"
         )
         assert word in h["text"]
         assert "stopped answering" not in h["text"]

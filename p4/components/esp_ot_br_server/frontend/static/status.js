@@ -38,8 +38,50 @@ function dongleFaultText(reason) {
          'on the Radios page.';
 }
 
-/** The banner of the page: {tone: ok|info|fault|idle, title, text, link: {href, label} | null}. */
-function heroFor(s) {
+/* /device/status's mode is Thread's status. Only these RADIO_FAULT reasons concern the whole board (and only while
+ * the C6, not a USB radio, is Thread's radio): the board line says them, whatever runs Thread. */
+var BOARD_FAULTS = [ 'storage unavailable', 'esp-hosted firmware', 'no rcp firmware' ];
+
+function isDongle(s) { return !!s.otbr_channel && s.otbr_channel !== 'c6'; }
+
+function boardFault(s) {
+  return s.mode === 'RADIO_FAULT' && !isDongle(s) && BOARD_FAULTS.indexOf(s.fault_reason) >= 0;
+}
+
+/** The Device and network line: {tone: ok|fault, title, text, link: {href, label} | null}. */
+function boardHealthFor(s) {
+  if (!boardFault(s))
+    return {tone : 'ok', title : 'Board OK', text : '', link : null};
+  return {
+    tone : 'fault',
+    title : 'Board fault',
+    text : faultText(s.fault_reason),
+    link : s.fault_reason === 'storage unavailable' ? null : {href : '/firmware.html', label : 'Open firmware'}
+  };
+}
+
+/** Thread runs on a radio, or the board predates otbr_channel (then it always did). */
+function isThreadActive(s) { return s.otbr_channel !== null; }
+
+var MODE_WORDS = {otbr : 'Thread', ziggurat : 'Zigbee', 'rcp-proxy' : 'RCP proxy', off : 'Off'};
+
+/** The Radios card from /device/channels (null: not read): always the two slots, C6 and USB. */
+function radiosView(body) {
+  function word(c) { return MODE_WORDS[c.mode] || String(c.mode); }
+  if (!body || !body.channels)
+    return [ {slot : 'C6 (on board)', mode : '-'}, {slot : 'USB radio', mode : '-'} ];
+  var c6 = body.channels.filter(function(c) { return c.id === 'c6'; })[0];
+  var usb = body.channels.filter(function(c) { return c.kind === 'usb' && c.mode !== 'unavailable'; })[0];
+  return [
+    {slot : 'C6 (on board)', mode : c6 ? word(c6) : '-'},
+    {slot : 'USB radio', mode : usb ? word(usb) : 'Not connected'}
+  ];
+}
+
+/** Thread's status line: {tone: ok|info|fault|idle, title, text, link: {href, label} | null}. */
+function threadHeroFor(s) {
+  if (boardFault(s))
+    return {tone : 'fault', title : 'Thread cannot start', text : 'See the board status above.', link : null};
   if (s.mode === 'BR_RUNNING')
     return {
       tone : 'ok',
@@ -55,7 +97,7 @@ function heroFor(s) {
                  ' frames so far. The Thread network is stopped until the capture ends.',
       link : {href : '/capture.html', label : 'Open packet capture'}
     };
-  var dongle = !!s.otbr_channel && s.otbr_channel !== 'c6'; // Thread's radio is a USB stick: nothing to update here
+  var dongle = isDongle(s); // Thread's radio is a USB stick: nothing to update here
   if (s.mode === 'RADIO_FAULT')
     return {
       tone : 'fault',
@@ -196,7 +238,11 @@ function addressRows(list) {
 }
 
 return {
-  heroFor : heroFor,
+  BOARD_FAULTS : BOARD_FAULTS,
+  boardHealthFor : boardHealthFor,
+  threadHeroFor : threadHeroFor,
+  isThreadActive : isThreadActive,
+  radiosView : radiosView,
   snifferText : snifferText,
   zigbeeStateText : zigbeeStateText,
   pdText : pdText,
@@ -276,7 +322,7 @@ function render(s) {
   show('s-offline', false);
   kit.renderThreadNotice(s, null, true);
   renderThreadOn(s);
-  var h = L.heroFor(s);
+  var h = L.threadHeroFor(s);
   $('hero').className = 'card hero hero-' + h.tone;
   setText('h-title', h.title);
   setText('h-text', h.text);
