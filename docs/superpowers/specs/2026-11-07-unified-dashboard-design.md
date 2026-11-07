@@ -56,8 +56,10 @@ its mode (radio channel mux). They want one page that answers "what is this boar
      radio runs Thread: the board unreachable (today's offline notice), storage unavailable, and the C6 running
      factory ESP-Hosted firmware or holding no RCP firmware (today these arrive as `RADIO_FAULT` reasons). Every
      other `RADIO_FAULT` reason, and `STARTING`, `BR_RUNNING`, `SNIFFER`, `NO_RADIO`, belong to the Thread section.
-   - Cards: **Radios** (each channel and its mode, from `/device/channels` or the `otbr_channel` / `zigbee_channel`
-     pair in `/device/status`; it replaces today's "Thread runs on" header chip), **Ethernet** (IPv4, IPv6),
+   - Cards: **Radios** — always exactly two static rows, the board's two radio slots (user, 2026-11-07): "C6 (on
+     board)" and "USB radio", each with its mode (Thread, Zigbee, RCP proxy, off) from `/device/channels`. The USB
+     row says "Not connected" when no USB radio is plugged in (no USB channel present: absent, or listed as
+     unavailable). The rows never grow or disappear. It replaces today's "Thread runs on" header chip. **Ethernet** (IPv4, IPv6),
      **Board firmware** (app, slot, storage), **Load and memory** (CPU 10 s, internal RAM free, PSRAM free, chip
      temperature).
    - The trial / OTA-pending and other board-wide banners stay at the top of the page, as today.
