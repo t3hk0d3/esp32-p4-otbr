@@ -315,6 +315,12 @@ An `rcp-proxy` channel is configured on two independent axes *(the user's decisi
 
 The bridge itself does not depend on either axis:
 
+- **Delivery to the radio**: on a byte channel (raw), a byte that cannot be delivered ends the peer session: a failed
+  write (a USB write timeout can stop part-way) drops the peer, counted as a radio tx error and logged, so a ZNP or
+  EZSP dongle never sees a spliced stream; when the channel is not attached right now (nothing was written) the bytes
+  are discarded and the peer stays. On a frame channel a failed frame is lost as a whole (HDLC resyncs at the next
+  flag) and the peer stays.
+
 - **Shared behaviour**: today's usb_serial TCP half becomes the proxy consumer, with overflow disconnect, counters and
   `kick`.
 - **Wake-up**: it is woken by the channel's eventfd instead of polling. The coalescing window shrinks to what the
@@ -323,6 +329,16 @@ The bridge itself does not depend on either axis:
 **TCP**:
 - Listen: first client wins, under the netcfg access rules (the per-VLAN rule, the Thread-mesh refusal), with
   keepalive. In split mode a client is judged by the route back to it.
+  - A refused client is accepted and closed at once: a FIN (lwIP resets from the socket API only a connection with
+    unsent data, so `SO_LINGER {1,0}` cannot reset a client that was never written to), or an RST when its bytes were
+    still unread. Its socket is free at once; its PCB lingers in FIN_WAIT/TIME_WAIT, and lwIP takes such PCBs back when
+    a new connection needs one.
+  - A cross-protocol request from a web page (any LAN browser can POST to `http://<board>:6638/`) never reaches the
+    radio: a new client's first bytes are held until 8 came or 50 ms passed since the accept (earlier when they
+    decide it), and a client that starts with an uppercase HTTP method (GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH,
+    CONNECT, TRACE) and a space is dropped, counted as refused and logged rate-limited. Spinel, ZNP, EZSP and ASH
+    clients start with 0x7E, 0xFE or 0x1A and pass at their first byte. Only then does the client become the peer
+    (reset replay on a frame channel). UDP and connect are not checked.
 - Connect: dials out to `host:port`.
   - The host is an IP address or a hostname; `.local` names go over mDNS. Name lookups run on their own task
     (`rcp_resolve`), never on the proxy task, so one slot's slow lookup does not stall the other slot's frames.

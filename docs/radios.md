@@ -86,7 +86,7 @@ under `rcp_proxy`:
 
 | | TCP | UDP |
 | --- | --- | --- |
-| listen | The first client wins; later ones are refused with a reset. TCP keepalive notices a dead client. | The first source that sends becomes the peer. Other sources are dropped and counted until the peer has been silent for 30 s, or you kick it. |
+| listen | The first client wins; later ones are accepted and closed at once (a FIN, or a reset when they had already sent bytes). A client that opens with an HTTP request is refused too (see Security notes). TCP keepalive notices a dead client. | The first source that sends becomes the peer. Other sources are dropped and counted until the peer has been silent for 30 s, or you kick it. |
 | connect | Retries with back-off 1, 2, 4, 8, 16, then 30 s; the back-off resets to 1 s after a connection that lasted 60 s. A connect that gets no answer gives up after 10 s. | Datagrams go to `host:port`; only datagrams from that address are accepted. |
 
 Listen sockets, TCP clients (by the address they came in on and by their own address), UDP sources and connect targets
@@ -106,7 +106,10 @@ datagram of at most 1024 bytes; loss and reordering corrupt the stream, so use i
 
 **Kick.** `{"rcp_proxy": {"kick": true}}` drops the current TCP peer or releases the UDP lock at once; it is not stored.
 
-**Behaviour.** A peer that does not read until the buffer overflows is disconnected. Unplugging the dongle drops the
+**Behaviour.** A peer that does not read until the buffer overflows is disconnected. On a USB channel (raw bytes), a
+write to the dongle that fails part-way (a USB write timeout) disconnects the peer, so the dongle never sees the rest
+of the peer's stream spliced onto a cut frame; while the dongle is not attached at all the peer's bytes are dropped
+and the peer stays. On the C6 a frame that fails is lost as a whole and the peer stays. Unplugging the dongle drops the
 peer; the channel serves again when the radio returns. Changing a proxy setting re-opens the listener or connection.
 The channel's counters and the peer's address are in `GET /device/channels` (`rcp_proxy.state`: `listening`,
 `connecting`, `backoff`, `connected`). When a listener cannot be opened (the port is used by another service) or a
@@ -114,6 +117,16 @@ connect fails (the host does not resolve, the access rules refuse it, no answer)
 `rcp_proxy.last_error` says why the last try failed, and while it backs off that is also the channel's `error` (the
 Radios page shows a warning "Backoff" with it). A firmware push or recovery of the C6 is refused with 409 `c6_busy`
 while its proxy has a peer.
+
+**Security notes.** The proxy has no authentication and no encryption: anyone the [network access
+rules](networking.md) let through can drive the radio, so serve it only on a trusted VLAN. A web page in any LAN
+browser can open a connection to `http://<board>:6638/` (the port is not on the browsers' blocked list) and send an
+HTTP request; in TCP listen the proxy therefore holds a new client's first bytes (up to 8, at most 50 ms after the
+accept) and refuses the client, counted as refused and logged at most every 10 s, when they start with an uppercase
+HTTP method and a space (`GET `, `POST `, `PUT `, `DELETE `, `HEAD `, `OPTIONS `, `PATCH `, `CONNECT `, `TRACE `).
+Nothing of such a request reaches the radio. Radio clients start with a frame byte (`0x7E` spinel and ASH, `0xFE` ZNP,
+`0x1A` EZSP), never with a letter, and pass at their first byte. UDP and `connect` are not checked: a browser cannot
+send raw UDP, and `connect` dials a host you chose.
 
 **One task for both channels.** A single proxy task serves the C6 and the dongle. Work that blocks it holds up the other
 channel for that time: resolving a `connect` host (DNS, or mDNS for `.local` names: up to about 2 s per try, again at

@@ -37,8 +37,9 @@ static const char *TAG = "rcp_proxy";
 #define SLOTS 2
 #define SLOT_C6 0
 #define SLOT_USB 1
-// The wait is set by the back-off and lock timers; without one it is a long safety wake. Never shorter than 1 s.
-#define WAIT_MIN_MS 1000
+// The wait is set by the back-off, lock and connect timers and a new TCP client's first-bytes hold (50 ms); without one
+// it is a long safety wake. Never shorter than 10 ms, so a timer already due does not spin the task.
+#define WAIT_MIN_MS 10
 #define WAIT_MAX_MS 60000
 #define EVENTS_PER_WAKE (RADIO_MUX_POOL_SLOTS + 4)
 #define RAW_READS_PER_WAKE 16
@@ -488,14 +489,23 @@ void rcp_proxy_from_peer(proxy_t *p, const uint8_t *d, size_t n)
         return;
     }
     if (!p->frames) {
-        if (radio_mux_tx(p->ch, d, n) == ESP_OK) {
+        const esp_err_t err = radio_mux_tx(p->ch, d, n);
+
+        if (err == ESP_OK) {
             p->to_radio += n;
-        } else { // no radio right now: never replayed into a radio that comes back
-            p->tx_errors++;
-            p->discarded += n;
+            return;
+        }
+        p->tx_errors++; // never replayed into a radio that comes back
+        p->discarded += n;
+        if (rcp_proxy_raw_tx_failed(err) == RCP_PROXY_TX_END) { // part may be written: a spliced stream otherwise
+            ESP_LOGW(TAG, "%s: radio write failed (%s): peer %s dropped (radio tx errors %lu)", p->id,
+                     esp_err_to_name(err), p->peer, (unsigned long)p->tx_errors);
+            p->ad->drop(p);
         }
         return;
     }
+    // A frame channel: a frame that failed is lost as a whole (the C6: one SPI transaction; USB: the dongle's HDLC
+    // decoder resyncs at the next flag), so the session goes on.
     while (n > 0) {
         bool done = false;
         const size_t used = radio_mux_hdlc_decode_feed(&p->dec, d, n, &done);

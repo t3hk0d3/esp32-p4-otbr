@@ -516,6 +516,85 @@ TEST_CASE("On clear: forgets the partial frame", "[rcp_proxy]")
     TEST_ASSERT_EQUAL(0, s.n);
 }
 
+/* ---- rcp_proxy_sniff ---- */
+
+static rcp_proxy_sniff_t sniff_text(const char *t, bool timed_out)
+{
+    return rcp_proxy_sniff((const uint8_t *)t, strlen(t), timed_out);
+}
+
+TEST_CASE("On an HTTP method and a space: refuses", "[rcp_proxy]")
+{
+    static const char *const lines[] = {
+        "GET / HT", "POST / H", "PUT /x H", "DELETE /", "HEAD / H", "OPTIONS ", "PATCH / ", "CONNECT ", "TRACE / ",
+    };
+
+    for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); i++) {
+        TEST_ASSERT_EQUAL_MESSAGE(RCP_PROXY_SNIFF_REFUSE, sniff_text(lines[i], false), lines[i]);
+    }
+}
+
+TEST_CASE("On a method and its space before 8 bytes came: refuses at once", "[rcp_proxy]")
+{
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_REFUSE, sniff_text("GET ", false));
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_REFUSE, sniff_text("PUT /", false));
+}
+
+TEST_CASE("On a method's prefix before the timeout: waits", "[rcp_proxy]")
+{
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_WAIT, sniff_text("", false));
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_WAIT, sniff_text("G", false));
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_WAIT, sniff_text("GET", false));
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_WAIT, sniff_text("OPTION", false));
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_WAIT, sniff_text("P", false)); // POST, PUT, PATCH
+}
+
+TEST_CASE("On a method without its space at the timeout: passes", "[rcp_proxy]")
+{
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_PASS, sniff_text("GET", true));
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_PASS, sniff_text("OPTIONS", true));
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_PASS, sniff_text("", true)); // a client that waits for the radio
+}
+
+TEST_CASE("On a method followed by another byte than a space: passes", "[rcp_proxy]")
+{
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_PASS, sniff_text("GETX", false));
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_PASS, sniff_text("get / HT", false)); // uppercase only
+}
+
+TEST_CASE("On a radio protocol's first byte: passes at once", "[rcp_proxy]")
+{
+    const uint8_t spinel[] = {0x7E, 0x80, 0x01, 0x00};
+    const uint8_t znp[] = {0xFE, 0x00, 0x21, 0x01};
+    const uint8_t ash[] = {0x1A, 0xC0, 0x38, 0xBC, 0x7E};
+    const uint8_t other[] = {0x11};
+
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_PASS, rcp_proxy_sniff(spinel, 1, false));
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_PASS, rcp_proxy_sniff(spinel, sizeof(spinel), false));
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_PASS, rcp_proxy_sniff(znp, sizeof(znp), false));
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_PASS, rcp_proxy_sniff(ash, sizeof(ash), false));
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_PASS, rcp_proxy_sniff(other, sizeof(other), false));
+}
+
+TEST_CASE("On 8 bytes that are no request line: passes without the timeout", "[rcp_proxy]")
+{
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_PASS, sniff_text("OPTIONSX", false));
+}
+
+/* ---- rcp_proxy_raw_tx_failed ---- */
+
+TEST_CASE("On a write to a channel not attached: discards, the session goes on", "[rcp_proxy]")
+{
+    TEST_ASSERT_EQUAL(RCP_PROXY_TX_DISCARD, rcp_proxy_raw_tx_failed(ESP_ERR_INVALID_STATE));
+}
+
+TEST_CASE("On a write that failed on the device: ends the peer session", "[rcp_proxy]")
+{
+    TEST_ASSERT_EQUAL(RCP_PROXY_TX_END, rcp_proxy_raw_tx_failed(ESP_ERR_TIMEOUT));
+    TEST_ASSERT_EQUAL(RCP_PROXY_TX_END, rcp_proxy_raw_tx_failed(ESP_FAIL));
+    TEST_ASSERT_EQUAL(RCP_PROXY_TX_END, rcp_proxy_raw_tx_failed(ESP_ERR_INVALID_RESPONSE));
+}
+
 void app_main(void)
 {
     UNITY_BEGIN();
