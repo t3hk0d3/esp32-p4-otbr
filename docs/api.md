@@ -253,7 +253,7 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
 ```
 {"available_modes": ["off", "otbr", "rcp-proxy"],
  "channels": [
-  {"id": "c6", "kind": "c6", "label": "ESP32-C6 (on board)", "mode": "otbr", "stored_mode": "otbr",
+  {"id": "c6", "kind": "c6", "label": "ESP32-C6 (built-in)", "mode": "otbr", "stored_mode": "otbr",
    "state": "running", "error": null, "line": {"baud": 460800, "flow_control": false}, "usb": null,
    "caps": {"firmware_update": true, "hw_reset": true, "flow_control": false},
    "rcp_proxy": {"direction": "listen", "adapter": "tcp", "port": 6638, "host": "", "framing": "hdlc",

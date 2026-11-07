@@ -178,7 +178,7 @@ void mux_load_chans(void)
     chan_blob_t b;
 
     mux_chan_defaults(&g_mux.chans[0], RADIO_MUX_C6_ID, RADIO_MUX_KIND_C6); // listed by the owner task (c6_init)
-    snprintf(g_mux.chans[0].label, sizeof(g_mux.chans[0].label), "ESP32-C6 (on board)");
+    snprintf(g_mux.chans[0].label, sizeof(g_mux.chans[0].label), "ESP32-C6 (built-in)");
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
 
     if (err != ESP_OK) {

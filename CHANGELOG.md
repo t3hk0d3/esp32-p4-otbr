@@ -20,7 +20,7 @@ release's `versions.txt`.
   and a "Chip temperature" row in the "Load and memory" card of the Status page. It is the die temperature, not the
   room temperature: it reads above ambient and rises with load. The sensor runs in its most accurate range, −10 to 80 °C (about ±1 °C; above 80 °C still shown, less accurately), read without a lock, and the value moves in 1 °C steps on a given board even though it is shown with one decimal. When it
   cannot start or a read fails, the value is `null` (`-` on the page, no series in `/metrics`). See `docs/diagnostics.md`.
-- Radio channels: every radio is a channel with a stored mode. The on-board C6 and one USB dongle (cp210x, ch34x or
+- Radio channels: every radio is a channel with a stored mode. The ESP32-C6 (built-in) and one USB dongle (cp210x, ch34x or
   plain CDC-ACM driver) are listed; a channel runs `off`, `otbr` (Thread border router) or `rcp-proxy`; `ziggurat` is
   reserved for the Zigbee work. A dongle's firmware is detected at every plug-in (spinel, Ziggurat, Z-Stack ZNP, EZSP,
   or unknown, within 3 s). `GET /device/channels`, `PUT` and `DELETE /device/channels/{id}`; the Radios page. See

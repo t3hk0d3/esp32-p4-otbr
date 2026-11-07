@@ -8,7 +8,7 @@ from device_js import FRONTEND, logic, needs_node, page, scenario
 C6 = {
     "id": "c6",
     "kind": "c6",
-    "label": "ESP32-C6 (on board)",
+    "label": "ESP32-C6 (built-in)",
     "mode": "otbr",
     "stored_mode": "otbr",
     "state": "running",
@@ -341,9 +341,9 @@ class TestTable:
         assert "<img src=x onerror=alert(1)>" in r
 
     def test_head_names_the_radio_thread_runs_on(self):
-        # On otbr_channel c6: the chip reads "Thread runs on: ESP32-C6 (on board)".
+        # On otbr_channel c6: the chip reads "Thread runs on: ESP32-C6 (built-in)".
         r = scenario(setup() + "return t.el('radios-chip').textContent;")
-        assert r == "Thread runs on: ESP32-C6 (on board)"
+        assert r == "Thread runs on: ESP32-C6 (built-in)"
 
     def test_head_says_when_no_radio_runs_thread(self):
         # On otbr_channel null: the chip reads "Thread runs on: no radio".
@@ -472,7 +472,7 @@ class TestDialog:
         assert r[1] == "Move Thread here"
         assert r[2] is False
         assert "Thread devices lose the border router" in r[3]
-        assert "ESP32-C6 (on board)" in r[3]
+        assert "ESP32-C6 (built-in)" in r[3]
 
     def test_the_radio_that_runs_thread_keeps_save(self):
         # On the C6 (already otbr): Save stays Save and no move text shows.
@@ -702,8 +702,8 @@ class TestSave:
             + "t.status = {mode: 'NO_RADIO', otbr_channel: null, fault_reason: 'no channel in otbr'};"
             + "await t.advance(5100); return [first, t.el('rMsg').textContent];"
         )
-        assert "Stopping Thread on ESP32-C6 (on board)" in r[0]
-        assert "Thread stopped on ESP32-C6 (on board)" in r[1]
+        assert "Stopping Thread on ESP32-C6 (built-in)" in r[0]
+        assert "Thread stopped on ESP32-C6 (built-in)" in r[1]
 
     def test_refused_stop_says_thread_keeps_running(self):
         # On a stop whose sessions did not end: the radio stays in otbr with error drain_timeout; the page says so.
@@ -745,7 +745,7 @@ class TestSave:
             + "return [open, text, n1 - n0];"
         )
         assert r[0] is False
-        assert "Moving Thread" in r[1] and "ESP32-C6 (on board)" in r[1]
+        assert "Moving Thread" in r[1] and "ESP32-C6 (built-in)" in r[1]
         assert r[2] >= 2
 
     def test_polling_returns_to_normal_once_nothing_starts(self):
@@ -902,7 +902,7 @@ class TestHideRule:
         assert r[0][2] is False
         assert r[1] is True
         assert r[2] is False
-        assert r[3] == "Thread runs on: ESP32-C6 (on board)"
+        assert r[3] == "Thread runs on: ESP32-C6 (built-in)"
 
     def test_dashboard_leaves_a_radio_fault_to_its_hero(self):
         # On RADIO_FAULT: the hero explains it and the notice stays hidden.
@@ -1127,7 +1127,7 @@ class TestMoveSource:
             + f"{card('otbr')}.click(); await t.flush(); return [t.el('mSave').textContent, t.el('otbrNote').textContent];"
         )
         assert r[0] == "Move Thread here"
-        assert "from ESP32-C6 (on board)" in r[1]
+        assert "from ESP32-C6 (built-in)" in r[1]
         assert "Sonoff" not in r[1]
 
     def test_the_accepted_move_names_the_boards_radio_without_moved_from(self):
@@ -1138,7 +1138,7 @@ class TestMoveSource:
             + open_row(2)
             + f"{card('otbr')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10); return t.el('rMsg').textContent;"
         )
-        assert "from ESP32-C6 (on board)" in r
+        assert "from ESP32-C6 (built-in)" in r
 
     def test_stored_modes_are_the_fallback_when_no_channel_runs_thread(self):
         # On otbr_channel null: the stick stored otbr is the source of the move.
