@@ -257,7 +257,8 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
    "rcp_proxy": {"direction": "listen", "adapter": "tcp", "port": 6638, "host": "", "framing": "hdlc",
                  "state": null, "peer": null, "last_error": null},
    "firmware": {"type": "spinel", "version": "1.4.0", "chip": "esp32c6", "baud": null, "source": "passive", "at": 1762430000},
-   "counters": {"frames_in": 10, "frames_out": 9, "bytes_in": 1000, "bytes_out": 900, "drops": 1, "resets": 2, "rx_errors": 3}},
+   "counters": {"frames_in": 10, "frames_out": 9, "bytes_in": 1000, "bytes_out": 900, "drops": 1, "resets": 2, "rx_errors": 3,
+               "uart_errors": 0}},
   {"id": "usb-10c4-ea60-abc123", "kind": "usb", "label": "Sonoff Zigbee 3.0 USB Dongle Plus", "mode": "rcp-proxy",
    "stored_mode": "rcp-proxy", "state": "running", "error": null, "line": {"baud": 115200, "flow_control": true},
    "usb": {"vid": "10c4", "pid": "ea60", "serial": "abc123", "driver": "cp210x"},
@@ -265,7 +266,8 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
    "rcp_proxy": {"direction": "connect", "adapter": "udp", "port": 9999, "host": "host.local", "framing": "raw",
                  "state": "connected", "peer": "192.168.1.20:9999", "last_error": null},
    "firmware": {"type": "znp", "version": "20240710", "chip": null, "baud": 115200, "source": "probe", "at": null},
-   "counters": {"frames_in": 0, "frames_out": 0, "bytes_in": 0, "bytes_out": 0, "drops": 0, "resets": 0, "rx_errors": 0}}
+   "counters": {"frames_in": 0, "frames_out": 0, "bytes_in": 0, "bytes_out": 0, "drops": 0, "resets": 0, "rx_errors": 0,
+               "uart_errors": 0}}
  ]}
 ```
 
@@ -282,6 +284,10 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
   channel's `error`.
 - `firmware` is `null` before a detection; `type` is `spinel`, `ziggurat`, `znp`, `ezsp` or `unknown`; `source` is
   `probe` or `passive`; `version`, `chip`, `baud` and `at` are `null` when unknown.
+- `counters` count since boot: `drops` are frames (raw: chunks) lost to a full pool or queue, `resets` the radio's
+  resets, `rx_errors` HDLC frames with a bad CRC or too long, `uart_errors` receive errors the USB bridge itself
+  reported (a CH34x status packet with an overrun, parity, framing or receive error bit; 0 on other bridges and the
+  C6). A dongle that sends them is also logged, at most once per 10 s.
 
 `PUT /device/channels/{id}` takes a body of at most 512 bytes with any of: `mode` (`off`, `otbr`, `ziggurat`,
 `rcp-proxy`), `baud` (38400, 57600, 115200, 230400, 460800, 921600, 1000000, 2000000; refused on the C6),

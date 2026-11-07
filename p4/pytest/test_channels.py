@@ -35,6 +35,7 @@ COUNTER_KEYS = [
     "drops",
     "resets",
     "rx_errors",
+    "uart_errors",
 ]
 PROXY_KEYS = [
     "direction",

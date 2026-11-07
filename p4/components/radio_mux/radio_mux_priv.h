@@ -88,6 +88,7 @@ typedef struct mux_port {
     radio_mux_pool_t pool;
     radio_mux_counters_t ctr;
     bool busy_peer; // the consumer reported a connected peer (radio_mux_set_busy_peer); cleared at detach
+    int64_t uart_err_log_us; // USB, the CDC driver task only: when the last UART error warning was logged (0: never)
 
     // Transmit: tx_lock serialises senders and the owner's close (on the C6 also the INT-driven receive transactions:
     // one SPI transaction at a time); tx_ok is false whenever a sender must fail at once.

@@ -42,6 +42,7 @@ C6 = {
         "drops": 1,
         "resets": 2,
         "rx_errors": 3,
+        "uart_errors": 0,
     },
 }
 ZERO = dict.fromkeys(C6["counters"], 0)

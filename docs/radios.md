@@ -18,6 +18,9 @@ Without a dongle the board behaves as before: the C6 channel in `otbr` mode.
 - One dongle is supported at a time. Two identical bridges without serial numbers share an id; the second cannot be
   opened while the first is attached.
 - Supported USB drivers: cp210x, ch34x and plain CDC-ACM. Anything else (FTDI, for example) is listed as `unavailable`.
+- A CH34x bridge (CH340, the OllyZig) reports receive errors on the dongle's UART (overrun, parity, framing) in its
+  status packets: each one counts in the channel's `uart_errors` counter, and the log shows at most one warning per
+  10 s with the packet's bytes. Rising `uart_errors` with `rx_errors` points at the bridge losing bytes, not the RCP.
 - A channel's `state` is `idle` (mode `off`), `starting`, `running`, `fault` (with a reason) or `busy` (a C6 job runs).
 - `DELETE /device/channels/{id}` (the page's "Forget this radio") removes an unplugged dongle and its settings. The C6
   and attached radios cannot be forgotten (409 `in_use`).

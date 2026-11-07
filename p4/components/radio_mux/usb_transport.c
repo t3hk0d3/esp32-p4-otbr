@@ -11,6 +11,7 @@
 #include "esp_heap_caps.h"
 #include "esp_intr_alloc.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_private/cdc_host_common.h" // cdc_dev_t: the USB device a VCP open picked
@@ -37,6 +38,8 @@ static const char *TAG = "radio_mux";
 #define CP210X_SET_FLOW 0x13
 #define ASCII_FIRST 0x20
 #define ASCII_LAST 0x7E
+#define UART_ERR_LOG_US (10 * 1000 * 1000) // at most one UART error warning per 10 s per port
+#define UART_ERR_LOG_BYTES 8               // raw bytes shown in it
 
 static bool s_host_up;          // owner only
 static cdc_acm_dev_hdl_t s_hdl; // written by the owner only (under the port's tx_lock), read by senders under it
@@ -120,6 +123,32 @@ static bool data_cb(const uint8_t *data, size_t len, void *arg)
     return true;
 }
 
+// A CH34x status packet (patch 27 delivers it as CDC_ACM_HOST_VENDOR_NOTIFICATION): a UART error bit counts one
+// uart_errors; the warning, with the raw bytes, at most once per UART_ERR_LOG_US. Nothing is logged per packet.
+static void ch34x_status(mux_port_t *p, const uint8_t *pkt, size_t len)
+{
+    if (!radio_mux_ch34x_uart_error(pkt, len)) {
+        return;
+    }
+    taskENTER_CRITICAL(&p->lock);
+    const uint32_t total = ++p->ctr.uart_errors;
+    taskEXIT_CRITICAL(&p->lock);
+    const int64_t now = esp_timer_get_time();
+
+    if (p->uart_err_log_us != 0 && now - p->uart_err_log_us < UART_ERR_LOG_US) {
+        return;
+    }
+    p->uart_err_log_us = now;
+    char hex[UART_ERR_LOG_BYTES * 3 + 1] = "";
+    const size_t n = len < UART_ERR_LOG_BYTES ? len : UART_ERR_LOG_BYTES;
+
+    for (size_t i = 0; i < n; i++) {
+        snprintf(hex + i * 3, sizeof(hex) - i * 3, "%02x%s", pkt[i], i + 1 < n ? " " : "");
+    }
+    ESP_LOGW(TAG, "%04x:%04x: the CH34x reports a UART error (%s), %lu so far", p->dev.vid, p->dev.pid, hex,
+             (unsigned long)total);
+}
+
 static void event_cb(const cdc_acm_host_dev_event_data_t *event, void *ctx)
 {
     mux_port_t *p = ctx;
@@ -137,6 +166,11 @@ static void event_cb(const cdc_acm_host_dev_event_data_t *event, void *ctx)
     }
     case CDC_ACM_HOST_ERROR:
         ESP_LOGW(TAG, "CDC error %d", event->data.error);
+        break;
+    case CDC_ACM_HOST_VENDOR_NOTIFICATION: // other drivers: ignored
+        if (p->dev.driver == RADIO_MUX_DRV_CH34X) {
+            ch34x_status(p, event->data.vendor_notification.data, event->data.vendor_notification.len);
+        }
         break;
     default:
         break;

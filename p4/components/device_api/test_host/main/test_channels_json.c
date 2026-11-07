@@ -26,7 +26,7 @@ static radio_mux_chan_info_t c6_chan(void)
         .line = {.baud = 460800, .flow_control = false},
         .caps = {.firmware_update = true, .hw_reset = true, .flow_control = false},
         .firmware = {.rec = {.type = RADIO_MUX_FW_SPINEL, .baud = 0}, .source = RADIO_MUX_FW_SRC_PASSIVE, .at = 1762430000},
-        .counters = {.frames_in = 10, .frames_out = 9, .bytes_in = 1000, .bytes_out = 900, .drops = 1, .resets = 2, .rx_errors = 3},
+        .counters = {.frames_in = 10, .frames_out = 9, .bytes_in = 1000, .bytes_out = 900, .drops = 1, .resets = 2, .rx_errors = 3, .uart_errors = 4},
     };
 
     strcpy(c.id, "c6");
@@ -96,7 +96,7 @@ TEST_CASE("On the registry snapshot: the C6 has the spec's fields in order, usb 
         "\"firmware\":{\"type\":\"spinel\",\"version\":\"1.4.0\",\"chip\":\"esp32c6\",\"baud\":null,\"source\":\"passive\","
         "\"at\":1762430000},"
         "\"counters\":{\"frames_in\":10,\"frames_out\":9,\"bytes_in\":1000,\"bytes_out\":900,\"drops\":1,\"resets\":2,"
-        "\"rx_errors\":3}}]}",
+        "\"rx_errors\":3,\"uart_errors\":4}}]}",
         body);
 }
 
@@ -115,7 +115,7 @@ TEST_CASE("On the registry snapshot: a dongle in rcp-proxy has usb, the proxy's 
         "\"state\":\"connected\",\"peer\":\"192.168.1.20:9999\",\"last_error\":null},"
         "\"firmware\":{\"type\":\"znp\",\"version\":\"20240710\",\"chip\":null,\"baud\":115200,\"source\":\"probe\",\"at\":null},"
         "\"counters\":{\"frames_in\":0,\"frames_out\":0,\"bytes_in\":0,\"bytes_out\":0,\"drops\":0,\"resets\":0,"
-        "\"rx_errors\":0}}]}",
+        "\"rx_errors\":0,\"uart_errors\":0}}]}",
         body);
 }
 
@@ -358,7 +358,7 @@ TEST_CASE("On the largest snapshot (8 channels, every text at its longest): fits
         c.firmware.rec.chip[sizeof(c.firmware.rec.chip) - 1] = '\0';
         c.firmware.at = INT64_MAX;
         c.counters = (radio_mux_counters_t) {
-            UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX,
+            UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX,
         };
         c.line.baud = 2000000;
         s.chans[i] = c;

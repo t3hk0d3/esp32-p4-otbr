@@ -127,6 +127,8 @@ static void counters_json(json_out_t *w, const radio_mux_counters_t *k)
     json_out_uint(w, k->resets);
     json_out_raw(w, ",\"rx_errors\":");
     json_out_uint(w, k->rx_errors);
+    json_out_raw(w, ",\"uart_errors\":");
+    json_out_uint(w, k->uart_errors);
     json_out_raw(w, "}");
 }
 

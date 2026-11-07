@@ -124,11 +124,12 @@ typedef enum {
 } radio_mux_fw_source_t;
 
 // Per-channel counters. drops: frames (raw: chunks) lost because the pool, the event queue or the raw ring was full;
-// rx_errors: HDLC frames with a bad CRC or too long for a slot.
+// rx_errors: HDLC frames with a bad CRC or too long for a slot; uart_errors: receive errors the USB bridge itself
+// reported (CH34x status packets with an overrun, parity, framing or receive error bit, radio_mux_ch34x_uart_error).
 typedef struct {
     uint32_t frames_in, frames_out;
     uint64_t bytes_in, bytes_out;
-    uint32_t drops, resets, rx_errors;
+    uint32_t drops, resets, rx_errors, uart_errors;
 } radio_mux_counters_t;
 
 typedef enum {
@@ -266,6 +267,14 @@ bool radio_mux_port_frames(bool c6_port, bool consumer_frames);
 // `baud`, rounded up. A baud of 0 (unknown) counts as the slowest accepted one, 38400.
 #define RADIO_MUX_TX_BASE_MS 100
 uint32_t radio_mux_tx_timeout_ms(size_t n, uint32_t baud);
+
+// A CH34x status packet (the bridge's interrupt IN endpoint, e.g. `20 ff 0f aa`): byte 0 carries the UART state, whose
+// transient bits (the ch34x driver's CH34X_UART_STATE_TRANSIENT_MASK: overrun, parity, framing, receive error) mean
+// one UART error. Packets shorter than RADIO_MUX_CH34X_STATUS_LEN are not status packets.
+#define RADIO_MUX_CH34X_STATUS_LEN 4
+#define RADIO_MUX_CH34X_UART_ERR_MASK 0x07
+// Whether the packet reports a UART error: false for no error bit, a short packet or NULL.
+bool radio_mux_ch34x_uart_error(const uint8_t *pkt, size_t len);
 
 // "idle", "starting", "running", "fault", "busy"; NULL for anything else.
 const char *radio_mux_state_name(radio_mux_state_t state);

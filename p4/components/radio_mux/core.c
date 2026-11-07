@@ -674,6 +674,11 @@ uint32_t radio_mux_tx_timeout_ms(size_t n, uint32_t baud)
     return RADIO_MUX_TX_BASE_MS + (uint32_t)((bits_ms + b - 1) / b);
 }
 
+bool radio_mux_ch34x_uart_error(const uint8_t *pkt, size_t len)
+{
+    return pkt != NULL && len >= RADIO_MUX_CH34X_STATUS_LEN && (pkt[0] & RADIO_MUX_CH34X_UART_ERR_MASK) != 0;
+}
+
 bool radio_mux_port_frames(bool c6_port, bool consumer_frames)
 {
     return c6_port || consumer_frames;

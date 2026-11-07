@@ -722,3 +722,41 @@ void app_main(void)
     int failures = (int)UNITY_END();
     exit(failures == 0 ? 0 : 1);
 }
+
+/* ---- CH34x status packets ---- */
+
+TEST_CASE("On a CH34x status packet without an error bit (0x20): returns false", "[radio_mux]")
+{
+    const uint8_t pkt[] = {0x20, 0xff, 0x0f, 0xaa};
+    const uint8_t pkt2[] = {0x20, 0xee, 0x0f, 0xdf};
+
+    TEST_ASSERT_FALSE(radio_mux_ch34x_uart_error(pkt, sizeof(pkt)));
+    TEST_ASSERT_FALSE(radio_mux_ch34x_uart_error(pkt2, sizeof(pkt2)));
+}
+
+TEST_CASE("On a CH34x status packet with an error bit (0x22, 0x21, 0x24): returns true", "[radio_mux]")
+{
+    const uint8_t first[] = {0x22, 0x21, 0x24};
+
+    for (size_t i = 0; i < sizeof(first); i++) {
+        const uint8_t pkt[] = {first[i], 0xff, 0x0f, 0xaa};
+
+        TEST_ASSERT_TRUE(radio_mux_ch34x_uart_error(pkt, sizeof(pkt)));
+    }
+}
+
+TEST_CASE("On a CH34x packet longer than a status packet with an error bit: returns true", "[radio_mux]")
+{
+    const uint8_t pkt[] = {0x22, 0xff, 0x0f, 0xaa, 0x00, 0x00};
+
+    TEST_ASSERT_TRUE(radio_mux_ch34x_uart_error(pkt, sizeof(pkt)));
+}
+
+TEST_CASE("On a short CH34x packet or none: returns false (ignored)", "[radio_mux]")
+{
+    const uint8_t pkt[] = {0x22, 0xff, 0x0f};
+
+    TEST_ASSERT_FALSE(radio_mux_ch34x_uart_error(pkt, sizeof(pkt)));
+    TEST_ASSERT_FALSE(radio_mux_ch34x_uart_error(pkt, 0));
+    TEST_ASSERT_FALSE(radio_mux_ch34x_uart_error(NULL, 4));
+}
