@@ -21,18 +21,6 @@ extern "C" {
 // UDP framing raw: the largest datagram towards the peer.
 #define RCP_PROXY_UDP_RAW_MAX 1024
 
-typedef enum {
-    RCP_PROXY_OK,
-    RCP_PROXY_NEED_HOST, // connect without a host
-    RCP_PROXY_BAD_PORT,  // 0, 80 or 179 (the board's own listeners)
-    RCP_PROXY_BAD_HOST,  // not an IPv4 or IPv6 literal, nor a DNS or .local name of at most 63 characters
-} rcp_proxy_check_t;
-
-// The full check of the rcp_proxy settings (device_api runs it before radio_mux_set): port, then a host for connect,
-// then the host's syntax when one is given (in either direction: a host kept for a later switch to connect is valid).
-// The framing is not checked against the adapter: it is kept with tcp for a later switch to udp.
-rcp_proxy_check_t rcp_proxy_settings_check(const radio_mux_proxy_settings_t *s);
-
 // True for "<name>.local" (any case) with a non-empty name: copies the name without ".local" into out.
 bool rcp_proxy_host_mdns(const char *host, char *out, size_t cap);
 

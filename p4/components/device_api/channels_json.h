@@ -55,8 +55,8 @@ int device_api_channel_moving_json(char *buf, size_t cap, const char *moved_from
 esp_err_t device_api_channel_put_parse(const char *body, radio_mux_set_req_t *out, const char **bad_field);
 
 /**
- * rcp_proxy_settings_check on `stored` with the request's given settings over it: NULL when the request gives none or
- * the merged settings pass, else the field to name in the 400 ("rcp_proxy.port", "rcp_proxy.host").
+ * radio_mux_proxy_merge of the request's given settings over `stored`: NULL when the request gives none or the merged
+ * settings pass, else the field to name in the 400 ("rcp_proxy.port", "rcp_proxy.host").
  */
 const char *device_api_channel_proxy_refusal(const radio_mux_proxy_settings_t *stored, const radio_mux_set_req_t *req);
 

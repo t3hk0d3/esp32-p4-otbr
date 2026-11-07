@@ -271,9 +271,25 @@ const char *radio_mux_state_name(radio_mux_state_t state);
 // "probe", "passive"; NULL for NONE.
 const char *radio_mux_fw_source_name(radio_mux_fw_source_t src);
 
-// Stored rcp_proxy settings: known direction, adapter and framing; port 1..65535 except 80 and 179 (the board's own
-// listeners); connect needs a host.
-bool radio_mux_proxy_ok(const radio_mux_proxy_settings_t *s);
+typedef enum {
+    RADIO_MUX_PROXY_CHECK_OK,
+    RADIO_MUX_PROXY_CHECK_BAD_KIND,  // an unknown direction, adapter or framing
+    RADIO_MUX_PROXY_CHECK_BAD_PORT,  // 0, 80 or 179 (the board's own listeners)
+    RADIO_MUX_PROXY_CHECK_NEED_HOST, // connect without a host
+    RADIO_MUX_PROXY_CHECK_BAD_HOST,  // not an IPv4 or IPv6 literal, nor a DNS or .local name of at most 63 characters
+} radio_mux_proxy_check_t;
+
+// The one check of rcp_proxy settings (a PUT, the stored settings at load, rcp_proxy at attach): known direction,
+// adapter and framing, then the port (1..65535 except 80 and 179), then a host for connect, then the host's syntax
+// when one is given (in either direction: a host kept for a later switch to connect is valid). The framing is not
+// checked against the adapter: it is kept with tcp for a later switch to udp.
+radio_mux_proxy_check_t radio_mux_proxy_check(const radio_mux_proxy_settings_t *s);
+
+// The settings a change leaves: `stored` with the fields of `given` that `fields` (RADIO_MUX_PROXY_F_* bits) names
+// over it, into *out; then radio_mux_proxy_check on them. No field given: *out is `stored` and the result
+// RADIO_MUX_PROXY_CHECK_OK (a change without rcp_proxy settings never fails on settings stored earlier).
+radio_mux_proxy_check_t radio_mux_proxy_merge(const radio_mux_proxy_settings_t *stored, uint8_t fields,
+                                              const radio_mux_proxy_settings_t *given, radio_mux_proxy_settings_t *out);
 
 /* ---- the C6 over SPI (OpenThread's spi_frame.hpp) ---- */
 

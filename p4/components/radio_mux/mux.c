@@ -994,32 +994,15 @@ static void check_presence(mux_port_t *p)
 static radio_mux_verdict_t check_req(const struct radio_mux_chan *ch, const radio_mux_set_req_t *req,
                                      radio_mux_proxy_settings_t *proxy)
 {
-    *proxy = ch->proxy;
+    if (radio_mux_proxy_merge(&ch->proxy, req->has_proxy ? req->proxy_fields : 0, &req->proxy, proxy) !=
+            RADIO_MUX_PROXY_CHECK_OK) {
+        return RADIO_MUX_REFUSE_BAD_VALUE;
+    }
     if (ch->kind == RADIO_MUX_KIND_C6 && (req->has_baud || req->has_flow)) {
         return RADIO_MUX_REFUSE_BAD_VALUE; // SPI: the C6 has no line settings
     }
     if (req->has_baud && !radio_mux_baud_ok(req->baud)) {
         return RADIO_MUX_REFUSE_BAD_VALUE;
-    }
-    if (req->has_proxy) {
-        if (req->proxy_fields & RADIO_MUX_PROXY_F_DIR) {
-            proxy->dir = req->proxy.dir;
-        }
-        if (req->proxy_fields & RADIO_MUX_PROXY_F_ADAPTER) {
-            proxy->adapter = req->proxy.adapter;
-        }
-        if (req->proxy_fields & RADIO_MUX_PROXY_F_PORT) {
-            proxy->port = req->proxy.port;
-        }
-        if (req->proxy_fields & RADIO_MUX_PROXY_F_HOST) {
-            memcpy(proxy->host, req->proxy.host, sizeof(proxy->host));
-        }
-        if (req->proxy_fields & RADIO_MUX_PROXY_F_FRAMING) {
-            proxy->framing = req->proxy.framing;
-        }
-        if (!radio_mux_proxy_ok(proxy)) {
-            return RADIO_MUX_REFUSE_BAD_VALUE;
-        }
     }
     return RADIO_MUX_APPLY;
 }

@@ -673,7 +673,7 @@ static esp_err_t on_attach(radio_mux_chan_t *ch, void *ctx)
         return ESP_ERR_INVALID_STATE;
     }
     radio_mux_get_proxy(ch, &set);
-    if (rcp_proxy_settings_check(&set) != RCP_PROXY_OK) {
+    if (radio_mux_proxy_check(&set) != RADIO_MUX_PROXY_CHECK_OK) {
         ESP_LOGE(TAG, "%s: stored rcp_proxy settings are invalid", radio_mux_chan_id(ch));
         return ESP_ERR_INVALID_ARG;
     }

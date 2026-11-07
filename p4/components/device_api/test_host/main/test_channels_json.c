@@ -638,7 +638,7 @@ TEST_CASE("On all fields together: each is set", "[device_api]")
     TEST_ASSERT_EQUAL_UINT16(7000, req.proxy.port);
 }
 
-/* ---- device_api_channel_proxy_refusal: rcp_proxy_settings_check on the merged settings ---- */
+/* ---- device_api_channel_proxy_refusal: radio_mux_proxy_merge (the mux's own check) ---- */
 
 static radio_mux_set_req_t proxy_req(const char *json)
 {
