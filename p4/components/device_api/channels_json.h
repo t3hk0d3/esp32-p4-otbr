@@ -89,10 +89,11 @@ device_api_error_t device_api_channel_forget_error(esp_err_t err, bool mux_start
  * Whether the PUT changes where OpenThread runs (and so takes the long-operation slot first), as the mux's MOVE
  * verdict: mode otbr on `id` while another channel (`otbr_id`, from radio_mux_otbr_channel; NULL: none) has it (a move)
  * or none has it (a start), or another mode on the OTBR channel itself (a stop). In the mux's order: a change into or
- * out of a mode in `reboot_modes` (radio_mux_snapshot_t.reboot_modes) is APPLY_REBOOT, not a stop.
+ * out of a mode in `reboot_modes` (radio_mux_snapshot_t.reboot_modes) is APPLY_REBOOT, neither a start nor a stop:
+ * `current` is the channel's mode now (otbr on a channel leaving ziggurat reboots).
  */
 bool device_api_channel_is_move(const radio_mux_set_req_t *req, const char *id, const char *otbr_id,
-                                uint32_t reboot_modes);
+                                uint32_t reboot_modes, radio_mux_mode_t current);
 
 /**
  * A start, move or stop of Thread (device_api_channel_is_move) goes alone: with baud, flow_control or any rcp_proxy
@@ -101,7 +102,7 @@ bool device_api_channel_is_move(const radio_mux_set_req_t *req, const char *id, 
  * before or after it. NULL when the PUT may go on.
  */
 const char *device_api_channel_move_refusal(const radio_mux_set_req_t *req, const char *id, const char *otbr_id,
-                                           uint32_t reboot_modes);
+                                           uint32_t reboot_modes, radio_mux_mode_t current);
 
 /**
  * While a move of Thread runs (`move_running`: br_core_move_running, or the long-operation slot held by RADIO_MOVE), a

@@ -460,6 +460,35 @@ TEST_CASE("On leaving otbr for a mode whose registration reboots: returns RADIO_
     TEST_ASSERT_EQUAL(RADIO_MUX_APPLY_REBOOT, radio_mux_check_set_mode(&zig, c, N_CHANS, 0, MODE_ZIGGURAT, NULL));
 }
 
+TEST_CASE("On otbr for a channel leaving a mode whose registration reboots: returns RADIO_MUX_APPLY_REBOOT, not a start",
+          "[radio_mux]")
+{
+    radio_mux_rules_t zig = ziggurat_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    size_t from = 99;
+
+    zig.rules[0].reboot_on_change = true;
+    three_channels(c);
+    c[0].mode = RADIO_MUX_MODE_OFF;
+    c[1].mode = MODE_ZIGGURAT;
+    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY_REBOOT, radio_mux_check_set_mode(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, &from));
+    TEST_ASSERT_EQUAL(99, from); // no move: nothing probes the channel the consumer still holds
+}
+
+TEST_CASE("On otbr for a channel leaving a mode that does not reboot: still RADIO_MUX_MOVE from no source (a start)",
+          "[radio_mux]")
+{
+    radio_mux_rules_t zig = ziggurat_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    size_t from = 99;
+
+    three_channels(c);
+    c[0].mode = RADIO_MUX_MODE_OFF;
+    c[1].mode = MODE_ZIGGURAT;
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_check_set_mode(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, &from));
+    TEST_ASSERT_EQUAL(N_CHANS, from);
+}
+
 /* ---- radio_mux_after_detect ---- */
 
 TEST_CASE("On a stored mode the detected type fits: returns the stored mode", "[radio_mux]")

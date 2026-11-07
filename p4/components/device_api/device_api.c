@@ -1804,7 +1804,7 @@ static esp_err_t channel_apply(httpd_req_t *req, radio_mux_snapshot_t *s, const 
         return send_error(req, 400, "bad_value", bad, false);
     }
     otbr_channel_id(otbr);
-    const char *mixed = device_api_channel_move_refusal(set, id, otbr[0] ? otbr : NULL, s->reboot_modes);
+    const char *mixed = device_api_channel_move_refusal(set, id, otbr[0] ? otbr : NULL, s->reboot_modes, c->mode);
 
     if (mixed) { // before port_taken: settings that go with a start, move or stop are never stored
         return send_error(req, 400, "bad_value", mixed, false);
@@ -1827,7 +1827,7 @@ static esp_err_t channel_apply(httpd_req_t *req, radio_mux_snapshot_t *s, const 
     }
     // A move is a long operation: it takes the shared slot before br_core is asked, and br_core gives it back once
     // the move ended (on_move_done). A refusal before the 202 gives it back at once.
-    const bool move = device_api_channel_is_move(set, id, otbr[0] ? otbr : NULL, s->reboot_modes);
+    const bool move = device_api_channel_is_move(set, id, otbr[0] ? otbr : NULL, s->reboot_modes, c->mode);
 
     if (move && !device_api_op_try_begin(DEVICE_API_OP_RADIO_MOVE)) {
         return send_error(req, 409, "busy", device_api_op_busy_detail(DEVICE_API_OP_RADIO_MOVE), false);

@@ -198,6 +198,13 @@ radio_mux_verdict_t radio_mux_check_set_mode(const radio_mux_rules_t *rules, con
         }
         return RADIO_MUX_REFUSE_MODE_TAKEN;
     }
+    const radio_mux_rule_t *leaving = find_rule(rules, chans[target].mode);
+
+    // otbr on a channel leaving a mode that reboots: the reboot starts OpenThread. A start now would probe a channel
+    // whose consumer still holds it, and fail.
+    if (want == RADIO_MUX_MODE_OTBR && chans[target].mode != want && leaving != NULL && leaving->reboot_on_change) {
+        return RADIO_MUX_APPLY_REBOOT;
+    }
     // otbr where no channel has it: a start, run like a move from nowhere (probe, start, store once it runs).
     if (want == RADIO_MUX_MODE_OTBR && chans[target].mode != RADIO_MUX_MODE_OTBR) {
         if (move_from != NULL) {
@@ -205,8 +212,6 @@ radio_mux_verdict_t radio_mux_check_set_mode(const radio_mux_rules_t *rules, con
         }
         return RADIO_MUX_MOVE;
     }
-    const radio_mux_rule_t *leaving = find_rule(rules, chans[target].mode);
-
     if (chans[target].mode != want && ((rule != NULL && rule->reboot_on_change) ||
                                        (leaving != NULL && leaving->reboot_on_change))) {
         return RADIO_MUX_APPLY_REBOOT;
