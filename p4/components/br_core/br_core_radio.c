@@ -626,6 +626,9 @@ static void reconcile(void)
         s_start_failed = false;
         mode_fsm_on_channel_gone(&g_fsm); // NO_RADIO first: new sessions are refused while the open ones drain
         s_lost = false;
+        // Again after the teardown: GONE reaches us before the mux lists an unplugged dongle absent, so the first
+        // reason said "went away" where it is "radio unplugged" (hardware pass 2026-11-07).
+        note_no_radio_reason(NULL);
         after_channel_op();
         radio_busy_end();
     }
