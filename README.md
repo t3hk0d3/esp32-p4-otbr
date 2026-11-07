@@ -61,7 +61,7 @@ down, the others keep the network reachable.
 
 <table>
   <tr>
-    <td width="25%"><img src="docs/images/dashboard.png" alt="Dashboard in three sections. Device and network: Board OK, the Radios card (C6 runs Thread, USB radio off), Ethernet, board firmware, load and memory. Thread: Border router running, router of ha-thread-bbc1 on channel 15, with the Thread network, identifiers, radio co-processor, Home Assistant, prefix delegation and packet capture cards and the Thread address table. Zigbee: not active, with a link to the Radios page"></td>
+    <td width="25%"><img src="docs/images/dashboard.png" alt="Dashboard in three sections. Device and network: Board OK, the Radios card (C6 runs Zigbee, USB radio off), Ethernet, board firmware, load and memory. Thread: not active, with a link to the Radios page. Zigbee: Waiting for Home Assistant on the on-board C6, with cards for Connect Home Assistant (the ws:// path and a Copy button), the client (not connected), the network (set by ZHA once it connects), radio traffic, memory and the radio firmware"></td>
     <td width="25%"><img src="docs/images/topology.png" alt="Topology page: the Thread mesh with its leader and routers"></td>
     <td width="25%"><img src="docs/images/diagnostics.png" alt="Diagnostics: CPU load per core, memory, OpenThread lock timings and tasks"></td>
     <td width="25%"><img src="docs/images/capture.png" alt="Packet capture page: channel, length and a curl-to-Wireshark command"></td>

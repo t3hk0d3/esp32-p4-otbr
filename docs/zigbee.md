@@ -50,7 +50,7 @@ path with a Copy button, the connected or last client, the network (channel, PAN
 traffic counters, the memory the stack uses and the radio firmware; it polls `GET /device/zigbee`. While no radio
 runs Zigbee it says so in one line and links the Radios page, and nothing is polled.
 
-<img src="images/dashboard.png" width="640" alt="Dashboard in three sections. Device and network: Board OK, the Radios card (C6 runs Thread, USB radio off), Ethernet, board firmware, load and memory. Thread: Border router running, router of ha-thread-bbc1 on channel 15, with the Thread network, identifiers, radio co-processor, Home Assistant, prefix delegation and packet capture cards and the Thread address table. Zigbee: not active, with a link to the Radios page">
+<img src="images/dashboard.png" width="640" alt="Dashboard in three sections. Device and network: Board OK, the Radios card (C6 runs Zigbee, USB radio off), Ethernet, board firmware, load and memory. Thread: not active, with a link to the Radios page. Zigbee: Waiting for Home Assistant on the on-board C6, with cards for Connect Home Assistant (the ws:// path and a Copy button), the client (not connected), the network (set by ZHA once it connects), radio traffic, memory and the radio firmware">
 
 ## Radio resets and loss
 
