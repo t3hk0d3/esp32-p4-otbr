@@ -371,7 +371,7 @@ recovery with the jumper), `/capture.html` (packet capture) and `/diagnostics.ht
 banner with **Keep new settings** while network settings are on trial. They use only `/device/*`, so they also work in
 `RADIO_FAULT` and while sniffing.
 
-<img src="images/dashboard.png" width="640" alt="Dashboard: Border router running, with the Thread network, identifiers, board firmware, radio, Ethernet, prefix delegation, packet capture and load cards, and the Thread address table">
+<img src="images/dashboard.png" width="640" alt="Dashboard in three sections. Device and network: Board OK, the Radios card (C6 runs Thread, USB radio off), Ethernet, board firmware, load and memory. Thread: Border router running, with the Thread network, identifiers, radio co-processor, Home Assistant, prefix delegation and packet capture cards and the Thread address table. Zigbee: not active, with a link to the Radios page">
 
 ## Creating a Thread network
 

@@ -50,6 +50,8 @@ path with a Copy button, the connected or last client, the network (channel, PAN
 traffic counters, the memory the stack uses and the radio firmware; it polls `GET /device/zigbee`. While no radio
 runs Zigbee it says so in one line and links the Radios page, and nothing is polled.
 
+<img src="images/dashboard-zigbee.png" width="640" alt="Dashboard with the USB radio running Zigbee. Device and network: Board OK, the Radios card (C6 off, USB radio Zigbee). Thread: not active, with a link to the Radios page. Zigbee: Coordinator running on channel 25 on the USB radio, ZHA connected; cards for Connect Home Assistant with the ws:// path and a Copy button, the connected client, the network, radio traffic, memory and the radio firmware">
+
 ## Radio resets and loss
 
 - **Reset.** When the radio resets (the C6 restarts, a dongle is reopened), the board sets the radio up again by

@@ -61,7 +61,7 @@ down, the others keep the network reachable.
 
 <table>
   <tr>
-    <td width="25%"><img src="docs/images/dashboard.png" alt="Dashboard: mode, firmware versions, radio, Thread network and Ethernet status"></td>
+    <td width="25%"><img src="docs/images/dashboard.png" alt="Dashboard: board health, radios, Ethernet and firmware; the running Thread border router with its network and addresses; Zigbee not active"></td>
     <td width="25%"><img src="docs/images/topology.png" alt="Topology page: the Thread mesh with its leader and routers"></td>
     <td width="25%"><img src="docs/images/diagnostics.png" alt="Diagnostics: CPU load per core, memory, OpenThread lock timings and tasks"></td>
     <td width="25%"><img src="docs/images/capture.png" alt="Packet capture page: channel, length and a curl-to-Wireshark command"></td>
