@@ -1,6 +1,8 @@
 // RCP proxy: the rcp-proxy consumer of the radio mux and the proxy task. The mux's attach and detach (owner task) only
 // leave a wish per transport and wake the task; the task alone opens and closes sessions and sockets, and waits in one
-// select() over the adapters' sockets, the channels' eventfds and its kick eventfd (spec section RCP proxy mode).
+// select() over the adapters' sockets, the channels' eventfds and its kick eventfd (spec section RCP proxy mode). A
+// connect target's name is looked up by the resolver task (rcp_resolve: getaddrinfo and mDNS block for seconds), which
+// leaves the answer per slot and wakes the proxy task through the kick eventfd; the other slot's session never waits.
 #include "rcp_proxy.h"
 
 #include <errno.h>
@@ -28,6 +30,8 @@ static const char *TAG = "rcp_proxy";
 
 #define TASK_PRIORITY 6
 #define TASK_STACK 6144
+#define RESOLVER_PRIORITY 5 // below the proxy task: frames first
+#define RESOLVER_STACK 4096
 // One session per transport: the C6 and the one open USB device. The mux detaches before it attaches again on the
 // same transport, so a slot never has two channels.
 #define SLOTS 2
@@ -62,9 +66,27 @@ typedef struct {
     char last_error[RADIO_MUX_PROXY_ERROR_MAX];
 } pub_t;
 
+// A connect target's name lookup, per slot: the proxy task asks, the resolver task answers. seq 0: none.
+typedef struct {
+    uint32_t seq;
+    char host[RADIO_MUX_PROXY_HOST_MAX];
+    uint16_t port;
+    int socktype;
+} ask_t;
+
+typedef struct {
+    uint32_t seq;
+    esp_err_t err; // ESP_OK: dst holds the target
+    struct sockaddr_storage dst;
+    socklen_t dst_len;
+} answer_t;
+
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static want_t s_want[SLOTS]; // under s_lock: attach, detach, kick
 static pub_t s_pub[SLOTS];   // under s_lock: what the task last published
+static ask_t s_ask[SLOTS];   // under s_lock: the lookup each slot waits for (the resolver skips one cancelled meanwhile)
+static answer_t s_ans[SLOTS]; // under s_lock: the resolver's latest answer per slot, not yet taken
+static TaskHandle_t s_resolver; // NULL: no resolver task (a name never resolves; literals still do)
 static int s_kick_fd = -1;
 static bool s_registered;
 static bool s_task_up; // false: attach is refused (the task could not be created)
@@ -72,6 +94,7 @@ static bool s_task_up; // false: attach is refused (the task could not be create
 // Proxy task only.
 static proxy_t s_px[SLOTS];
 static uint32_t s_gen[SLOTS];
+static uint32_t s_lookup_seq; // rcp_proxy_lookup_ask's counter, shared by every session
 static uint8_t s_rx[RCP_PROXY_RX_MAX];
 static uint8_t s_raw[RCP_PROXY_UDP_RAW_MAX];
 
@@ -128,69 +151,137 @@ static void peer_text(const struct sockaddr *sa, char *out, size_t cap)
     }
 }
 
-static esp_err_t resolve_host(proxy_t *p, int socktype)
+// The first address of a getaddrinfo answer into dst.
+static void take_addrinfo(const struct addrinfo *res, struct sockaddr_storage *dst, socklen_t *len)
+{
+    const size_t n = res->ai_addrlen < sizeof(*dst) ? res->ai_addrlen : sizeof(*dst);
+
+    memcpy(dst, res->ai_addr, n);
+    *len = (socklen_t)n;
+}
+
+static void port_text(uint16_t port, char out[PORT_TEXT_MAX])
+{
+    snprintf(out, PORT_TEXT_MAX, "%u", port);
+}
+
+// An IP literal into dst without a lookup (getaddrinfo with AI_NUMERICHOST only parses); false for a name.
+static bool literal_host(const char *host, uint16_t port, int socktype, struct sockaddr_storage *dst, socklen_t *len)
+{
+    char text[PORT_TEXT_MAX];
+    const struct addrinfo hints = {.ai_family = AF_UNSPEC, .ai_socktype = socktype, .ai_flags = AI_NUMERICHOST};
+    struct addrinfo *res = NULL;
+
+    port_text(port, text);
+    if (getaddrinfo(host, text, &hints, &res) != 0 || !res) {
+        return false;
+    }
+    take_addrinfo(res, dst, len);
+    freeaddrinfo(res);
+    return true;
+}
+
+// The resolver task's lookup of a name: a .local name over mDNS (A, then AAAA, MDNS_WAIT_MS each), else DNS
+// (getaddrinfo). Blocks for seconds: never on the proxy task.
+static esp_err_t lookup_name(const char *host, uint16_t port, int socktype, struct sockaddr_storage *dst,
+                             socklen_t *len)
 {
     char name[RADIO_MUX_PROXY_HOST_MAX];
 
-    memset(&p->dst, 0, sizeof(p->dst));
-    p->dst_len = 0;
-    if (rcp_proxy_host_mdns(p->set.host, name, sizeof(name))) {
+    memset(dst, 0, sizeof(*dst));
+    *len = 0;
+    if (rcp_proxy_host_mdns(host, name, sizeof(name))) {
         esp_ip4_addr_t a4;
         esp_ip6_addr_t a6;
 
         if (mdns_query_a(name, MDNS_WAIT_MS, &a4) == ESP_OK && a4.addr != 0) {
-            struct sockaddr_in *v4 = (struct sockaddr_in *)&p->dst;
+            struct sockaddr_in *v4 = (struct sockaddr_in *)dst;
 
             v4->sin_family = AF_INET;
-            v4->sin_port = htons(p->set.port);
+            v4->sin_port = htons(port);
             v4->sin_addr.s_addr = a4.addr;
-            p->dst_len = sizeof(*v4);
+            *len = sizeof(*v4);
             return ESP_OK;
         }
         if (mdns_query_aaaa(name, MDNS_WAIT_MS, &a6) == ESP_OK) {
-            struct sockaddr_in6 *v6 = (struct sockaddr_in6 *)&p->dst;
+            struct sockaddr_in6 *v6 = (struct sockaddr_in6 *)dst;
 
             v6->sin6_family = AF_INET6;
-            v6->sin6_port = htons(p->set.port);
+            v6->sin6_port = htons(port);
             memcpy(v6->sin6_addr.s6_addr, a6.addr, sizeof(v6->sin6_addr.s6_addr));
             v6->sin6_scope_id = a6.zone;
-            p->dst_len = sizeof(*v6);
+            *len = sizeof(*v6);
             return ESP_OK;
         }
         return ESP_ERR_NOT_FOUND;
     }
-    char port[PORT_TEXT_MAX];
+    char text[PORT_TEXT_MAX];
     const struct addrinfo hints = {.ai_family = AF_UNSPEC, .ai_socktype = socktype};
     struct addrinfo *res = NULL;
 
-    snprintf(port, sizeof(port), "%u", p->set.port);
-    if (getaddrinfo(p->set.host, port, &hints, &res) != 0 || !res) {
+    port_text(port, text);
+    if (getaddrinfo(host, text, &hints, &res) != 0 || !res) {
         return ESP_ERR_NOT_FOUND;
     }
-    const size_t len = res->ai_addrlen < sizeof(p->dst) ? res->ai_addrlen : sizeof(p->dst);
-
-    memcpy(&p->dst, res->ai_addr, len);
-    p->dst_len = (socklen_t)len;
+    take_addrinfo(res, dst, len);
     freeaddrinfo(res);
     return ESP_OK;
 }
 
-esp_err_t rcp_proxy_resolve(proxy_t *p, int socktype)
+// One rule for both adapters: the connect target is judged like a UDP source (the mesh is refused).
+static esp_err_t target_allowed(proxy_t *p)
 {
-    const esp_err_t err = resolve_host(p, socktype);
-
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "%s: %s does not resolve", p->id, p->set.host);
-        rcp_proxy_note_error(p, "%s does not resolve", p->set.host);
-        return err;
-    }
-    // One rule for both adapters: the connect target is judged like a UDP source (the mesh is refused).
     if (!netcfg_peer_allowed((const struct sockaddr *)&p->dst, NETCFG_SVC_RCP_PROXY)) {
         ESP_LOGW(TAG, "%s: %s is not allowed by the network access rules", p->id, p->set.host);
         rcp_proxy_note_error(p, "%s: refused by the access rules", p->set.host);
         return ESP_ERR_NOT_ALLOWED;
     }
     return ESP_OK;
+}
+
+static int slot_index(const proxy_t *p)
+{
+    return (int)(p - s_px);
+}
+
+esp_err_t rcp_proxy_resolve(proxy_t *p, int socktype)
+{
+    memset(&p->dst, 0, sizeof(p->dst));
+    p->dst_len = 0;
+    if (literal_host(p->set.host, p->set.port, socktype, &p->dst, &p->dst_len)) {
+        return target_allowed(p);
+    }
+    if (!s_resolver) {
+        rcp_proxy_note_error(p, "%s: no resolver task", p->set.host);
+        return ESP_ERR_NO_MEM;
+    }
+    const int i = slot_index(p);
+    const uint32_t seq = rcp_proxy_lookup_ask(&p->lookup, &s_lookup_seq);
+
+    taskENTER_CRITICAL(&s_lock);
+    s_ask[i].seq = seq;
+    strlcpy(s_ask[i].host, p->set.host, sizeof(s_ask[i].host));
+    s_ask[i].port = p->set.port;
+    s_ask[i].socktype = socktype;
+    taskEXIT_CRITICAL(&s_lock);
+    xTaskNotifyGive(s_resolver);
+    ESP_LOGI(TAG, "%s: resolving %s", p->id, p->set.host);
+    return ESP_ERR_NOT_FINISHED;
+}
+
+// The session stops waiting for its lookup (retry, close): its answer is discarded, and the resolver skips the ask
+// when it has not started on it yet.
+static void lookup_cancel(proxy_t *p)
+{
+    if (!rcp_proxy_lookup_waiting(&p->lookup)) {
+        return;
+    }
+    const int i = slot_index(p);
+
+    rcp_proxy_lookup_cancel(&p->lookup);
+    taskENTER_CRITICAL(&s_lock);
+    s_ask[i].seq = 0;
+    taskEXIT_CRITICAL(&s_lock);
 }
 
 /* ---- session ---- */
@@ -275,6 +366,7 @@ void rcp_proxy_retry(proxy_t *p, const char *why)
     if (p->state != PROXY_CONNECTED && p->last_error[0] == '\0') {
         rcp_proxy_note_error(p, "%s", why); // a failed open or connect; a lost connection is no error of the setup
     }
+    lookup_cancel(p);
     p->ad->close(p);
     p->backoff_s = rcp_proxy_backoff_next(p->backoff_s, lasted);
     p->retry_ms = now + (int64_t)p->backoff_s * 1000;
@@ -323,6 +415,7 @@ static void session_close(proxy_t *p)
     if (!p->ch) {
         return;
     }
+    lookup_cancel(p);
     p->ad->close(p);
     radio_mux_set_busy_peer(p->ch, false);
     ESP_LOGI(TAG, "%s: closed (to radio %llu B, to peer %llu B, discarded %lu B, refused %lu, overflows %lu, "
@@ -522,6 +615,88 @@ static void poke(void)
     }
 }
 
+// The resolver task: looks up each slot's latest ask, one at a time, and leaves the answer for the proxy task (poke).
+// An ask cancelled or replaced while it was looked up gets no answer.
+static void resolver_task(void *arg)
+{
+    uint32_t done[SLOTS] = {0};
+
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        for (int i = 0; i < SLOTS; i++) {
+            ask_t a;
+
+            taskENTER_CRITICAL(&s_lock);
+            a = s_ask[i];
+            taskEXIT_CRITICAL(&s_lock);
+            if (a.seq == 0 || a.seq == done[i]) {
+                continue;
+            }
+            done[i] = a.seq;
+            answer_t r = {.seq = a.seq};
+
+            r.err = lookup_name(a.host, a.port, a.socktype, &r.dst, &r.dst_len);
+            taskENTER_CRITICAL(&s_lock);
+            const bool wanted = s_ask[i].seq == a.seq;
+
+            if (wanted) {
+                s_ans[i] = r;
+            }
+            taskEXIT_CRITICAL(&s_lock);
+            if (wanted) {
+                poke();
+            }
+        }
+    }
+}
+
+// The lookup the session waited for answered: the access rules, then the adapter dials; a failure backs off with the
+// reason, as a failed open does.
+static void lookup_done(proxy_t *p, const answer_t *a)
+{
+    esp_err_t err = a->err;
+
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "%s: %s does not resolve", p->id, p->set.host);
+        rcp_proxy_note_error(p, "%s does not resolve", p->set.host);
+    } else {
+        p->dst = a->dst;
+        p->dst_len = a->dst_len;
+        err = target_allowed(p);
+    }
+    if (err == ESP_OK) {
+        err = p->ad->dial(p);
+    }
+    if (err != ESP_OK) {
+        rcp_proxy_retry(p, p->last_error[0] ? p->last_error : esp_err_to_name(err));
+    }
+}
+
+// Takes the resolver's answers: one the session still waits for continues it, any other is discarded.
+static void take_answers(void)
+{
+    for (int i = 0; i < SLOTS; i++) {
+        answer_t a = {.seq = 0};
+
+        taskENTER_CRITICAL(&s_lock);
+        if (s_ans[i].seq != 0) {
+            a = s_ans[i];
+            s_ans[i].seq = 0;
+        }
+        taskEXIT_CRITICAL(&s_lock);
+        if (a.seq == 0) {
+            continue;
+        }
+        proxy_t *p = &s_px[i];
+
+        if (!p->ch || !rcp_proxy_lookup_answer(&p->lookup, a.seq)) {
+            ESP_LOGD(TAG, "slot %d: an answer for a lookup nobody waits for: discarded", i);
+            continue;
+        }
+        lookup_done(p, &a);
+    }
+}
+
 // Applies the wishes of attach, detach and kick: a new generation closes the session and opens the wished one.
 static void reconcile(void)
 {
@@ -576,6 +751,7 @@ static void proxy_task(void *arg)
 
     for (;;) {
         reconcile();
+        take_answers();
         const int64_t now = rcp_proxy_now_ms();
         fd_set rd, wr;
         int maxfd = s_kick_fd;
@@ -731,6 +907,11 @@ esp_err_t rcp_proxy_register(void)
         return err;
     }
     s_registered = true;
+    if (xTaskCreatePinnedToCore(resolver_task, "rcp_resolve", RESOLVER_STACK, NULL, RESOLVER_PRIORITY, &s_resolver,
+                                MGMT_CORE) != pdPASS) {
+        s_resolver = NULL;
+        ESP_LOGE(TAG, "the resolver task could not be created: connect targets by name do not resolve");
+    }
     if (xTaskCreatePinnedToCore(proxy_task, "rcp_proxy", TASK_STACK, NULL, TASK_PRIORITY, NULL, MGMT_CORE) != pdPASS) {
         ESP_LOGE(TAG, "the proxy task could not be created: rcp-proxy channels stay in fault");
         return ESP_ERR_NO_MEM;

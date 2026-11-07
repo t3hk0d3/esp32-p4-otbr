@@ -84,7 +84,9 @@ under `rcp_proxy`:
 | listen | The first client wins; later ones are refused with a reset. TCP keepalive notices a dead client. | The first source that sends becomes the peer. Other sources are dropped and counted until the peer has been silent for 30 s, or you kick it. |
 | connect | Retries with back-off 1, 2, 4, 8, 16, then 30 s; the back-off resets to 1 s after a connection that lasted 60 s. A connect that gets no answer gives up after 10 s. | Datagrams go to `host:port`; only datagrams from that address are accepted. |
 
-Listen sockets and UDP sources follow the [network access rules](networking.md) (per-VLAN rule, Thread-mesh refusal).
+Listen sockets, TCP clients (by the address they came in on and by their own address), UDP sources and connect targets
+follow the [network access rules](networking.md) (per-VLAN rule, Thread-mesh refusal). A connect host that is a name is
+looked up in the background: the channel shows `connecting` meanwhile, and the other radio's proxy keeps running.
 Ports 80 and 179 are refused. Two channels cannot listen on the same adapter and port: a PUT that would make a second
 channel in `rcp-proxy` listen where another one (also an unplugged one) is stored listening is refused with 409
 `port_taken`, naming the port and that channel.
@@ -225,10 +227,10 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
 - **Heap**: about 21 KB of internal DMA RAM is taken at the first C6 open, about 39 KB (pool, buffers, 16 KB ring) at
   the first dongle open (never on a board without a dongle); a proxy session takes an 8 KB ring (TCP) plus codec
   buffers. Compare the free and the minimum free internal heap (`GET /device/diag`) after boot with no dongle against
-  v0.4.0 on the same board: at most 40 KB less (the six new tasks, below, the queues and the C6 buffers). This is a
+  v0.4.0 on the same board: at most 40 KB less (the seven new tasks, below, the queues and the C6 buffers). This is a
   limit to measure in the hardware pass, not a measured number yet.
 - **Task stacks** (not shrunk: no high-water marks measured yet): `radio_mux` 6144, `usb_lib` 4096, `USB-CDC` 4096,
-  `c6` transport 4096, `rcp_proxy` 6144, `br_radio` 6144 bytes. Read their high-water marks after the checks below
+  `c6` transport 4096, `rcp_proxy` 6144, `rcp_resolve` 4096, `br_radio` 6144 bytes. Read their high-water marks after the checks below
   (a C6 move, a dongle detection, a proxy with a `.local` connect host) before shrinking any.
 - **C6 drops under REST load**: with Thread on the C6 and the REST load of `test_unplug_during_rest_load` (without the
   unplug) for 5 minutes, the C6 channel's `drops` and `rx_errors` stay at or near 0 and pings to a Thread device do not

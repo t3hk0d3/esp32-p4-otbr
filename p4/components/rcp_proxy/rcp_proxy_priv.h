@@ -29,8 +29,13 @@ typedef struct proxy proxy_t;
 typedef struct {
     const char *name;
     bool datagram;
-    // Opens the sockets for p->set (listen, or resolve and dial). An error: proxy.c closes and backs off.
+    // Opens the sockets for p->set (listen, or resolve and dial). An error: proxy.c closes and backs off. A connect
+    // target that is a name is resolved off the task (rcp_proxy_resolve): open then returns ESP_OK in CONNECTING
+    // without a socket, and proxy.c calls dial once the answer came and passed the access rules.
     esp_err_t (*open)(proxy_t *p);
+    // Connect: p->dst is resolved and allowed; opens the socket towards it (TCP: a non-blocking dial). An error:
+    // proxy.c closes and backs off.
+    esp_err_t (*dial)(proxy_t *p);
     // Closes every socket; also after a failed open.
     void (*close)(proxy_t *p);
     // Adds the sockets to wait on (wr: a connect in progress, or bytes waiting for room) and sets p->wake_ms to the
@@ -67,6 +72,7 @@ struct proxy {
     struct sockaddr_storage dst; // connect: the resolved target; UDP listen: the locked source
     socklen_t dst_len;
     int64_t conn_deadline_ms; // TCP connect in progress: give up at
+    rcp_proxy_lookup_t lookup; // connect: the name lookup the session waits for (the resolver task answers)
     rcp_proxy_udp_lock_t lock;
     rcp_proxy_peer_memo_t memo; // the previous peer of this socket session (UDP: reset replay only for a new one)
 
@@ -103,9 +109,12 @@ void rcp_proxy_retry(proxy_t *p, const char *why);
 void rcp_proxy_note_error(proxy_t *p, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 // The peer's bytes (a stream chunk or one datagram) towards the radio.
 void rcp_proxy_from_peer(proxy_t *p, const uint8_t *d, size_t n);
-// Resolves p->set.host and p->set.port into p->dst: an IP literal or a DNS name (getaddrinfo), a .local name over mDNS
-// (A, then AAAA, bounded waits), then applies the netcfg access rules to the target (netcfg_peer_allowed, the same rule
-// as for UDP sources; ESP_ERR_NOT_ALLOWED). Blocks the proxy task for at most a few seconds.
+// Resolves p->set.host and p->set.port into p->dst without blocking the proxy task. An IP literal at once: ESP_OK, or
+// ESP_ERR_NOT_ALLOWED when the netcfg access rules refuse the target (netcfg_peer_allowed, the same rule as for UDP
+// sources). A name (DNS, getaddrinfo; .local over mDNS, A then AAAA) is asked of the resolver task (rcp_resolve):
+// ESP_ERR_NOT_FINISHED, the session stays CONNECTING, and when the answer comes proxy.c applies the access rules and
+// calls the adapter's dial, or backs off with the reason. An answer for a session that stopped waiting meanwhile (a
+// retry, a close, new settings) is discarded.
 esp_err_t rcp_proxy_resolve(proxy_t *p, int socktype);
 void rcp_proxy_addr_from(const struct sockaddr *sa, rcp_proxy_addr_t *out);
 void rcp_proxy_set_nonblocking(int fd);

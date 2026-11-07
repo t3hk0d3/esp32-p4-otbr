@@ -69,6 +69,24 @@ void rcp_proxy_peer_memo_init(rcp_proxy_peer_memo_t *m);
 // Records peer; true when it starts a new peer session (no peer before, or a different one).
 bool rcp_proxy_peer_new(rcp_proxy_peer_memo_t *m, const rcp_proxy_addr_t *peer);
 
+// Connect: the target's name lookup runs off the proxy task (rcp_resolve) and its answer comes back later. A session
+// waits for the answer to its latest ask only: an answer to an earlier ask, or one that comes after the session
+// stopped waiting (a retry, a close, new settings: rcp_proxy_lookup_cancel, or a new session), is discarded.
+typedef struct {
+    uint32_t pending; // the ask the session waits for; 0 none
+} rcp_proxy_lookup_t;
+
+// A new ask: its number (never 0) from the counter *seq, which every session of the task shares so a number is never
+// reused by a later session; the session now waits for it (an earlier ask is forgotten).
+uint32_t rcp_proxy_lookup_ask(rcp_proxy_lookup_t *l, uint32_t *seq);
+// The session stops waiting: any answer that comes is discarded.
+void rcp_proxy_lookup_cancel(rcp_proxy_lookup_t *l);
+// Whether the session waits for an answer.
+bool rcp_proxy_lookup_waiting(const rcp_proxy_lookup_t *l);
+// An answer to ask `seq` came: true (and the session no longer waits) when it is the one the session waits for; false
+// when it is to be discarded.
+bool rcp_proxy_lookup_answer(rcp_proxy_lookup_t *l, uint32_t seq);
+
 typedef enum {
     RCP_PROXY_TAKE,
     RCP_PROXY_REFUSE,

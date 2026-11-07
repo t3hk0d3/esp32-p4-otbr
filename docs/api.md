@@ -302,6 +302,7 @@ settings are stored and applied at once, also for an unplugged radio.
 | 409 `port_taken` | the channel would listen in `rcp-proxy` on the adapter and port another channel stored in `rcp-proxy` listens on (also an unplugged one); `detail` names the port and that channel; nothing changed |
 | 409 `busy` | an update, a firmware push, a recovery or another move runs, a mode is changed during a move, or the board is stopping or starting OpenThread on its radio (after an unplug, a plug-in) |
 | 500 `failed` | the mux is not started, storage failed or a probe took too long |
+| 503 `mux_busy` | the radio mux took the change but did not answer within 5 s; it may still be applied (read the channel again) |
 
 A move that fails after the 202 (the target does not start, or open Thread sessions do not end within 45 s) leaves
 Thread on the old channel and shows on the target as `"state": "fault"` with the reason in `error` (`drain_timeout`

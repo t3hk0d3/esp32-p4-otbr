@@ -1,4 +1,4 @@
-// Decisions of the RCP proxy: the .local host test, the connect back-off, the UDP peer lock, the accept rule, the byte
+// Decisions of the RCP proxy: the .local host test, the connect back-off, the target lookup's answers, the UDP peer lock, the accept rule, the byte
 // ring (moved from usb_serial) and the HDLC cutter of UDP framing. Pure: no ESP-IDF calls.
 #include "rcp_proxy_core.h"
 
@@ -101,6 +101,36 @@ bool rcp_proxy_peer_new(rcp_proxy_peer_memo_t *m, const rcp_proxy_addr_t *peer)
     m->had = true;
     m->last = *peer;
     return fresh;
+}
+
+/* ---- connect target lookup ---- */
+
+uint32_t rcp_proxy_lookup_ask(rcp_proxy_lookup_t *l, uint32_t *seq)
+{
+    if (++*seq == 0) {
+        ++*seq; // 0 means none
+    }
+    l->pending = *seq;
+    return l->pending;
+}
+
+void rcp_proxy_lookup_cancel(rcp_proxy_lookup_t *l)
+{
+    l->pending = 0;
+}
+
+bool rcp_proxy_lookup_waiting(const rcp_proxy_lookup_t *l)
+{
+    return l->pending != 0;
+}
+
+bool rcp_proxy_lookup_answer(rcp_proxy_lookup_t *l, uint32_t seq)
+{
+    if (seq == 0 || seq != l->pending) {
+        return false;
+    }
+    l->pending = 0;
+    return true;
 }
 
 /* ---- TCP accept rule ---- */

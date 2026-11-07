@@ -231,6 +231,68 @@ TEST_CASE("On TCP accept or connect (init before each): every peer session repla
     }
 }
 
+/* ---- rcp_proxy_lookup (connect target, resolved off the proxy task) ---- */
+
+TEST_CASE("On the answer to the pending ask: it is taken once and the session no longer waits", "[rcp_proxy]")
+{
+    rcp_proxy_lookup_t l = {0};
+    uint32_t seq = 0;
+    const uint32_t ask = rcp_proxy_lookup_ask(&l, &seq);
+
+    TEST_ASSERT_NOT_EQUAL(0, ask);
+    TEST_ASSERT_TRUE(rcp_proxy_lookup_waiting(&l));
+    TEST_ASSERT_TRUE(rcp_proxy_lookup_answer(&l, ask));
+    TEST_ASSERT_FALSE(rcp_proxy_lookup_waiting(&l));
+    TEST_ASSERT_FALSE(rcp_proxy_lookup_answer(&l, ask));
+}
+
+TEST_CASE("On an answer to an earlier ask of the session: it is discarded, the latest still taken", "[rcp_proxy]")
+{
+    rcp_proxy_lookup_t l = {0};
+    uint32_t seq = 0;
+    const uint32_t first = rcp_proxy_lookup_ask(&l, &seq);
+    const uint32_t second = rcp_proxy_lookup_ask(&l, &seq);
+
+    TEST_ASSERT_NOT_EQUAL(first, second);
+    TEST_ASSERT_FALSE(rcp_proxy_lookup_answer(&l, first));
+    TEST_ASSERT_TRUE(rcp_proxy_lookup_waiting(&l));
+    TEST_ASSERT_TRUE(rcp_proxy_lookup_answer(&l, second));
+}
+
+TEST_CASE("On an answer after the session stopped waiting (retry, close, new settings): it is discarded",
+          "[rcp_proxy]")
+{
+    rcp_proxy_lookup_t l = {0};
+    uint32_t seq = 0;
+    const uint32_t ask = rcp_proxy_lookup_ask(&l, &seq);
+
+    rcp_proxy_lookup_cancel(&l);
+    TEST_ASSERT_FALSE(rcp_proxy_lookup_waiting(&l));
+    TEST_ASSERT_FALSE(rcp_proxy_lookup_answer(&l, ask));
+}
+
+TEST_CASE("On an answer for an ended session arriving at the next session: it is discarded", "[rcp_proxy]")
+{
+    rcp_proxy_lookup_t old = {0};
+    rcp_proxy_lookup_t next = {0};
+    uint32_t seq = 0; // shared by every session of the task
+    const uint32_t stale = rcp_proxy_lookup_ask(&old, &seq);
+    const uint32_t ask = rcp_proxy_lookup_ask(&next, &seq);
+
+    TEST_ASSERT_FALSE(rcp_proxy_lookup_answer(&next, stale));
+    TEST_ASSERT_TRUE(rcp_proxy_lookup_answer(&next, ask));
+}
+
+TEST_CASE("On the counter wrapping: an ask is never 0, and answer 0 is never taken", "[rcp_proxy]")
+{
+    rcp_proxy_lookup_t l = {0};
+    uint32_t seq = UINT32_MAX;
+
+    TEST_ASSERT_EQUAL_UINT32(1, rcp_proxy_lookup_ask(&l, &seq));
+    rcp_proxy_lookup_cancel(&l);
+    TEST_ASSERT_FALSE(rcp_proxy_lookup_answer(&l, 0));
+}
+
 /* ---- rcp_proxy_accept (TCP listen) ---- */
 
 TEST_CASE("On a connection with no peer that both access rules allow: returns RCP_PROXY_TAKE", "[rcp_proxy]")

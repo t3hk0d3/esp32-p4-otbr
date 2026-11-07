@@ -14,7 +14,7 @@
 //                  routing (the BGP and RIPng sockets), the radio channel mux: radio_mux (owner task), usb_lib (USB
 //                  host daemon) and USB-CDC (CDC driver task, cdc_acm_host_driver_config_t.xCoreID); usb_host_install
 //                  is called from the radio_mux task, so the USB interrupt lands on core 1 too; rcp_proxy (the
-//                  rcp-proxy mode's sockets); br_radio (br_core: OpenThread's start and stop on the OTBR channel,
+//                  rcp-proxy mode's sockets) and rcp_resolve (its connect targets' name lookups); br_radio (br_core: OpenThread's start and stop on the OTBR channel,
 //                  moves between channels, the RCP probe).
 //
 // Note: the C6 log UART driver is first installed from net_init (core 0); after a pause/resume handoff the log task

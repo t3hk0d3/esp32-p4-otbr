@@ -105,25 +105,9 @@ static void lose_peer(proxy_t *p, const char *why)
     rcp_proxy_peer_lost(p, PROXY_LISTENING);
 }
 
-static esp_err_t tcp_open(proxy_t *p)
+// Connect, once p->dst is resolved and allowed.
+static esp_err_t tcp_dial(proxy_t *p)
 {
-    p->lfd = -1;
-    p->fd = -1;
-    if (p->set.dir == RADIO_MUX_PROXY_LISTEN) {
-        p->lfd = listen_on(p, p->set.port);
-        if (p->lfd < 0) {
-            return ESP_FAIL;
-        }
-        p->state = PROXY_LISTENING;
-        ESP_LOGI(TAG, "%s: listening on TCP port %u", p->id, p->set.port);
-        return ESP_OK;
-    }
-    p->state = PROXY_CONNECTING;
-    const esp_err_t err = rcp_proxy_resolve(p, SOCK_STREAM); // resolves and applies netcfg_peer_allowed
-
-    if (err != ESP_OK) {
-        return err;
-    }
     p->fd = socket(p->dst.ss_family, SOCK_STREAM, IPPROTO_TCP);
     if (p->fd < 0) {
         ESP_LOGE(TAG, "socket: errno %d", errno);
@@ -144,6 +128,28 @@ static esp_err_t tcp_open(proxy_t *p)
     }
     p->conn_deadline_ms = rcp_proxy_now_ms() + CONNECT_TIMEOUT_MS;
     return ESP_OK;
+}
+
+static esp_err_t tcp_open(proxy_t *p)
+{
+    p->lfd = -1;
+    p->fd = -1;
+    if (p->set.dir == RADIO_MUX_PROXY_LISTEN) {
+        p->lfd = listen_on(p, p->set.port);
+        if (p->lfd < 0) {
+            return ESP_FAIL;
+        }
+        p->state = PROXY_LISTENING;
+        ESP_LOGI(TAG, "%s: listening on TCP port %u", p->id, p->set.port);
+        return ESP_OK;
+    }
+    p->state = PROXY_CONNECTING;
+    const esp_err_t err = rcp_proxy_resolve(p, SOCK_STREAM); // a literal at once; a name: the resolver task answers
+
+    if (err == ESP_ERR_NOT_FINISHED) {
+        return ESP_OK; // waits for the answer; proxy.c calls tcp_dial then
+    }
+    return err == ESP_OK ? tcp_dial(p) : err;
 }
 
 static void tcp_close(proxy_t *p)
@@ -313,6 +319,7 @@ const rcp_proxy_adapter_t rcp_proxy_adapter_tcp = {
     .name = "tcp",
     .datagram = false,
     .open = tcp_open,
+    .dial = tcp_dial,
     .close = tcp_close,
     .fds = tcp_fds,
     .ready = tcp_ready,
