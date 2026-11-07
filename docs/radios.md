@@ -261,6 +261,12 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
   again, and an unplug and replug detects it again. The "no answer after 3 resets" give-up is checked only with a
   consumer that resets on its own timeouts (Zigbee mode, on the merged branch). `uart_errors` counts, and at most one
   CH34x warning per 10 s, with no "Unsupported notification type" lines.
+- **USB reopen under traffic** (`test_usb_reopen_under_traffic_survives`, test build: the `usb_reopen` console command):
+  120 reopens while the dongle streams answers: no abort (PATCHES.md patch 33) and the radio answers again (the first
+  request after the last reopen may be lost, a cut outgoing frame). Checked 2026-11-07. The CH340 never stayed silent
+  after a reopen on the bench, also after forced overruns (`usb_stall <ms>` masks a core's interrupts) and with spinel
+  resets in between (about 400 reopens); `ch34x diag|init|clear` (test build) read the chip's registers and send the
+  open-time init that ESP-IDF's ch34x driver skips, if it ever does.
 - **C6 jobs**: a firmware push with OpenThread on the dongle leaves OpenThread alone; with a proxy peer on the C6 it gives
   409 `c6_busy`.
 - **Boot**: a stored dongle that is unplugged gives `NO_RADIO` without a fault; plugging it in gives `BR_RUNNING`.

@@ -114,6 +114,7 @@ typedef enum {
     MUX_MSG_LEASE,        // radio_mux_lease
     MUX_MSG_LEASE_END,    // radio_mux_lease_end
     MUX_MSG_COMMIT_OTBR,  // radio_mux_commit_otbr
+    MUX_MSG_TEST_REOPEN,  // radio_mux_test_usb_reopen (test build only)
 } mux_msg_type_t;
 
 typedef struct mux_call mux_call_t;
