@@ -209,11 +209,22 @@ static void on_compatibility_error(void)
 
 // Reset of the OTBR channel's radio, from the recovery ladder (OpenThread's hardware-reset hook): the C6's reset GPIO
 // or a dongle's close and reopen, through the mux. The interface waits for the RESET (mux_spinel_interface.cpp).
+// The test build's c6_hold (rcp_kill) keeps the C6 in reset instead: no RESET comes, as from an RCP that never answers.
 static esp_err_t reset_rcp(void)
 {
     radio_mux_chan_t *ch = core_radio_chan();
 
-    return ch ? radio_mux_reset(ch) : ESP_ERR_INVALID_STATE;
+    if (!ch) {
+        return ESP_ERR_INVALID_STATE;
+    }
+#ifdef OTBR_TEST_BUILD
+    if (strcmp(radio_mux_chan_id(ch), RADIO_MUX_C6_ID) == 0 && br_core_test_c6_hold()) {
+        ESP_LOGW(TAG, "test build: holding the C6 in reset");
+        gpio_set_level(P4_PIN_C6_RESET, 0);
+        return ESP_OK;
+    }
+#endif
+    return radio_mux_reset(ch);
 }
 
 static esp_err_t op_reset_rcp(void)
