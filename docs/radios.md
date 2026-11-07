@@ -285,8 +285,8 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
 - **Unplug with the console open** running `channel supported` (and `state`) in a loop while the OTBR dongle is
   unplugged: `NO_RADIO`, never `RADIO_FAULT`, no reboot (uptime keeps growing); the open console's commands get
   answers or errors, never a hang, until the session closes with the teardown.
-- **Sustained radio -> host stream** (one-MPS IN transfers, PATCHES.md patches 28 and 29: two transfers in flight, as
-  Linux's usb-serial; with one, the CH340 at 460800 under Zigbee load counted `uart_errors` 9 and `rx_errors` 5 in
+- **Sustained radio -> host stream** (one-MPS IN transfers, PATCHES.md patches 28 and 29: eight transfers in flight;
+  checked 2026-11-07: 44808 of 44808 pipelined spinel replies over the proxy, 0 errors; with one, the CH340 at 460800 under Zigbee load counted `uart_errors` 9 and `rx_errors` 5 in
   6 minutes): `rcp-proxy` raw, or `otbr`, on the CH340 at 460800 baud with a sustained radio -> host stream (a spinel
   `PROP_VALUE_GET` flood, or the dongle's own TX burst test) while the REST load of `test_unplug_during_rest_load`
   (without the unplug) runs for 5 minutes: the channel's `uart_errors`, `drops` and `rx_errors` stay 0. Repeat the

@@ -458,7 +458,7 @@ the sequence above.
    100: adjust it if that test is ever revived here. Host test: none (no USB host mocks, see patch 27).
    (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md)
 
-29. Applied (CH34x UART overrun, 2026-11-07). `usb_host_cdc_acm`: `CDC_ACM_IN_XFERS` (2) bulk IN transfers in flight
+29. Applied (CH34x UART overrun, 2026-11-07). `usb_host_cdc_acm`: `CDC_ACM_IN_XFERS` (8) bulk IN transfers in flight
    per device. `include/esp_private/cdc_host_common.h`: new `CDC_ACM_IN_XFERS`; `data.in_xfer`,
    `data.in_data_buffer_base` and `data.in_polling` become arrays of that size (`in_xfer_len` and `in_mps` stay shared:
    the transfers are allocated alike). `cdc_acm_host.c`: `cdc_acm_transfers_allocate` allocates each transfer (patch
@@ -477,16 +477,22 @@ the sequence above.
    only warns there); with more than one transfer the next data already lands in another transfer, so it is treated
    as processed, with one `ESP_LOGW` per boot; with `CDC_ACM_IN_XFERS` 1 the upstream code is compiled unchanged.
    radio_mux's `data_cb` always returns true; the ch34x and cp210x VCP drivers pass the user's callback through.
-   Memory: one more transfer per open device (one max packet, a 64-byte DMA buffer after the cache-line rounding).
+   Memory: seven more transfers per open device (one max packet each, a 64-byte DMA buffer after the cache-line
+   rounding: 448 bytes).
    Reason: on the board (CH340 OllyZig at 460800, sustained Zigbee load, 6 minutes) the single 32-byte IN transfer of
    patch 28 left the CH340 nothing to complete into between a completion and the resubmit (46 bytes/ms at 460800):
    the channel counted `uart_errors` 9 (the CH340's own UART receive-error/overrun bit, patch 27) and `rx_errors` 5
    (bad HDLC frames). Linux's usb-serial keeps two one-MPS read URBs in flight (generic driver, `bulk_in_urbs[2]`);
-   this does the same. Errors: a transfer that fails (stall, error) is not resubmitted, as upstream; the endpoint flush
+   two were not enough here. Measured on the board (rcp-proxy over TCP, frame mode, 2 minutes of pipelined spinel
+   requests, 8 per burst, ~15-29 KB/s from the dongle): with 2 transfers 23453 of 23472 replies, 19 with a bad FCS,
+   `uart_errors` 38; with 8 transfers 44808 of 44808, none bad, `uart_errors` 0, at twice the throughput. Linux
+   completes URBs in interrupt context; here the callbacks run on the CDC driver task (priority 7, below lwIP's 18),
+   so the queue must cover its scheduling delay: 8 one-packet transfers are ~5.5 ms at 460800 on a CH340. (Bursts of
+   60 pipelined requests still lose replies, but on the dongle's side: the RCP drops requests it cannot take, with
+   no flow control, and the board counts no error.) Errors: a transfer that fails (stall, error) is not resubmitted, as upstream; the endpoint flush
    then returns the other one as well (cancelled, no resubmit), and the user may see one `CDC_ACM_HOST_ERROR` per
    transfer. Upstream's `host_test` fixtures (`common_test_fixtures.cpp`) still use the single `data.in_xfer` and expect
    one IN submit: adjust them if that test is ever revived here. Host test: none (no USB host mocks, see patch 27).
-   Not yet on a board (docs/radios.md, "Sustained radio -> host stream").
 
 ## Known upstream behaviour (not patches)
 

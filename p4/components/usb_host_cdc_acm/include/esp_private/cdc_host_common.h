@@ -33,8 +33,10 @@
 
 // [patch 29] Bulk IN transfers kept in flight per device: while one completes into the user's data callback and is
 // resubmitted, the next is already queued on the pipe, so a USB serial bridge always has a transfer to complete into.
-// With 1 the driver behaves as upstream (including appending unprocessed data into the same buffer).
-#define CDC_ACM_IN_XFERS 2
+// With 1 the driver behaves as upstream (including appending unprocessed data into the same buffer). 8: two left the
+// CH340 overrunning under sustained load (the callbacks run on a priority-7 task that lwIP preempts); 8 one-packet
+// transfers are ~5.5 ms at 460800 baud (hardware 2026-11-07, PATCHES.md patch 29).
+#define CDC_ACM_IN_XFERS 8
 
 typedef struct cdc_dev_s cdc_dev_t;
 struct cdc_dev_s {
