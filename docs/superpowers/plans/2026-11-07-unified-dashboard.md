@@ -244,9 +244,38 @@ zigbee.html
 - [ ] **Step 2: Run** `make docs` and `uvx pre-commit run --files <changed>`: clean.
 - [ ] **Step 3: Commit** `docs: one Dashboard for Thread and Zigbee`.
 
+### Task 6: Docs screenshots from live hardware (user, 2026-11-07)
+
+Runs in the batched hardware pass, after the final review and its fixes, never inside Tasks 1–5 (memory: no flashing
+inside tasks). Needs the P4 back from the radio-mux session and the user's OK for one OTA; re-read
+`/device/status` `app.version` in its own step before the OTA (rig rule). The Zigbee shot needs a Zigbee client:
+ZHA set up again by the user, or a zigpy client from this PC connected for the shot.
+
+**Files:**
+- Replace: `docs/images/dashboard.png` (Thread running on the C6, USB radio row as it really is), used by
+  `README.md` and `docs/api.md`.
+- Replace: `docs/images/dashboard-radio-fault.png` (a board-wide or Thread fault that can be produced on the live
+  board without erasing the C6; if the fault differs from today's "no rcp firmware", rewrite the alt text and the
+  sentence around it in `docs/troubleshooting.md` to match what the shot shows).
+- Replace: `docs/images/home/dashboard.webp` (the docs home page; today mock data, now the live Thread shot, same
+  pixel size as the other `home/*.webp`).
+- Create: `docs/images/dashboard-zigbee.png` (Zigbee running on a radio with a connected client, Thread placeholder
+  visible), embedded in `docs/zigbee.md`'s Dashboard section.
+- Modify: the `alt` texts of every image above to list the three sections and what each shows.
+
+- [ ] **Step 1:** OTA the release build of the branch head (after the version check) and wait for it to be valid
+  (uptime over 60 s).
+- [ ] **Step 2:** Capture each state as a full-page PNG at 1280 px wide with a headless browser on this PC
+  (e.g. `chromium --headless --screenshot --window-size=1280,<height>`), the board on its normal network; convert
+  the home page one to WebP at the size of the other `docs/images/home/*.webp`.
+- [ ] **Step 3:** Look at each image: no foreign or private data beyond the test network's names and the board's
+  own addresses, as in today's screenshots.
+- [ ] **Step 4:** `make docs`: clean; commit `docs: Dashboard screenshots from the board`.
+- [ ] **Step 5:** Put the board back as found (C6 mode, Thread network) and hand it back to the radio-mux session.
+
 ### Final verification
 
 - [ ] `make test-tools`, `make test-host`, `make build` all pass; `git grep -n "zigbee.html"` shows only docs history
   and the removal test.
-- [ ] Not on a board in this plan: the P4 is with the radio-mux session. The on-board look is checked in the next
-  batched hardware pass (memory: no flashing inside tasks).
+- [ ] On the board only in Task 6 (screenshots), which also checks the on-board look in the batched hardware
+  pass (memory: no flashing inside tasks).
