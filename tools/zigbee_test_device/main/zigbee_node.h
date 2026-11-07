@@ -13,3 +13,9 @@ esp_err_t zigbee_node_factory_reset(void);
 
 /** True while the node is on a network. */
 bool zigbee_node_is_joined(void);
+
+/** Active scan on channels 11..26: prints `scan: ...` per beacon, then `scan: done`. */
+esp_err_t zigbee_node_scan(void);
+
+/** The channels steering scans from now on (a bitmask within channels 11..26; all of them at boot). */
+esp_err_t zigbee_node_set_channels(uint32_t mask);

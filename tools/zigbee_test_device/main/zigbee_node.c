@@ -15,6 +15,7 @@
 #include "zigbee_node.h"
 
 #define STEERING_RETRY_MS     1000
+#define SCAN_DURATION         3 /* (2^3 + 1) beacon intervals per channel, as BDB steering */
 #define ALL_CHANNELS_MASK     0x07FFF800U /* channels 11..26 */
 #define MANUFACTURER_NAME     "\x09""ESPRESSIF"
 #define MODEL_IDENTIFIER      "\x0d""otbr_test_dev"
@@ -194,6 +195,45 @@ esp_err_t zigbee_node_factory_reset(void)
     }
     esp_zigbee_lock_release();
     return ESP_OK;
+}
+
+/* One console line per received beacon, then `scan: done` (read by the pytest helper and by hand). */
+static void active_scan_cb(ezb_nwk_active_scan_result_t *result, void *user_ctx)
+{
+    if (result == NULL) {
+        printf("scan: done\n");
+        return;
+    }
+    printf("scan: channel %u pan 0x%04x short 0x%04x lqa %u rssi %d profile %u version %u permit %d router %d enddev %d\n",
+           result->channel_number, result->panid, result->shortaddr, result->lqa, result->rssi,
+           result->stack_profile, result->protocol_version, result->permit_join, result->router_capacity,
+           result->enddev_capacity);
+}
+
+esp_err_t zigbee_node_scan(void)
+{
+    const ezb_nwk_scan_req_t req = {
+        .scan_type = EZB_NWK_SCAN_TYPE_ACTIVE,
+        .scan_duration = SCAN_DURATION,
+        .scan_channels = ALL_CHANNELS_MASK,
+        .active_scan_cb = active_scan_cb,
+        .user_ctx = NULL,
+    };
+
+    ESP_RETURN_ON_FALSE(esp_zigbee_lock_acquire(pdMS_TO_TICKS(1000)), ESP_ERR_TIMEOUT, TAG, "zigbee lock");
+    const ezb_err_t err = ezb_nwk_scan(&req);
+    esp_zigbee_lock_release();
+    return err == EZB_ERR_NONE ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t zigbee_node_set_channels(uint32_t mask)
+{
+    ESP_RETURN_ON_FALSE((mask & ~ALL_CHANNELS_MASK) == 0 && mask != 0, ESP_ERR_INVALID_ARG, TAG, "mask");
+    ESP_RETURN_ON_FALSE(esp_zigbee_lock_acquire(pdMS_TO_TICKS(1000)), ESP_ERR_TIMEOUT, TAG, "zigbee lock");
+    const ezb_err_t primary = ezb_bdb_set_primary_channel_set(mask);
+    const ezb_err_t secondary = ezb_bdb_set_secondary_channel_set(mask);
+    esp_zigbee_lock_release();
+    return primary == EZB_ERR_NONE && secondary == EZB_ERR_NONE ? ESP_OK : ESP_FAIL;
 }
 
 bool zigbee_node_is_joined(void)
