@@ -270,7 +270,7 @@ uint32_t radio_mux_tx_timeout_ms(size_t n, uint32_t baud);
 
 // A CH34x status packet (the bridge's interrupt IN endpoint, e.g. `20 ff 0f aa`): byte 0 carries the UART state, whose
 // transient bits (the ch34x driver's CH34X_UART_STATE_TRANSIENT_MASK: overrun, parity, framing, receive error) mean
-// one UART error. Packets shorter than RADIO_MUX_CH34X_STATUS_LEN are not status packets.
+// one UART error (as the driver's defines read it; not confirmed against a datasheet). Packets shorter than RADIO_MUX_CH34X_STATUS_LEN are not status packets.
 #define RADIO_MUX_CH34X_STATUS_LEN 4
 #define RADIO_MUX_CH34X_UART_ERR_MASK 0x07
 // Whether the packet reports a UART error: false for no error bit, a short packet or NULL.

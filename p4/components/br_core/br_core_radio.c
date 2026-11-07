@@ -570,9 +570,10 @@ static void after_channel_op(void)
 }
 
 // Why there is no OpenThread now (the reason NO_RADIO shows): no channel stored in otbr, it is unplugged, a C6 job
-// holds it, it is in fault (its own reason, e.g. "no answer after 3 resets"), or it left otbr. Returns whether the channel OpenThread ran on (`ran_on`, may be NULL) was lost: it is still
-// the one stored in otbr and no C6 job holds it, so it went by an unplug or a failure, not a deliberate change (a mode
-// change, a move, a C6 job), which keeps the normal drain.
+// holds it, it is in fault (its own reason; the mux's "no answer after 3 resets" give-up lands here if an otbr flow ever
+// reaches it), or it left otbr. Returns whether the channel OpenThread ran on (`ran_on`, may be NULL) was lost: it is
+// still the one stored in otbr and no C6 job holds it, so it went by an unplug or a failure, not a deliberate change (a
+// mode change, a move, a C6 job), which keeps the normal drain.
 static bool note_no_radio_reason(radio_mux_chan_t *ran_on)
 {
     char otbr[RADIO_MUX_ID_MAX];

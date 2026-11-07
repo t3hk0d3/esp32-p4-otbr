@@ -286,7 +286,7 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
   `probe` or `passive`; `version`, `chip`, `baud` and `at` are `null` when unknown.
 - `counters` count since boot: `drops` are frames (raw: chunks) lost to a full pool or queue, `resets` the radio's
   resets, `rx_errors` HDLC frames with a bad CRC or too long, `uart_errors` receive errors the USB bridge itself
-  reported (a CH34x status packet with an overrun, parity, framing or receive error bit; 0 on other bridges and the
+  reported (a CH34x status packet with an overrun, parity, framing or receive error bit, as the ch34x driver's defines read it, not confirmed against a datasheet; 0 on other bridges and the
   C6). A dongle that sends them is also logged, at most once per 10 s.
 
 `PUT /device/channels/{id}` takes a body of at most 512 bytes with any of: `mode` (`off`, `otbr`, `ziggurat`,

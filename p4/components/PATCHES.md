@@ -434,7 +434,7 @@ the sequence above.
    traffic, on the CDC driver task that also runs the bulk IN callback: on the 115200 baud console that delayed the bulk
    IN resubmit while the dongle kept sending at 460800. radio_mux's `usb_transport.c` counts the CH34x's UART errors
    from these packets. Host test: none here (upstream's `host_test` needs the esp-usb tree's USB host mocks); the
-   CH34x status decision is host-tested in radio_mux (`radio_mux_ch34x_status`).
+   CH34x status decision is host-tested in radio_mux (`radio_mux_ch34x_uart_error`).
    (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md; docs/radios.md, counter `uart_errors`)
 
 ## Known upstream behaviour (not patches)
