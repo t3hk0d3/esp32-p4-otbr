@@ -553,7 +553,12 @@ TEST_CASE("On a method without its space at the timeout: passes", "[rcp_proxy]")
 {
     TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_PASS, sniff_text("GET", true));
     TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_PASS, sniff_text("OPTIONS", true));
-    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_PASS, sniff_text("", true)); // a client that waits for the radio
+}
+
+TEST_CASE("On no bytes yet, timed out or not: waits for the first bytes", "[rcp_proxy]")
+{
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_WAIT, sniff_text("", false));
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_WAIT, sniff_text("", true)); // judged when they come (a preconnect)
 }
 
 TEST_CASE("On a method followed by another byte than a space: passes", "[rcp_proxy]")
@@ -579,6 +584,104 @@ TEST_CASE("On a radio protocol's first byte: passes at once", "[rcp_proxy]")
 TEST_CASE("On 8 bytes that are no request line: passes without the timeout", "[rcp_proxy]")
 {
     TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_PASS, sniff_text("OPTIONSX", false));
+}
+
+/* ---- rcp_proxy_hold ---- */
+
+static rcp_proxy_hold_act_t hold_text(rcp_proxy_hold_t *h, const char *t, int64_t now_ms)
+{
+    return rcp_proxy_hold_add(h, (const uint8_t *)t, strlen(t), now_ms);
+}
+
+TEST_CASE("Hold: on a radio client's first byte: passes at once, the byte held for the radio", "[rcp_proxy]")
+{
+    rcp_proxy_hold_t h;
+    const uint8_t spinel[] = {0x7E, 0x81};
+
+    rcp_proxy_hold_start(&h, 1000);
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_PASS, rcp_proxy_hold_add(&h, spinel, sizeof(spinel), 1010));
+    TEST_ASSERT_EQUAL(2, h.len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(spinel, h.buf, 2);
+    TEST_ASSERT_FALSE(h.up);
+    TEST_ASSERT_EQUAL(-1, h.deadline_ms);
+}
+
+TEST_CASE("Hold: on a request line within the window: refuses", "[rcp_proxy]")
+{
+    rcp_proxy_hold_t h;
+
+    rcp_proxy_hold_start(&h, 1000);
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_REFUSE, hold_text(&h, "POST / H", 1005));
+    TEST_ASSERT_FALSE(h.up);
+}
+
+TEST_CASE("Hold: on silence until the deadline: the client becomes the peer once, no timer after", "[rcp_proxy]")
+{
+    rcp_proxy_hold_t h;
+
+    rcp_proxy_hold_start(&h, 1000);
+    TEST_ASSERT_EQUAL(1000 + RCP_PROXY_SNIFF_MS, h.deadline_ms);
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, rcp_proxy_hold_tick(&h, 1000 + RCP_PROXY_SNIFF_MS - 1));
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_UP, rcp_proxy_hold_tick(&h, 1000 + RCP_PROXY_SNIFF_MS));
+    TEST_ASSERT_TRUE(h.up);
+    TEST_ASSERT_EQUAL(-1, h.deadline_ms);
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, rcp_proxy_hold_tick(&h, 900000)); // no second UP, no judgement
+}
+
+TEST_CASE("Hold: on a request line long after a silent start (preconnect): refuses", "[rcp_proxy]")
+{
+    rcp_proxy_hold_t h;
+
+    rcp_proxy_hold_start(&h, 1000);
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_UP, rcp_proxy_hold_tick(&h, 1060));
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, hold_text(&h, "PO", 5000)); // a split first segment
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_REFUSE, hold_text(&h, "ST / HTT", 5020));
+}
+
+TEST_CASE("Hold: on a radio client's first byte after a silent start: passes", "[rcp_proxy]")
+{
+    rcp_proxy_hold_t h;
+    const uint8_t spinel[] = {0x7E};
+
+    rcp_proxy_hold_start(&h, 1000);
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_UP, rcp_proxy_hold_tick(&h, 1050));
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_PASS, rcp_proxy_hold_add(&h, spinel, 1, 3000));
+    TEST_ASSERT_TRUE(h.up);
+}
+
+TEST_CASE("Hold: on a method's prefix: the timeout counts from the first byte, not the accept", "[rcp_proxy]")
+{
+    rcp_proxy_hold_t h;
+
+    rcp_proxy_hold_start(&h, 1000);
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, hold_text(&h, "GET", 1040));
+    TEST_ASSERT_EQUAL(1040 + RCP_PROXY_SNIFF_MS, h.deadline_ms);
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, rcp_proxy_hold_tick(&h, 1000 + RCP_PROXY_SNIFF_MS)); // the accept's
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_PASS, rcp_proxy_hold_tick(&h, 1040 + RCP_PROXY_SNIFF_MS));
+}
+
+TEST_CASE("Hold: on a method's prefix after a silent start, then its space in time: refuses", "[rcp_proxy]")
+{
+    rcp_proxy_hold_t h;
+
+    rcp_proxy_hold_start(&h, 1000);
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_UP, rcp_proxy_hold_tick(&h, 1050));
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, hold_text(&h, "GET", 2000));
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, rcp_proxy_hold_tick(&h, 2000 + RCP_PROXY_SNIFF_MS - 1));
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_REFUSE, hold_text(&h, " /", 2000 + RCP_PROXY_SNIFF_MS - 1));
+}
+
+TEST_CASE("Hold: reads at most RCP_PROXY_SNIFF_LEN bytes", "[rcp_proxy]")
+{
+    rcp_proxy_hold_t h;
+
+    rcp_proxy_hold_start(&h, 0);
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_LEN, rcp_proxy_hold_room(&h));
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, hold_text(&h, "OPT", 1));
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_LEN - 3, rcp_proxy_hold_room(&h));
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_PASS, hold_text(&h, "IONSXYZW", 2)); // only "IONSX" is taken
+    TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_LEN, h.len);
+    TEST_ASSERT_EQUAL_MEMORY("OPTIONSX", h.buf, RCP_PROXY_SNIFF_LEN);
 }
 
 /* ---- rcp_proxy_raw_tx_failed ---- */

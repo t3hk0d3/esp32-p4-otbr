@@ -72,11 +72,10 @@ struct proxy {
     struct sockaddr_storage dst; // connect: the resolved target; UDP listen: the locked source
     socklen_t dst_len;
     int64_t conn_deadline_ms; // TCP connect in progress: give up at
-    // TCP listen: a client just accepted, its first bytes held (rcp_proxy_sniff) before it becomes the peer.
+    // TCP listen: a client accepted whose first bytes are not judged yet (rcp_proxy_hold_t). Not the peer until they
+    // pass, or until it was silent RCP_PROXY_SNIFF_MS (hold.up: then the peer, state CONNECTED, its bytes still held).
     bool sniffing;
-    uint8_t sniff[RCP_PROXY_SNIFF_LEN];
-    size_t sniff_len;
-    int64_t sniff_deadline_ms;
+    rcp_proxy_hold_t hold;
     struct sockaddr_storage sniff_from;
     int64_t http_log_ms; // the last log of a refused HTTP request (rate-limited)
     rcp_proxy_lookup_t lookup; // connect: the name lookup the session waits for (the resolver task answers)

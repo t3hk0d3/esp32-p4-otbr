@@ -1,9 +1,11 @@
 // TCP adapter (from usb_serial's tcp.c): listen (first client wins, later ones are accepted and closed at once) or
-// connect (non-blocking dial to a target the netcfg rules allow, back-off on failure). A listen client's first bytes
-// are held until rcp_proxy_sniff decides (at most RCP_PROXY_SNIFF_LEN bytes or RCP_PROXY_SNIFF_MS): an HTTP request
-// line is refused before anything reaches the radio. Clients get TCP_NODELAY and keepalive 10/2/3; every accepted
-// (and passed) client and every connect is a new peer session (reset replay on a frame channel). Bytes towards the
-// peer wait in the session's ring while the socket has no room; a ring that would overflow disconnects the peer.
+// connect (non-blocking dial to a target the netcfg rules allow, back-off on failure). A listen client's first bytes,
+// whenever they come, are held until rcp_proxy_sniff decides (rcp_proxy_hold_t: at most RCP_PROXY_SNIFF_LEN bytes or
+// RCP_PROXY_SNIFF_MS from the first byte): an HTTP request line is refused before anything reaches the radio. A client
+// silent RCP_PROXY_SNIFF_MS after the accept becomes the peer meanwhile (the radio's bytes reach it), its own bytes
+// still held. Clients get TCP_NODELAY and keepalive 10/2/3; every accepted (passed or silent) client and every connect
+// is a new peer session (reset replay on a frame channel). Bytes towards the peer wait in the session's ring while the
+// socket has no room; a ring that would overflow disconnects the peer.
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -92,13 +94,14 @@ static void peer_setup(int fd)
 // the back-off.
 static void lose_peer(proxy_t *p, const char *why)
 {
-    if (p->sniffing) { // not a peer yet: the radio and the status never saw it
+    if (p->sniffing && p->state != PROXY_CONNECTED) { // not a peer yet: the radio and the status never saw it
         p->sniffing = false;
         close(p->fd);
         p->fd = -1;
         ESP_LOGD(TAG, "%s: a new client: %s", p->id, why);
         return;
     }
+    p->sniffing = false;
     if (p->set.dir == RADIO_MUX_PROXY_CONNECT) {
         rcp_proxy_retry(p, why);
         return;
@@ -187,8 +190,8 @@ static int tcp_fds(proxy_t *p, fd_set *rd, fd_set *wr, int maxfd)
         p->wake_ms = p->conn_deadline_ms;
     } else if (p->fd >= 0) {
         maxfd = add(p->fd, rd, maxfd);
-        if (p->sniffing) {
-            p->wake_ms = p->sniff_deadline_ms;
+        if (p->sniffing && p->hold.deadline_ms >= 0) {
+            p->wake_ms = p->hold.deadline_ms;
         }
         if (p->ring.len > 0) {
             maxfd = add(p->fd, wr, maxfd);
@@ -237,19 +240,22 @@ static void connect_done(proxy_t *p)
     rcp_proxy_peer_up(p, (struct sockaddr *)&p->dst, true); // every connect is a new peer session
 }
 
-// The held first bytes are judged (timed_out: RCP_PROXY_SNIFF_MS passed since the accept): a radio client becomes the
-// peer and its held bytes go to the radio; an HTTP request is closed (refused + 1) without a byte to the radio.
-static void sniff_decide(proxy_t *p, bool timed_out)
+// Acts on the hold's decision (rcp_proxy_hold_t). UP: a silent client becomes the peer (the C6 reset replay), its bytes
+// still held. PASS: a radio client becomes the peer (if it is not yet) and its held bytes go to the radio. REFUSE: an
+// HTTP request is closed (refused + 1) without a byte to the radio; a client that was already the peer is lost.
+static void hold_act(proxy_t *p, rcp_proxy_hold_act_t a)
 {
-    const rcp_proxy_sniff_t d = rcp_proxy_sniff(p->sniff, p->sniff_len, timed_out);
-
-    if (d == RCP_PROXY_SNIFF_WAIT) {
+    switch (a) {
+    case RCP_PROXY_HOLD_WAIT:
         return;
-    }
-    p->sniffing = false;
-    if (d == RCP_PROXY_SNIFF_REFUSE) {
+    case RCP_PROXY_HOLD_UP:
+        rcp_proxy_peer_up(p, (struct sockaddr *)&p->sniff_from, true); // every accept is a new peer session
+        return;
+    case RCP_PROXY_HOLD_REFUSE: {
         const int64_t now = rcp_proxy_now_ms();
+        const bool was_peer = p->state == PROXY_CONNECTED;
 
+        p->sniffing = false;
         refuse(p->fd);
         p->fd = -1;
         p->refused++;
@@ -258,22 +264,31 @@ static void sniff_decide(proxy_t *p, bool timed_out)
             ESP_LOGW(TAG, "%s: an HTTP request (a web page?) refused (%lu refused so far)", p->id,
                      (unsigned long)p->refused);
         }
+        if (was_peer) {
+            rcp_proxy_peer_lost(p, PROXY_LISTENING);
+        }
         return;
     }
-    rcp_proxy_peer_up(p, (struct sockaddr *)&p->sniff_from, true); // every accept is a new peer session
-    if (p->sniff_len > 0) {
-        rcp_proxy_from_peer(p, p->sniff, p->sniff_len);
+    case RCP_PROXY_HOLD_PASS:
+        p->sniffing = false;
+        if (p->state != PROXY_CONNECTED) {
+            // The replayed reset is only posted to the radio's owner task, and the held bytes follow at once, so on
+            // the C6 a spinel host's first frame can meet the radio while it resets and be lost. Harmless: the host
+            // retries its RESET and gets the replayed reset notification.
+            rcp_proxy_peer_up(p, (struct sockaddr *)&p->sniff_from, true); // every accept is a new peer session
+        }
+        rcp_proxy_from_peer(p, p->hold.buf, p->hold.len); // may drop the peer (a raw write that failed)
+        return;
     }
-    p->sniff_len = 0;
 }
 
 static void read_sniff(proxy_t *p)
 {
-    const int n = recv(p->fd, p->sniff + p->sniff_len, RCP_PROXY_SNIFF_LEN - p->sniff_len, MSG_DONTWAIT);
+    uint8_t *buf = rcp_proxy_rx_buf();
+    const int n = recv(p->fd, buf, rcp_proxy_hold_room(&p->hold), MSG_DONTWAIT);
 
     if (n > 0) {
-        p->sniff_len += (size_t)n;
-        sniff_decide(p, false);
+        hold_act(p, rcp_proxy_hold_add(&p->hold, buf, (size_t)n, rcp_proxy_now_ms()));
     } else if (n == 0) {
         lose_peer(p, "closed before it sent enough to judge");
     } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
@@ -325,9 +340,8 @@ static void accept_one(proxy_t *p)
     }
     peer_setup(fd);
     p->fd = fd;
-    p->sniffing = true; // the peer once its first bytes pass (sniff_decide)
-    p->sniff_len = 0;
-    p->sniff_deadline_ms = rcp_proxy_now_ms() + RCP_PROXY_SNIFF_MS;
+    p->sniffing = true; // the peer once its first bytes pass, or once it was silent long enough (hold_act)
+    rcp_proxy_hold_start(&p->hold, rcp_proxy_now_ms());
     p->sniff_from = sa;
 }
 
@@ -346,8 +360,8 @@ static void tcp_ready(proxy_t *p, fd_set *rd, fd_set *wr)
     if (p->fd >= 0 && FD_ISSET(p->fd, rd)) {
         read_peer(p);
     }
-    if (p->sniffing && rcp_proxy_now_ms() >= p->sniff_deadline_ms) {
-        sniff_decide(p, true);
+    if (p->sniffing) {
+        hold_act(p, rcp_proxy_hold_tick(&p->hold, rcp_proxy_now_ms()));
     }
     if (p->fd >= 0 && FD_ISSET(p->fd, wr)) {
         flush(p);
