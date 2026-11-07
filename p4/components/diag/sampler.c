@@ -7,6 +7,8 @@
 
 #include "board_cores.h"
 #include "driver/temperature_sensor.h"
+#include "hal/temperature_sensor_ll.h"
+#include "hal/temperature_sensor_periph.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -18,6 +20,7 @@
 
 #include "diag_priv.h"
 #include "snapshot_json.h"
+#include "tsens_conv.h"
 #include "windows.h"
 
 static const char *TAG = "diag";
@@ -28,8 +31,19 @@ static const char *TAG = "diag";
 #define SAMPLER_PERIOD_MS 1000
 #define TASK_HEADROOM 8      // tasks that may appear between uxTaskGetNumberOfTasks and uxTaskGetSystemState
 #define MUTEX_WAIT_MS 100
-#define TSENS_RANGE_MIN_C 20 // start range only: the driver re-picks the range from the reading
-#define TSENS_RANGE_MAX_C 100
+// The chip temperature sensor runs in one fixed range, the most accurate one (-10..80 C, +-1 C), and is read with a
+// plain register read: ESP-IDF's temperature_sensor_get_celsius takes rtc_spinlock (shared by both cores, interrupts
+// masked) and, when a reading leaves its range, reprograms the range and busy-waits 300 us inside it. Under load that
+// held off the USB host interrupt and a CH340 dongle at 460800 overran its UART (hardware 2026-11-07). With the range
+// never changed, the output register (updated by the sensor on its own) needs no lock; the driver only installs and
+// enables it. Above 80 C the reading is still reported, less accurately.
+#define TSENS_RANGE_MIN_C (-10)
+#define TSENS_RANGE_MAX_C 80
+_Static_assert(DIAG_TSENS_ADC_FACTOR_INT == TEMPERATURE_SENSOR_LL_ADC_FACTOR_INT &&
+               DIAG_TSENS_DAC_FACTOR_INT == TEMPERATURE_SENSOR_LL_DAC_FACTOR_INT &&
+               DIAG_TSENS_OFFSET_FACTOR_INT == TEMPERATURE_SENSOR_LL_OFFSET_FACTOR_INT &&
+               DIAG_TSENS_DENOMINATOR == TEMPERATURE_SENSOR_LL_DENOMINATOR,
+               "ESP-IDF's temperature sensor conversion changed: update tsens_conv.h");
 
 static SemaphoreHandle_t s_mutex;
 static diag_windows_t *s_windows; // guarded by s_mutex
@@ -38,6 +52,8 @@ static diag_heap_info_t s_psram;
 static bool s_chip_temperature_valid; // guarded by s_mutex
 static float s_chip_temperature_c;
 static temperature_sensor_handle_t s_tsens; // NULL: the sensor is unavailable
+static int s_tsens_offset;                 // the fixed range's DAC offset
+static int s_tsens_delta_t;                // the chip's eFuse calibration, tenths of a degree
 static bool s_started;
 static bool s_untracked_logged; // sampler task only
 
@@ -125,7 +141,8 @@ static void sample_once(sample_buffers_t *b)
     const diag_heap_info_t psram = read_heap(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
     float chip_c = 0.0f;
-    const bool chip_valid = s_tsens && temperature_sensor_get_celsius(s_tsens, &chip_c) == ESP_OK;
+    const bool chip_valid =
+        s_tsens && diag_tsens_celsius(temperature_sensor_ll_get_raw_value(), s_tsens_offset, s_tsens_delta_t, &chip_c);
 
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     diag_windows_update(s_windows, b->samples, n, totals);
@@ -172,10 +189,23 @@ static void start_temperature_sensor(void)
     esp_err_t err = temperature_sensor_install(&config, &s_tsens);
 
     if (err == ESP_OK) {
-        err = temperature_sensor_enable(s_tsens);
+        err = ESP_ERR_NOT_FOUND; // the fixed range's offset, from the table the driver chose it from
+        for (int i = 0; i < TEMPERATURE_SENSOR_ATTR_RANGE_NUM; i++) {
+            if (temperature_sensor_attributes[i].range_min == TSENS_RANGE_MIN_C &&
+                    temperature_sensor_attributes[i].range_max == TSENS_RANGE_MAX_C) {
+                s_tsens_offset = temperature_sensor_attributes[i].offset;
+                err = ESP_OK;
+            }
+        }
+        if (err == ESP_OK) {
+            err = temperature_sensor_enable(s_tsens);
+        }
         if (err != ESP_OK) {
             temperature_sensor_uninstall(s_tsens);
         }
+    }
+    if (err == ESP_OK) {
+        s_tsens_delta_t = temperature_sensor_ll_load_calib_param();
     }
     if (err != ESP_OK) {
         s_tsens = NULL;
