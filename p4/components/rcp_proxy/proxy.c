@@ -231,7 +231,7 @@ static esp_err_t lookup_name(const char *host, uint16_t port, int socktype, stru
 // One rule for both adapters: the connect target is judged like a UDP source (the mesh is refused).
 static esp_err_t target_allowed(proxy_t *p)
 {
-    if (!netcfg_peer_allowed((const struct sockaddr *)&p->dst, NETCFG_SVC_RCP_PROXY)) {
+    if (!netcfg_peer_allowed_as((const struct sockaddr *)&p->dst, NETCFG_SVC_RCP_PROXY, "a target")) {
         ESP_LOGW(TAG, "%s: %s is not allowed by the network access rules", p->id, p->set.host);
         rcp_proxy_note_error(p, "%s: refused by the access rules", p->set.host);
         return ESP_ERR_NOT_ALLOWED;

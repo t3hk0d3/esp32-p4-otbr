@@ -280,9 +280,14 @@ bool netcfg_socket_allowed(int fd, netcfg_service_t svc)
     return lookup_allowed(socket_side, &fd, "a connection", svc);
 }
 
+bool netcfg_peer_allowed_as(const struct sockaddr *peer, netcfg_service_t svc, const char *noun)
+{
+    return lookup_allowed(peer_side, peer, noun, svc);
+}
+
 bool netcfg_peer_allowed(const struct sockaddr *peer, netcfg_service_t svc)
 {
-    return lookup_allowed(peer_side, peer, "a source", svc);
+    return netcfg_peer_allowed_as(peer, svc, "a source");
 }
 
 esp_err_t netcfg_set_trial(const netcfg_config_t *cfg)

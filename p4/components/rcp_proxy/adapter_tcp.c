@@ -256,7 +256,8 @@ static void accept_one(proxy_t *p)
     // dials an infrastructure address passes the first and is refused by the second).
     const bool busy = p->fd >= 0;
     const bool local_ok = !busy && netcfg_socket_allowed(fd, NETCFG_SVC_RCP_PROXY);
-    const bool peer_ok = local_ok && netcfg_peer_allowed((const struct sockaddr *)&sa, NETCFG_SVC_RCP_PROXY);
+    const bool peer_ok = local_ok &&
+                         netcfg_peer_allowed_as((const struct sockaddr *)&sa, NETCFG_SVC_RCP_PROXY, "a client");
 
     if (rcp_proxy_accept(busy, local_ok, peer_ok) == RCP_PROXY_REFUSE) {
         refuse(fd);

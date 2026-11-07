@@ -69,6 +69,9 @@ bool netcfg_socket_allowed(int fd, netcfg_service_t svc);
  */
 bool netcfg_peer_allowed(const struct sockaddr *peer, netcfg_service_t svc);
 
+/** netcfg_peer_allowed with `noun` naming the peer in the refusal log ("a client", "a target"; the plain one says "a source"). */
+bool netcfg_peer_allowed_as(const struct sockaddr *peer, netcfg_service_t svc, const char *noun);
+
 /**
  * Validate `cfg` and store it as the pending trial, then reboot (after a short delay, so the reply can be sent) into it.
  * ESP_ERR_INVALID_ARG for an invalid config (nothing stored; netcfg_validate names the field).
