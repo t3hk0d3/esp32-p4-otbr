@@ -7,13 +7,15 @@
 //                  br_bringup, net_init, default esp_event loop (task_core_id 0 in IDF), mDNS
 //                  (CONFIG_MDNS_TASK_AFFINITY_CPU0), esp_timer task, the radio channel mux's C6 transport:
 //                  radio_mux_c6 (the OpenThread task's priority + 1), its SPI2 interrupt (spi_bus_config_t.isr_cpu_id)
-//                  and the GPIO ISR service with the C6's INT pin (installed from radio_mux_c6).
+//                  and the GPIO ISR service with the C6's INT pin (installed from radio_mux_c6); the mux's USB
+//                  transport: usb_lib (USB host daemon, which calls usb_host_install, so the USB interrupt lands on
+//                  core 0) and USB-CDC (CDC driver task, cdc_acm_host_driver_config_t.xCoreID). Radio transports stay
+//                  off MGMT_CORE: its management code may mask interrupts for hundreds of microseconds (the chip
+//                  temperature read), which overran a USB dongle's UART.
 //   MGMT_CORE (1)  management: HTTP server (httpd_config_t.core_id, patch 1), thread_rest worker (patch 11),
 //                  device_api workers (pcap_stream, ota_http, radio_fw, rom_recover), C6 log receiver,
 //                  diag sampler, console_repl (main/console.c), the rest of app_main (CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1),
-//                  routing (the BGP and RIPng sockets), the radio channel mux: radio_mux (owner task), usb_lib (USB
-//                  host daemon) and USB-CDC (CDC driver task, cdc_acm_host_driver_config_t.xCoreID); usb_host_install
-//                  is called from the radio_mux task, so the USB interrupt lands on core 1 too; rcp_proxy (the
+//                  routing (the BGP and RIPng sockets), the radio channel mux's owner task radio_mux, rcp_proxy (the
 //                  rcp-proxy mode's sockets) and rcp_resolve (its connect targets' name lookups); br_radio
 //                  (br_core: OpenThread's start and stop on the OTBR channel, moves between channels, the RCP probe);
 //                  zigbee_tx (the Zigbee WebSocket sender, has the HTTP server task send).
