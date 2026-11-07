@@ -4,7 +4,7 @@ if(IDF_TARGET STREQUAL "linux")
     idf_component_register(SRCS "mode_fsm.c" "leader.c" "trel_peers.c" "vendor_info.c" "otbr_probe.c"
                            INCLUDE_DIRS "include" "." "test_host/stubs"
                            REQUIRES rcp_sync
-                           PRIV_REQUIRES log)
+                           PRIV_REQUIRES log radio_mux) # radio_mux: radio_mux_spinel_uint.h (otbr_probe.c)
     return()
 endif()
 

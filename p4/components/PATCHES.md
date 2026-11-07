@@ -380,7 +380,8 @@ target tests: `p4/pytest/test_rest_guard.py`, `test_br_boot.py::test_radio_fault
 configure, and that component overrides ESP-IDF's `openthread` (`EXTRA_COMPONENT_DIRS`). It holds symlinks to IDF's
 `components/openthread` (v6.1), a real `src/port` and `include` with symlinks to IDF's files plus the project's
 `p4/ot_port/mux_spinel_interface.cpp`, `mux_spinel_interface.hpp`, `mux_gone_answer.{c,h}` (the answers after GONE,
-host-tested in `p4/ot_port/test_host`) and `esp_openthread_mux.h`, and two patched copies.
+host-tested in `p4/ot_port/test_host`), `esp_openthread_mux.h` and radio_mux's header-only
+`radio_mux_spinel_uint.h` (the spinel packed-uint codec `mux_gone_answer.c` includes), and two patched copies.
 Each replaced text is looked up with `string(FIND)` first; a text that is not there any more (an IDF update) stops the
 configure with a `FATAL_ERROR` naming the IDF file. Kconfig stays `CONFIG_OPENTHREAD_RADIO_SPINEL_SPI`; the IDF tree is
 not touched. Upstream path: a runtime "custom spinel interface" radio mode with per-interface caps (spec section 5).

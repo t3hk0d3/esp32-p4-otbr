@@ -3,37 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "radio_mux_spinel_uint.h"
+
 #define TID_MAX 15
-
-// Spinel packed unsigned integer (EXI): 7 bits a byte, low first, the high bit set on all but the last.
-static size_t unpack_uint(const uint8_t *p, size_t len, uint32_t *out)
-{
-    uint32_t value = 0;
-
-    for (size_t i = 0; i < len && i < 4; i++) {
-        value |= (uint32_t)(p[i] & 0x7F) << (7 * i);
-        if (!(p[i] & 0x80)) {
-            *out = value;
-            return i + 1;
-        }
-    }
-    return 0;
-}
-
-static size_t pack_uint(uint32_t value, uint8_t *out)
-{
-    size_t n = 0;
-
-    do {
-        out[n] = value & 0x7F;
-        value >>= 7;
-        if (value) {
-            out[n] |= 0x80;
-        }
-        n++;
-    } while (value);
-    return n;
-}
 
 size_t otbr_probe_reset_frame(uint8_t out[OTBR_PROBE_FRAME_MAX])
 {
@@ -50,7 +22,7 @@ size_t otbr_probe_get_frame(uint8_t tid, uint32_t prop, uint8_t out[OTBR_PROBE_F
     }
     out[0] = OTBR_SPINEL_HEADER_FLAG | tid;
     out[1] = OTBR_SPINEL_CMD_PROP_VALUE_GET;
-    return 2 + pack_uint(prop, &out[2]);
+    return 2 + radio_mux_spinel_uint_pack(prop, &out[2]);
 }
 
 bool otbr_probe_parse(const uint8_t *frame, size_t len, otbr_spinel_msg_t *out)
@@ -62,12 +34,12 @@ bool otbr_probe_parse(const uint8_t *frame, size_t len, otbr_spinel_msg_t *out)
     }
     memset(out, 0, sizeof(*out));
     out->tid = frame[0] & 0x0F;
-    n = unpack_uint(&frame[at], len - at, &out->cmd);
+    n = radio_mux_spinel_uint_unpack(&frame[at], len - at, &out->cmd);
     if (n == 0) {
         return false;
     }
     at += n;
-    n = unpack_uint(&frame[at], len - at, &out->key);
+    n = radio_mux_spinel_uint_unpack(&frame[at], len - at, &out->key);
     if (n == 0) {
         return false;
     }
@@ -82,7 +54,7 @@ bool otbr_probe_is_reset(const otbr_spinel_msg_t *m)
     uint32_t status;
 
     return m->tid == 0 && m->cmd == OTBR_SPINEL_CMD_PROP_VALUE_IS && m->key == OTBR_SPINEL_PROP_LAST_STATUS &&
-           unpack_uint(m->value, m->value_len, &status) > 0 && status >= OTBR_SPINEL_STATUS_RESET_BEGIN &&
+           radio_mux_spinel_uint_unpack(m->value, m->value_len, &status) > 0 && status >= OTBR_SPINEL_STATUS_RESET_BEGIN &&
            status < OTBR_SPINEL_STATUS_RESET_END;
 }
 
@@ -97,7 +69,7 @@ bool otbr_probe_has_cap(const uint8_t *value, size_t len, uint32_t cap)
 
     while (at < len) {
         uint32_t c;
-        const size_t n = unpack_uint(&value[at], len - at, &c);
+        const size_t n = radio_mux_spinel_uint_unpack(&value[at], len - at, &c);
 
         if (n == 0) {
             return false;
@@ -112,7 +84,7 @@ bool otbr_probe_has_cap(const uint8_t *value, size_t len, uint32_t cap)
 
 bool otbr_probe_radio_caps(const uint8_t *value, size_t len, uint32_t *caps)
 {
-    return unpack_uint(value, len, caps) > 0;
+    return radio_mux_spinel_uint_unpack(value, len, caps) > 0;
 }
 
 uint32_t otbr_probe_missing_caps(uint32_t caps, char *out, size_t cap)
