@@ -276,8 +276,10 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
   unplug) for 5 minutes, the C6 channel's `drops` and `rx_errors` stay at or near 0 and pings to a Thread device do not
   get lost more than without the load (compare v0.4.0's open ping-loss note).
 - **C6 otbr → rcp-proxy → otbr with an otbr-agent peer** (handles of earlier attaches): `RADIO_MUX_AGENT_TEST=1
-  pytest -s -m usb_dongle -k otbr_agent` (it creates `wpan0` and routes on the host and advertises a Border Agent on the
-  LAN while it runs). While the old OpenThread drains, the agent gets its RCP's answers and resets, never the board's,
+  pytest -s -m usb_dongle -k otbr_agent` (on the host network by default: it creates `wpan0` and routes on the host;
+  with `RADIO_MUX_AGENT_NET=otbr-p0 RADIO_MUX_AGENT_BOARD=<the board's fdaa:1:: address>` the container runs on that
+  macvlan network instead and keeps them to itself; either way it advertises a Border Agent on the LAN while it runs.
+  Passed that way 2026-11-07). While the old OpenThread drains, the agent gets its RCP's answers and resets, never the board's,
   and the board's OpenThread does not log frames it did not ask for; afterwards Thread is back on the C6 with the same
   network.
 - **Two channels in `rcp-proxy` on the same port**: refused with 409 `port_taken` (`test_proxy_port_taken`); a

@@ -71,6 +71,12 @@ AGENT_IMAGE = "usbproxy-otbr:local"
 AGENT_START_S = 90
 AGENT_TTY = "/dev/ttyOTBR"  # a pty made by socat inside the container (a host pty passed in gives EIO)
 BACKBONE_IF = os.environ.get("PROXY_BACKBONE_IF", "lo")
+# Where the otbr-agent container runs: "host" (the default: wpan0 and its routes on THIS host), or a Docker macvlan
+# network on the board's segment (e.g. otbr-p0, see tools/lan_ping.sh), which keeps wpan0, its routes and the
+# agent's mDNS inside the container; then RADIO_MUX_AGENT_BOARD is the board's address on that network (otbr-p0 is
+# IPv6-only: the board's fdaa:1:: address from /device/netcfg) and the backbone is the container's eth0.
+AGENT_NET = os.environ.get("RADIO_MUX_AGENT_NET", "host")
+AGENT_BOARD = os.environ.get("RADIO_MUX_AGENT_BOARD", "")
 REST_LOAD_THREADS = 4
 
 
@@ -683,16 +689,29 @@ def agent_container():
         pytest.skip(f"no Docker image {AGENT_IMAGE}")
     names = []
 
+    if AGENT_NET != "host" and not AGENT_BOARD:
+        pytest.skip(
+            f"RADIO_MUX_AGENT_NET={AGENT_NET}: set RADIO_MUX_AGENT_BOARD to the board's address on it"
+        )
+
     def start(board, port):
         name = f"otbr-agent-c6-{os.getpid()}"
         names.append(name)
+        backbone = BACKBONE_IF if AGENT_NET == "host" else "eth0"
+        target = f"tcp:{board}:{port}"
+        if AGENT_NET != "host":
+            target = (
+                f"tcp6:[{AGENT_BOARD}]:{port}"
+                if ":" in AGENT_BOARD
+                else f"tcp:{AGENT_BOARD}:{port}"
+            )
         script = (
-            f"socat pty,link={AGENT_TTY},raw,echo=0 tcp:{board}:{port} & sleep 2; "
-            f"exec otbr-agent --vendor-name=Test --model-name=Proxy -I wpan0 -B {BACKBONE_IF} "
-            f"'spinel+hdlc+uart://{AGENT_TTY}?uart-baudrate=460800' 'trel://{BACKBONE_IF}'"
+            f"socat pty,link={AGENT_TTY},raw,echo=0 {target} & sleep 2; "
+            f"exec otbr-agent --vendor-name=Test --model-name=Proxy -I wpan0 -B {backbone} "
+            f"'spinel+hdlc+uart://{AGENT_TTY}?uart-baudrate=460800' 'trel://{backbone}'"
         )
         subprocess.run(
-            ["docker", "run", "-d", "--rm", "--name", name, "--network", "host", "--privileged",
+            ["docker", "run", "-d", "--rm", "--name", name, "--network", AGENT_NET, "--privileged",
              "--entrypoint", "sh", AGENT_IMAGE, "-c", script],
             check=True, capture_output=True, text=True,
         )  # fmt: skip
@@ -708,8 +727,9 @@ def test_c6_proxy_otbr_agent(base_url, board_ip, agent_container):
     through the proxy and reports a thread state; the board's own Thread stops while the C6 serves the proxy.
 
     Opt-in only (RADIO_MUX_AGENT_TEST=1 and the image present; never run by default): the container runs privileged on
-    the host network, so otbr-agent creates wpan0 and its routes on THIS host and advertises a Thread Border Agent
-    (_meshcop._udp) on the LAN while it runs. Uses only the C6 (no dongle needed)."""
+    the host network by default, so otbr-agent creates wpan0 and its routes on THIS host; with RADIO_MUX_AGENT_NET set
+    to a macvlan network they stay in the container. Either way it advertises a Thread Border Agent (_meshcop._udp) on
+    the LAN while it runs. Uses only the C6 (no dongle needed)."""
     set_mode(
         base_url, "rcp-proxy", "c6"
     )  # a stop of Thread on the C6 (202), then the proxy listens
