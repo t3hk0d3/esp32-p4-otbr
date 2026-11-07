@@ -471,6 +471,21 @@ TEST_CASE("TX timeout of nothing: the base", "[radio_mux]")
     TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_TX_BASE_MS, radio_mux_tx_timeout_ms(0, 115200));
 }
 
+/* ---- radio_mux_tx_transport_err ---- */
+
+TEST_CASE("TX transport error ESP_ERR_INVALID_STATE: ESP_FAIL (the mux's own checks keep that code)", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(ESP_FAIL, radio_mux_tx_transport_err(ESP_ERR_INVALID_STATE));
+}
+
+TEST_CASE("TX transport result other than ESP_ERR_INVALID_STATE: returned as it is", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, radio_mux_tx_transport_err(ESP_OK));
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, radio_mux_tx_transport_err(ESP_ERR_TIMEOUT));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_RESPONSE, radio_mux_tx_transport_err(ESP_ERR_INVALID_RESPONSE));
+    TEST_ASSERT_EQUAL(ESP_FAIL, radio_mux_tx_transport_err(ESP_FAIL));
+}
+
 /* ---- radio_mux_port_frames: the delivery kind ---- */
 
 TEST_CASE("Delivery on the C6 port: frames, whatever the consumer declares", "[radio_mux]")

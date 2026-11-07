@@ -454,8 +454,53 @@ the sequence above.
    completion. A bulk IN transfer completes only on a short packet or when full, and USB serial bridges send no ZLP:
    a received burst ending on a packet boundary stayed in the transfer until the device sent again, which showed as
    ~2 s late answers on the OllyZig (CH340) under Zigbee and rcp-proxy load. radio_mux's `usb_transport.c` asks for
-   one max packet (`in_buffer_size` 0), as Linux's usb-serial submits one max packet per URB. Host test: none (no USB
-   host mocks, see patch 27). (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md)
+   one max packet (`in_buffer_size` 0). Linux's usb-serial also reads one max packet per URB, but keeps two read URBs
+   in flight, so the bridge always has a transfer to complete into; this driver has one IN transfer in flight, so
+   every packet now waits for a software turnaround (completion, `data_cb`, resubmit) that the bridge's receive FIFO
+   must cover. Not measured under a sustained stream yet (docs/radios.md, "Verifying on a board"); if `uart_errors`
+   or `drops` move there, the fallback is a longer transfer only for devices known to send ZLPs, or a second IN
+   transfer here. Below one packet (`0 < in_buf_len < MPS` with a buffer still under one MPS after the cache-line
+   rounding, for example an HS device with MPS 512 asked for 100 bytes) `in_xfer_len` comes out 0 and a zero-length
+   IN is submitted, as upstream also did; this project never asks for that (it passes 0). Upstream's `host_test` that
+   opens with `in_buffer_size = 100` (`test_device_interaction.cpp`) would now expect a first submit of 64 bytes, not
+   100: adjust it if that test is ever revived here. Host test: none (no USB host mocks, see patch 27).
+   (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md)
+
+29. Applied (CH34x UART overrun, 2026-11-07). `usb_host_cdc_acm`: `CDC_ACM_IN_XFERS` (8) bulk IN transfers in flight
+   per device. `include/esp_private/cdc_host_common.h`: new `CDC_ACM_IN_XFERS`; `data.in_xfer`,
+   `data.in_data_buffer_base` and `data.in_polling` become arrays of that size (`in_xfer_len` and `in_mps` stay shared:
+   the transfers are allocated alike). `cdc_acm_host.c`: `cdc_acm_transfers_allocate` allocates each transfer (patch
+   28's length for all; a failed allocation frees the ones before it); `cdc_acm_transfers_free` frees each;
+   `cdc_acm_reset_in_transfer` takes the transfer's index; the new `cdc_acm_submit_in_polls` submits every transfer not
+   already polling, in index order, from `cdc_acm_start` and `cdc_acm_resume`; `cdc_acm_suspend_polling` and
+   `cdc_acm_host_close` clear every `in_polling` flag, and close halts, flushes and clears the shared endpoint once
+   (that retires every transfer on it); `in_xfer_cb` finds the transfer's index, calls `data_cb`, resets that transfer
+   and resubmits it, so it queues behind the other one. Order: the USB host queues a pipe's URBs FIFO
+   (`hcd_dwc.c` `hcd_urb_enqueue` appends to `pending_urb_tailq`; the HCD's two DMA buffers execute and retire in
+   order, the next buffer starting in the ISR as the previous completes, into `done_urb_tailq`), and
+   `usb_host.c` `_handle_pending_ep` dequeues them in that order and runs each callback to its end on the CDC driver
+   task (`usb_host_client_handle_events`), so `data_cb` sees the data in arrival order, one call at a time; the
+   resubmit inside the callback goes behind the transfer still in flight. "Data not processed" (`data_cb` returning
+   false): upstream appends the next data into the same buffer (not on the P4: `SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE`
+   only warns there); with more than one transfer the next data already lands in another transfer, so it is treated
+   as processed, with one `ESP_LOGW` per boot; with `CDC_ACM_IN_XFERS` 1 the upstream code is compiled unchanged.
+   radio_mux's `data_cb` always returns true; the ch34x and cp210x VCP drivers pass the user's callback through.
+   Memory: seven more transfers per open device (one max packet each, a 64-byte DMA buffer after the cache-line
+   rounding: 448 bytes).
+   Reason: on the board (CH340 OllyZig at 460800, sustained Zigbee load, 6 minutes) the single 32-byte IN transfer of
+   patch 28 left the CH340 nothing to complete into between a completion and the resubmit (46 bytes/ms at 460800):
+   the channel counted `uart_errors` 9 (the CH340's own UART receive-error/overrun bit, patch 27) and `rx_errors` 5
+   (bad HDLC frames). Linux's usb-serial keeps two one-MPS read URBs in flight (generic driver, `bulk_in_urbs[2]`);
+   two were not enough here. Measured on the board (rcp-proxy over TCP, frame mode, 2 minutes of pipelined spinel
+   requests, 8 per burst, ~15-29 KB/s from the dongle): with 2 transfers 23453 of 23472 replies, 19 with a bad FCS,
+   `uart_errors` 38; with 8 transfers 44808 of 44808, none bad, `uart_errors` 0, at twice the throughput. Linux
+   completes URBs in interrupt context; here the callbacks run on the CDC driver task (priority 7, below lwIP's 18),
+   so the queue must cover its scheduling delay: 8 one-packet transfers are ~5.5 ms at 460800 on a CH340. (Bursts of
+   60 pipelined requests still lose replies, but on the dongle's side: the RCP drops requests it cannot take, with
+   no flow control, and the board counts no error.) Errors: a transfer that fails (stall, error) is not resubmitted, as upstream; the endpoint flush
+   then returns the other one as well (cancelled, no resubmit), and the user may see one `CDC_ACM_HOST_ERROR` per
+   transfer. Upstream's `host_test` fixtures (`common_test_fixtures.cpp`) still use the single `data.in_xfer` and expect
+   one IN submit: adjust them if that test is ever revived here. Host test: none (no USB host mocks, see patch 27).
 
 ## Known upstream behaviour (not patches)
 

@@ -693,6 +693,11 @@ uint32_t radio_mux_tx_timeout_ms(size_t n, uint32_t baud)
     return RADIO_MUX_TX_BASE_MS + (uint32_t)((bits_ms + b - 1) / b);
 }
 
+esp_err_t radio_mux_tx_transport_err(esp_err_t err)
+{
+    return err == ESP_ERR_INVALID_STATE ? ESP_FAIL : err;
+}
+
 bool radio_mux_reset_count_request(radio_mux_reset_count_t *c)
 {
     if (++c->unanswered < RADIO_MUX_USB_DEAD_RESETS) {

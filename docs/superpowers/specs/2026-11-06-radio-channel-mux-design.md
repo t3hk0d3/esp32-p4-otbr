@@ -100,8 +100,9 @@ From the spike (`spike/dongle-rcp`) and the research (merged notes in the sessio
   netif and border router torn down, `esp_openthread_deinit`, then `init` again). The dataset and frame counters are
   host settings and survive; the EUI-64 comes from the RCP and changes with it. An incompatible RCP parks the task
   inside `esp_openthread_init` (`init_abandoned`, reboot only), so a radio must be probed before OpenThread gets it.
-- The CDC-ACM driver (2.4.1) hands `data_cb` a pointer into its one IN transfer buffer, valid only until the callback
-  returns (append is unsupported on the P4). TX always copies into its one OUT buffer and blocks. Unplug arrives as a
+- The CDC-ACM driver (2.4.1) hands `data_cb` a pointer into the buffer of the IN transfer that completed, valid only
+  until the callback returns (append is unsupported on the P4; with PATCHES.md patch 29's eight IN transfers in flight,
+  not at all). TX always copies into its one OUT buffer and blocks. Unplug arrives as a
   DEVICE_DISCONNECTED event; `cdc_acm_host_close` must then run exactly once, from one task.
 - Flow control: CP210x through the proxy's own vendor request, CH34x none, plain CDC none. DTR and RTS are set together
   in one request to avoid half-pulses on auto-reset circuits.
@@ -316,8 +317,9 @@ An `rcp-proxy` channel is configured on two independent axes *(the user's decisi
 The bridge itself does not depend on either axis:
 
 - **Delivery to the radio**: on a byte channel (raw), a byte that cannot be delivered ends the peer session: a failed
-  write (a USB write timeout can stop part-way) drops the peer, counted as a radio tx error and logged, so a ZNP or
-  EZSP dongle never sees a spliced stream; when the channel is not attached right now (nothing was written) the bytes
+  write (a USB write timeout can stop part-way) disconnects a TCP peer, counted as a radio tx error and logged, so a
+  ZNP or EZSP dongle never sees a spliced stream (a UDP lock is only let go: the same source can lock again at once, so
+  UDP raw, a testing mode, is not covered); when the channel is not attached right now (nothing was written) the bytes
   are discarded and the peer stays. On a frame channel a failed frame is lost as a whole (HDLC resyncs at the next
   flag) and the peer stays.
 
@@ -334,11 +336,14 @@ The bridge itself does not depend on either axis:
     still unread. Its socket is free at once; its PCB lingers in FIN_WAIT/TIME_WAIT, and lwIP takes such PCBs back when
     a new connection needs one.
   - A cross-protocol request from a web page (any LAN browser can POST to `http://<board>:6638/`) never reaches the
-    radio: a new client's first bytes are held until 8 came or 50 ms passed since the accept (earlier when they
-    decide it), and a client that starts with an uppercase HTTP method (GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH,
-    CONNECT, TRACE) and a space is dropped, counted as refused and logged rate-limited. Spinel, ZNP, EZSP and ASH
-    clients start with 0x7E, 0xFE or 0x1A and pass at their first byte. Only then does the client become the peer
-    (reset replay on a frame channel). UDP and connect are not checked.
+    radio: the first bytes a new client sends, whenever they come, are held until 8 came or 50 ms passed since the
+    first of them (earlier when they decide it), and a client that starts with an uppercase HTTP method (GET, POST,
+    PUT, DELETE, HEAD, OPTIONS, PATCH, CONNECT, TRACE) and a space is dropped, counted as refused and logged
+    rate-limited. Spinel starts with 0x7E, ZNP with 0xFE, ASH (EZSP) with 0x1A or 0xC0: they pass at their first
+    byte, and the client becomes the peer then (reset replay on a frame channel). A client silent 50 ms after the
+    accept (a host that waits for the reset; also a browser's preconnect) becomes the peer at that point, but its first
+    bytes are still held and judged when they come. UDP (a browser sends UDP only inside STUN/DTLS) and connect are
+    not checked.
 - Connect: dials out to `host:port`.
   - The host is an IP address or a hostname; `.local` names go over mDNS. Name lookups run on their own task
     (`rcp_resolve`), never on the proxy task, so one slot's slow lookup does not stall the other slot's frames.
@@ -360,7 +365,8 @@ The bridge itself does not depend on either axis:
 - The proxy uses the `hdlc` framing adapter in reverse, so a Linux otbr-agent (`spinel+hdlc+uart` through socat, or a
   UDP-to-pty bridge) can drive the board's C6.
 - On UDP with `hdlc` framing, a C6 frame maps directly to one datagram.
-- The mux replays the SPI reset-flag handshake when a peer connects (TCP) or first sends (UDP).
+- The mux replays the SPI reset-flag handshake when a TCP client becomes the peer (its first bytes passed, or it was
+  silent 50 ms after the accept) or a UDP peer first sends.
 
 Settings per channel, under `rcp_proxy`: `direction`, `adapter`, `port` (the local port to listen on, or the remote
 port to connect to; default 6638), `host` (connect only), and `framing` (UDP only).

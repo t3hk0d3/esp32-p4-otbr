@@ -152,6 +152,9 @@ rcp_proxy_sniff_t rcp_proxy_sniff(const uint8_t *d, size_t n, bool timed_out)
 {
     bool prefix = false; // the bytes are still the start of some method
 
+    if (n == 0) {
+        return RCP_PROXY_SNIFF_WAIT; // judged by the first bytes the client sends, whenever they come
+    }
     for (size_t i = 0; i < sizeof(HTTP_METHODS) / sizeof(HTTP_METHODS[0]); i++) {
         const size_t len = strlen(HTTP_METHODS[i]);
         const size_t cmp = n < len ? n : len;
@@ -168,6 +171,63 @@ rcp_proxy_sniff_t rcp_proxy_sniff(const uint8_t *d, size_t n, bool timed_out)
         return RCP_PROXY_SNIFF_WAIT;
     }
     return RCP_PROXY_SNIFF_PASS;
+}
+
+static rcp_proxy_hold_act_t hold_judge(rcp_proxy_hold_t *h, bool timed_out)
+{
+    switch (rcp_proxy_sniff(h->buf, h->len, timed_out)) {
+    case RCP_PROXY_SNIFF_PASS:
+        h->deadline_ms = -1;
+        return RCP_PROXY_HOLD_PASS;
+    case RCP_PROXY_SNIFF_REFUSE:
+        h->deadline_ms = -1;
+        return RCP_PROXY_HOLD_REFUSE;
+    default:
+        return RCP_PROXY_HOLD_WAIT;
+    }
+}
+
+void rcp_proxy_hold_start(rcp_proxy_hold_t *h, int64_t now_ms)
+{
+    h->len = 0;
+    h->up = false;
+    h->deadline_ms = now_ms + RCP_PROXY_SNIFF_MS;
+}
+
+size_t rcp_proxy_hold_room(const rcp_proxy_hold_t *h)
+{
+    return RCP_PROXY_SNIFF_LEN - h->len;
+}
+
+rcp_proxy_hold_act_t rcp_proxy_hold_add(rcp_proxy_hold_t *h, const uint8_t *d, size_t n, int64_t now_ms)
+{
+    const size_t room = rcp_proxy_hold_room(h);
+
+    if (n > room) {
+        n = room;
+    }
+    if (n == 0) {
+        return RCP_PROXY_HOLD_WAIT;
+    }
+    if (h->len == 0) {
+        h->deadline_ms = now_ms + RCP_PROXY_SNIFF_MS; // counted from the first byte, not from the accept
+    }
+    memcpy(h->buf + h->len, d, n);
+    h->len += n;
+    return hold_judge(h, false);
+}
+
+rcp_proxy_hold_act_t rcp_proxy_hold_tick(rcp_proxy_hold_t *h, int64_t now_ms)
+{
+    if (h->deadline_ms < 0 || now_ms < h->deadline_ms) {
+        return RCP_PROXY_HOLD_WAIT;
+    }
+    if (h->len == 0) {
+        h->up = true;
+        h->deadline_ms = -1; // until the first byte
+        return RCP_PROXY_HOLD_UP;
+    }
+    return hold_judge(h, true);
 }
 
 /* ---- raw write failure ---- */

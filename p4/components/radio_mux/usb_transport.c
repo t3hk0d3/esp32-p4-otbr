@@ -33,8 +33,10 @@ static const char *TAG = "radio_mux";
 #define USB_BUF_SIZE 512 // the OUT buffer
 // The bulk IN transfer is one max packet (0 = the endpoint's MPS, the driver's default): a transfer completes only on
 // a short packet or when full, and the bridges send no ZLP, so a 512-byte transfer held a burst ending on a packet
-// boundary until the radio sent again (~2 s late answers on a CH340, hardware 2026-11-07). Linux's usb-serial does
-// the same, one MPS per URB. PATCHES.md patch 28 keeps that length after the cache-line rounding of the buffer.
+// boundary until the radio sent again (~2 s late answers on a CH340, hardware 2026-11-07). The driver keeps eight such
+// transfers in flight (PATCHES.md patch 29; Linux's usb-serial keeps two, but completes them in interrupt context):
+// while some complete into data_cb and are resubmitted, the bridge completes into the others (with one or two, the
+// CH340 overran its UART FIFO at 460800). PATCHES.md patch 28 keeps that length after the buffer's cache-line rounding.
 #define USB_IN_BUF_SIZE 0
 #define MAX_INTERFACES 16
 #define MAX_ADDRS 8

@@ -219,7 +219,12 @@ def test_put_validation_400(base_url, body, detail):
     assert reply.json()["error"] == "bad_value", reply.text
     if detail is not None:
         assert detail in reply.json()["detail"], reply.text
-    assert get_channel(base_url) == before
+    assert without_counters(get_channel(base_url)) == without_counters(before)
+
+
+def without_counters(channel):
+    """The channel without its traffic counters, which Thread traffic moves at any time."""
+    return {k: v for k, v in channel.items() if k != "counters"}
 
 
 def test_put_validation_not_an_object(base_url):

@@ -122,7 +122,8 @@ bool radio_mux_poll(radio_mux_chan_t *ch, radio_mux_ev_t *ev);
 void radio_mux_release(radio_mux_chan_t *ch, uint8_t *slot);
 // Sends one spinel frame (frame consumers; HDLC-encoded on USB) or bytes (raw consumers). The data is copied before
 // the call returns. ESP_ERR_INVALID_STATE at once when the channel is not attached (gone, closed, reopening) or the
-// handle is of an earlier attach;
+// handle is of an earlier attach, and only then: nothing was written (a transport's own ESP_ERR_INVALID_STATE comes
+// back as ESP_FAIL, radio_mux_tx_transport_err); ESP_FAIL also for a write the device or transport failed;
 // ESP_ERR_INVALID_SIZE for a frame above RADIO_MUX_FRAME_MAX. Blocks at most radio_mux_tx_timeout_ms (100 ms plus
 // twice the write's wire time at the channel's baud) on a stalled device. On the C6: one SPI transaction, sent again a
 // tick apart while the RCP is busy (at most 4 times, ESP_ERR_TIMEOUT), once more 15 ms after a bad header

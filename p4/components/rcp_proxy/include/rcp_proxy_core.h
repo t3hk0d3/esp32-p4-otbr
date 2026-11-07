@@ -99,9 +99,12 @@ typedef enum {
 // connected to an infrastructure address).
 rcp_proxy_accept_t rcp_proxy_accept(bool peer_connected, bool local_allowed, bool peer_allowed);
 
-// TCP listen: a new client's first bytes are held until RCP_PROXY_SNIFF_LEN of them came or RCP_PROXY_SNIFF_MS passed
-// since the accept, whichever is first (earlier when they already decide it), so a web page's cross-protocol request
-// (a POST to http://<board>:6638/ from any LAN browser) never reaches the radio.
+// TCP listen: the first bytes a new client ever sends are held until RCP_PROXY_SNIFF_LEN of them came or
+// RCP_PROXY_SNIFF_MS passed since the first of them, whichever is first (earlier when they already decide it), so a
+// web page's cross-protocol request (a POST to http://<board>:6638/ from any LAN browser, also over a connection the
+// browser opened earlier and kept idle: a preconnect) never reaches the radio. A client that has sent nothing
+// RCP_PROXY_SNIFF_MS after the accept becomes the peer (a host that waits for the radio), but its bytes are still held
+// and judged when they come.
 #define RCP_PROXY_SNIFF_LEN 8
 #define RCP_PROXY_SNIFF_MS 50
 
@@ -111,11 +114,38 @@ typedef enum {
     RCP_PROXY_SNIFF_REFUSE, // an HTTP request line: drop the client, nothing reaches the radio
 } rcp_proxy_sniff_t;
 
-// The held first n bytes of a client (n <= RCP_PROXY_SNIFF_LEN; timed_out once RCP_PROXY_SNIFF_MS passed): REFUSE when
-// they start with an uppercase HTTP method (GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH, CONNECT, TRACE) and a space;
-// PASS as soon as they can no longer become one (spinel, ZNP, EZSP and ASH start with 0x7E, 0xFE, 0x1A ...), or at the
-// timeout or at RCP_PROXY_SNIFF_LEN bytes without a match ("GET" alone); WAIT while they are still a method's prefix.
+// The held first n bytes of a client (n <= RCP_PROXY_SNIFF_LEN; timed_out once RCP_PROXY_SNIFF_MS passed since the
+// first of them): REFUSE when they start with an uppercase HTTP method (GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH,
+// CONNECT, TRACE) and a space; PASS as soon as they can no longer become one (spinel starts with 0x7E, ZNP with 0xFE,
+// ASH with 0x1A or 0xC0 ...), or at the timeout or at RCP_PROXY_SNIFF_LEN bytes without a match ("GET" alone); WAIT
+// while they are still a method's prefix, and always while there are none (n 0), timed out or not.
 rcp_proxy_sniff_t rcp_proxy_sniff(const uint8_t *d, size_t n, bool timed_out);
+
+// The hold of a TCP listen client's first bytes, from the accept until they are judged (rcp_proxy_sniff).
+typedef struct {
+    uint8_t buf[RCP_PROXY_SNIFF_LEN];
+    size_t len;          // bytes held
+    bool up;             // became the peer while silent (RCP_PROXY_HOLD_UP)
+    int64_t deadline_ms; // the next timer: the silent-start deadline, then the judgement's; -1 none
+} rcp_proxy_hold_t;
+
+typedef enum {
+    RCP_PROXY_HOLD_WAIT,   // nothing to do yet
+    RCP_PROXY_HOLD_UP,     // silent RCP_PROXY_SNIFF_MS since the accept: the client becomes the peer, bytes still held
+    RCP_PROXY_HOLD_PASS,   // judged a radio client: the peer (if not up yet), then buf[0..len) to the radio
+    RCP_PROXY_HOLD_REFUSE, // judged an HTTP request: drop the client (and the peer, if up); nothing to the radio
+} rcp_proxy_hold_act_t;
+
+// At the accept: nothing held, the silent-start deadline at now_ms + RCP_PROXY_SNIFF_MS.
+void rcp_proxy_hold_start(rcp_proxy_hold_t *h, int64_t now_ms);
+// Room for more bytes: read at most this much from the client (0 never happens while undecided).
+size_t rcp_proxy_hold_room(const rcp_proxy_hold_t *h);
+// n bytes (n <= rcp_proxy_hold_room) came at now_ms: the first of them starts the judgement's RCP_PROXY_SNIFF_MS.
+// WAIT, PASS or REFUSE.
+rcp_proxy_hold_act_t rcp_proxy_hold_add(rcp_proxy_hold_t *h, const uint8_t *d, size_t n, int64_t now_ms);
+// The timer at now_ms: WAIT before the deadline; at it, UP when nothing came (once; no deadline after it until the
+// first byte), else the judgement with timed_out (PASS or REFUSE).
+rcp_proxy_hold_act_t rcp_proxy_hold_tick(rcp_proxy_hold_t *h, int64_t now_ms);
 
 typedef enum {
     RCP_PROXY_TX_DISCARD, // nothing was written: count the bytes as discarded, the peer session goes on
@@ -123,9 +153,10 @@ typedef enum {
 } rcp_proxy_tx_fail_t;
 
 // A byte channel's (raw) radio_mux_tx failed with err: ESP_ERR_INVALID_STATE means the channel is not attached right
-// now and nothing was written (DISCARD); any other error (a USB write timeout halts the endpoint part-way through) may
-// have written a part, and going on would splice the peer's byte stream (a ZNP or EZSP dongle would see a frame cut
-// into the next one), so the session ends (END). Frame channels never ask: HDLC resyncs at the next flag.
+// now and nothing was written (DISCARD; radio_mux_tx returns it only from its own checks, a transport's becomes
+// ESP_FAIL); any other error (a USB write timeout halts the endpoint part-way through) may have written a part, and
+// going on would splice the peer's byte stream (a ZNP or EZSP dongle would see a frame cut into the next one), so the
+// session ends (END). Frame channels never ask: HDLC resyncs at the next flag.
 rcp_proxy_tx_fail_t rcp_proxy_raw_tx_failed(esp_err_t err);
 
 // Byte FIFO over caller-owned storage. Not thread-safe: one task owns it.

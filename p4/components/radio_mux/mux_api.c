@@ -154,13 +154,13 @@ esp_err_t radio_mux_tx(radio_mux_chan_t *ch, const uint8_t *data, size_t n)
     if (!atomic_load(&p->tx_ok) || !is_current(p, ch)) {
         err = ESP_ERR_INVALID_STATE;
     } else if (p->kind == RADIO_MUX_KIND_C6) {
-        err = c6_transport_tx(data, n); // one SPI transaction (frames only, R23)
+        err = radio_mux_tx_transport_err(c6_transport_tx(data, n)); // one SPI transaction (frames only, R23)
     } else if (p->tx_frames) {
         const size_t len = radio_mux_hdlc_encode(data, n, p->tx_buf, p->tx_cap);
 
-        err = len ? usb_transport_write(p->tx_buf, len) : ESP_ERR_INVALID_SIZE;
+        err = len ? radio_mux_tx_transport_err(usb_transport_write(p->tx_buf, len)) : ESP_ERR_INVALID_SIZE;
     } else {
-        err = usb_transport_write(data, n);
+        err = radio_mux_tx_transport_err(usb_transport_write(data, n));
     }
     xSemaphoreGive(p->tx_lock);
     if (err == ESP_OK) {

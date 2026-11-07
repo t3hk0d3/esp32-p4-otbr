@@ -99,16 +99,18 @@ channel in `rcp-proxy` listen where another one (also an unplugged one) is store
 `port_taken`, naming the port and that channel.
 
 **Framing.** A USB channel passes bytes as they are. On the C6 the proxy turns spinel frames into HDLC bytes and back,
-so a Linux `otbr-agent` (`spinel+hdlc+uart` through `socat`) can drive the C6; when a peer connects (TCP) or first sends
-(UDP), the board resets the handshake so the host sees the RCP's reset. For UDP, `framing` is `hdlc` (default: the stream
+so a Linux `otbr-agent` (`spinel+hdlc+uart` through `socat`) can drive the C6; when a TCP client becomes the peer (its
+first bytes passed the check in the security notes below, or it stayed silent 50 ms after the connect) or a UDP peer
+first sends, the board resets the handshake so the host sees the RCP's reset. For UDP, `framing` is `hdlc` (default: the stream
 is cut at HDLC frame boundaries, one frame per datagram, which suits spinel) or `raw` (each received chunk becomes a
 datagram of at most 1024 bytes; loss and reordering corrupt the stream, so use it for testing only).
 
 **Kick.** `{"rcp_proxy": {"kick": true}}` drops the current TCP peer or releases the UDP lock at once; it is not stored.
 
 **Behaviour.** A peer that does not read until the buffer overflows is disconnected. On a USB channel (raw bytes), a
-write to the dongle that fails part-way (a USB write timeout) disconnects the peer, so the dongle never sees the rest
-of the peer's stream spliced onto a cut frame; while the dongle is not attached at all the peer's bytes are dropped
+write to the dongle that fails part-way (a USB write timeout) ends the peer session: a TCP peer is disconnected, so
+the dongle never sees the rest of its stream spliced onto a cut frame; a UDP lock is only let go (the same source can
+lock again with its next datagram, so over UDP raw the splice is not prevented: another reason it is for testing); while the dongle is not attached at all the peer's bytes are dropped
 and the peer stays. On the C6 a frame that fails is lost as a whole and the peer stays. Unplugging the dongle drops the
 peer; the channel serves again when the radio returns. Changing a proxy setting re-opens the listener or connection.
 The channel's counters and the peer's address are in `GET /device/channels` (`rcp_proxy.state`: `listening`,
@@ -121,12 +123,15 @@ while its proxy has a peer.
 **Security notes.** The proxy has no authentication and no encryption: anyone the [network access
 rules](networking.md) let through can drive the radio, so serve it only on a trusted VLAN. A web page in any LAN
 browser can open a connection to `http://<board>:6638/` (the port is not on the browsers' blocked list) and send an
-HTTP request; in TCP listen the proxy therefore holds a new client's first bytes (up to 8, at most 50 ms after the
-accept) and refuses the client, counted as refused and logged at most every 10 s, when they start with an uppercase
-HTTP method and a space (`GET `, `POST `, `PUT `, `DELETE `, `HEAD `, `OPTIONS `, `PATCH `, `CONNECT `, `TRACE `).
-Nothing of such a request reaches the radio. Radio clients start with a frame byte (`0x7E` spinel and ASH, `0xFE` ZNP,
-`0x1A` EZSP), never with a letter, and pass at their first byte. UDP and `connect` are not checked: a browser cannot
-send raw UDP, and `connect` dials a host you chose.
+HTTP request; in TCP listen the proxy therefore holds the first bytes a new client sends, whenever they come (up to
+8, at most 50 ms after the first of them), and refuses the client, counted as refused and logged at most every 10 s,
+when they start with an uppercase HTTP method and a space (`GET `, `POST `, `PUT `, `DELETE `, `HEAD `, `OPTIONS `,
+`PATCH `, `CONNECT `, `TRACE `). A client that sends nothing in the first 50 ms (a host that waits for the radio's
+reset, or a browser's idle preconnected connection) becomes the peer and gets the radio's bytes, but its own first
+bytes are still held and judged when they come. Nothing of such a request reaches the radio. Radio clients start with
+a frame byte (`0x7E` spinel, `0xFE` ZNP, ASH (EZSP) with `0x1A` cancel or the `0xC0` reset; `0x7E` ends an ASH frame),
+never with a letter, and pass at their first byte. UDP and `connect` are not checked: a browser can send UDP only
+inside STUN/DTLS (WebRTC), not bytes it chooses, and `connect` dials a host you chose.
 
 **One task for both channels.** A single proxy task serves the C6 and the dongle. Work that blocks it holds up the other
 channel for that time: resolving a `connect` host (DNS, or mDNS for `.local` names: up to about 2 s per try, again at
@@ -271,8 +276,10 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
   unplug) for 5 minutes, the C6 channel's `drops` and `rx_errors` stay at or near 0 and pings to a Thread device do not
   get lost more than without the load (compare v0.4.0's open ping-loss note).
 - **C6 otbr → rcp-proxy → otbr with an otbr-agent peer** (handles of earlier attaches): `RADIO_MUX_AGENT_TEST=1
-  pytest -s -m usb_dongle -k otbr_agent` (it creates `wpan0` and routes on the host and advertises a Border Agent on the
-  LAN while it runs). While the old OpenThread drains, the agent gets its RCP's answers and resets, never the board's,
+  pytest -s -m usb_dongle -k otbr_agent` (on the host network by default: it creates `wpan0` and routes on the host;
+  with `RADIO_MUX_AGENT_NET=otbr-p0 RADIO_MUX_AGENT_BOARD=<the board's fdaa:1:: address>` the container runs on that
+  macvlan network instead and keeps them to itself; either way it advertises a Border Agent on the LAN while it runs.
+  Passed that way 2026-11-07). While the old OpenThread drains, the agent gets its RCP's answers and resets, never the board's,
   and the board's OpenThread does not log frames it did not ask for; afterwards Thread is back on the C6 with the same
   network.
 - **Two channels in `rcp-proxy` on the same port**: refused with 409 `port_taken` (`test_proxy_port_taken`); a
@@ -280,5 +287,16 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
 - **Unplug with the console open** running `channel supported` (and `state`) in a loop while the OTBR dongle is
   unplugged: `NO_RADIO`, never `RADIO_FAULT`, no reboot (uptime keeps growing); the open console's commands get
   answers or errors, never a hang, until the session closes with the teardown.
+- **Sustained radio -> host stream** (one-MPS IN transfers, PATCHES.md patches 28 and 29: eight transfers in flight;
+  checked 2026-11-07: 44808 of 44808 pipelined spinel replies over the proxy, 0 errors; with one, the CH340 at 460800 under Zigbee load counted `uart_errors` 9 and `rx_errors` 5 in
+  6 minutes): `rcp-proxy` raw, or `otbr`, on the CH340 at 460800 baud with a sustained radio -> host stream (a spinel
+  `PROP_VALUE_GET` flood, or the dongle's own TX burst test) while the REST load of `test_unplug_during_rest_load`
+  (without the unplug) runs for 5 minutes: the channel's `uart_errors`, `drops` and `rx_errors` stay 0. Repeat the
+  Zigbee load that showed the overrun. Repeat on the CP2102N if one is at hand.
+- **HTTP refusal in TCP listen** (port 6638): `curl -X POST http://<board>:6638/ -d x` is refused (`refused` + 1, an RST
+  or FIN for curl) with `to_radio` unchanged; `otbr-agent` through `socat` on the C6 still comes up (the reset replay
+  once its first bytes pass); a kick during the hold (a client connected with `nc` that has not sent yet) drops it and
+  the next client is served; the preconnect case: a client that connects, stays silent over 50 ms (it becomes the
+  peer: `connected`), then sends `POST / HTTP/1.1` is dropped (`refused` + 1) with `to_radio` unchanged.
 - **Stop with an open session**: hold a REST session longer than 45 s while setting the OTBR channel `off`: the PUT
   answers 202, the channel stays `otbr` running with `error` `drain_timeout`, Thread keeps running.

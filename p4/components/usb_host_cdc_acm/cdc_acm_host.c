@@ -110,13 +110,14 @@ static void usb_event_cb(const usb_host_client_event_msg_t *event_msg, void *arg
  * In in_xfer_cb() we can modify IN transfer parameters, this function resets the transfer to its defaults
  *
  * @param[in] cdc_dev Pointer to CDC device
+ * @param[in] idx     Index of the IN transfer [patch 29]
  */
-static void cdc_acm_reset_in_transfer(cdc_dev_t *cdc_dev)
+static void cdc_acm_reset_in_transfer(cdc_dev_t *cdc_dev, int idx)
 {
-    assert(cdc_dev->data.in_xfer);
-    usb_transfer_t *transfer = cdc_dev->data.in_xfer;
+    assert(cdc_dev->data.in_xfer[idx]);
+    usb_transfer_t *transfer = cdc_dev->data.in_xfer[idx];
     uint8_t **ptr = (uint8_t **)(&(transfer->data_buffer));
-    *ptr = cdc_dev->data.in_data_buffer_base;
+    *ptr = cdc_dev->data.in_data_buffer_base[idx];
     // [patch 28] The length asked for at open, not the allocated buffer: urb_alloc rounds the buffer up to the cache
     // line, and a longer transfer waits for more packets (a bridge sends no ZLP), holding a burst that ended on a
     // packet boundary until the device sends again.
@@ -209,6 +210,25 @@ static esp_err_t cdc_acm_submit_poll(usb_transfer_t *xfer, bool *polling_active,
 }
 
 /**
+ * @brief Submit every BULK IN poll transfer that is not already active [patch 29]
+ *
+ * The transfers are submitted in index order; the USB host completes the transfers of one pipe in the order they
+ * were queued, and in_xfer_cb() resubmits each one behind the others, so received data keeps its order.
+ *
+ * @param[in] cdc_dev Pointer to CDC device (with IN transfers allocated)
+ * @return
+ *    - ESP_OK: All IN transfers polling
+ *    - Other errors passed from cdc_acm_submit_poll() (the first one)
+ */
+static esp_err_t cdc_acm_submit_in_polls(cdc_dev_t *cdc_dev)
+{
+    for (int i = 0; i < CDC_ACM_IN_XFERS; i++) {
+        ESP_RETURN_ON_ERROR(cdc_acm_submit_poll(cdc_dev->data.in_xfer[i], &cdc_dev->data.in_polling[i], "BULK IN"), TAG,);
+    }
+    return ESP_OK;
+}
+
+/**
  * @brief Start CDC device
  *
  * After this call, USB host peripheral will continuously poll IN endpoints.
@@ -238,9 +258,9 @@ static esp_err_t cdc_acm_start(cdc_dev_t *cdc_dev, cdc_acm_host_dev_callback_t e
             cdc_dev->data.intf_desc->bInterfaceNumber,
             cdc_dev->data.intf_desc->bAlternateSetting),
         err, TAG, "Could not claim interface");
-    if (cdc_dev->data.in_xfer) {
-        ESP_LOGD(TAG, "Submitting poll for BULK IN transfer");
-        ESP_ERROR_CHECK(cdc_acm_submit_poll(cdc_dev->data.in_xfer, &cdc_dev->data.in_polling, "BULK IN"));
+    if (cdc_dev->data.in_xfer[0]) {
+        ESP_LOGD(TAG, "Submitting poll for BULK IN transfers");
+        ESP_ERROR_CHECK(cdc_acm_submit_in_polls(cdc_dev));
     }
 
     // If notification are supported, claim its interface and start polling its IN endpoint
@@ -511,10 +531,12 @@ static void cdc_acm_transfers_free(cdc_dev_t *cdc_dev)
         usb_host_transfer_free(cdc_dev->notif.xfer);
         cdc_dev->notif.xfer = NULL;
     }
-    if (cdc_dev->data.in_xfer != NULL) {
-        cdc_acm_reset_in_transfer(cdc_dev);
-        usb_host_transfer_free(cdc_dev->data.in_xfer);
-        cdc_dev->data.in_xfer = NULL;
+    for (int i = 0; i < CDC_ACM_IN_XFERS; i++) { // [patch 29] every IN transfer
+        if (cdc_dev->data.in_xfer[i] != NULL) {
+            cdc_acm_reset_in_transfer(cdc_dev, i);
+            usb_host_transfer_free(cdc_dev->data.in_xfer[i]);
+            cdc_dev->data.in_xfer[i] = NULL;
+        }
     }
     if (cdc_dev->data.out_xfer != NULL) {
         if (cdc_dev->data.out_xfer->context != NULL) {
@@ -587,27 +609,32 @@ static esp_err_t cdc_acm_transfers_allocate(cdc_dev_t *cdc_dev, const usb_ep_des
     cdc_dev->ctrl_mux = xSemaphoreCreateMutex();
     ESP_GOTO_ON_FALSE(cdc_dev->ctrl_mux, ESP_ERR_NO_MEM, err, TAG,);
 
-    // 3. Setup IN data transfer (if it is required (in_buf_len > 0))
+    // 3. Setup IN data transfers (if it is required (in_buf_len > 0))
+    // [patch 29] CDC_ACM_IN_XFERS transfers of the same length, each with its own buffer.
     if (in_buf_len != 0) {
-        ESP_GOTO_ON_ERROR(
-            usb_host_transfer_alloc(in_buf_len, 0, &cdc_dev->data.in_xfer),
-            err, TAG,
-        );
-        assert(cdc_dev->data.in_xfer);
-        cdc_dev->data.in_xfer->callback = in_xfer_cb;
-        cdc_dev->data.in_xfer->num_bytes = in_buf_len;
-        cdc_dev->data.in_xfer->bEndpointAddress = in_ep_desc->bEndpointAddress;
-        cdc_dev->data.in_xfer->device_handle = cdc_dev->dev_hdl;
-        cdc_dev->data.in_xfer->context = cdc_dev;
-        cdc_dev->data.in_mps = USB_EP_DESC_GET_MPS(in_ep_desc);
-        cdc_dev->data.in_data_buffer_base = cdc_dev->data.in_xfer->data_buffer;
-        // [patch 28] Whole packets of the length asked for; below one packet, upstream's length (the allocated buffer).
-        cdc_dev->data.in_xfer_len = in_buf_len - in_buf_len % cdc_dev->data.in_mps;
-        if (cdc_dev->data.in_xfer_len == 0) {
-            const size_t allocated = cdc_dev->data.in_xfer->data_buffer_size;
-            cdc_dev->data.in_xfer_len = allocated - allocated % cdc_dev->data.in_mps;
+        for (int i = 0; i < CDC_ACM_IN_XFERS; i++) {
+            ESP_GOTO_ON_ERROR(
+                usb_host_transfer_alloc(in_buf_len, 0, &cdc_dev->data.in_xfer[i]),
+                err, TAG,
+            );
+            usb_transfer_t *in_xfer = cdc_dev->data.in_xfer[i];
+            assert(in_xfer);
+            in_xfer->callback = in_xfer_cb;
+            in_xfer->num_bytes = in_buf_len;
+            in_xfer->bEndpointAddress = in_ep_desc->bEndpointAddress;
+            in_xfer->device_handle = cdc_dev->dev_hdl;
+            in_xfer->context = cdc_dev;
+            cdc_dev->data.in_mps = USB_EP_DESC_GET_MPS(in_ep_desc);
+            cdc_dev->data.in_data_buffer_base[i] = in_xfer->data_buffer;
+            // [patch 28] Whole packets of the length asked for; below one packet, upstream's length (the allocated buffer).
+            // The transfers are allocated alike, so they all get the same length.
+            cdc_dev->data.in_xfer_len = in_buf_len - in_buf_len % cdc_dev->data.in_mps;
+            if (cdc_dev->data.in_xfer_len == 0) {
+                const size_t allocated = in_xfer->data_buffer_size;
+                cdc_dev->data.in_xfer_len = allocated - allocated % cdc_dev->data.in_mps;
+            }
+            in_xfer->num_bytes = cdc_dev->data.in_xfer_len;
         }
-        cdc_dev->data.in_xfer->num_bytes = cdc_dev->data.in_xfer_len;
     }
 
     // 4. Setup OUT bulk transfer (if it is required (out_buf_len > 0))
@@ -751,10 +778,13 @@ esp_err_t cdc_acm_host_close(cdc_acm_dev_hdl_t cdc_hdl)
     CDC_ACM_EXIT_CRITICAL();
 
     // Cancel polling of BULK IN and INTERRUPT IN
-    cdc_dev->data.in_polling = false;
+    // [patch 29] The IN transfers share one endpoint: halting and flushing it once retires all of them.
+    for (int i = 0; i < CDC_ACM_IN_XFERS; i++) {
+        cdc_dev->data.in_polling[i] = false;
+    }
     cdc_dev->notif.xfer_polling = false;
-    if (cdc_dev->data.in_xfer) {
-        ESP_ERROR_CHECK(cdc_acm_reset_transfer_endpoint(cdc_dev->dev_hdl, cdc_dev->data.in_xfer));
+    if (cdc_dev->data.in_xfer[0]) {
+        ESP_ERROR_CHECK(cdc_acm_reset_transfer_endpoint(cdc_dev->dev_hdl, cdc_dev->data.in_xfer[0]));
     }
     if (cdc_dev->notif.xfer != NULL) {
         ESP_ERROR_CHECK(cdc_acm_reset_transfer_endpoint(cdc_dev->dev_hdl, cdc_dev->notif.xfer));
@@ -832,7 +862,14 @@ static void in_xfer_cb(usb_transfer_t *transfer)
 {
     ESP_LOGD(TAG, "in xfer cb");
     cdc_dev_t *cdc_dev = (cdc_dev_t *)transfer->context;
-    cdc_dev->data.in_polling = false;
+    // [patch 29] Which of the IN transfers completed. Callbacks run one at a time on the CDC driver task
+    // (usb_host_client_handle_events), in the order the transfers were queued on the pipe.
+    int idx = 0;
+    while (idx < CDC_ACM_IN_XFERS - 1 && cdc_dev->data.in_xfer[idx] != transfer) {
+        idx++;
+    }
+    assert(cdc_dev->data.in_xfer[idx] == transfer);
+    cdc_dev->data.in_polling[idx] = false;
 
     if (!cdc_acm_is_transfer_completed(transfer)) {
         return;
@@ -845,14 +882,24 @@ static void in_xfer_cb(usb_transfer_t *transfer)
         // In order to save RAM and CPU time, the application can indicate that the received data was not processed and that the application expects more data.
         // In this case, the next received data must be appended to the existing buffer.
         // Since the data_buffer in usb_transfer_t is a constant pointer, we must cast away to const qualifier.
+        // [patch 29] Appending needs the next data to land in this same transfer. With more than one IN transfer in
+        // flight the next data is already queued into another one, so "not processed" is treated as processed
+        // (warned once): the user gets every transfer's data once, in order, and must keep what it has not consumed.
         if (!data_processed) {
-#if !SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
+#if CDC_ACM_IN_XFERS > 1
+            static bool not_processed_warned = false;
+            if (!not_processed_warned) {
+                not_processed_warned = true;
+                ESP_LOGW(TAG, "RX data not processed: with %d IN transfers in flight, append is not supported, treated as processed", CDC_ACM_IN_XFERS);
+            }
+            cdc_acm_reset_in_transfer(cdc_dev, idx);
+#elif !SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
             // In case the received data was not processed, the next RX data must be appended to current buffer
             uint8_t **ptr = (uint8_t **)(&(transfer->data_buffer));
             *ptr += transfer->actual_num_bytes;
 
             // Calculate remaining space in the buffer. Attention: pointer arithmetic!
-            size_t space_left = transfer->data_buffer_size - (transfer->data_buffer - cdc_dev->data.in_data_buffer_base);
+            size_t space_left = transfer->data_buffer_size - (transfer->data_buffer - cdc_dev->data.in_data_buffer_base[idx]);
             uint16_t mps = cdc_dev->data.in_mps;
             transfer->num_bytes = (space_left / mps) * mps; // Round down to MPS for next transfer
 
@@ -868,7 +915,7 @@ static void in_xfer_cb(usb_transfer_t *transfer)
                     cdc_dev->notif.cb(&serial_state_event, cdc_dev->cb_arg);
                 }
 
-                cdc_acm_reset_in_transfer(cdc_dev);
+                cdc_acm_reset_in_transfer(cdc_dev, idx);
                 cdc_dev->serial_state.bOverRun = false;
             }
 #else
@@ -877,12 +924,13 @@ static void in_xfer_cb(usb_transfer_t *transfer)
             ESP_LOGW(TAG, "RX buffer append is not supported on this target!");
 #endif
         } else {
-            cdc_acm_reset_in_transfer(cdc_dev);
+            cdc_acm_reset_in_transfer(cdc_dev, idx);
         }
     }
 
-    ESP_LOGD(TAG, "Submitting poll for BULK IN transfer");
-    cdc_acm_submit_poll(cdc_dev->data.in_xfer, &cdc_dev->data.in_polling, "BULK IN");
+    // [patch 29] Resubmit this transfer: it queues behind the other IN transfers still in flight.
+    ESP_LOGD(TAG, "Submitting poll for BULK IN transfer %d", idx);
+    cdc_acm_submit_poll(cdc_dev->data.in_xfer[idx], &cdc_dev->data.in_polling[idx], "BULK IN");
 }
 
 static void notif_xfer_cb(usb_transfer_t *transfer)
@@ -971,9 +1019,9 @@ static void cdc_acm_resume(cdc_dev_t *cdc_dev)
 {
     assert(cdc_dev);
 
-    if (cdc_dev->data.in_xfer) {
-        ESP_LOGD(TAG, "Submitting poll for BULK IN transfer");
-        ESP_ERROR_CHECK(cdc_acm_submit_poll(cdc_dev->data.in_xfer, &cdc_dev->data.in_polling, "BULK IN"));
+    if (cdc_dev->data.in_xfer[0]) {
+        ESP_LOGD(TAG, "Submitting poll for BULK IN transfers");
+        ESP_ERROR_CHECK(cdc_acm_submit_in_polls(cdc_dev)); // [patch 29]
     }
 
     if (cdc_dev->notif.xfer) {
@@ -994,8 +1042,8 @@ static void cdc_acm_suspend_polling(cdc_dev_t *cdc_dev)
 {
     assert(cdc_dev);
 
-    if (cdc_dev->data.in_xfer) {
-        cdc_dev->data.in_polling = false;
+    for (int i = 0; i < CDC_ACM_IN_XFERS; i++) { // [patch 29]
+        cdc_dev->data.in_polling[i] = false;
     }
 
     if (cdc_dev->notif.xfer) {
