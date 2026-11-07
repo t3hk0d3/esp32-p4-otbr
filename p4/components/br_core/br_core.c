@@ -183,8 +183,15 @@ static void park_gone(void)
     vTaskDelete(NULL);
 }
 
+// rcp_compatible is the C6's (the status page, the firmware page's C6 card, the metrics' br_info): OpenThread's verdict
+// on a dongle leaves it alone.
 static void set_compatible(bool compatible)
 {
+    radio_mux_chan_t *ch = core_radio_chan();
+
+    if (!ch || strcmp(radio_mux_chan_id(ch), RADIO_MUX_C6_ID) != 0) {
+        return;
+    }
     xSemaphoreTake(g_core.mutex, portMAX_DELAY);
     g_core.rcp_compatible = compatible;
     xSemaphoreGive(g_core.mutex);

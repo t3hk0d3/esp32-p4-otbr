@@ -31,6 +31,13 @@ function faultText(reason) {
          '. Updating or recovering the radio firmware may help.';
 }
 
+/** A fault of a USB radio that runs Thread: nothing on the Firmware page installs into it. */
+function dongleFaultText(reason) {
+  return 'The USB radio that runs Thread did not answer as an OpenThread RCP' + (reason ? ' (' + reason + ')' : '') +
+         ', so the Thread network cannot start. Check that it runs OpenThread RCP firmware, or choose another radio ' +
+         'on the Radios page.';
+}
+
 /** The banner of the page: {tone: ok|info|fault|idle, title, text, link: {href, label} | null}. */
 function heroFor(s) {
   if (s.mode === 'BR_RUNNING')
@@ -53,7 +60,7 @@ function heroFor(s) {
     return {
       tone : 'fault',
       title : 'Radio fault',
-      text : faultText(s.fault_reason),
+      text : dongle ? dongleFaultText(s.fault_reason) : faultText(s.fault_reason),
       link : dongle ? {href : '/radios.html', label : 'Open Radios'} : {href : '/firmware.html', label : 'Open firmware'}
     };
   if (s.mode === 'NO_RADIO')
