@@ -48,7 +48,9 @@ INTERVIEW_TIMEOUT_S = 60
 REPORT_TIMEOUT_S = 10
 LATENCY_ROUNDS = 30
 LATENCY_BUDGET_S = 0.5  # recorded, loose: the figure matters more than the bound
-HEAP_MARGIN_BYTES = 0  # internal free heap with a client and a formed network: not below the idle channel's
+# A connected client keeps its socket and WebSocket buffers (about 0.7 KB on the board, 2026-11-07); the margin allows
+# that and still catches a lost frame buffer or a growing queue.
+HEAP_MARGIN_BYTES = 4096
 HEAP_SETTLE_S = 5
 ON_OFF_CLUSTER_ID = 0x0006
 ATTR_ON_OFF = 0x0000
@@ -212,6 +214,7 @@ async def pair_device(app, device, permit=PERMIT_S):
                 joined.set_result(zigpy_device)
 
     app.add_listener(Listener())
+    device.set_channels([app.state.network_info.channel])
     device.factory_reset()
     await app.permit(permit)
     waiter = asyncio.get_running_loop().run_in_executor(
@@ -290,11 +293,16 @@ class TestZigbeeMode:
         assert get_json(base_url, "/device/status")["zigbee_channel"] is None
         if radio == C6 and dataset is not None:
             deadline = time.monotonic() + RUNNING_TIMEOUT_S
+            again = None
             while time.monotonic() < deadline:
-                again = http.get("/node/dataset/active")
-                if again.status_code == requests.codes.ok:
-                    break
+                try:  # the board is still rebooting into Thread: a dropped connection is a retry
+                    again = http.get("/node/dataset/active")
+                    if again.status_code == requests.codes.ok:
+                        break
+                except requests.RequestException:
+                    pass
                 time.sleep(2)
+            assert again is not None
             assert again.text == dataset
 
     def test_form_and_energy_scan(self, base_url, zigbee_mode, radio):
@@ -406,8 +414,8 @@ class TestZigbeeMode:
         assert status["last_client"] is not None
 
     def test_second_client_takes_over(self, base_url, zigbee_mode, radio):
-        """A second client connecting replaces the first: the first is dropped, /device/zigbee names the new one.
-        Both clients run on this host, so they differ in `since` (when each connected), not in the address."""
+        """A second client connecting replaces the first: the first is dropped and /device/zigbee names it last_client.
+        Both clients run on this host, so the address does not change, and `since` is 0 while the clock is unset."""
         zigbee_mode(radio)
         address = base_url.removeprefix("http://")
 
@@ -421,18 +429,21 @@ class TestZigbeeMode:
 
         async def body():
             async with zigpy_app(address) as first:
-                before = zigbee_status(base_url)["client"]
+                before = zigbee_status(base_url)
+                assert before["last_client"] is None, (
+                    before
+                )  # a fresh boot: nobody left yet
                 async with zigpy_app(address, auto_form=False) as second:
                     deadline = time.monotonic() + TAKEOVER_S
                     after = before
-                    while time.monotonic() < deadline and after == before:
+                    while time.monotonic() < deadline and after["last_client"] is None:
                         await asyncio.sleep(0.5)
-                        after = zigbee_status(base_url)["client"]
-                    assert after["since"] != before["since"], (before, after)
+                        after = zigbee_status(base_url)
+                    assert after["last_client"] is not None, after
                     assert (
-                        zigbee_status(base_url)["last_client"]["address"]
-                        == before["address"]
+                        after["last_client"]["address"] == before["client"]["address"]
                     )
+                    assert after["client"] is not None
                     # The first client lost its connection: a request on it fails; the second one works.
                     with pytest.raises(Exception):  # noqa: B017  (ConnectionError or a timeout)
                         await scan(first)
@@ -479,26 +490,40 @@ class TestZigbeeMode:
 
         run(body())
 
-    def test_radio_gone_and_back(self, dut, send, base_url, zigbee_mode, radio):
-        """The radio disappears: state no_radio, no reboot (uptime keeps growing); after its return the stack answers."""
-        zigbee_mode(radio)
+    def test_radio_held_comes_back(self, dut, send, base_url, zigbee_mode, radio):
+        """The C6 held in reset (`rcp_kill`) under a connected client: the client's refused sends ask for a channel
+        reset, the reset brings the C6 back, rcp_resets grows, no reboot, and the stack answers again."""
         if radio != C6:
-            pytest.skip(
-                "TODO: a dongle needs a person to unplug it (no manual opt-in in conftest yet)"
-            )
+            pytest.skip("rcp_kill holds the C6 only")
+        zigbee_mode(radio)
+        address = base_url.removeprefix("http://")
         uptime_before = get_json(base_url, "/device/diag")["uptime_s"]
-        send("rcp_kill", rb"rcp_kill: ESP_OK")
-        send("c6_hold 1", rb"c6_hold: ok")
-        wait_state(base_url, "no_radio", RECOVERY_S)
-        assert get_json(base_url, "/device/diag")["uptime_s"] >= uptime_before
-        send("c6_hold 0", rb"c6_hold: ok")
-        wait_state(base_url, EXPECTED_STATE, RECOVERY_S)
-        assert get_json(base_url, "/device/diag")["uptime_s"] > uptime_before
 
         async def body():
-            async with zigpy_app(
-                base_url.removeprefix("http://"), auto_form=False
-            ) as app:
+            async with zigpy_app(address) as app:
+                before = zigbee_status(base_url)["counters"]["rcp_resets"]
+                send("rcp_kill", rb"rcp_kill: ESP_OK")
+                try:
+                    deadline = time.monotonic() + RECOVERY_S
+                    now = zigbee_status(base_url)
+                    while time.monotonic() < deadline:
+                        with contextlib.suppress(
+                            Exception
+                        ):  # sends fail until the reset brought the C6 back
+                            await asyncio.wait_for(app.permit(0), 5)
+                        now = zigbee_status(base_url)
+                        if (
+                            now["counters"]["rcp_resets"] > before
+                            and now["state"] == EXPECTED_STATE
+                        ):
+                            break
+                        await asyncio.sleep(1)
+                    assert now["counters"]["rcp_resets"] > before, now
+                    assert now["state"] == EXPECTED_STATE, now
+                finally:
+                    send(
+                        "c6_hold 0", rb"c6_hold: ok"
+                    )  # the flag persists: never leave it for the next boot
                 scan = await asyncio.wait_for(
                     app.energy_scan(
                         channels=zigpy_types.Channels.ALL_CHANNELS,
@@ -510,6 +535,18 @@ class TestZigbeeMode:
                 assert len(scan) == ENERGY_CHANNELS
 
         run(body())
+        assert get_json(base_url, "/device/diag")["uptime_s"] > uptime_before
+
+    def test_radio_gone_and_back(self, base_url, radio):
+        """The radio disappears (GONE): state no_radio, no reboot; after its return the stack answers. On the C6 GONE
+        comes only from a C6 firmware job: test_radio_held_comes_back covers the C6's loss."""
+        if radio == C6:
+            pytest.skip(
+                "the C6 has no GONE without a firmware job; test_radio_held_comes_back covers its loss"
+            )
+        pytest.skip(
+            "TODO: a dongle needs a person to unplug it (no manual opt-in in conftest yet)"
+        )
 
     def test_internal_heap_not_lower_than_idle(
         self, record_property, base_url, zigbee_mode, radio

@@ -199,6 +199,16 @@ class ZigbeeTestDevice:
         if was_joined:
             self._wait_line(JOINED, mark, LEAVE_TIMEOUT_S, expect="no")
 
+    def set_channels(self, channels):
+        """Steer only on these 802.15.4 channels from now on (until the device restarts): the coordinator's channel
+        keeps it off other networks nearby and shortens each steering round."""
+        mask = sum(1 << channel for channel in channels)
+        mark = self._mark()
+        self._send(f"channels {mask:#x}")
+        line = self._wait_line(re.compile(r"channels: (\S+)\s*$"), mark)
+        if "failed" in line:
+            raise RuntimeError(f"the test device refused channels {mask:#x}")
+
     def wait_joined(self, timeout=JOIN_TIMEOUT_S):
         """Block until the device is on a network (it retries steering every second while permit-join is open)."""
         deadline = time.monotonic() + timeout
