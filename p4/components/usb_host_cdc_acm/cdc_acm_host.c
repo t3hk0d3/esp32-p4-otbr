@@ -25,6 +25,8 @@
 #include "cdc_host_acm_compliant.h"
 
 static const char *TAG = "cdc_acm";
+// [patch 33] Rounds of halt, flush, clear and interface release a close tries, one tick apart.
+#define CDC_ACM_CLOSE_ATTEMPTS 10
 
 // Control transfer constants
 #define CDC_ACM_CTRL_TRANSFER_SIZE (64)   // All standard CTRL requests and responses fit in this size
@@ -775,25 +777,45 @@ esp_err_t cdc_acm_host_close(cdc_acm_dev_hdl_t cdc_hdl)
     // No user callbacks from this point
     cdc_dev->notif.cb = NULL;
     cdc_dev->data.in_cb = NULL;
+    cdc_dev->closing = true; // [patch 33] and no resubmits from the IN callbacks
     CDC_ACM_EXIT_CRITICAL();
 
     // Cancel polling of BULK IN and INTERRUPT IN
     // [patch 32] The IN transfers share one endpoint: halting and flushing it once retires all of them.
-    for (int i = 0; i < CDC_ACM_IN_XFERS; i++) {
-        cdc_dev->data.in_polling[i] = false;
+    // [patch 33] An IN callback that was already running on the CDC driver task (another core) when `closing` was set
+    // may still resubmit its transfer once; the interface release then fails (a transfer in flight). So the halt,
+    // flush, clear and release are retried a few ticks apart (the late transfer is cancelled in the next round, and a
+    // cancelled transfer is never resubmitted), and a close that still fails returns the error instead of aborting.
+    esp_err_t release_err = ESP_FAIL;
+    int attempt = 0;
+    for (; attempt < CDC_ACM_CLOSE_ATTEMPTS && release_err != ESP_OK; attempt++) {
+        if (attempt > 0) {
+            vTaskDelay(1);
+        }
+        for (int i = 0; i < CDC_ACM_IN_XFERS; i++) {
+            cdc_dev->data.in_polling[i] = false;
+        }
+        cdc_dev->notif.xfer_polling = false;
+        if (cdc_dev->data.in_xfer[0]) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(cdc_acm_reset_transfer_endpoint(cdc_dev->dev_hdl, cdc_dev->data.in_xfer[0]));
+        }
+        if (cdc_dev->notif.xfer != NULL) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(cdc_acm_reset_transfer_endpoint(cdc_dev->dev_hdl, cdc_dev->notif.xfer));
+        }
+        release_err = usb_host_interface_release(p_cdc_acm_obj->cdc_acm_client_hdl, cdc_dev->dev_hdl,
+                      cdc_dev->data.intf_desc->bInterfaceNumber);
     }
-    cdc_dev->notif.xfer_polling = false;
-    if (cdc_dev->data.in_xfer[0]) {
-        ESP_ERROR_CHECK(cdc_acm_reset_transfer_endpoint(cdc_dev->dev_hdl, cdc_dev->data.in_xfer[0]));
+    if (release_err == ESP_OK && attempt > 1) {
+        ESP_LOGW(TAG, "close: a late transfer, interface released after %d rounds", attempt);
     }
-    if (cdc_dev->notif.xfer != NULL) {
-        ESP_ERROR_CHECK(cdc_acm_reset_transfer_endpoint(cdc_dev->dev_hdl, cdc_dev->notif.xfer));
+    if (release_err != ESP_OK) {
+        ESP_LOGE(TAG, "close: interface release failed: %s", esp_err_to_name(release_err));
+        xSemaphoreGive(p_cdc_acm_obj->open_close_mutex);
+        return release_err;
     }
-
-    // Release all interfaces
-    ESP_ERROR_CHECK(usb_host_interface_release(p_cdc_acm_obj->cdc_acm_client_hdl, cdc_dev->dev_hdl, cdc_dev->data.intf_desc->bInterfaceNumber));
     if ((cdc_dev->notif.intf_desc != NULL) && (cdc_dev->notif.intf_desc != cdc_dev->data.intf_desc)) {
-        ESP_ERROR_CHECK(usb_host_interface_release(p_cdc_acm_obj->cdc_acm_client_hdl, cdc_dev->dev_hdl, cdc_dev->notif.intf_desc->bInterfaceNumber));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(usb_host_interface_release(p_cdc_acm_obj->cdc_acm_client_hdl, cdc_dev->dev_hdl,
+                                      cdc_dev->notif.intf_desc->bInterfaceNumber));
     }
 
     CDC_ACM_ENTER_CRITICAL();
@@ -930,7 +952,9 @@ static void in_xfer_cb(usb_transfer_t *transfer)
 
     // [patch 32] Resubmit this transfer: it queues behind the other IN transfers still in flight.
     ESP_LOGD(TAG, "Submitting poll for BULK IN transfer %d", idx);
-    cdc_acm_submit_poll(cdc_dev->data.in_xfer[idx], &cdc_dev->data.in_polling[idx], "BULK IN");
+    if (!cdc_dev->closing) { // [patch 33] a close is halting the endpoint: no new transfer behind its back
+        cdc_acm_submit_poll(cdc_dev->data.in_xfer[idx], &cdc_dev->data.in_polling[idx], "BULK IN");
+    }
 }
 
 static void notif_xfer_cb(usb_transfer_t *transfer)
@@ -956,7 +980,9 @@ static void notif_xfer_cb(usb_transfer_t *transfer)
                 cdc_dev->notif.cb(&vendor_event, cdc_dev->cb_arg);
             }
             ESP_LOGD(TAG, "Submitting poll for INTR IN transfer");
-            cdc_acm_submit_poll(cdc_dev->notif.xfer, &cdc_dev->notif.xfer_polling, "INTR IN");
+            if (!cdc_dev->closing) { // [patch 33]
+                cdc_acm_submit_poll(cdc_dev->notif.xfer, &cdc_dev->notif.xfer_polling, "INTR IN");
+            }
             return;
         }
         switch (notif->bNotificationCode) {
@@ -995,7 +1021,9 @@ static void notif_xfer_cb(usb_transfer_t *transfer)
 
         // Start polling for new data again
         ESP_LOGD(TAG, "Submitting poll for INTR IN transfer");
-        cdc_acm_submit_poll(cdc_dev->notif.xfer, &cdc_dev->notif.xfer_polling, "INTR IN");
+        if (!cdc_dev->closing) { // [patch 33]
+            cdc_acm_submit_poll(cdc_dev->notif.xfer, &cdc_dev->notif.xfer_polling, "INTR IN");
+        }
     }
 }
 

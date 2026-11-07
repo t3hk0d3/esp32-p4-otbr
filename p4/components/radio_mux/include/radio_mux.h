@@ -300,6 +300,16 @@ esp_err_t radio_mux_c6_job_begin(void);
 // 5 s (later: logged). No-op before radio_mux_start.
 void radio_mux_c6_job_end(bool c6_ok);
 
+
+#ifdef OTBR_TEST_BUILD
+/* ---- test build only: CH340 experiments (2026-11-07) ---- */
+// A control request on the open USB dongle (vendor or standard). ESP_ERR_INVALID_STATE when no dongle is open.
+esp_err_t radio_mux_test_usb_ctrl(uint8_t bm_request_type, uint8_t b_request, uint16_t w_value, uint16_t w_index,
+                                  uint16_t w_length, uint8_t *data);
+// The owner's USB reset path (close, open, RESET event) on the dongle, whatever is attached. Waits for nothing.
+esp_err_t radio_mux_test_usb_reopen(void);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

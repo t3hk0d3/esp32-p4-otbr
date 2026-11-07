@@ -1255,6 +1255,26 @@ static void handle(const mux_msg_t *m)
     case MUX_MSG_RESET:
         handle_reset(m->h);
         break;
+#ifdef OTBR_TEST_BUILD
+    case MUX_MSG_TEST_REOPEN: { // the USB part of handle_reset, without the consumer's handle check
+        mux_port_t *p = &g_mux.usb;
+
+        if (p->chan && usb_transport_is_open()) {
+            atomic_store(&p->tx_ok, false);
+            mux_set_rx(p, MUX_RX_DISCARD);
+            usb_transport_close(p);
+            const bool ok = open_dev(p, mux_eff_baud(p->chan));
+
+            mux_set_rx(p, p->tx_frames ? MUX_RX_FRAMES : MUX_RX_RAW);
+            atomic_store(&p->tx_ok, ok);
+            if (ok) {
+                mux_post_ctl(p, RADIO_MUX_EV_RESET);
+            }
+            ESP_LOGW(TAG, "test: %s reopened: %s", p->chan->id, ok ? "ok" : "FAILED");
+        }
+        break;
+    }
+#endif
     case MUX_MSG_NOTE_FW:
         handle_note_fw(m->note.h, &m->note.fw);
         break;
@@ -1382,3 +1402,11 @@ bool mux_post(const mux_msg_t *m)
 {
     return g_mux.queue && xQueueSend(g_mux.queue, m, 0) == pdTRUE;
 }
+#ifdef OTBR_TEST_BUILD
+esp_err_t radio_mux_test_usb_reopen(void)
+{
+    const mux_msg_t m = {.type = MUX_MSG_TEST_REOPEN};
+
+    return mux_post(&m) ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+#endif

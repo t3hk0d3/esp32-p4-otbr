@@ -505,6 +505,55 @@ def test_proxy_listen_tcp_latency(base_url, board_ip, dongle):
     assert counters["frames_out"] >= LATENCY_ROUNDS or counters["bytes_out"] > 0
 
 
+REOPEN_ROUNDS = 60  # a crash needed ~100 reopens under traffic before PATCHES.md patch 33; 60 x 2 here
+REOPEN_BURST = (
+    30  # pipelined requests per round, so the IN callbacks run while the device closes
+)
+
+
+def test_usb_reopen_under_traffic_survives(dut, base_url, board_ip, dongle, send):
+    # The mux's USB reset path (close, open) while the dongle streams answers: no abort (PATCHES.md patch 33, the IN
+    # callbacks on NET_CORE racing cdc_acm_host_close on MGMT_CORE), and the radio still answers after the last reopen
+    # (within three tries).
+    # Uses the test build's usb_reopen console command.
+    assert put_channel(base_url, {"mode": "rcp-proxy"}, dongle).status_code == 200
+    wait_proxy_state(base_url, dongle, "listening", PROXY_PEER_WAIT_S)
+    uptime = requests.get(f"{base_url}/device/diag", timeout=10).json()["uptime_s"]
+    sock = connect(board_ip, proxy_state(base_url, dongle)["port"])
+    try:
+        burst = b"".join(
+            hdlc_frame(spinel_get(SPINEL_PROP_PROTOCOL_VERSION, tid=1 + k % 15))
+            for k in range(REOPEN_BURST)
+        )
+        for _ in range(REOPEN_ROUNDS):
+            sock.sendall(burst)
+            send("usb_reopen", rb"usb_reopen: ESP_OK")
+            sock.sendall(burst)
+            send("usb_reopen", rb"usb_reopen: ESP_OK")
+            time.sleep(0.3)
+        time.sleep(2)
+        while True:  # drain what the reopens left behind
+            ready, _, _ = select.select([sock], [], [], 0.2)
+            if not ready or not sock.recv(65536):
+                break
+        # A reopen can cut an outgoing burst mid-frame, and the RCP then drops the next request with the partial
+        # bytes (seen on the board: the first request after the loop goes unanswered, the following ones answer), as
+        # a spinel host's retry would: up to three tries.
+        for attempt in range(3):
+            sock.sendall(hdlc_frame(spinel_get(SPINEL_PROP_PROTOCOL_VERSION)))
+            try:
+                read_frame(sock, timeout=2.0, header=SPINEL_HEADER_FLAG | 1)
+                break
+            except pytest.fail.Exception:
+                if attempt == 2:
+                    raise
+    finally:
+        sock.close()
+    assert (
+        requests.get(f"{base_url}/device/diag", timeout=10).json()["uptime_s"] > uptime
+    ), "the board rebooted"
+
+
 def accept_and_close(listener, stop, times):
     """Accept connections on the host listener and close each at once; record when each arrived."""
     listener.settimeout(1)

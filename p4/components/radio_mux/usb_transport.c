@@ -492,3 +492,16 @@ bool usb_transport_dev_attached(uint8_t addr)
     }
     return false;
 }
+
+#ifdef OTBR_TEST_BUILD
+esp_err_t radio_mux_test_usb_ctrl(uint8_t bm_request_type, uint8_t b_request, uint16_t w_value, uint16_t w_index,
+                                  uint16_t w_length, uint8_t *data)
+{
+    const cdc_acm_dev_hdl_t hdl = s_hdl;
+
+    if (!hdl) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return cdc_acm_host_send_custom_request(hdl, bm_request_type, b_request, w_value, w_index, w_length, data);
+}
+#endif
