@@ -280,37 +280,6 @@ function rcpText(installed) {
   return installed === '' ? 'none (no valid RCP firmware)' : String(installed);
 }
 
-/* "Thread runs on: <label>": the label comes from /device/channels, asked once per radio the status names. */
-var channelLabels = {};
-var labelAsked = null;
-
-function renderThreadOn(s) {
-  var chip = $('h-thread-on');
-  var id = s.otbr_channel;
-  if (id === undefined) {
-    chip.classList.add('hidden');
-    return;
-  }
-  chip.classList.remove('hidden');
-  if (id === null) {
-    chip.textContent = 'Thread runs on: no radio';
-    chip.className = 'chip chip-warn';
-    return;
-  }
-  chip.textContent = 'Thread runs on: ' + (channelLabels[id] || id);
-  chip.className = 'chip chip-ok';
-  if (!channelLabels[id] && labelAsked !== id) {
-    labelAsked = id;
-    kit.request('GET', '/device/channels', {timeoutMs : 5000}).then(function(r) {
-      if (r.status !== 200 || !r.body || !r.body.channels)
-        return;
-      r.body.channels.forEach(function(c) { channelLabels[c.id] = c.label; });
-      if (lastStatus)
-        renderThreadOn(lastStatus);
-    }, function() {});
-  }
-}
-
 function render(s) {
   var wasRunning = lastMode === 'BR_RUNNING';
   lastMode = s.mode;
@@ -320,8 +289,18 @@ function render(s) {
     threadOff();
   lastSeen = env.now();
   show('s-offline', false);
-  kit.renderThreadNotice(s, null, true);
-  renderThreadOn(s);
+  var b = L.boardHealthFor(s);
+  $('board-hero').className = 'card hero hero-' + b.tone;
+  setText('b-title', b.title);
+  setText('b-text', b.text);
+  show('b-link', !!b.link);
+  if (b.link) {
+    $('b-link').setAttribute('href', b.link.href);
+    setText('b-link', b.link.label);
+  }
+  var active = L.isThreadActive(s);
+  show('thread-on', active);
+  show('thread-off', !active);
   var h = L.threadHeroFor(s);
   $('hero').className = 'card hero hero-' + h.tone;
   setText('h-title', h.title);
@@ -331,7 +310,6 @@ function render(s) {
     $('h-link').setAttribute('href', h.link.href);
     setText('h-link', h.link.label);
   }
-  setText('h-mode', s.mode);
   setText('t-app', s.app.version);
   setText('t-slot', 'Slot ' + s.app.slot);
   setText('t-storage', s.storage_ok === undefined ? '-' : s.storage_ok ? 'OK' : 'Failed: settings are not saved');
@@ -418,6 +396,24 @@ function refreshZigbee() {
     return ok;
   }, function() {
     renderZigbeeBody(null);
+    return false;
+  });
+}
+
+/* The Radios card: the two slots and their modes from /device/channels; "-" when it cannot be read. */
+function renderRadios(body) {
+  var rows = L.radiosView(body);
+  setText('t-radio-c6', rows[0].mode);
+  setText('t-radio-usb', rows[1].mode);
+}
+
+function refreshChannels() {
+  return kit.request('GET', '/device/channels', {timeoutMs : 5000}).then(function(r) {
+    var ok = r.status === 200 && !!r.body && !!r.body.channels;
+    renderRadios(ok ? r.body : null);
+    return ok;
+  }, function() {
+    renderRadios(null);
     return false;
   });
 }
@@ -586,6 +582,7 @@ function init() {
   kit.poller(refreshDiag, 10000, 'statusSection');
   threadPoll = kit.poller(refreshThread, 10000, 'statusSection');
   kit.poller(refreshNetwork, 10000, null);
+  kit.poller(refreshChannels, 10000, 'statusSection');
   zigbeePoll = kit.poller(refreshZigbee, 5000, 'statusSection');
 }
 
@@ -595,6 +592,7 @@ return {
   refreshDiag : refreshDiag,
   refreshThread : refreshThread,
   refreshNetwork : refreshNetwork,
+  refreshChannels : refreshChannels,
   refreshZigbee : refreshZigbee,
   reboot : reboot,
   kit : kit

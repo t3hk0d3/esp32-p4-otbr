@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from device_js import logic, needs_node, page, scenario
+from device_js import FRONTEND, logic, needs_node, page, scenario
 
 
 def st(expression):
@@ -289,7 +289,7 @@ class TestStatusPage:
             page("index", ROUTES)
             + """
             await t.page.refreshStatus();
-            return ['h-title','h-mode','t-app','t-slot','t-storage','t-rcp','t-compat','t-base','t-jumper','t-ipv4',
+            return ['h-title','t-app','t-slot','t-storage','t-rcp','t-compat','t-base','t-jumper','t-ipv4',
                     't-ipv6','t-pd-state','t-pd-prefix','t-sniffer-state','t-sniffer-detail']
                    .map((i) => t.el(i).textContent).concat([t.el('s-offline').hidden(), t.el('hero').className,
                    t.el('h-link').hidden()]);
@@ -297,7 +297,6 @@ class TestStatusPage:
         )
         assert r == [
             "Border router running",
-            "BR_RUNNING",
             "1.0",
             "Slot 0",
             "OK",
@@ -437,6 +436,7 @@ class TestStatusPage:
             + "t.page.init(); await t.advance(100); return [...new Set(t.calls.map((c) => c.url))].sort();"
         )
         assert r == [
+            "/device/channels",
             "/device/diag",
             "/device/names",
             "/device/network",
@@ -768,3 +768,124 @@ class TestUxReview:
             "esp-otbr-d2cafc",
             "Ethernet port",
         ]
+
+
+SECTION_ROUTES = (
+    "(u, o) => o.method === 'POST' ? ({status: 200, body: {status: 'rebooting'}}) : t.fail ? ({status: 500, body: {}})"
+    " : ({status: 200, body: u === '/device/diag' ? H.DIAG : u === '/device/network' ? H.NETWORK"
+    " : u === '/get_properties' ? H.PROPS : u === '/ipaddr' ? H.IPADDR"
+    f" : u === '/device/channels' ? (t.c === undefined ? {json.dumps(CHANNELS)} : t.c) : (t.s || H.STATUS)}})"
+)
+
+
+def sections(tail, before=""):
+    return scenario(page("index", SECTION_ROUTES) + before + tail)
+
+
+@needs_node
+class TestDashboardSections:
+    """StatusPage: the Device and network and Thread sections (one Dashboard, 2026-11-07 spec)"""
+
+    def test_running_thread_shows_board_ok_and_the_thread_content(self):
+        # On BR_RUNNING with a Thread channel: board line "Board OK", Thread content shown, placeholder hidden.
+        r = sections(
+            f"t.s = {status(mode='BR_RUNNING', otbr_channel='c6')}; await t.page.refreshStatus();"
+            " return [t.el('b-title').textContent, t.el('board-hero').className, t.el('thread-on').hidden(),"
+            " t.el('thread-off').hidden()];"
+        )
+        assert r == ["Board OK", "card hero hero-ok", False, True]
+
+    def test_no_thread_channel_shows_the_placeholder_and_clears_thread_data(self):
+        # On otbr_channel null: Thread content hidden, placeholder shown with its link, Thread values cleared.
+        r = sections(
+            f"t.s = {status(mode='BR_RUNNING', otbr_channel='c6')}; await t.page.refreshStatus();"
+            " await t.page.refreshThread();"
+            f" t.s = {status(mode='NO_RADIO', otbr_channel=None)}; await t.page.refreshStatus();"
+            " return [t.el('thread-on').hidden(), t.el('thread-off').hidden(), t.el('thread-off').textContent,"
+            " t.el('thread-off-link').getAttribute('href'), t.el('t-net-name').textContent];"
+        )
+        assert r[0:2] == [True, False]
+        assert r[3:] == ["/radios.html", "-"]
+        html = " ".join((FRONTEND / "index.html").read_text().split())
+        assert "Thread is not active: no radio runs the Thread border router." in html
+        assert ">Set a radio to Thread on the Radios page</a>" in html
+
+    def test_board_wide_fault_shows_on_the_board_line_while_thread_is_off(self):
+        # On a board-wide fault while Thread is off: the board line shows it; the Thread placeholder stays.
+        r = sections(
+            f"t.s = {status(mode='RADIO_FAULT', fault_reason='storage unavailable', otbr_channel=None)};"
+            " await t.page.refreshStatus();"
+            " return [t.el('board-hero').className, t.el('b-title').textContent, t.el('b-text').textContent,"
+            " t.el('b-link').hidden(), t.el('thread-off').hidden()];"
+        )
+        assert r[0:2] == ["card hero hero-fault", "Board fault"]
+        assert "settings storage" in r[2]
+        assert r[3:] == [True, False]
+
+    def test_board_wide_firmware_fault_links_firmware_and_thread_points_up(self):
+        # On RADIO_FAULT "no rcp firmware" with the C6 as Thread's radio: board link to Firmware; Thread line
+        # "Thread cannot start".
+        r = sections(
+            f"t.s = {status(mode='RADIO_FAULT', fault_reason='no rcp firmware', otbr_channel='c6')};"
+            " await t.page.refreshStatus();"
+            " return [t.el('b-link').getAttribute('href'), t.el('h-title').textContent, t.el('h-link').hidden()];"
+        )
+        assert r == ["/firmware.html", "Thread cannot start", True]
+
+    def test_failed_status_keeps_the_sections(self):
+        # On the status request failing: offline line shown, the sections keep their state (no placeholder flip).
+        r = sections(
+            f"t.s = {status(mode='BR_RUNNING', otbr_channel='c6')}; await t.page.refreshStatus();"
+            " t.fail = true; await t.page.refreshStatus();"
+            " return [t.el('s-offline').hidden(), t.el('thread-on').hidden(), t.el('thread-off').hidden()];"
+        )
+        assert r == [False, False, True]
+
+    def test_radios_card_shows_both_rows(self):
+        # On a channels body: the two rows from radiosView.
+        r = sections(
+            "await t.page.refreshChannels();"
+            " return [t.el('t-radio-c6').textContent, t.el('t-radio-usb').textContent];"
+        )
+        assert r == ["Thread", "Zigbee"]
+
+    def test_radios_card_without_a_usb_radio_says_not_connected(self):
+        # On no USB channel: the USB row reads "Not connected".
+        r = sections(
+            "await t.page.refreshChannels(); return t.el('t-radio-usb').textContent;",
+            f"t.c = {json.dumps(channels())};",
+        )
+        assert r == "Not connected"
+
+    def test_radios_card_on_a_failed_request_shows_dashes(self):
+        # On a failed /device/channels: both rows read "-".
+        r = sections(
+            "t.fail = true; const ok = await t.page.refreshChannels();"
+            " return [ok, t.el('t-radio-c6').textContent, t.el('t-radio-usb').textContent];"
+        )
+        assert r == [False, "-", "-"]
+
+    def test_no_thread_notice_banner_on_the_dashboard(self):
+        # The shared "no Thread radio" banner is gone from the Dashboard: the placeholder replaces it.
+        html = (FRONTEND / "index.html").read_text()
+        script = (FRONTEND / "static" / "status.js").read_text()
+        assert 'id="threadNotice"' not in html
+        assert "renderThreadNotice" not in script
+
+    def test_reboot_button_sits_in_the_board_line(self):
+        # The Reboot button and its message are in the Device and network section.
+        html = (FRONTEND / "index.html").read_text()
+        device = html[html.index('id="sec-device"') : html.index('id="sec-thread"')]
+        assert 'id="rebootBtn"' in device and 'id="rebootMsg"' in device
+
+    def test_sections_come_in_order_with_their_headings(self):
+        # Section order and headings: Device and network, Thread, Zigbee; no "Thread runs on" chip, no Mode row.
+        html = (FRONTEND / "index.html").read_text()
+        assert (
+            html.index('id="sec-device"')
+            < html.index('id="sec-thread"')
+            < html.index('id="sec-zigbee"')
+        )
+        for heading in ("Device and network", "Thread", "Zigbee"):
+            assert f'<h2 class="dash-heading">{heading}</h2>' in html
+        assert 'id="h-thread-on"' not in html and 'id="h-mode"' not in html
