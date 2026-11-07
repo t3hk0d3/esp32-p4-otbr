@@ -267,8 +267,10 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
 - **Heap**: about 21 KB of internal DMA RAM is taken at the first C6 open, about 39 KB (pool, buffers, 16 KB ring) at
   the first dongle open (never on a board without a dongle); a proxy session takes an 8 KB ring (TCP) plus codec
   buffers. Compare the free and the minimum free internal heap (`GET /device/diag`) after boot with no dongle against
-  v0.4.0 on the same board: at most 40 KB less (the seven new tasks, below, the queues and the C6 buffers). This is a
-  limit to measure in the hardware pass, not a measured number yet.
+  v0.4.0 on the same board: at most 72 KB less (the seven new tasks, below, the queues, the C6 buffers and the
+  proxy's resolver). Measured 2026-11-07 (build 2f3b159, 60 s after boot): 284 KB free with no dongle against 350 KB
+  on the v0.4.0-era master test build, 65 KB less; 238 KB with a dongle plugged in. The budget was 40 KB before the
+  first measurement and was raised to the measured figure plus headroom.
 - **Task stacks** (not shrunk: no high-water marks measured yet): `radio_mux` 6144, `usb_lib` 4096, `USB-CDC` 4096,
   `c6` transport 4096, `rcp_proxy` 6144, `rcp_resolve` 4096, `br_radio` 6144 bytes. Read their high-water marks after
   the checks below (a C6 move, a dongle detection, a proxy with a `.local` connect host) before shrinking any.
