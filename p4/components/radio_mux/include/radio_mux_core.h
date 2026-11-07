@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "esp_err.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -267,6 +269,12 @@ bool radio_mux_port_frames(bool c6_port, bool consumer_frames);
 // `baud`, rounded up. A baud of 0 (unknown) counts as the slowest accepted one, 38400.
 #define RADIO_MUX_TX_BASE_MS 100
 uint32_t radio_mux_tx_timeout_ms(size_t n, uint32_t baud);
+
+// What radio_mux_tx returns for its transport's err: ESP_ERR_INVALID_STATE is radio_mux_tx's own answer for "not
+// attached, nothing written" (its tx_ok and generation checks), so a transport's ESP_ERR_INVALID_STATE (the USB host
+// library refusing a later chunk of a write while the device goes away: part may be written) becomes ESP_FAIL; every
+// other err is returned as it is.
+esp_err_t radio_mux_tx_transport_err(esp_err_t err);
 
 // A CH34x status packet (the bridge's interrupt IN endpoint, e.g. `20 ff 0f aa`): byte 0 carries the UART state, whose
 // transient bits (the ch34x driver's CH34X_UART_STATE_TRANSIENT_MASK: overrun, parity, framing, receive error) mean
