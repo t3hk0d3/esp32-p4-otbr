@@ -34,6 +34,16 @@ THREAD_MENU = [
 # page -> (script, endpoints its script names)
 # Scripts of sections that share a page, loaded after the page's own script.
 EXTRA_SCRIPTS = {"ethernet": ["names"]}
+# Scripts of sections a page mounts, loaded before the page's own script (which starts the page as it loads).
+SECTION_SCRIPTS = {"index": ["zigbee"]}
+
+
+def scripts_of(name):
+    """The page's own script, its section scripts and its extra scripts."""
+    return (
+        [PAGES[name][0]] + SECTION_SCRIPTS.get(name, []) + EXTRA_SCRIPTS.get(name, [])
+    )
+
 
 PAGES = {
     "radios": ("radios", ["/device/channels", "/device/status"]),
@@ -43,6 +53,8 @@ PAGES = {
             "/device/status",
             "/device/diag",
             "/device/reboot",
+            "/device/channels",
+            "/device/zigbee",
             "/get_properties",
             "/ipaddr",
         ],
@@ -67,7 +79,6 @@ PAGES = {
         "capture",
         ["/device/sniffer.pcap", "/device/sniffer", "/device/status"],
     ),
-    "zigbee": ("zigbee", ["/device/zigbee"]),
 }
 
 KIT_IDS = ["trialBanner", "trialRemaining", "trialFill", "confirmBtn", "confirmMsg"]
@@ -278,11 +289,12 @@ class TestPages:
         assert '<nav class="nav" id="nav"></nav>' in html
         assert '<body class="device-page">' in html
         tags = re.findall(r'<script src="([^"]+)"></script>', html)
-        assert tags == [
-            "/static/api.js",
-            "/static/device_common.js",
-            f"/static/{script}.js",
-        ] + [f"/static/{extra}.js" for extra in EXTRA_SCRIPTS.get(name, [])]
+        assert tags == (
+            ["/static/api.js", "/static/device_common.js"]
+            + [f"/static/{section}.js" for section in SECTION_SCRIPTS.get(name, [])]
+            + [f"/static/{script}.js"]
+            + [f"/static/{extra}.js" for extra in EXTRA_SCRIPTS.get(name, [])]
+        )
 
     def test_page_has_the_trial_banner_and_the_source_link(self, name):
         # On the page: the shared banner ids and the AGPL source link in the footer.
@@ -297,10 +309,11 @@ class TestPages:
 
     def test_script_never_inserts_markup(self, name):
         # On the script: no innerHTML/outerHTML/insertAdjacentHTML/document.write.
-        assert not re.search(
-            r"innerHTML|outerHTML|insertAdjacentHTML|document\.write",
-            js_of(PAGES[name][0]),
-        )
+        for script in scripts_of(name):
+            assert not re.search(
+                r"innerHTML|outerHTML|insertAdjacentHTML|document\.write",
+                js_of(script),
+            ), script
 
     def test_page_and_script_load_nothing_remote(self, name):
         # On both: no script/link/src/href to a remote host, no import (a plain <a> link is navigation).
@@ -315,7 +328,9 @@ class TestPages:
         used = set(
             re.findall(
                 r"(?:\$|setText|show|note)\('([A-Za-z0-9_-]+)'\s*[,)]",
-                js_of(PAGES[name][0]),
+                "".join(
+                    js_of(s) for s in [PAGES[name][0]] + SECTION_SCRIPTS.get(name, [])
+                ),
             )
         )
         present = set(re.findall(r'id="([^"]+)"', html_of(name)))
@@ -332,7 +347,7 @@ class TestPages:
 
     def test_each_endpoint_is_named_by_the_script_and_registered(self, name):
         # On the endpoints of the page: quoted in its script and registered (device_api, or the Thread web GUI).
-        scripts = [PAGES[name][0]] + EXTRA_SCRIPTS.get(name, [])
+        scripts = scripts_of(name)
         source, routes = "".join(js_of(s) for s in scripts), DEVICE_API.read_text()
         for endpoint in PAGES[name][1]:
             assert re.search(rf"['\"]{re.escape(endpoint)}['\"?]", source), endpoint
