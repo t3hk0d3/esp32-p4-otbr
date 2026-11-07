@@ -246,7 +246,13 @@ static void accept_one(proxy_t *p)
     if (fd < 0) {
         return;
     }
-    if (rcp_proxy_accept(p->fd >= 0) == RCP_PROXY_REFUSE || !netcfg_socket_allowed(fd, NETCFG_SVC_RCP_PROXY)) {
+    // Both access rules: the local address the client came in on, and the route back to it (a Thread mesh node that
+    // dials an infrastructure address passes the first and is refused by the second).
+    const bool busy = p->fd >= 0;
+    const bool local_ok = !busy && netcfg_socket_allowed(fd, NETCFG_SVC_RCP_PROXY);
+    const bool peer_ok = local_ok && netcfg_peer_allowed((const struct sockaddr *)&sa, NETCFG_SVC_RCP_PROXY);
+
+    if (rcp_proxy_accept(busy, local_ok, peer_ok) == RCP_PROXY_REFUSE) {
         refuse(fd);
         p->refused++;
         ESP_LOGI(TAG, "%s: connection refused (%lu so far)", p->id, (unsigned long)p->refused);

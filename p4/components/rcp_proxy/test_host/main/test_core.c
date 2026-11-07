@@ -377,14 +377,26 @@ TEST_CASE("On TCP accept or connect (init before each): every peer session repla
 
 /* ---- rcp_proxy_accept (TCP listen) ---- */
 
-TEST_CASE("On a connection with no peer: returns RCP_PROXY_TAKE", "[rcp_proxy]")
+TEST_CASE("On a connection with no peer that both access rules allow: returns RCP_PROXY_TAKE", "[rcp_proxy]")
 {
-    TEST_ASSERT_EQUAL(RCP_PROXY_TAKE, rcp_proxy_accept(false));
+    TEST_ASSERT_EQUAL(RCP_PROXY_TAKE, rcp_proxy_accept(false, true, true));
 }
 
 TEST_CASE("On a connection while a peer is connected: returns RCP_PROXY_REFUSE (first client wins)", "[rcp_proxy]")
 {
-    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(true));
+    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(true, true, true));
+}
+
+TEST_CASE("On a connection whose local address the access rules refuse: returns RCP_PROXY_REFUSE", "[rcp_proxy]")
+{
+    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(false, false, true));
+}
+
+TEST_CASE("On a client routed over the Thread mesh to an infrastructure address: returns RCP_PROXY_REFUSE",
+          "[rcp_proxy]")
+{
+    // The local address (mgmt or thread_bb) passes netcfg_socket_allowed; netcfg_peer_allowed refuses the mesh route.
+    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(false, true, false));
 }
 
 /* ---- rcp_proxy_ring ---- */

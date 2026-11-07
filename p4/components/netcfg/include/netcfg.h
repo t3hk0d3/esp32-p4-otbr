@@ -61,11 +61,11 @@ bool netcfg_request_allowed(httpd_req_t *req, netcfg_service_t svc);
 bool netcfg_socket_allowed(int fd, netcfg_service_t svc);
 
 /**
- * The same decision for a datagram source (the RCP proxy's UDP sources): may `peer` (sockaddr_in, or sockaddr_in6 with an
- * IPv4-mapped address on a dual-stack socket) use `svc`? Its interface is the one a reply to it leaves on (lwIP's route
- * lookup, a short call into the tcpip task; a link-local address goes by its zone). A peer routed to the OpenThread netif is
- * refused in every mode; otherwise as netcfg_socket_allowed (netcfg_policy_conn_allowed). Call it from a task that does not
- * hold the netcfg lock, never from the tcpip task.
+ * The same decision for a peer address (the RCP proxy's UDP sources, TCP listen clients and connect targets): may
+ * `peer` (sockaddr_in, or sockaddr_in6 with an IPv4-mapped address on a dual-stack socket) use `svc`? Its interface is
+ * the one a reply to it leaves on (lwIP's route lookup, a short call into the tcpip task; a link-local address goes by
+ * its zone). A peer routed to the OpenThread netif is refused in every mode; otherwise as netcfg_socket_allowed
+ * (netcfg_policy_conn_allowed). Call it from a task that does not hold the netcfg lock, never from the tcpip task.
  */
 bool netcfg_peer_allowed(const struct sockaddr *peer, netcfg_service_t svc);
 

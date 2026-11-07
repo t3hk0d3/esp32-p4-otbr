@@ -86,8 +86,11 @@ typedef enum {
     RCP_PROXY_REFUSE,
 } rcp_proxy_accept_t;
 
-// TCP listen: the first client keeps the port; a connection while one is connected is refused.
-rcp_proxy_accept_t rcp_proxy_accept(bool peer_connected);
+// TCP listen: the first client keeps the port; a connection while one is connected is refused. A connection must also
+// pass both netcfg access rules: by the local address it came in on (local_allowed, netcfg_socket_allowed) and by the
+// route back to the client (peer_allowed, netcfg_peer_allowed: a client on the Thread mesh is refused even when it
+// connected to an infrastructure address).
+rcp_proxy_accept_t rcp_proxy_accept(bool peer_connected, bool local_allowed, bool peer_allowed);
 
 // Byte FIFO over caller-owned storage. Not thread-safe: one task owns it.
 typedef struct {

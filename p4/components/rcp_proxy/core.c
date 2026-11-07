@@ -275,9 +275,9 @@ bool rcp_proxy_peer_new(rcp_proxy_peer_memo_t *m, const rcp_proxy_addr_t *peer)
 
 /* ---- TCP accept rule ---- */
 
-rcp_proxy_accept_t rcp_proxy_accept(bool peer_connected)
+rcp_proxy_accept_t rcp_proxy_accept(bool peer_connected, bool local_allowed, bool peer_allowed)
 {
-    return peer_connected ? RCP_PROXY_REFUSE : RCP_PROXY_TAKE;
+    return peer_connected || !local_allowed || !peer_allowed ? RCP_PROXY_REFUSE : RCP_PROXY_TAKE;
 }
 
 /* ---- byte ring ---- */
