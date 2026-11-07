@@ -84,6 +84,29 @@ static void free_tid(zigbee_spinel_t *s, uint8_t tid)
 }
 
 /* SpinelDriver::SendCommand: "Cii" header, command, property, then the value as `fmt`. */
+/* Asks the board for a channel reset. An accepted one is asked again after ZIGBEE_SPINEL_RESET_RETRY_US until a
+ * RESET (or GONE) comes. Returns the board's answer: 0 accepted, nonzero refused. */
+static int ask_reset(zigbee_spinel_t *s)
+{
+    const int rc = s->ops.request_reset(s->ops.ctx);
+
+    s->reset_retry_us = rc == 0 ? now(s) + ZIGBEE_SPINEL_RESET_RETRY_US : NEVER;
+    return rc;
+}
+
+/* A frame the board could not send: the radio is gone under it, which only a reset brings back. One reset at a time:
+ * while one is pending, the retry in zigbee_spinel_on_tick asks again. */
+static int send_frame(zigbee_spinel_t *s, size_t n)
+{
+    if (s->ops.send(s->ops.ctx, s->frame, n) == 0) {
+        return 0;
+    }
+    if (s->reset_retry_us == NEVER) {
+        (void)ask_reset(s);
+    }
+    return -1;
+}
+
 static int send_propv(zigbee_spinel_t *s, uint8_t tid, unsigned cmd, unsigned key, const char *fmt, va_list args)
 {
     spinel_ssize_t n = spinel_datatype_pack(s->frame, sizeof(s->frame), "Cii", HEADER(tid), cmd, key);
@@ -99,7 +122,7 @@ static int send_propv(zigbee_spinel_t *s, uint8_t tid, unsigned cmd, unsigned ke
         }
         n += m;
     }
-    return s->ops.send(s->ops.ctx, s->frame, (size_t)n) == 0 ? 0 : -1;
+    return send_frame(s, (size_t)n);
 }
 
 static int send_prop(zigbee_spinel_t *s, uint8_t tid, unsigned cmd, unsigned key, const char *fmt, ...)
@@ -147,7 +170,7 @@ static int wait_reply(zigbee_spinel_t *s)
     s->wait_state = ZIGBEE_SPINEL_WAIT_IDLE;
     s->wait_for_reset = false;
     if (rc == ZIGBEE_SPINEL_ERR_TIMEOUT) {
-        (void)s->ops.request_reset(s->ops.ctx); // refused: the call has failed already, nothing stays open
+        (void)ask_reset(s); // refused: the call has failed already, nothing stays open
     }
     return rc;
 }
@@ -354,7 +377,7 @@ static int reset_rcp(zigbee_spinel_t *s)
     s->wait_for_reset = true;
     s->reply_status = SPINEL_STATUS_OK;
     s->wait_state = ZIGBEE_SPINEL_WAIT_PENDING;
-    if (s->ops.send(s->ops.ctx, s->frame, (size_t)n) != 0) {
+    if (send_frame(s, (size_t)n) != 0) {
         s->wait_for_reset = false;
         s->wait_state = ZIGBEE_SPINEL_WAIT_IDLE;
         return ZIGBEE_SPINEL_ERR_LOCAL;
@@ -557,6 +580,7 @@ void zigbee_spinel_on_reset(zigbee_spinel_t *s)
         return; // GONE came first: the next attach brings the radio back
     }
     s->resets++;
+    s->reset_retry_us = NEVER;
     s->attached = false;
     drop_open(s);
     s->attach_pending = true;
@@ -569,6 +593,7 @@ void zigbee_spinel_on_reset(zigbee_spinel_t *s)
 void zigbee_spinel_on_gone(zigbee_spinel_t *s)
 {
     s->radio = false;
+    s->reset_retry_us = NEVER;
     s->attached = false;
     s->attach_pending = false;
     drop_open(s);
@@ -597,6 +622,7 @@ void zigbee_spinel_init(zigbee_spinel_t *s, const zigbee_spinel_ops_t *ops, cons
     s->tx_deadline_us = NEVER;
     s->rearm_deadline_us = NEVER;
     s->scan_deadline_us = NEVER;
+    s->reset_retry_us = NEVER;
 }
 
 /* With no radio (or before the attach sequence enabled it) these store the change for the replay and return 0. */
@@ -904,7 +930,7 @@ void zigbee_spinel_on_tick(zigbee_spinel_t *s)
     // (the mux refuses, e.g. during a C6 firmware job) no RESET comes, so it fails here: the next one can go.
     if (s->tx_in_flight && t >= s->tx_deadline_us) {
         s->tx_deadline_us = NEVER;
-        if (s->ops.request_reset(s->ops.ctx) != 0) {
+        if (ask_reset(s) != 0) {
             free_tid(s, s->tx_tid);
             s->tx_tid = 0;
             s->tx_in_flight = false;
@@ -915,14 +941,18 @@ void zigbee_spinel_on_tick(zigbee_spinel_t *s)
         free_tid(s, s->rearm_tid);
         s->rearm_tid = 0;
         s->rearm_deadline_us = NEVER;
-        (void)s->ops.request_reset(s->ops.ctx);
+        (void)ask_reset(s);
     }
     if (s->scanning && t >= s->scan_deadline_us) {
         s->scan_deadline_us = NEVER;
-        if (s->ops.request_reset(s->ops.ctx) != 0) {
+        if (ask_reset(s) != 0) {
             s->scanning = false;
             s->sink.scan_done(s->sink.ctx, ZIGBEE_SPINEL_SCAN_FAILED_RSSI);
         }
+    }
+    // Checked after the deadlines above: a reset one of them just asked for has its own interval.
+    if (s->reset_retry_us != NEVER && t >= s->reset_retry_us) {
+        (void)ask_reset(s);
     }
 }
 

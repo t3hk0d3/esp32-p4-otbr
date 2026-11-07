@@ -1178,6 +1178,63 @@ TEST_CASE("transmit with no answer for 5 s: asks for a channel reset once", "[zi
     TEST_ASSERT_EQUAL(1, rcp.resets_requested);
 }
 
+TEST_CASE("transmit the board refuses to send: returns ZIGBEE_SPINEL_ERR_LOCAL and asks for a channel reset once",
+          "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.send_result = -1; // the radio is gone under the board (C6 held in reset: hardware pass 2026-11-07)
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_LOCAL, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_LOCAL, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+}
+
+TEST_CASE("requested reset with no RESET for ZIGBEE_SPINEL_RESET_RETRY_US: asks again, then after every interval",
+          "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.send_result = -1;
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+    rcp.now += ZIGBEE_SPINEL_RESET_RETRY_US - 1;
+    zigbee_spinel_on_tick(&client);
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+    rcp.now += 1;
+    zigbee_spinel_on_tick(&client);
+    TEST_ASSERT_EQUAL(2, rcp.resets_requested);
+    zigbee_spinel_on_tick(&client);
+    TEST_ASSERT_EQUAL(2, rcp.resets_requested);
+    rcp.now += ZIGBEE_SPINEL_RESET_RETRY_US;
+    zigbee_spinel_on_tick(&client);
+    TEST_ASSERT_EQUAL(3, rcp.resets_requested);
+}
+
+TEST_CASE("timed-out transmit whose reset brings no RESET: the reset is asked again after the retry interval",
+          "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    rcp.now += ZIGBEE_SPINEL_TX_TIMEOUT_US;
+    zigbee_spinel_on_tick(&client);
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+    rcp.now += ZIGBEE_SPINEL_RESET_RETRY_US;
+    zigbee_spinel_on_tick(&client);
+    TEST_ASSERT_EQUAL(2, rcp.resets_requested);
+}
+
+TEST_CASE("RESET after a requested reset: no further reset is asked", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    rcp.send_result = -1;
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+    rcp.send_result = 0;
+    zigbee_spinel_on_reset(&client);
+    rcp.now += 3 * ZIGBEE_SPINEL_RESET_RETRY_US;
+    zigbee_spinel_on_tick(&client);
+    TEST_ASSERT_EQUAL(1, rcp.resets_requested);
+}
+
 TEST_CASE("transmit re-arm with no reply for 2000 ms: asks for a channel reset", "[zigbee]")
 {
     attached(FRAMES_CC2652P_RADIO_CAPS);

@@ -51,6 +51,9 @@ extern "C" {
 #define ZIGBEE_SPINEL_REQUEST_TIMEOUT_US (2000 * 1000LL)
 /** Timeout of a transmit's answer (RadioSpinel kTxWaitUs, OPENTHREAD_SPINEL_CONFIG_RCP_TX_WAIT_TIME_SECS = 5). */
 #define ZIGBEE_SPINEL_TX_TIMEOUT_US (5000 * 1000LL)
+/** A requested channel reset that brought no RESET in this time is asked again (a radio held in reset comes back only
+ * through a reset: hardware pass 2026-11-07). */
+#define ZIGBEE_SPINEL_RESET_RETRY_US (5000 * 1000LL)
 /** An energy scan's result is due this long after the scan's duration has passed. */
 #define ZIGBEE_SPINEL_SCAN_GRACE_US (2000 * 1000LL)
 /** The protocol major version the client speaks (SPINEL_PROTOCOL_VERSION_THREAD_MAJOR). */
@@ -158,6 +161,9 @@ typedef struct {
     // Receive re-arm after a transmit answer, on RCPs without rx-on-when-idle (sent without waiting).
     uint8_t rearm_tid;
     int64_t rearm_deadline_us;
+
+    // When to ask again for an accepted channel reset that brought no RESET yet; NEVER when none is pending.
+    int64_t reset_retry_us;
 
     // The energy scan in progress.
     bool scanning;
