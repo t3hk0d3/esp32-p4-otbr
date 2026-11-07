@@ -74,7 +74,7 @@ bundle: ## Build the P4 OTA bundle dist/otbr.bundle from the current build
 	mkdir -p $(DIST)
 	tools/make_bundle.py --web p4/build/web_0.bin --app p4/build/p4.bin --out $(DIST)/otbr.bundle
 
-package: ## Collect all release files into dist/ (what CI publishes)
+package: ## Collect all release files into dist/ (what CI publishes; RELEASE_TAG=<tag> adds the release line to versions.txt)
 	$(IDF) tools/package_release.sh $(DIST)
 
 sizes: ## Image sizes and flash headroom of the current build into SIZES (default build/sizes.json), then sizes-report

@@ -210,7 +210,7 @@ class TestStatusPage:
         # On a diag answer: uptime in words, reset reason, 10 s CPU per core, internal and PSRAM free.
         r = scenario(
             page("index", ROUTES)
-            + "await t.page.refreshDiag(); return ['h-uptime','h-reset','t-cpu','t-mem-int','t-mem-psram'].map((i) => t.el(i).textContent);"
+            + "await t.page.refreshDiag(); return ['h-uptime','h-reset','t-cpu','t-mem-int','t-mem-psram','t-chip-temp'].map((i) => t.el(i).textContent);"
         )
         assert r == [
             "7 h 35 min",
@@ -218,7 +218,22 @@ class TestStatusPage:
             "Core 0 0.5%, core 1 0.6%",
             "408.9 KB (lowest 350.7 KB)",
             "30.2 MB",
+            "47.3 \u00b0C",
         ]
+
+    @pytest.mark.parametrize("patch", ["{chip_temperature_c: null}", "{}", "{chip_temperature_c: 'hot'}"])
+    def test_diag_without_a_chip_temperature_shows_a_dash(self, patch):
+        # On null, a missing field (older firmware) or a non-number: the chip temperature is a dash.
+        r = scenario(
+            page(
+                "index",
+                "(u) => { const d = H.fixture(H.DIAG); delete d.chip_temperature_c; return {status: 200, body: Object.assign(d, "
+                + patch
+                + ")}; }",
+            )
+            + "await t.page.refreshDiag(); return t.el('t-chip-temp').textContent;"
+        )
+        assert r == "-"
 
     def test_diag_failure_leaves_dashes(self):
         # On a failing diag: the uptime stays a dash.
@@ -301,10 +316,10 @@ class TestStatusPageReview:
             )
             + """
             await t.page.refreshDiag(); t.fail = true; await t.page.refreshDiag();
-            return ['h-uptime','h-reset','t-cpu','t-mem-int','t-mem-psram'].map((i) => t.el(i).textContent);
+            return ['h-uptime','h-reset','t-cpu','t-mem-int','t-mem-psram','t-chip-temp'].map((i) => t.el(i).textContent);
         """
         )
-        assert r == ["-"] * 5
+        assert r == ["-"] * 6
 
 
 @needs_node

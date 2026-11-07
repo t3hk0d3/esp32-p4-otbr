@@ -27,6 +27,7 @@
 #include "br_core.h"
 #include "device_api.h"
 #include "c6_board.h"
+#include "self_update.h"
 #include "driver/gpio.h"
 #include "ot_console.h"
 #include "rcp_sync.h"
@@ -309,6 +310,18 @@ static int cmd_ota_url(int argc, char **argv)
         return 1;
     }
     return start_ota(argv[1], true);
+}
+
+// update_source <base>: releases base for the update check and install (an http URL; empty restores the default).
+static int cmd_update_source(int argc, char **argv)
+{
+    if (argc != 2) {
+        printf("usage: update_source <base>\n");
+        return 1;
+    }
+    self_update_test_set_base(argv[1]);
+    printf("update_source: %s\n", self_update_base());
+    return 0;
 }
 
 // ota_url_bg <url>: as ota_url, but returns at once (the console stays usable during the update).
@@ -596,6 +609,8 @@ esp_err_t test_cmds_register(void)
     ESP_RETURN_ON_ERROR(register_command("rcp_glitch", "reset the C6 briefly, no hold (self-recovering RCP crash)", cmd_rcp_glitch), TAG, "rcp_glitch");
     ESP_RETURN_ON_ERROR(register_command("ota_url", "ota_url <url>: bundle OTA by URL, restarts on success", cmd_ota_url), TAG, "ota_url");
     ESP_RETURN_ON_ERROR(register_command("ota_url_bg", "ota_url_bg <url>: as ota_url, returns at once", cmd_ota_url_bg), TAG, "ota_url_bg");
+    ESP_RETURN_ON_ERROR(register_command("update_source", "update_source <base>: releases base of the update check (empty restores)",
+                                         cmd_update_source), TAG, "update_source");
     ESP_RETURN_ON_ERROR(register_command("ota_probe", "begin and abort an update: shows if one is running", cmd_ota_probe), TAG, "ota_probe");
     ESP_RETURN_ON_ERROR(register_command("ota_commit_delay", "ota_commit_delay <ms>: wait before the boot partition is set", cmd_ota_commit_delay), TAG, "ota_commit_delay");
     ESP_RETURN_ON_ERROR(register_command("ota_boot", "boot and running slot", cmd_ota_boot), TAG, "ota_boot");

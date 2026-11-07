@@ -55,7 +55,7 @@ CONFIG_LWIP_NUM_NETIF_CLIENT_DATA=0
 
 # Sockets: web server 10 (max_open_sockets 7 + listener + 2 control sockets) + mesh routing up to 7 (BGP: a listener,
 # a current and a pending connection per peer, and 2 closing after a NOTIFICATION; RIPng: one, never both methods at
-# once) + 1 HTTP client (OTA or a radio firmware URL) + 6 RCP proxy (two channels in rcp-proxy at once, the C6 and the
+# once) + 1 HTTP client (OTA, a radio firmware URL or the update check, which share it) + 6 RCP proxy (two channels in rcp-proxy at once, the C6 and the
 # one open USB device, each a listener, its client and one connection being refused) = 24. mDNS, OpenThread, DNS and
 # SNTP use lwIP raw PCBs, not sockets. routing/task.c fails the build below that. An existing p4/sdkconfig keeps its old
 # value: delete it after pulling (docs/development.md).
@@ -118,3 +118,8 @@ CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
 CONFIG_HTTPD_WS_SUPPORT=y
 CONFIG_HTTPD_WS_PRE_HANDSHAKE_CB_SUPPORT=y
 CONFIG_HTTPD_WS_POST_HANDSHAKE_CB_SUPPORT=y
+
+# https download URLs (OTA, radio firmware, the update check): verify the server against the bundled root certificates
+# (the common set: Sectigo, USERTrust and ISRG cover github.com and its asset host). No pinning.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y

@@ -53,6 +53,8 @@ void sample_input(sample_input_t *s)
     s->diag.psram.free = 30000000;
     s->diag.psram.min_free = 29000000;
     s->diag.psram.largest_free_block = 28000000;
+    s->diag.chip_temperature_valid = true;
+    s->diag.chip_temperature_c = 47.25f;
     s->diag.lock.acquisitions = 12345;
     s->diag.lock.hold_us_total = 2500000;
     s->diag.lock.wait_us_total = 1500;

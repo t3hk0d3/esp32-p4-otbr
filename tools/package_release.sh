@@ -10,7 +10,7 @@
 #   p4-flash.zip                 full P4 USB flash: images and flash_args (esptool --chip esp32p4 write-flash @flash_args)
 #   c6-updater-flash.zip         C6 base images for the USB-UART first install (docs/first-install.md, Path 3)
 #   third-party-licenses.zip     license texts of the code linked into the images
-#   versions.txt, SHA256SUMS
+#   versions.txt, SHA256SUMS     versions.txt starts with "release: <tag>" when RELEASE_TAG is set (CI sets it on a v* tag)
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,6 +20,12 @@ if [[ $# -ne 1 ]]; then
     exit 2
 fi
 : "${IDF_PATH:?activate the ESP-IDF environment first}"
+# The board downloads the release's files by this tag: 1 to 32 characters from [A-Za-z0-9._-], checked before any output.
+release_tag="${RELEASE_TAG:-}"
+if [[ -n "$release_tag" && ! "$release_tag" =~ ^[A-Za-z0-9._-]{1,32}$ ]]; then
+    echo "RELEASE_TAG '$release_tag' is not 1 to 32 characters of [A-Za-z0-9._-]" >&2
+    exit 1
+fi
 out="$(mkdir -p "$1" && cd "$1" && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -101,6 +107,7 @@ done
 mv -f "$tmp/p4-flash.zip" "$tmp/c6-updater-flash.zip" "$tmp/third-party-licenses.zip" "$out/"
 
 {
+    [[ -z "$release_tag" ]] || echo "release:     $release_tag"
     echo "p4 app:      $(project_version p4)"
     echo "c6_rcp:      $(project_version c6_rcp)"
     echo "c6 base:     $(project_version c6_updater)"

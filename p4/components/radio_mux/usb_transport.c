@@ -34,9 +34,9 @@ static const char *TAG = "radio_mux";
 // The bulk IN transfer is one max packet (0 = the endpoint's MPS, the driver's default): a transfer completes only on
 // a short packet or when full, and the bridges send no ZLP, so a 512-byte transfer held a burst ending on a packet
 // boundary until the radio sent again (~2 s late answers on a CH340, hardware 2026-11-07). The driver keeps eight such
-// transfers in flight (PATCHES.md patch 29; Linux's usb-serial keeps two, but completes them in interrupt context):
+// transfers in flight (PATCHES.md patch 32; Linux's usb-serial keeps two, but completes them in interrupt context):
 // while some complete into data_cb and are resubmitted, the bridge completes into the others (with one or two, the
-// CH340 overran its UART FIFO at 460800). PATCHES.md patch 28 keeps that length after the buffer's cache-line rounding.
+// CH340 overran its UART FIFO at 460800). PATCHES.md patch 31 keeps that length after the buffer's cache-line rounding.
 #define USB_IN_BUF_SIZE 0
 #define MAX_INTERFACES 16
 #define MAX_ADDRS 8
@@ -130,7 +130,7 @@ static bool data_cb(const uint8_t *data, size_t len, void *arg)
     return true;
 }
 
-// A CH34x status packet (patch 27 delivers it as CDC_ACM_HOST_VENDOR_NOTIFICATION): a UART error bit counts one
+// A CH34x status packet (patch 30 delivers it as CDC_ACM_HOST_VENDOR_NOTIFICATION): a UART error bit counts one
 // uart_errors; the warning, with the raw bytes, at most once per UART_ERR_LOG_US. Nothing is logged per packet.
 static void ch34x_status(mux_port_t *p, const uint8_t *pkt, size_t len)
 {

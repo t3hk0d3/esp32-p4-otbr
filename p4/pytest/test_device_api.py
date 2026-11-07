@@ -34,6 +34,7 @@ STATUS_KEYS = {
     "sniffer",
     "fault_reason",
     "storage_ok",
+    "trel",
 }
 CHANNEL = 15
 RCP_OFFSET_MID = 100_000
@@ -425,14 +426,14 @@ class TestOtaEdgeCases:
             assert response.status_code == requests.codes.bad_request, body
             assert_error_body(response)
 
-    def test_ota_url_with_an_https_url_returns_400_https_not_supported(self, base_url):
+    def test_ota_url_with_an_https_url_without_a_host_returns_400_invalid_request(self, base_url):
         response = requests.post(
             f"{base_url}/device/ota/url",
-            json={"url": "https://example.org/a.bin"},
+            json={"url": "https:///a.bin"},
             timeout=10,
         )
         assert response.status_code == requests.codes.bad_request
-        assert response.json()["error"] == "https_not_supported"
+        assert response.json()["error"] == "invalid_request"
 
     def test_ota_with_an_absurd_content_length_returns_413_without_starting(
         self, board_ip, base_url
@@ -602,14 +603,14 @@ class TestRadioFirmwareEndpoint:
         assert "payload_too_large" in body
         assert status(base_url)["mode"] == "BR_RUNNING"
 
-    def test_from_url_with_an_https_url_returns_400_https_not_supported(self, base_url):
+    def test_from_url_with_an_https_url_without_a_host_returns_400_invalid_request(self, base_url):
         response = requests.post(
             f"{base_url}/device/radio/firmware",
-            params={"from_url": "https://example.org/a.bin"},
+            params={"from_url": "https:///a.bin"},
             timeout=10,
         )
         assert response.status_code == requests.codes.bad_request
-        assert response.json()["error"] == "https_not_supported"
+        assert response.json()["error"] == "invalid_request"
 
     def test_from_url_response_above_the_c6_slot_returns_413_and_keeps_openthread(
         self, base_url, board_ip
