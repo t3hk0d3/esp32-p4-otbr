@@ -183,8 +183,9 @@ TEST_CASE("On some fields given: only those replace the stored ones", "[radio_mu
     given.port = 7000;
     given.adapter = RADIO_MUX_PROXY_UDP;
     given.dir = RADIO_MUX_PROXY_LISTEN; // not named: stays connect
-    TEST_ASSERT_EQUAL(RADIO_MUX_PROXY_CHECK_OK, radio_mux_proxy_merge(&stored, RADIO_MUX_PROXY_F_PORT |
-                      RADIO_MUX_PROXY_F_ADAPTER, &given, &out));
+    const uint8_t fields = RADIO_MUX_PROXY_F_PORT | RADIO_MUX_PROXY_F_ADAPTER;
+
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROXY_CHECK_OK, radio_mux_proxy_merge(&stored, fields, &given, &out));
     TEST_ASSERT_EQUAL(7000, out.port);
     TEST_ASSERT_EQUAL(RADIO_MUX_PROXY_UDP, out.adapter);
     TEST_ASSERT_EQUAL(RADIO_MUX_PROXY_CONNECT, out.dir);
@@ -207,12 +208,13 @@ TEST_CASE("On merged settings the check refuses: returns its verdict", "[radio_m
     radio_mux_proxy_settings_t given = connect_to("");
     radio_mux_proxy_settings_t out;
 
-    TEST_ASSERT_EQUAL(RADIO_MUX_PROXY_CHECK_NEED_HOST, radio_mux_proxy_merge(&stored, RADIO_MUX_PROXY_F_DIR, &given,
-                      &out));
+    radio_mux_proxy_check_t v = radio_mux_proxy_merge(&stored, RADIO_MUX_PROXY_F_DIR, &given, &out);
+
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROXY_CHECK_NEED_HOST, v);
     given.port = 179;
-    TEST_ASSERT_EQUAL(RADIO_MUX_PROXY_CHECK_BAD_PORT, radio_mux_proxy_merge(&stored, RADIO_MUX_PROXY_F_PORT, &given,
-                      &out));
+    v = radio_mux_proxy_merge(&stored, RADIO_MUX_PROXY_F_PORT, &given, &out);
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROXY_CHECK_BAD_PORT, v);
     strcpy(given.host, "a..b");
-    TEST_ASSERT_EQUAL(RADIO_MUX_PROXY_CHECK_BAD_HOST, radio_mux_proxy_merge(&stored, RADIO_MUX_PROXY_F_HOST, &given,
-                      &out));
+    v = radio_mux_proxy_merge(&stored, RADIO_MUX_PROXY_F_HOST, &given, &out);
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROXY_CHECK_BAD_HOST, v);
 }
