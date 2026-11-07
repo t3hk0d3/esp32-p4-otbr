@@ -30,7 +30,12 @@ static const char *TAG = "radio_mux";
 #define CDC_TASK_STACK 4096
 #define LIB_POLL_MS 50
 #define OPEN_TIMEOUT_MS 1000
-#define USB_BUF_SIZE 512
+#define USB_BUF_SIZE 512 // the OUT buffer
+// The bulk IN transfer is one max packet (0 = the endpoint's MPS, the driver's default): a transfer completes only on
+// a short packet or when full, and the bridges send no ZLP, so a 512-byte transfer held a burst ending on a packet
+// boundary until the radio sent again (~2 s late answers on a CH340, hardware 2026-11-07). Linux's usb-serial does
+// the same, one MPS per URB. PATCHES.md patch 28 keeps that length after the cache-line rounding of the buffer.
+#define USB_IN_BUF_SIZE 0
 #define MAX_INTERFACES 16
 #define MAX_ADDRS 8
 #define DATA_INTERFACE 0 // the interface the VCP drivers open (CP2102N, CH340: the only one)
@@ -333,7 +338,7 @@ esp_err_t usb_transport_open(mux_port_t *p, const mux_usb_dev_t *dev, uint32_t b
     const cdc_acm_host_device_config_t cfg = {
         .connection_timeout_ms = OPEN_TIMEOUT_MS,
         .out_buffer_size = USB_BUF_SIZE,
-        .in_buffer_size = USB_BUF_SIZE,
+        .in_buffer_size = USB_IN_BUF_SIZE,
         .event_cb = event_cb,
         .data_cb = data_cb,
         .user_arg = p,
@@ -357,7 +362,7 @@ esp_err_t usb_transport_open(mux_port_t *p, const mux_usb_dev_t *dev, uint32_t b
             .dev_addr = dev->addr,
             .connection_timeout_ms = OPEN_TIMEOUT_MS,
             .out_buffer_size = USB_BUF_SIZE,
-            .in_buffer_size = USB_BUF_SIZE,
+            .in_buffer_size = USB_IN_BUF_SIZE,
             .event_cb = event_cb,
             .data_cb = data_cb,
             .user_arg = p,
