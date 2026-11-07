@@ -174,6 +174,11 @@ typedef enum {
 } __attribute__((packed)) cdc_notification_code_t;
 
 /**
+ * @brief bmRequestType of a CDC class notification: device to host, class, interface (patch 27).
+ */
+#define CDC_NOTIF_BM_REQUEST_TYPE 0xA1
+
+/**
  * @brief USB CDC notification packet.
  */
 typedef struct {

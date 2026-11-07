@@ -886,6 +886,24 @@ static void notif_xfer_cb(usb_transfer_t *transfer)
 
     if (cdc_acm_is_transfer_completed(transfer)) {
         cdc_notification_t *notif = (cdc_notification_t *)transfer->data_buffer;
+        // Patch 27 (p4/components/PATCHES.md): a packet that does not start with the CDC class notification
+        // bmRequestType (0xA1) is not a CDC notification (e.g. the CH34x's vendor status packets): it goes to the
+        // user's event callback as it is, without a warning.
+        if (transfer->actual_num_bytes < 1 || notif->bmRequestType != CDC_NOTIF_BM_REQUEST_TYPE) {
+            if (cdc_dev->notif.cb) {
+                const cdc_acm_host_dev_event_data_t vendor_event = {
+                    .type = CDC_ACM_HOST_VENDOR_NOTIFICATION,
+                    .data.vendor_notification = {
+                        .data = transfer->data_buffer,
+                        .len = (size_t)(transfer->actual_num_bytes > 0 ? transfer->actual_num_bytes : 0),
+                    },
+                };
+                cdc_dev->notif.cb(&vendor_event, cdc_dev->cb_arg);
+            }
+            ESP_LOGD(TAG, "Submitting poll for INTR IN transfer");
+            cdc_acm_submit_poll(cdc_dev->notif.xfer, &cdc_dev->notif.xfer_polling, "INTR IN");
+            return;
+        }
         switch (notif->bNotificationCode) {
         case USB_CDC_NOTIF_NETWORK_CONNECTION: {
             if (cdc_dev->notif.cb) {

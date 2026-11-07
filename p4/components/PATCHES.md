@@ -422,6 +422,21 @@ Vendored from:
 Same rules as above: upstream formatting, excluded from pre-commit, every change listed here. Patch numbers continue
 the sequence above.
 
+27. Applied (CH34x status packets, 2026-11-07). `usb_host_cdc_acm`: packets on the notification endpoint that are not
+   CDC notifications. `cdc_acm_host.c` `notif_xfer_cb`: a packet whose first byte (bmRequestType) is not
+   `CDC_NOTIF_BM_REQUEST_TYPE` (0xA1, new in `include/usb/usb_types_cdc.h`), or an empty one, is passed to the user's
+   event callback as the new event `CDC_ACM_HOST_VENDOR_NOTIFICATION` (`include/usb/cdc_host_types.h`: appended to
+   `cdc_acm_host_dev_event_t` after the suspend/resume values, so no upstream value moves; union member
+   `vendor_notification {const uint8_t *data; size_t len;}`, valid only during the callback; `<stddef.h>` included for
+   `size_t`), with no warning and no hex dump; the INTR IN poll is resubmitted as before. Reason: the CH34x driver
+   (`usb_host_ch34x_vcp` 2.2.1) opens the CH340 through `cdc_acm_host_open`, so its 4-byte vendor status packets
+   (`20 ff 0f aa` ...) were read as CDC notifications with code 0xFF and logged with a hex dump, 3-10 per second under
+   traffic, on the CDC driver task that also runs the bulk IN callback: on the 115200 baud console that delayed the bulk
+   IN resubmit while the dongle kept sending at 460800. radio_mux's `usb_transport.c` counts the CH34x's UART errors
+   from these packets. Host test: none here (upstream's `host_test` needs the esp-usb tree's USB host mocks); the
+   CH34x status decision is host-tested in radio_mux (`radio_mux_ch34x_status`).
+   (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md; docs/radios.md, counter `uart_errors`)
+
 ## Known upstream behaviour (not patches)
 
 - **`GET /api/node` and `/api/devices` can report a stale node** (`state: "disabled"`, `networkName: "OpenThread"`,

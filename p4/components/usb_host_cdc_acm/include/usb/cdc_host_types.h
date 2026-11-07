@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "usb/usb_types_cdc.h"
@@ -44,6 +45,7 @@ typedef enum {
     CDC_ACM_HOST_DEVICE_SUSPENDED,                  /*!< The CDC-ACM device was suspended. */
     CDC_ACM_HOST_DEVICE_RESUMED,                    /*!< The CDC-ACM device was resumed. */
 #endif // CDC_HOST_SUSPEND_RESUME_API_SUPPORTED
+    CDC_ACM_HOST_VENDOR_NOTIFICATION,               /*!< A notification-endpoint packet that is not a CDC notification (bmRequestType not 0xA1), e.g. a CH34x status packet (patch 27). */
 } cdc_acm_host_dev_event_t;
 
 /**
@@ -56,6 +58,10 @@ typedef struct {
         cdc_acm_uart_state_t serial_state; /*!< Serial state bitmap. */
         bool network_connected;            /*!< Network connection state. */
         cdc_acm_dev_hdl_t cdc_hdl;         /*!< Device handle related to the event. */
+        struct {
+            const uint8_t *data;           /*!< The packet; valid only during the callback. */
+            size_t len;                    /*!< Its length in bytes (0 for an empty packet). */
+        } vendor_notification;             /*!< CDC_ACM_HOST_VENDOR_NOTIFICATION (patch 27). */
     } data;                                /*!< Event-specific payload. */
 } cdc_acm_host_dev_event_data_t;
 
