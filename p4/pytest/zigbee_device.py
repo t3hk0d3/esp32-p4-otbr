@@ -205,8 +205,8 @@ class ZigbeeTestDevice:
         mask = sum(1 << channel for channel in channels)
         mark = self._mark()
         self._send(f"channels {mask:#x}")
-        line = self._wait_line(re.compile(r"channels: (\S+)\s*$"), mark)
-        if "failed" in line:
+        answer = self._wait_line(re.compile(r"channels: (\S+)\s*$"), mark)
+        if answer.group(1) == "failed":
             raise RuntimeError(f"the test device refused channels {mask:#x}")
 
     def wait_joined(self, timeout=JOIN_TIMEOUT_S):
