@@ -213,8 +213,11 @@ int32_t ziggurat_platform_radio_energy_scan(uint8_t channel, uint16_t duration_m
 {
     const int rc = zigbee_spinel_energy_scan(g_zigbee.spinel, channel, duration_ms);
 
+    g_zigbee.scan_channel = channel;
     if (rc == 0) {
         ZIGBEE_STATUS(g_zigbee_status.counters.energy_scans++);
+    } else {
+        ESP_LOGW(TAG, "energy scan on channel %u not started: %d", channel, rc);
     }
     return rc;
 }

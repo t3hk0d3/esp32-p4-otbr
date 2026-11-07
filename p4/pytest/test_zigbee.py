@@ -226,8 +226,9 @@ async def pair_device(app, device, permit=PERMIT_S):
 
 
 def on_off_cluster(zigpy_device):
-    for endpoint in zigpy_device.endpoints.values():
-        if endpoint.endpoint_id != 0 and ON_OFF_CLUSTER_ID in endpoint.in_clusters:
+    for endpoint_id, endpoint in zigpy_device.endpoints.items():
+        # Endpoint 0 is zigpy's ZDO object: no clusters, no endpoint_id.
+        if endpoint_id != 0 and ON_OFF_CLUSTER_ID in endpoint.in_clusters:
             return endpoint.in_clusters[ON_OFF_CLUSTER_ID]
     pytest.fail("the joined device has no On/Off cluster")
 

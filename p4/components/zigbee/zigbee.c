@@ -188,6 +188,7 @@ static int op_request_reset(void *ctx)
 {
     const esp_err_t err = radio_mux_reset(atomic_load(&g_zigbee.ch));
 
+    ESP_LOGI(TAG, "asking for a radio reset");
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "channel reset not possible: %s", esp_err_to_name(err));
     }
@@ -288,6 +289,9 @@ static void sink_tx_done(void *ctx, zigbee_tx_result_t r)
 
 static void sink_scan_done(void *ctx, int8_t max_rssi)
 {
+    if (max_rssi == ZIGBEE_SPINEL_SCAN_FAILED_RSSI) {
+        ESP_LOGW(TAG, "energy scan on channel %u failed (no result, or the radio reset)", g_zigbee.scan_channel);
+    }
     if (g_zigbee.start_ran) {
         ziggurat_radio_energy_scan_done(max_rssi);
     }

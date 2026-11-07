@@ -117,6 +117,7 @@ typedef struct {
     uint64_t timer_deadline;     // UINT64_MAX: not armed
     bool start_due;              // the first ready came: ziggurat_start runs at the top of the loop
     bool start_ran;
+    uint8_t scan_channel;        // the channel of the last energy scan asked for (its failure is logged with it)
     uint32_t attach_seen;        // the number of the last ATTACH handled (0: none)
     uint32_t gone_seen;          // the attachment number of the last GONE handled (0: none)
     bool kick_swallowed;         // op_wait took a KICK out of `q`: the loop looks at the mailbox without blocking
