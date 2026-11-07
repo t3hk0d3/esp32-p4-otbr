@@ -371,7 +371,7 @@ recovery with the jumper), `/capture.html` (packet capture) and `/diagnostics.ht
 banner with **Keep new settings** while network settings are on trial. They use only `/device/*`, so they also work in
 `RADIO_FAULT` and while sniffing.
 
-<img src="images/dashboard.png" width="640" alt="Dashboard in three sections. Device and network: Board OK, the Radios card (C6 off, USB radio Zigbee), Ethernet, board firmware, load and memory. Thread: not active, with a link to the Radios page. Zigbee: Coordinator running on channel 25 on the USB radio, ZHA connected; cards for Connect Home Assistant with the ws:// path and a Copy button, the connected client, the network, radio traffic, memory and the radio firmware">
+<img src="images/dashboard.png" width="640" alt="Dashboard in three sections. Device and network: Board OK, the Radios card (C6 runs Thread, USB radio off), Ethernet, board firmware, load and memory. Thread: Border router running, router of ha-thread-bbc1 on channel 15, with the Thread network, identifiers, radio co-processor, Home Assistant, prefix delegation and packet capture cards and the Thread address table. Zigbee: not active, with a link to the Radios page">
 
 ## Creating a Thread network
 
