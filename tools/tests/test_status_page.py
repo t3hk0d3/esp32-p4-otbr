@@ -219,7 +219,7 @@ class TestDashboardLogic:
         rows = st(
             "L.radiosView({channels: [{id: 'c6', kind: 'c6', mode: 'unavailable'}]})"
         )
-        assert rows[0] == {"slot": "C6 (on board)", "mode": "Unavailable"}
+        assert rows[0] == {"slot": "ESP32-C6 (built-in)", "mode": "Unavailable"}
 
     @pytest.mark.parametrize(
         "reason", ["storage unavailable", "esp-hosted firmware", "no rcp firmware"]
@@ -256,7 +256,7 @@ class TestDashboardLogic:
     def test_radios_rows_name_both_slots_and_their_modes(self):
         # On c6 and a present USB channel: two rows, fixed slot names, mode words.
         assert st(f"L.radiosView({json.dumps(CHANNELS)})") == [
-            {"slot": "C6 (on board)", "mode": "Thread"},
+            {"slot": "ESP32-C6 (built-in)", "mode": "Thread"},
             {"slot": "USB radio", "mode": "Zigbee"},
         ]
 
@@ -274,14 +274,14 @@ class TestDashboardLogic:
         # On no USB channel, or only one in mode unavailable: the USB row reads "Not connected".
         rows = st(f"L.radiosView({json.dumps(channels(*usb))})")
         assert rows == [
-            {"slot": "C6 (on board)", "mode": "Thread"},
+            {"slot": "ESP32-C6 (built-in)", "mode": "Thread"},
             {"slot": "USB radio", "mode": "Not connected"},
         ]
 
     def test_unread_channels_show_dashes(self):
         # On null (the request failed): both rows read "-".
         assert st("L.radiosView(null)") == [
-            {"slot": "C6 (on board)", "mode": "-"},
+            {"slot": "ESP32-C6 (built-in)", "mode": "-"},
             {"slot": "USB radio", "mode": "-"},
         ]
 

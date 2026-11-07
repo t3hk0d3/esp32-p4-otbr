@@ -10,7 +10,7 @@ Without a dongle the board behaves as before: the C6 channel in `otbr` mode.
 
 | Channel | Id | Notes |
 | --- | --- | --- |
-| On-board C6 | `c6` | Always listed. Its line is fixed (no baud setting). `off` holds it in reset. |
+| ESP32-C6 (built-in) | `c6` | Always listed. Its line is fixed (no baud setting). `off` holds it in reset. |
 | USB dongle | `usb-<vid>-<pid>`, plus `-<serial>` when the device reports a serial number | Listed while attached, and afterwards as `unavailable` (not detected) with its settings until you forget it. |
 
 - Ids are lowercase hex (`usb-10c4-ea60-abc123`); characters outside letters and digits are dropped from the serial,

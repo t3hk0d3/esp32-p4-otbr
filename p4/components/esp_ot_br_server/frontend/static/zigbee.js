@@ -21,7 +21,7 @@ function pollMs(state) { return state === 'starting' ? 2000 : 5000; }
 /** The radio behind a mux channel id: "c6" is the on-board one, "usb-..." a stick. */
 function radioName(channel) {
   if (channel === 'c6')
-    return 'on-board C6';
+    return 'ESP32-C6 (built-in)';
   return channel ? 'USB radio ' + channel : '-';
 }
 

@@ -30,7 +30,7 @@ static radio_mux_chan_info_t c6_chan(void)
     };
 
     strcpy(c.id, "c6");
-    strcpy(c.label, "ESP32-C6 (on board)");
+    strcpy(c.label, "ESP32-C6 (built-in)");
     strcpy(c.firmware.rec.version, "1.4.0");
     strcpy(c.firmware.rec.chip, "esp32c6");
     radio_mux_proxy_defaults(&c.proxy);
@@ -87,7 +87,7 @@ TEST_CASE("On the registry snapshot: the C6 has the spec's fields in order, usb 
 
     TEST_ASSERT_GREATER_THAN(0, render_one(&c));
     TEST_ASSERT_EQUAL_STRING(
-        "{\"available_modes\":[\"off\",\"otbr\",\"rcp-proxy\"],\"channels\":[{\"id\":\"c6\",\"kind\":\"c6\",\"label\":\"ESP32-C6 (on board)\",\"mode\":\"otbr\","
+        "{\"available_modes\":[\"off\",\"otbr\",\"rcp-proxy\"],\"channels\":[{\"id\":\"c6\",\"kind\":\"c6\",\"label\":\"ESP32-C6 (built-in)\",\"mode\":\"otbr\","
         "\"stored_mode\":\"otbr\",\"state\":\"running\",\"error\":null,"
         "\"line\":{\"baud\":460800,\"flow_control\":false},\"usb\":null,"
         "\"caps\":{\"firmware_update\":true,\"hw_reset\":true,\"flow_control\":false},"

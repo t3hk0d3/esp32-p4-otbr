@@ -131,9 +131,9 @@ class TestZigbeeLogic:
         assert z("L.zhaPath('board.lan')") == "ws://board.lan/zigbee"
 
     def test_radio_ids_read_as_names(self):
-        # On "c6": the on-board C6; on a USB id: that id.
+        # On "c6": ESP32-C6 (built-in); on a USB id: that id.
         assert z("[L.radioName('c6'), L.radioName('usb-303a-1001')]") == [
-            "on-board C6",
+            "ESP32-C6 (built-in)",
             "USB radio usb-303a-1001",
         ]
 

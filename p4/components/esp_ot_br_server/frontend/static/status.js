@@ -72,11 +72,11 @@ var MODE_WORDS = {otbr : 'Thread', ziggurat : 'Zigbee', 'rcp-proxy' : 'RCP proxy
 function radiosView(body) {
   function word(c) { return MODE_WORDS[c.mode] || String(c.mode); }
   if (!body || !body.channels)
-    return [ {slot : 'C6 (on board)', mode : '-'}, {slot : 'USB radio', mode : '-'} ];
+    return [ {slot : 'ESP32-C6 (built-in)', mode : '-'}, {slot : 'USB radio', mode : '-'} ];
   var c6 = body.channels.filter(function(c) { return c.id === 'c6'; })[0];
   var usb = body.channels.filter(function(c) { return c.kind === 'usb' && c.mode !== 'unavailable'; })[0];
   return [
-    {slot : 'C6 (on board)', mode : c6 ? word(c6) : '-'},
+    {slot : 'ESP32-C6 (built-in)', mode : c6 ? word(c6) : '-'},
     {slot : 'USB radio', mode : usb ? word(usb) : 'Not connected'}
   ];
 }
