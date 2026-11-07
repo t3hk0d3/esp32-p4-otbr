@@ -276,6 +276,23 @@ uint32_t radio_mux_tx_timeout_ms(size_t n, uint32_t baud);
 // Whether the packet reports a UART error: false for no error bit, a short packet or NULL.
 bool radio_mux_ch34x_uart_error(const uint8_t *pkt, size_t len);
 
+// A USB dongle's reset is a close and reopen. One that gets nothing back is not reset forever: the
+// RADIO_MUX_USB_DEAD_RESETS-th reset request in a row with nothing received in between (no RX frame, no raw byte) is
+// not carried out; the channel goes to fault with RADIO_MUX_USB_DEAD_REASON and its consumer gets GONE. Unplug and
+// replug, or a PUT of its mode, opens it again.
+#define RADIO_MUX_USB_DEAD_RESETS 3
+#define RADIO_MUX_USB_DEAD_REASON "no answer after 3 resets"
+
+typedef struct {
+    uint8_t unanswered; // reset requests since the last thing received
+} radio_mux_reset_count_t;
+
+// A reset request: counts it. True when it is the RADIO_MUX_USB_DEAD_RESETS-th in a row (give up, no reopen; the count
+// starts again from 0), false when the device is to be reopened.
+bool radio_mux_reset_count_request(radio_mux_reset_count_t *c);
+// Something was received from the device, or a new attach starts: the count starts again from 0.
+void radio_mux_reset_count_clear(radio_mux_reset_count_t *c);
+
 // "idle", "starting", "running", "fault", "busy"; NULL for anything else.
 const char *radio_mux_state_name(radio_mux_state_t state);
 // "probe", "passive"; NULL for NONE.

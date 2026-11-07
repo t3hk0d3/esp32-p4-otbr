@@ -265,6 +265,9 @@ static void do_attach(mux_port_t *p)
     }
     radio_mux_chan_t *h = mux_new_attach(p);
 
+    xSemaphoreTake(p->rx_lock, portMAX_DELAY);
+    radio_mux_reset_count_clear(&p->reset_count); // a new attach starts with no unanswered reset
+    xSemaphoreGive(p->rx_lock);
     p->consumer = c;
     p->tx_frames = radio_mux_port_frames(p->kind == RADIO_MUX_KIND_C6, c->frames); // the C6 ignores c->frames
     mux_set_rx(p, p->tx_frames ? MUX_RX_FRAMES : MUX_RX_RAW);
@@ -1148,8 +1151,9 @@ static void handle_forget(mux_call_t *call)
     }
 }
 
-// A reset: a dongle is closed and reopened over USB, then RESET; GONE (detach) when it does not reopen. The C6 gets its
-// reset GPIO pulse.
+// A reset: a dongle is closed and reopened over USB, then RESET; GONE (detach) when it does not reopen, or when this is
+// the RADIO_MUX_USB_DEAD_RESETS-th reset in a row with nothing received in between (closed, fault "no answer after 3
+// resets"; an unplug or a PUT of the mode opens it again). The C6 gets its reset GPIO pulse.
 static void handle_reset(radio_mux_chan_t *h)
 {
     mux_port_t *p;
@@ -1169,9 +1173,19 @@ static void handle_reset(radio_mux_chan_t *h)
         }
         return;
     }
+    xSemaphoreTake(p->rx_lock, portMAX_DELAY);
+    const bool give_up = radio_mux_reset_count_request(&p->reset_count);
+    xSemaphoreGive(p->rx_lock);
+
     atomic_store(&p->tx_ok, false);
     mux_set_rx(p, MUX_RX_DISCARD);
     usb_transport_close(p);
+    if (give_up) {
+        snprintf(p->fault, sizeof(p->fault), "%s", RADIO_MUX_USB_DEAD_REASON);
+        ESP_LOGW(TAG, "%s: %s: closed (unplug it or PUT its mode to open it again)", ch->id, p->fault);
+        feed(p, RADIO_MUX_AEV_MODE_SET); // not open: the machine detaches the consumer (GONE), the channel shows fault
+        return;
+    }
     if (!open_dev(p, mux_eff_baud(ch))) {
         feed(p, RADIO_MUX_AEV_MODE_SET); // not open: the machine detaches the consumer (GONE)
         return;

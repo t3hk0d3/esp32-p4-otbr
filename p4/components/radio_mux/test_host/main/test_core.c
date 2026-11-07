@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "radio_mux_core.h"
@@ -759,4 +760,47 @@ TEST_CASE("On a short CH34x packet or none: returns false (ignored)", "[radio_mu
     TEST_ASSERT_FALSE(radio_mux_ch34x_uart_error(pkt, sizeof(pkt)));
     TEST_ASSERT_FALSE(radio_mux_ch34x_uart_error(pkt, 0));
     TEST_ASSERT_FALSE(radio_mux_ch34x_uart_error(NULL, 4));
+}
+
+/* ---- USB resets that get nothing back ---- */
+
+TEST_CASE("On reset requests with nothing received: the first two reopen, the third gives up", "[radio_mux]")
+{
+    radio_mux_reset_count_t c = {0};
+
+    TEST_ASSERT_EQUAL(3, RADIO_MUX_USB_DEAD_RESETS);
+    TEST_ASSERT_FALSE(radio_mux_reset_count_request(&c));
+    TEST_ASSERT_FALSE(radio_mux_reset_count_request(&c));
+    TEST_ASSERT_TRUE(radio_mux_reset_count_request(&c));
+}
+
+TEST_CASE("On something received between reset requests: the count starts again", "[radio_mux]")
+{
+    radio_mux_reset_count_t c = {0};
+
+    TEST_ASSERT_FALSE(radio_mux_reset_count_request(&c));
+    TEST_ASSERT_FALSE(radio_mux_reset_count_request(&c));
+    radio_mux_reset_count_clear(&c); // a frame came
+    TEST_ASSERT_FALSE(radio_mux_reset_count_request(&c));
+    TEST_ASSERT_FALSE(radio_mux_reset_count_request(&c));
+    TEST_ASSERT_TRUE(radio_mux_reset_count_request(&c));
+}
+
+TEST_CASE("On a give-up: the count starts again from 0", "[radio_mux]")
+{
+    radio_mux_reset_count_t c = {0};
+
+    for (int i = 0; i < RADIO_MUX_USB_DEAD_RESETS; i++) {
+        radio_mux_reset_count_request(&c);
+    }
+    TEST_ASSERT_EQUAL_UINT8(0, c.unanswered);
+    TEST_ASSERT_FALSE(radio_mux_reset_count_request(&c));
+}
+
+TEST_CASE("On the give-up reason: names the number of resets", "[radio_mux]")
+{
+    char want[32];
+
+    snprintf(want, sizeof(want), "no answer after %d resets", RADIO_MUX_USB_DEAD_RESETS);
+    TEST_ASSERT_EQUAL_STRING(want, RADIO_MUX_USB_DEAD_REASON);
 }

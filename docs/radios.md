@@ -169,6 +169,13 @@ When the dongle that runs OpenThread is unplugged:
 - Unplugging a dongle in any other mode drops its proxy peer or stops it, and nothing else changes.
 - A dongle that stays plugged in but goes silent gets a close and reopen, then a spinel reset; after three failed recoveries
   the board enters `RADIO_FAULT` with the reason (no abort). A PUT of `otbr` on that channel starts it again.
+- A dongle's reset (a close and reopen over USB) is not repeated forever: the third reset request in a row with nothing
+  received from the dongle in between (no frame, in a raw proxy no byte) is not carried out. The dongle is closed, the
+  channel shows `fault` "no answer after 3 resets", and its consumer is detached as for an unplug: in `otbr` the board
+  goes to `NO_RADIO` with that reason, a proxy drops its peer. Anything received clears the count. To recover, unplug and
+  replug the dongle (it is detected again, as a new device), or PUT the channel's mode again (the same mode: it opens
+  the dongle and attaches its consumer again; for `otbr` OpenThread starts on it). The C6 is not affected: its reset is
+  the reset GPIO.
 - Requests to the radio that are in flight when it goes, or that come before OpenThread is torn down (the console's
   `channel supported`, a REST call), are answered by the board itself: settings "work", reads that can fail fail, the
   channel masks read as 11 to 26, and a recovery that resets the radio completes against those answers instead of
@@ -226,6 +233,10 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
 - **Drain timeout**: hold a REST session for more than 45 s during a move: the target shows `fault` `drain_timeout`, Thread
   stays on the source.
 - **Silent dongle**: the recovery ladder (reopen, spinel reset), and after three recoveries `RADIO_FAULT` without abort.
+- **Dead dongle after a reset** (the CH340 OllyZig that stops answering after a reopen): at most three resets, then the
+  channel in `fault` "no answer after 3 resets", `NO_RADIO` with that reason (or the proxy's peer dropped), no more
+  reopens in the log; a PUT of the same mode opens it again, and an unplug and replug detects it again. `uart_errors`
+  counts, and at most one CH34x warning per 10 s, with no "Unsupported notification type" lines.
 - **C6 jobs**: a firmware push with OpenThread on the dongle leaves OpenThread alone; with a proxy peer on the C6 it gives
   409 `c6_busy`.
 - **Boot**: a stored dongle that is unplugged gives `NO_RADIO` without a fault; plugging it in gives `BR_RUNNING`.

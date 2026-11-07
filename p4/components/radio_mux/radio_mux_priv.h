@@ -81,6 +81,9 @@ typedef struct mux_port {
     uint8_t *dec_slot;   // slot the decoder writes into (at MUX_SLOT_HDR); NULL = into `discard`
     uint8_t *discard;    // decoder target while the pool is empty: the frame is parsed and dropped
     uint32_t dec_errors; // crc_errors + overruns already added to the counters
+    // USB: reset requests with nothing received since (RADIO_MUX_USB_DEAD_RESETS); cleared by every RX frame or raw
+    // byte and at every attach, counted by the owner's handle_reset.
+    radio_mux_reset_count_t reset_count;
     RingbufHandle_t ring; // raw and detection bytes
 
     // Pool and counters: under `lock` (taken by the transport, the consumers' release and tx, and the snapshot).

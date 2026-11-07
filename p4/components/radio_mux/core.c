@@ -674,6 +674,20 @@ uint32_t radio_mux_tx_timeout_ms(size_t n, uint32_t baud)
     return RADIO_MUX_TX_BASE_MS + (uint32_t)((bits_ms + b - 1) / b);
 }
 
+bool radio_mux_reset_count_request(radio_mux_reset_count_t *c)
+{
+    if (++c->unanswered < RADIO_MUX_USB_DEAD_RESETS) {
+        return false;
+    }
+    c->unanswered = 0;
+    return true;
+}
+
+void radio_mux_reset_count_clear(radio_mux_reset_count_t *c)
+{
+    c->unanswered = 0;
+}
+
 bool radio_mux_ch34x_uart_error(const uint8_t *pkt, size_t len)
 {
     return pkt != NULL && len >= RADIO_MUX_CH34X_STATUS_LEN && (pkt[0] & RADIO_MUX_CH34X_UART_ERR_MASK) != 0;
