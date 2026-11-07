@@ -446,8 +446,17 @@ the sequence above.
    completion. A bulk IN transfer completes only on a short packet or when full, and USB serial bridges send no ZLP:
    a received burst ending on a packet boundary stayed in the transfer until the device sent again, which showed as
    ~2 s late answers on the OllyZig (CH340) under Zigbee and rcp-proxy load. radio_mux's `usb_transport.c` asks for
-   one max packet (`in_buffer_size` 0), as Linux's usb-serial submits one max packet per URB. Host test: none (no USB
-   host mocks, see patch 27). (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md)
+   one max packet (`in_buffer_size` 0). Linux's usb-serial also reads one max packet per URB, but keeps two read URBs
+   in flight, so the bridge always has a transfer to complete into; this driver has one IN transfer in flight, so
+   every packet now waits for a software turnaround (completion, `data_cb`, resubmit) that the bridge's receive FIFO
+   must cover. Not measured under a sustained stream yet (docs/radios.md, "Verifying on a board"); if `uart_errors`
+   or `drops` move there, the fallback is a longer transfer only for devices known to send ZLPs, or a second IN
+   transfer here. Below one packet (`0 < in_buf_len < MPS` with a buffer still under one MPS after the cache-line
+   rounding, for example an HS device with MPS 512 asked for 100 bytes) `in_xfer_len` comes out 0 and a zero-length
+   IN is submitted, as upstream also did; this project never asks for that (it passes 0). Upstream's `host_test` that
+   opens with `in_buffer_size = 100` (`test_device_interaction.cpp`) would now expect a first submit of 64 bytes, not
+   100: adjust it if that test is ever revived here. Host test: none (no USB host mocks, see patch 27).
+   (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md)
 
 ## Known upstream behaviour (not patches)
 
