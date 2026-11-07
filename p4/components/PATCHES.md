@@ -343,7 +343,7 @@ reason, spec reference.
    `NO_RADIO` hero linking the Radios page, and the `RADIO_FAULT` hero links Radios instead of Firmware while Thread's
    radio is a dongle.
    (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md, sections Board mode and API)
-28. Applied (Zigbee mode, Task 5). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 30 -> 32 (on top of patch
+29. Applied (Zigbee mode, Task 5). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 30 -> 32 (on top of patch
    26: `GET /device/zigbee` and `GET /zigbee`, one slot of headroom kept). The extra-handlers callback (`app_main.c`
    `register_extra_handlers`) also registers the WebSocket `GET /zigbee` (`zigbee_register_ws`) after the device API,
    before the catch-all. Frontend (Task 7): new page `frontend/zigbee.html` and `frontend/static/zigbee.js`;
