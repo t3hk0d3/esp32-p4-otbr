@@ -1,5 +1,6 @@
-// Decisions of the RCP proxy: the .local host test, the connect back-off, the target lookup's answers, the UDP peer lock, the accept rule, the byte
-// ring (moved from usb_serial) and the HDLC cutter of UDP framing. Pure: no ESP-IDF calls.
+// Decisions of the RCP proxy: the .local host test, the connect back-off, the target lookup's answers, the UDP peer lock, the accept rule, the
+// first-bytes check of a TCP client, the raw write failure rule, the byte ring (moved from usb_serial) and the HDLC
+// cutter of UDP framing. Pure: no ESP-IDF calls.
 #include "rcp_proxy_core.h"
 
 #include <string.h>
@@ -138,6 +139,42 @@ bool rcp_proxy_lookup_answer(rcp_proxy_lookup_t *l, uint32_t seq)
 rcp_proxy_accept_t rcp_proxy_accept(bool peer_connected, bool local_allowed, bool peer_allowed)
 {
     return peer_connected || !local_allowed || !peer_allowed ? RCP_PROXY_REFUSE : RCP_PROXY_TAKE;
+}
+
+/* ---- first bytes of a TCP client ---- */
+
+// Each with its space: the longest is RCP_PROXY_SNIFF_LEN.
+static const char *const HTTP_METHODS[] = {
+    "GET ", "POST ", "PUT ", "DELETE ", "HEAD ", "OPTIONS ", "PATCH ", "CONNECT ", "TRACE ",
+};
+
+rcp_proxy_sniff_t rcp_proxy_sniff(const uint8_t *d, size_t n, bool timed_out)
+{
+    bool prefix = false; // the bytes are still the start of some method
+
+    for (size_t i = 0; i < sizeof(HTTP_METHODS) / sizeof(HTTP_METHODS[0]); i++) {
+        const size_t len = strlen(HTTP_METHODS[i]);
+        const size_t cmp = n < len ? n : len;
+
+        if (memcmp(d, HTTP_METHODS[i], cmp) != 0) {
+            continue;
+        }
+        if (n >= len) {
+            return RCP_PROXY_SNIFF_REFUSE;
+        }
+        prefix = true;
+    }
+    if (prefix && !timed_out && n < RCP_PROXY_SNIFF_LEN) {
+        return RCP_PROXY_SNIFF_WAIT;
+    }
+    return RCP_PROXY_SNIFF_PASS;
+}
+
+/* ---- raw write failure ---- */
+
+rcp_proxy_tx_fail_t rcp_proxy_raw_tx_failed(esp_err_t err)
+{
+    return err == ESP_ERR_INVALID_STATE ? RCP_PROXY_TX_DISCARD : RCP_PROXY_TX_END;
 }
 
 /* ---- byte ring ---- */

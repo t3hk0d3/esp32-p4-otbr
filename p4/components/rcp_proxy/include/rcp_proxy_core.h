@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "esp_err.h"
 #include "radio_mux_core.h"
 
 #ifdef __cplusplus
@@ -97,6 +98,35 @@ typedef enum {
 // route back to the client (peer_allowed, netcfg_peer_allowed: a client on the Thread mesh is refused even when it
 // connected to an infrastructure address).
 rcp_proxy_accept_t rcp_proxy_accept(bool peer_connected, bool local_allowed, bool peer_allowed);
+
+// TCP listen: a new client's first bytes are held until RCP_PROXY_SNIFF_LEN of them came or RCP_PROXY_SNIFF_MS passed
+// since the accept, whichever is first (earlier when they already decide it), so a web page's cross-protocol request
+// (a POST to http://<board>:6638/ from any LAN browser) never reaches the radio.
+#define RCP_PROXY_SNIFF_LEN 8
+#define RCP_PROXY_SNIFF_MS 50
+
+typedef enum {
+    RCP_PROXY_SNIFF_WAIT,   // undecided: hold the bytes, wait for more or the timeout
+    RCP_PROXY_SNIFF_PASS,   // a radio client: the held bytes and the rest go to the radio
+    RCP_PROXY_SNIFF_REFUSE, // an HTTP request line: drop the client, nothing reaches the radio
+} rcp_proxy_sniff_t;
+
+// The held first n bytes of a client (n <= RCP_PROXY_SNIFF_LEN; timed_out once RCP_PROXY_SNIFF_MS passed): REFUSE when
+// they start with an uppercase HTTP method (GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH, CONNECT, TRACE) and a space;
+// PASS as soon as they can no longer become one (spinel, ZNP, EZSP and ASH start with 0x7E, 0xFE, 0x1A ...), or at the
+// timeout or at RCP_PROXY_SNIFF_LEN bytes without a match ("GET" alone); WAIT while they are still a method's prefix.
+rcp_proxy_sniff_t rcp_proxy_sniff(const uint8_t *d, size_t n, bool timed_out);
+
+typedef enum {
+    RCP_PROXY_TX_DISCARD, // nothing was written: count the bytes as discarded, the peer session goes on
+    RCP_PROXY_TX_END,     // the radio may have taken part of the bytes: end the peer session
+} rcp_proxy_tx_fail_t;
+
+// A byte channel's (raw) radio_mux_tx failed with err: ESP_ERR_INVALID_STATE means the channel is not attached right
+// now and nothing was written (DISCARD); any other error (a USB write timeout halts the endpoint part-way through) may
+// have written a part, and going on would splice the peer's byte stream (a ZNP or EZSP dongle would see a frame cut
+// into the next one), so the session ends (END). Frame channels never ask: HDLC resyncs at the next flag.
+rcp_proxy_tx_fail_t rcp_proxy_raw_tx_failed(esp_err_t err);
 
 // Byte FIFO over caller-owned storage. Not thread-safe: one task owns it.
 typedef struct {
