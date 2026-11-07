@@ -515,6 +515,21 @@ the sequence above.
    transfer. Upstream's `host_test` fixtures (`common_test_fixtures.cpp`) still use the single `data.in_xfer` and expect
    one IN submit: adjust them if that test is ever revived here. Host test: none (no USB host mocks, see patch 30).
 
+33. Applied (close race, 2026-11-07). `usb_host_cdc_acm`: `cdc_acm_host_close` no longer aborts when an IN callback
+   resubmits during the close. `include/esp_private/cdc_host_common.h`: new field `closing` (volatile bool) in
+   `cdc_dev_t`. `cdc_acm_host.c`: close sets `closing` with the callbacks cleared; `in_xfer_cb` and `notif_xfer_cb`
+   (both resubmit points) resubmit only while it is false; close retries the endpoint halt, flush and clear plus the
+   interface release up to `CDC_ACM_CLOSE_ATTEMPTS` (10) rounds one tick apart (logged when it took more than one), the
+   endpoint resets use `ESP_ERROR_CHECK_WITHOUT_ABORT`, and a release that still fails is logged and returned instead of
+   aborting (the device stays listed; radio_mux's reopen then fails and the channel is treated as gone). Reason: close
+   runs on radio_mux's owner task (MGMT_CORE), the callbacks on the CDC driver task (NET_CORE since 0071091); a callback
+   that had passed the polling-flag check before close cleared it resubmitted its transfer, and
+   `usb_host_interface_release` failed with ESP_ERR_INVALID_STATE under upstream's `ESP_ERROR_CHECK`: an abort (core
+   dump: `cdc_acm_host_close` line 790/794, called from radio_mux's USB reset path) about once per 100 reopens under
+   traffic on the board. With the patch: 300 reopens under traffic, 4 late transfers caught by a second round, no
+   abort. The race existed upstream with both tasks on one core too, rarer (it needs a preemption inside the callback).
+   Host test: none (no USB host mocks, see patch 30).
+
 ## Known upstream behaviour (not patches)
 
 - **`GET /api/node` and `/api/devices` can report a stale node** (`state: "disabled"`, `networkName: "OpenThread"`,

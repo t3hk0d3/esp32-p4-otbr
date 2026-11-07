@@ -43,6 +43,7 @@ struct cdc_dev_s {
     cdc_acm_intf_t intf_func;             // CDC interface function table
     usb_device_handle_t dev_hdl;          // USB device handle
     void *cb_arg;                         // Common argument for user's callbacks (data IN and Notification)
+    volatile bool closing;                // [patch 33] cdc_acm_host_close runs: the IN callbacks resubmit nothing
     struct {
         usb_transfer_t *out_xfer;         // OUT data transfer
         usb_transfer_t *in_xfer[CDC_ACM_IN_XFERS]; // IN data transfers, submitted in index order [patch 32]
