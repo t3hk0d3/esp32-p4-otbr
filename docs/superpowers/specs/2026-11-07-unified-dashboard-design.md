@@ -44,7 +44,8 @@ its mode (radio channel mux). They want one page that answers "what is this boar
   `zigbee_channel` is set; keep that).
 - A section that flickers between placeholder and content on each poll, or a page that shows stale stack data after
   the stack stopped.
-- A bookmark or link to `/zigbee.html` that ends on a blank page or 404 without a way on.
+- A link to `/zigbee.html` left anywhere in the web UI. (The page itself is deleted outright, no stub: the web
+  partition's space is tight; a bookmark gets the server's 404. User, 2026-11-07.)
 
 ## Layout (as approved in the mockup)
 
@@ -99,8 +100,6 @@ The nav loses the Zigbee entry. The Thread menu keeps its current rule.
   folded into `status.js`; the page tests must keep covering them either way.
 - The exact markup and ids of the moved cards, as long as existing page tests are carried over (renamed where ids
   change) and the four Zigbee states are still tested.
-- What `/zigbee.html` does after the page is removed (a redirect to the Dashboard's Zigbee section, or a short page
-  that points there), within the anti-goal above.
 - Doc updates: `docs/zigbee.md` (the "Zigbee page" section becomes the Dashboard's Zigbee section), `docs/README.md`
   index if it names the page, CHANGELOG.
 

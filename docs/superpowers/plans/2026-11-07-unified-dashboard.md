@@ -9,7 +9,7 @@ Zigbee — where a stack that is not running shows a one-line placeholder.
 **Architecture:** Frontend only, in the vendored `esp_ot_br_server` frontend. `status.js` keeps the page
 (`StatusPage`) and gains pure helpers for the board line, the Thread status line and the two-row Radios card.
 `zigbee.js` stops being a page: it keeps `ZigbeeLogic` and turns `ZigbeePage` into `ZigbeeSection`, which renders
-the Zigbee section inside the Dashboard. `zigbee.html` becomes a stub that sends visitors to the Dashboard.
+the Zigbee section inside the Dashboard. `zigbee.html` is deleted.
 
 **Tech Stack:** vanilla ES5-style browser JS (`static/*.js`, `'use strict'`, IIFE logic modules that also `require`
 under node), `DeviceCommon.DeviceKit`, page tests in Python driving node (`tools/tests/device_js.py`,
@@ -118,9 +118,9 @@ ZigbeeSection (zigbee.js, mounted by StatusPage)
 api.js nav
     On any status
         - no Zigbee link is added; the nav slot stays empty and hidden; the Thread menu rule is unchanged
-zigbee.html (stub)
-    On opening /zigbee.html
-        - a short page links to /index.html#zigbee and redirects there; it loads no Zigbee script
+zigbee.html
+    After this change
+        - the file does not exist and no frontend file links to it
 ```
 
 ## Review Focus
@@ -133,8 +133,8 @@ zigbee.html (stub)
    behaviour), Zigbee as absent (Task 1 `isThreadActive`, Task 3 test with the field missing).
 4. A board-wide fault with Thread off (`storage unavailable` while the C6 runs Zigbee): the Device line must still
    say it (Task 1, Task 2).
-5. Bookmarks to `/zigbee.html` and the old Dashboard "Open" link: no dead end (Task 4 stub test; the Dashboard's old
-   Zigbee card and its link are removed in Task 3).
+5. Links to the removed `/zigbee.html` left anywhere in the frontend (the old Dashboard card's "Open" link, the nav):
+   none may remain (Task 4 test; the old card goes in Task 3). A bookmark gets the server's 404, by the user's choice.
 
 ---
 
@@ -216,20 +216,20 @@ zigbee.html (stub)
 - [ ] **Step 4: Run** `make test-tools`: PASS.
 - [ ] **Step 5: Commit** `feat(web): the Zigbee section moves into the Dashboard`.
 
-### Task 4: Retire the Zigbee page and its nav link
+### Task 4: Remove the Zigbee page and its nav link
 
 **Files:**
-- Modify: `frontend/zigbee.html` → a stub: title "Zigbee moved", one sentence and a link to `/index.html#zigbee`,
-  `<meta http-equiv="refresh" content="0; url=/index.html#zigbee">`, no scripts but `api.js` for the menu
+- Delete: `frontend/zigbee.html` (no stub: the web partition's space is tight; user, 2026-11-07). Check that nothing
+  in the build lists the file by name (`git grep -n "zigbee.html"`).
 - Modify: `frontend/static/api.js` (remove `showZigbeeSlot` and its call; keep the empty hidden slot)
-- Test: `tools/tests/test_zigbee_page.py` (`TestZigbeeNav` → the slot stays empty and hidden for any status; a stub
-  test asserts the refresh target and that no `zigbee.js` is loaded)
+- Test: `tools/tests/test_zigbee_page.py` (`TestZigbeeNav` → the slot stays empty and hidden for any status; a test
+  asserts `frontend/zigbee.html` does not exist and that no frontend file links to it)
 
-- [ ] **Step 1: Write the failing tests** (nav and stub, per the skeleton).
+- [ ] **Step 1: Write the failing tests** (nav and the page gone, per the skeleton).
 - [ ] **Step 2: Run**: FAIL.
-- [ ] **Step 3: Implement** the stub and the `api.js` change.
+- [ ] **Step 3: Delete** the page and make the `api.js` change.
 - [ ] **Step 4: Run** `make test-tools`: PASS.
-- [ ] **Step 5: Commit** `feat(web): the Zigbee page becomes a pointer to the Dashboard`.
+- [ ] **Step 5: Commit** `feat(web): remove the Zigbee page; the Dashboard has its section`.
 
 ### Task 5: Docs and the patch log
 
@@ -237,7 +237,7 @@ zigbee.html (stub)
 - Modify: `docs/zigbee.md` (the "Zigbee page" section → "The Dashboard's Zigbee section"; Home Assistant setup
   points to the Dashboard), `docs/README.md` and `docs/api.md` only where they name the Zigbee page,
   `p4/components/PATCHES.md` entry 33 (frontend part rewritten: Dashboard sections, `zigbee.js` as a section,
-  `zigbee.html` stub, `api.js` no longer fills patch 29's slot), `CHANGELOG.md` (Changed: one Dashboard for the board,
+  `zigbee.html` removed, `api.js` no longer fills patch 29's slot), `CHANGELOG.md` (Changed: one Dashboard for the board,
   Thread and Zigbee; the Zigbee page moved into it).
 
 - [ ] **Step 1: Edit** the files above.
@@ -246,7 +246,7 @@ zigbee.html (stub)
 
 ### Final verification
 
-- [ ] `make test-tools`, `make test-host`, `make build` all pass; `git grep -n "zigbee.html"` shows only the stub,
-  docs history and tests.
+- [ ] `make test-tools`, `make test-host`, `make build` all pass; `git grep -n "zigbee.html"` shows only docs history
+  and the removal test.
 - [ ] Not on a board in this plan: the P4 is with the radio-mux session. The on-board look is checked in the next
   batched hardware pass (memory: no flashing inside tasks).
