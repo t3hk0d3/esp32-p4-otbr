@@ -85,8 +85,10 @@ radio_mux_chan_t *core_radio_chan(void);
 bool core_radio_gone(void);
 // esp_openthread_mux_set for that channel (before every esp_openthread_init).
 void core_radio_mux_set(void);
-// Wakes br_radio: it reconciles OpenThread with the attached channel.
+// Wakes br_radio: it acts on the orchestrator's latest input (and a move, a retry).
 void core_radio_notify(void);
+// mode_fsm's mode_changed op: Thread's new state to the orchestrator (its reason follows from br_radio). Never blocks.
+void core_radio_mode_changed(br_core_mode_t mode);
 // The boot of the OTBR channel (from br_core_start).
 void core_radio_boot(void);
 // OpenThread stopped (no session drain) and its channel forgotten.

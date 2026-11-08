@@ -23,10 +23,19 @@ static const char *mode_name(br_core_mode_t mode)
     return "?";
 }
 
+// Every change of the mode is logged and reported (the mode_changed op).
+static void changed(mode_fsm_t *fsm, br_core_mode_t mode)
+{
+    ESP_LOGI(TAG, "mode %s", mode_name(mode));
+    if (fsm->ops->mode_changed) {
+        fsm->ops->mode_changed(mode);
+    }
+}
+
 static void set_mode(mode_fsm_t *fsm, br_core_mode_t mode)
 {
     atomic_store(&fsm->mode, mode);
-    ESP_LOGI(TAG, "mode %s", mode_name(mode));
+    changed(fsm, mode);
 }
 
 // Back to the state before the capture: dataset channel, OpenThread netif, Thread. Any failure reboots.
@@ -76,12 +85,12 @@ bool mode_fsm_set_started(mode_fsm_t *fsm)
         return false; // the restart inside a push or ROM recovery: the job sets the final mode when it ends
     }
     br_core_mode_t expected = BR_MODE_STARTING;
-    const bool changed = atomic_compare_exchange_strong(&fsm->mode, &expected, BR_MODE_BR_RUNNING);
+    const bool started = atomic_compare_exchange_strong(&fsm->mode, &expected, BR_MODE_BR_RUNNING);
 
-    if (changed) {
-        ESP_LOGI(TAG, "mode %s", mode_name(BR_MODE_BR_RUNNING));
+    if (started) {
+        changed(fsm, BR_MODE_BR_RUNNING);
     }
-    return changed;
+    return started;
 }
 
 void mode_fsm_set_sniffer_end_cb(mode_fsm_t *fsm, void (*cb)(void))
@@ -100,7 +109,7 @@ void mode_fsm_set_fault(mode_fsm_t *fsm)
 {
     const br_core_mode_t before = atomic_exchange(&fsm->mode, BR_MODE_RADIO_FAULT);
 
-    ESP_LOGI(TAG, "mode %s", mode_name(BR_MODE_RADIO_FAULT));
+    changed(fsm, BR_MODE_RADIO_FAULT);
     if (before == BR_MODE_SNIFFER) {
         notify_sniffer_end(fsm);
     }
@@ -204,7 +213,7 @@ void mode_fsm_cancel_radio_job(mode_fsm_t *fsm)
         fsm->radio_job = false;
         br_core_mode_t expected = BR_MODE_STARTING; // a fault entered meanwhile stays
         if (atomic_compare_exchange_strong(&fsm->mode, &expected, fsm->radio_job_prev)) {
-            ESP_LOGI(TAG, "mode %s", mode_name(fsm->radio_job_prev));
+            changed(fsm, fsm->radio_job_prev);
         }
     }
 }
@@ -494,7 +503,8 @@ void mode_fsm_on_channel_gone(mode_fsm_t *fsm)
     // NO_RADIO before the teardown: the guards refuse new Thread sessions (503) at once while the open ones drain.
     const br_core_mode_t before = atomic_exchange(&fsm->mode, BR_MODE_NO_RADIO);
 
-    ESP_LOGI(TAG, "mode %s (the OTBR channel is gone)", mode_name(BR_MODE_NO_RADIO));
+    ESP_LOGI(TAG, "the OTBR channel is gone");
+    changed(fsm, BR_MODE_NO_RADIO);
     if (before == BR_MODE_SNIFFER) {
         fsm->thread_stopped_by_capture = false; // OpenThread goes away: nothing to restore
         notify_sniffer_end(fsm);
@@ -524,4 +534,77 @@ void mode_fsm_on_channel_back(mode_fsm_t *fsm, const char *id)
     if (start_on(fsm, id) != ESP_OK) {
         mode_fsm_set_fault(fsm);
     }
+}
+
+br_core_mode_t mode_fsm_mode_for(const mode_fsm_view_t *v, char *reason, size_t cap)
+{
+    const char *id = v->chan_id ? v->chan_id : "";
+    const char *cr = v->chan_reason ? v->chan_reason : "";
+    const char *tr = v->thread_reason ? v->thread_reason : "";
+
+    reason[0] = '\0';
+    if (!v->bound) {
+        snprintf(reason, cap, "no channel in otbr");
+        return BR_MODE_NO_RADIO;
+    }
+    if (v->thread == BR_MODE_STARTING) {
+        return BR_MODE_STARTING;
+    }
+    if (v->chan_state == RADIO_MUX_CS_READY) {
+        switch (v->thread) {
+        case BR_MODE_BR_RUNNING:
+        case BR_MODE_SNIFFER:
+            return v->thread;
+        case BR_MODE_RADIO_FAULT:
+            snprintf(reason, cap, "%s", tr);
+            return BR_MODE_RADIO_FAULT;
+        default: // bound but not started: waiting for the start, or the firmware does not fit
+            snprintf(reason, cap, tr[0] ? "%s" : "waiting for %s", tr[0] ? tr : id);
+            return BR_MODE_NO_RADIO;
+        }
+    }
+    switch (v->chan_state) {
+    case RADIO_MUX_CS_FAULT:
+        if (v->kind == RADIO_MUX_FAULT_FIRMWARE) {
+            snprintf(reason, cap, "%s", cr);
+            return BR_MODE_RADIO_FAULT;
+        }
+        snprintf(reason, cap, "%s (%s)", cr, id);
+        return BR_MODE_NO_RADIO;
+    case RADIO_MUX_CS_REINIT:
+        if (v->work != RADIO_MUX_WORK_DETECT) {
+            return BR_MODE_STARTING; // the built-in RCP's maintenance: Thread starts once it ends
+        }
+        snprintf(reason, cap, "waiting for %s", id);
+        return BR_MODE_NO_RADIO;
+    default: // absent
+        snprintf(reason, cap, v->unplugged ? "radio unplugged (%s)" : "waiting for %s", id);
+        return BR_MODE_NO_RADIO;
+    }
+}
+
+esp_err_t mode_fsm_reinit_verdict(br_core_mode_t mode)
+{
+    return mode == BR_MODE_SNIFFER || mode == BR_MODE_STARTING ? ESP_ERR_INVALID_STATE : ESP_OK;
+}
+
+bool mode_fsm_input_newer(uint32_t seen_seq, uint32_t input_seq)
+{
+    return (int32_t)(input_seq - seen_seq) > 0;
+}
+
+esp_err_t mode_fsm_on_reinit(mode_fsm_t *fsm)
+{
+    const br_core_mode_t prev = mode_fsm_get_mode(fsm);
+    const esp_err_t verdict = mode_fsm_reinit_verdict(prev);
+
+    if (verdict != ESP_OK) {
+        return verdict;
+    }
+    set_mode(fsm, BR_MODE_STARTING); // the guards refuse new sessions while the open ones drain
+    if (fsm->ops->ot_stop() != ESP_OK) {
+        set_mode(fsm, prev); // nothing stopped: OpenThread goes on as before
+        return MODE_FSM_ERR_DRAIN_TIMEOUT;
+    }
+    return ESP_OK;
 }

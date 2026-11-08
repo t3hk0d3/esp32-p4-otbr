@@ -97,7 +97,10 @@ typedef struct {
     radio_mux_fw_t needs;   // firmware the mode needs; UNKNOWN = any (otbr always needs spinel, rcp-proxy nothing)
     uint8_t limit;          // channels that may run the mode at once; 0 = no limit (otbr is always 1)
     bool reboot_on_change;  // binding or unbinding it reboots the board (the orchestrator answers APPLY_REBOOT)
-    bool frames;            // as radio_mux_consumer_t.frames
+    // Byte transports (USB) only. true: spinel frames (RX_FRAME events, radio_mux_tx takes frames); false: raw bytes
+    // (radio_mux_read_raw, radio_mux_tx takes bytes). Ignored on the C6, which always delivers and takes frames: ask
+    // radio_mux_chan_frames once bound.
+    bool frames;
     bool per_channel;       // one instance per channel bound to the mode (the RCP proxy); else a singleton
     // Called on the owner task for every input. Copy *in as the latest input and wake the instance's own task: never
     // block, and call nothing of the mux that posts to the owner task or waits for it (reading the channel through the
@@ -107,8 +110,9 @@ typedef struct {
     void *ctx;
 } radio_mux_instance_t;
 
-// Before radio_mux_start only. The declaration is copied. The errors of radio_mux_register_consumer, plus
-// ESP_ERR_INVALID_ARG without `input`.
+// Before radio_mux_start only. The declaration is copied. ESP_ERR_INVALID_STATE for a duplicate mode or after the
+// start, ESP_ERR_INVALID_ARG for off, unavailable or an unknown mode or without `input`, ESP_ERR_NO_MEM when
+// RADIO_MUX_RULES_MAX instances are registered.
 esp_err_t radio_mux_register_instance(const radio_mux_instance_t *inst);
 
 // The instance's own state and reason on the channel of handle `ch`, shown in the read API (mode_state, mode_reason;
@@ -121,33 +125,6 @@ void radio_mux_report(radio_mux_chan_t *ch, const char *state, const char *reaso
 // once, or once a drain ends; no answer within RADIO_MUX_REINIT_REPLY_MS is a refusal. Ignored for a stale handle or
 // seq. Never blocks: ESP_FAIL when the owner's queue was full (the answer is lost: the maintenance times out).
 esp_err_t radio_mux_reinit_reply(radio_mux_chan_t *ch, uint32_t seq, esp_err_t verdict, const char *reason);
-
-/* ---- consumers (transitional: registered consumers are wrapped as instances until every mode is one) ---- */
-
-typedef struct {
-    radio_mux_mode_t mode;  // otbr, ziggurat or rcp-proxy
-    radio_mux_fw_t needs;   // firmware the mode needs; UNKNOWN = any (otbr always needs spinel, rcp-proxy nothing)
-    uint8_t limit;          // channels that may run the mode at once; 0 = no limit (otbr is always 1)
-    bool reboot_on_change;  // entering or leaving the mode reboots the board
-    // Byte transports (USB) only. true: spinel frames (RX_FRAME events, radio_mux_tx takes frames); false: raw bytes
-    // (radio_mux_read_raw, radio_mux_tx takes bytes). Ignored on the C6, which always delivers and takes frames: ask
-    // radio_mux_chan_frames in attach.
-    bool frames;
-    // Called from the owner task when the channel enters the mode (present, firmware fits), with this attach's own
-    // handle. Bind a queue or take the eventfd here and return quickly: long work (a probe, a stack start) belongs on
-    // the consumer's own task. An error leaves the channel in fault with the error in its reason (the handle is then
-    // never used by the mux again).
-    esp_err_t (*attach)(radio_mux_chan_t *ch, void *ctx);
-    // Called from the owner task after GONE was posted, with the handle attach got: stop using the channel (releases
-    // of slots already taken stay allowed). A consumer attached again later is a normal case (with a new handle).
-    void (*detach)(radio_mux_chan_t *ch, void *ctx);
-    void *ctx;
-} radio_mux_consumer_t;
-
-// Before radio_mux_start only. The declaration is copied. ESP_ERR_INVALID_STATE for a duplicate mode or after the
-// start, ESP_ERR_INVALID_ARG for off, unavailable or an unknown mode, ESP_ERR_NO_MEM when RADIO_MUX_RULES_MAX consumers
-// are registered.
-esp_err_t radio_mux_register_consumer(const radio_mux_consumer_t *c);
 
 // Loads the channels from NVS, lists c6, creates the eventfds (the eventfd VFS must be registered), starts the owner
 // task (MGMT_CORE), which installs the USB host from NET_CORE (its interrupt and the CDC driver's task run there, off
@@ -264,6 +241,8 @@ typedef struct {
     radio_mux_counters_t counters; // since boot
     // The orchestrator's view (design section 6): the channel's lifecycle and the bound instance's own state.
     radio_mux_chan_state_t chan_state;
+    radio_mux_fault_kind_t fault_kind;      // fault: firmware or link
+    radio_mux_work_t work;                  // reinit: the maintenance
     char chan_reason[RADIO_MUX_REASON_MAX]; // reinit: the work; fault: why; else ""
     char mode_state[16];                    // the instance's state ("" when nothing is bound or it reported none)
     char mode_reason[RADIO_MUX_REASON_MAX];

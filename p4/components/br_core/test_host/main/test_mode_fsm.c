@@ -34,6 +34,8 @@ typedef struct {
     esp_err_t reset_first;       /* what the first reset_rcp returns (fail[OP_RESET_RCP] for the later ones) */
     int resets;                  /* reset_rcp calls so far */
     uint32_t slept_ms;           /* what sleep_ms was given, summed */
+    br_core_mode_t heard[LOG_CAP]; /* the modes the mode_changed op heard, in order */
+    int heard_count;
 } fake_t;
 
 enum { OP_THREAD_STOP, OP_NETIF_DOWN, OP_RAW_ENABLE, OP_RAW_DISABLE, OP_RESTORE_CHANNEL, OP_NETIF_UP, OP_THREAD_START,
@@ -178,6 +180,13 @@ static esp_err_t f_store_otbr(const char *from, const char *to)
     return record(OP_STORE, "store_otbr");
 }
 
+static void f_mode_changed(br_core_mode_t mode)
+{
+    if (fake.heard_count < LOG_CAP) {
+        fake.heard[fake.heard_count++] = mode;
+    }
+}
+
 static const mode_fsm_ops_t ops = {
     .thread_stop = f_thread_stop,
     .netif_down = f_netif_down,
@@ -199,6 +208,7 @@ static const mode_fsm_ops_t ops = {
     .ot_start = f_ot_start,
     .ot_stop = f_ot_stop,
     .store_otbr = f_store_otbr,
+    .mode_changed = f_mode_changed,
 };
 
 static void rx_done(otInstance *instance, otRadioFrame *frame, otError error)
@@ -1505,4 +1515,256 @@ TEST_CASE("On a move whose start on the target fails but back on the source work
     fake.start_fail_on[0] = DST;
     mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err));
     TEST_ASSERT_FALSE(mode_fsm_start_failed(mode_fsm_get_mode(&fsm), true));
+}
+
+/* ---- the board-mode table (design section 6): mode_fsm_mode_for ---- */
+
+#define USB_ID "usb-303a-1001"
+
+// Thread bound to a ready dongle, not started.
+static mode_fsm_view_t view(void)
+{
+    return (mode_fsm_view_t) {
+        .bound = true, .chan_state = RADIO_MUX_CS_READY, .kind = RADIO_MUX_FAULT_NONE, .work = RADIO_MUX_WORK_NONE,
+        .chan_id = USB_ID, .chan_reason = "", .thread = BR_MODE_NO_RADIO, .thread_reason = "", .unplugged = false,
+    };
+}
+
+static br_core_mode_t mode_for(const mode_fsm_view_t *v, char *reason)
+{
+    strcpy(reason, "stale");
+    return mode_fsm_mode_for(v, reason, 96);
+}
+
+TEST_CASE("On Thread running on a ready channel: BR_RUNNING, no reason", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.thread = BR_MODE_BR_RUNNING;
+    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("", reason);
+}
+
+TEST_CASE("On Thread sniffing on a ready channel: SNIFFER", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.thread = BR_MODE_SNIFFER;
+    TEST_ASSERT_EQUAL(BR_MODE_SNIFFER, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("", reason);
+}
+
+TEST_CASE("On Thread starting or releasing, whatever its channel: STARTING", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.thread = BR_MODE_STARTING;
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_for(&v, reason));
+    v.chan_state = RADIO_MUX_CS_ABSENT;
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("", reason);
+}
+
+TEST_CASE("On Thread bound and waiting for the C6's boot steps, push or ROM recovery: STARTING", "[mode_fsm]")
+{
+    const radio_mux_work_t works[] = {RADIO_MUX_WORK_BOOT_STEPS, RADIO_MUX_WORK_PUSH, RADIO_MUX_WORK_ROM_RECOVERY};
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.chan_id = "c6";
+    v.chan_state = RADIO_MUX_CS_REINIT;
+    for (size_t i = 0; i < sizeof(works) / sizeof(works[0]); i++) {
+        v.work = works[i];
+        TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_for(&v, reason));
+        TEST_ASSERT_EQUAL_STRING("", reason);
+    }
+}
+
+TEST_CASE("On Thread bound and waiting for a dongle's firmware detection: NO_RADIO waiting for <id>", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.chan_state = RADIO_MUX_CS_REINIT;
+    v.work = RADIO_MUX_WORK_DETECT;
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("waiting for " USB_ID, reason);
+}
+
+TEST_CASE("On Thread bound to an absent dongle at boot: NO_RADIO waiting for <id>", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.chan_state = RADIO_MUX_CS_ABSENT;
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("waiting for " USB_ID, reason);
+}
+
+TEST_CASE("On Thread bound to a dongle unplugged after it ran: NO_RADIO radio unplugged (<id>)", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.chan_state = RADIO_MUX_CS_ABSENT;
+    v.unplugged = true;
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("radio unplugged (" USB_ID ")", reason);
+}
+
+TEST_CASE("On Thread's channel in a link fault: NO_RADIO with the channel's reason and id", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.chan_state = RADIO_MUX_CS_FAULT;
+    v.kind = RADIO_MUX_FAULT_LINK;
+    v.chan_reason = "no answer after 3 resets";
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("no answer after 3 resets (" USB_ID ")", reason);
+}
+
+TEST_CASE("On Thread's channel in a firmware fault: RADIO_FAULT with the channel's reason", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.chan_id = "c6";
+    v.chan_state = RADIO_MUX_CS_FAULT;
+    v.kind = RADIO_MUX_FAULT_FIRMWARE;
+    v.chan_reason = "no rcp firmware";
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("no rcp firmware", reason);
+    v.thread = BR_MODE_RADIO_FAULT; // after its LOST (firmware) as well
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("no rcp firmware", reason);
+}
+
+TEST_CASE("On Thread in fault on a ready channel: RADIO_FAULT with the start's reason", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.chan_id = "c6";
+    v.thread = BR_MODE_RADIO_FAULT;
+    v.thread_reason = MODE_FSM_FAULT_INCOMPATIBLE;
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("rcp incompatible", reason);
+    v.thread_reason = "an earlier OpenThread start was abandoned: reboot";
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("an earlier OpenThread start was abandoned: reboot", reason);
+}
+
+TEST_CASE("On Thread bound to a ready channel whose firmware does not fit: NO_RADIO with the fit reason", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.thread_reason = "detected znp firmware does not fit otbr";
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("detected znp firmware does not fit otbr", reason);
+}
+
+TEST_CASE("On no channel stored in otbr: NO_RADIO no channel in otbr", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.bound = false;
+    v.chan_id = NULL;
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("no channel in otbr", reason);
+}
+
+/* ---- Thread's answer to a reinit request: mode_fsm_reinit_verdict ---- */
+
+TEST_CASE("On a reinit request while BR_RUNNING: accepts (after the sessions drain)", "[mode_fsm]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_reinit_verdict(BR_MODE_BR_RUNNING));
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_reinit_verdict(BR_MODE_RADIO_FAULT));
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_reinit_verdict(BR_MODE_NO_RADIO));
+}
+
+TEST_CASE("On a reinit request in SNIFFER: refuses with ESP_ERR_INVALID_STATE", "[mode_fsm]")
+{
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_reinit_verdict(BR_MODE_SNIFFER));
+}
+
+TEST_CASE("On a reinit request in STARTING: refuses with ESP_ERR_INVALID_STATE", "[mode_fsm]")
+{
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_reinit_verdict(BR_MODE_STARTING));
+}
+
+/* ---- inputs: mode_fsm_input_newer ---- */
+
+TEST_CASE("On an input newer than the last one handled: acted on", "[mode_fsm]")
+{
+    TEST_ASSERT_TRUE(mode_fsm_input_newer(0, 1));
+    TEST_ASSERT_TRUE(mode_fsm_input_newer(2, 9));
+    TEST_ASSERT_TRUE(mode_fsm_input_newer(UINT32_MAX, 0));
+}
+
+TEST_CASE("On an input older than the latest, or the one handled: is ignored", "[mode_fsm]")
+{
+    TEST_ASSERT_FALSE(mode_fsm_input_newer(9, 9));
+    TEST_ASSERT_FALSE(mode_fsm_input_newer(9, 2));
+}
+
+/* ---- the mode_changed op (Thread's state reported to the orchestrator) ---- */
+
+TEST_CASE("On every mode change: the mode_changed op hears the new mode", "[mode_fsm]")
+{
+    setup(BR_MODE_STARTING);
+    TEST_ASSERT_TRUE(mode_fsm_set_started(&fsm));
+    mode_fsm_set_fault(&fsm);
+    mode_fsm_on_channel_gone(&fsm);
+    TEST_ASSERT_EQUAL(4, fake.heard_count); /* BR_RUNNING, RADIO_FAULT, NO_RADIO (before and after the teardown) */
+    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, fake.heard[0]);
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, fake.heard[1]);
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, fake.heard[2]);
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, fake.heard[3]);
+}
+
+/* ---- REINIT: mode_fsm_on_reinit ---- */
+
+TEST_CASE("On a reinit while BR_RUNNING: OpenThread stops after its drain, STARTING, accepted", "[mode_fsm]")
+{
+    setup(BR_MODE_BR_RUNNING);
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_on_reinit(&fsm));
+    TEST_ASSERT_EQUAL(1, count_of("ot_stop"));
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, fake.mode_in_stop); /* the guards refuse new sessions during the drain */
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
+    TEST_ASSERT_EQUAL(0, count_of("ot_start"));
+}
+
+TEST_CASE("On a reinit in SNIFFER or STARTING: refused with ESP_ERR_INVALID_STATE, nothing stopped", "[mode_fsm]")
+{
+    setup(BR_MODE_SNIFFER);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_on_reinit(&fsm));
+    TEST_ASSERT_EQUAL(BR_MODE_SNIFFER, mode_fsm_get_mode(&fsm));
+    setup(BR_MODE_STARTING);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_on_reinit(&fsm));
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
+    TEST_ASSERT_EQUAL(0, count_of("ot_stop"));
+}
+
+TEST_CASE("On a reinit whose sessions do not end: refused with a drain timeout, the mode back", "[mode_fsm]")
+{
+    setup(BR_MODE_BR_RUNNING);
+    fake.fail[OP_OT_STOP] = ESP_ERR_TIMEOUT;
+    TEST_ASSERT_EQUAL(MODE_FSM_ERR_DRAIN_TIMEOUT, mode_fsm_on_reinit(&fsm));
+    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm)); /* never RADIO_FAULT */
+}
+
+TEST_CASE("On a reinit with OpenThread not running (RADIO_FAULT, NO_RADIO): accepted, STARTING", "[mode_fsm]")
+{
+    setup(BR_MODE_RADIO_FAULT);
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_on_reinit(&fsm));
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
+    setup(BR_MODE_NO_RADIO);
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_on_reinit(&fsm));
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
 }

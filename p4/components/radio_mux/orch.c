@@ -1,6 +1,5 @@
 // The channel/mode orchestrator's runtime, on the mux owner task: the registered mode instances, the inputs it delivers
-// to them (BIND, UNBIND, LOST, BACK; REINIT once maintenance asks), their sequence numbers, and the shim that drives a
-// consumer registered the old way as an instance. The binding table is the channels' stored modes (no record of its
+// to them (BIND, UNBIND, LOST, BACK; REINIT once maintenance asks) and their sequence numbers. The binding table is the channels' stored modes (no record of its
 // own); the decisions are in orch_core.c.
 #include <inttypes.h>
 #include <stdatomic.h>
@@ -57,7 +56,7 @@ static void set_mode_state(struct radio_mux_chan *ch, const char *state, const c
     mux_unlock();
 }
 
-esp_err_t orch_bind(mux_port_t *p, orch_inst_t *oi, radio_mux_chan_t *h)
+void orch_bind(mux_port_t *p, orch_inst_t *oi, radio_mux_chan_t *h)
 {
     struct radio_mux_chan *ch = p->chan;
     const size_t slot = slot_of(ch);
@@ -68,15 +67,6 @@ esp_err_t orch_bind(mux_port_t *p, orch_inst_t *oi, radio_mux_chan_t *h)
     // NONE: the instance already holds the binding on a ready channel (a re-attach of the transport): a new handle is
     // a bind back.
     deliver(oi, slot, type == RADIO_MUX_IN_NONE ? RADIO_MUX_IN_BACK : type, h, RADIO_MUX_FAULT_NONE, NULL);
-    if (oi->consumer.attach == NULL) {
-        return ESP_OK;
-    }
-    if (oi->shim_err != ESP_OK) {
-        oi->held[slot] = false;
-        return oi->shim_err;
-    }
-    set_mode_state(ch, "running", NULL); // the shim's consumer reports nothing itself
-    return ESP_OK;
 }
 
 void orch_leave(mux_port_t *p, orch_inst_t *oi, radio_mux_input_type_t type, radio_mux_fault_kind_t kind,
@@ -86,13 +76,10 @@ void orch_leave(mux_port_t *p, orch_inst_t *oi, radio_mux_input_type_t type, rad
     const size_t slot = slot_of(ch);
 
     if (type == RADIO_MUX_IN_UNBIND) {
+        // Nothing is bound: the binding goes, and the state with it (a report through the old handle after this is
+        // refused once the next instance binds).
         oi->held[slot] = false;
-    }
-    if (type == RADIO_MUX_IN_UNBIND) {
-        set_mode_state(ch, "", NULL); // nothing is bound (a report through the old handle after this is refused once
-        // the next instance binds)
-    } else if (oi->consumer.attach != NULL) {
-        set_mode_state(ch, "no_radio", reason); // the shim's consumer reports nothing itself
+        set_mode_state(ch, "", NULL);
     }
     deliver(oi, slot, type, p->att_handle, kind, reason);
 }
@@ -157,8 +144,9 @@ void orch_fill_modes(radio_mux_snapshot_t *out)
 
 /* ---- registration ---- */
 
-static esp_err_t add(const radio_mux_instance_t *inst, const radio_mux_consumer_t *shim)
+esp_err_t radio_mux_register_instance(const radio_mux_instance_t *inst)
 {
+    ESP_RETURN_ON_FALSE(inst && inst->input, ESP_ERR_INVALID_ARG, TAG, "an instance needs input");
     ESP_RETURN_ON_FALSE(inst->mode == RADIO_MUX_MODE_OTBR || inst->mode == RADIO_MUX_MODE_ZIGGURAT ||
                         inst->mode == RADIO_MUX_MODE_RCP_PROXY, ESP_ERR_INVALID_ARG, TAG, "no instance for mode %d",
                         (int)inst->mode);
@@ -170,51 +158,9 @@ static esp_err_t add(const radio_mux_instance_t *inst, const radio_mux_consumer_
 
     memset(oi, 0, sizeof(*oi));
     oi->inst = *inst;
-    if (shim != NULL) {
-        oi->consumer = *shim;
-        oi->inst.ctx = oi;
-    }
     g_mux.rules.rules[g_mux.rules.n++] = (radio_mux_rule_t) {
         .mode = inst->mode, .needs = inst->needs, .limit = inst->limit, .reboot_on_change = inst->reboot_on_change,
     };
-    ESP_LOGI(TAG, "%s %s registered", radio_mux_mode_name(inst->mode), shim ? "consumer" : "instance");
+    ESP_LOGI(TAG, "%s instance registered", radio_mux_mode_name(inst->mode));
     return ESP_OK;
-}
-
-esp_err_t radio_mux_register_instance(const radio_mux_instance_t *inst)
-{
-    ESP_RETURN_ON_FALSE(inst && inst->input, ESP_ERR_INVALID_ARG, TAG, "an instance needs input");
-    return add(inst, NULL);
-}
-
-// The shim: BIND and BACK attach the consumer, UNBIND and LOST detach it (GONE was posted), as the attach machine did.
-static void shim_input(const radio_mux_input_t *in, void *ctx)
-{
-    orch_inst_t *oi = ctx;
-
-    switch (in->type) {
-    case RADIO_MUX_IN_BIND:
-    case RADIO_MUX_IN_BACK:
-        oi->shim_err = oi->consumer.attach(in->ch, oi->consumer.ctx);
-        break;
-    case RADIO_MUX_IN_UNBIND:
-    case RADIO_MUX_IN_LOST:
-        if (in->ch != NULL) {
-            oi->consumer.detach(in->ch, oi->consumer.ctx);
-        }
-        break;
-    default:
-        break; // REINIT: nothing asks a consumer
-    }
-}
-
-esp_err_t radio_mux_register_consumer(const radio_mux_consumer_t *c)
-{
-    ESP_RETURN_ON_FALSE(c && c->attach && c->detach, ESP_ERR_INVALID_ARG, TAG, "consumer needs attach and detach");
-    const radio_mux_instance_t inst = {
-        .mode = c->mode, .needs = c->needs, .limit = c->limit, .reboot_on_change = c->reboot_on_change,
-        .frames = c->frames, .per_channel = c->mode == RADIO_MUX_MODE_RCP_PROXY, .input = shim_input,
-    };
-
-    return add(&inst, c);
 }

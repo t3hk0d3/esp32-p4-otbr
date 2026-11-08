@@ -42,12 +42,9 @@ typedef struct {
 // The answer to a reinit as a message carries this much of the instance's reason.
 #define MUX_REPLY_REASON_MAX 72
 
-// A registered mode instance (orch.c). A consumer registered the old way is wrapped as one (the shim: consumer.attach
-// set, inst.input the shim's).
+// A registered mode instance (orch.c).
 typedef struct orch_inst {
     radio_mux_instance_t inst;
-    radio_mux_consumer_t consumer;        // the shim's consumer; zero for an instance
-    esp_err_t shim_err;                   // the shim's last attach result
     uint32_t seq[RADIO_MUX_CHANNELS_MAX]; // inputs sent: per channel slot (per_channel), else [0]
     bool held[RADIO_MUX_CHANNELS_MAX];    // BIND sent on that slot and no UNBIND since (a LOST keeps it)
 } orch_inst_t;
@@ -190,6 +187,8 @@ struct radio_mux_chan {
     bool det_failed; // runtime: its last detection found nothing and the earlier record was kept (shown as the reason)
     // Runtime, the orchestrator's view (radio_mux_chan_info_t): set by refresh, mode_* also by radio_mux_report.
     radio_mux_chan_state_t chan_state;
+    radio_mux_fault_kind_t fault_kind;
+    radio_mux_work_t work;
     char chan_reason[RADIO_MUX_REASON_MAX];
     char mode_state[16];
     char mode_reason[RADIO_MUX_REASON_MAX];
@@ -257,11 +256,10 @@ radio_mux_chan_t *mux_new_attach(mux_port_t *p);
 
 // The instance registered for `mode`; NULL when none is.
 orch_inst_t *orch_find(radio_mux_mode_t mode);
-// BIND (or BACK, when the instance holds the binding of p->chan) to `oi` with the new handle `h`. Returns the shim's
-// attach result (ESP_OK for an instance); on an error the instance does not hold the binding.
-esp_err_t orch_bind(mux_port_t *p, orch_inst_t *oi, radio_mux_chan_t *h);
-// UNBIND (the binding goes) or LOST (it is kept) to `oi`, bound to p->chan through p->att_handle. The shim's consumer
-// is detached; GONE was posted before.
+// BIND (or BACK, when the instance holds the binding of p->chan) to `oi` with the new handle `h`.
+void orch_bind(mux_port_t *p, orch_inst_t *oi, radio_mux_chan_t *h);
+// UNBIND (the binding goes) or LOST (it is kept) to `oi`, bound to p->chan through p->att_handle. GONE was posted
+// before.
 void orch_leave(mux_port_t *p, orch_inst_t *oi, radio_mux_input_type_t type, radio_mux_fault_kind_t kind,
                 const char *reason);
 // UNBIND to the instance of `mode` that holds the binding of channel `ch` while nothing is attached there (a move

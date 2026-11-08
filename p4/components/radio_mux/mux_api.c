@@ -322,6 +322,8 @@ static void fill_info(const struct radio_mux_chan *ch, radio_mux_chan_info_t *o)
         o->counters = ch->ctr;
     }
     o->chan_state = ch->chan_state;
+    o->fault_kind = ch->fault_kind;
+    o->work = ch->work;
     memcpy(o->chan_reason, ch->chan_reason, sizeof(o->chan_reason));
     memcpy(o->mode_state, ch->mode_state, sizeof(o->mode_state));
     memcpy(o->mode_reason, ch->mode_reason, sizeof(o->mode_reason));

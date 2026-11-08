@@ -7,6 +7,7 @@
 #include "esp_err.h"
 #include "openthread/link_raw.h"
 #include "br_core_mode.h"
+#include "radio_mux_orch_core.h"
 #include "rcp_sync.h"
 
 #ifdef __cplusplus
@@ -89,6 +90,8 @@ typedef struct {
     esp_err_t (*ot_stop)(void);
     /** Store channel `to` in mode otbr and `from` in mode off (both stored modes, after `to` runs). */
     esp_err_t (*store_otbr)(const char *from, const char *to);
+    /** The mode changed (to `mode`); Thread's state goes to the orchestrator's read API. Never blocks. May be NULL. */
+    void (*mode_changed)(br_core_mode_t mode);
 } mode_fsm_ops_t;
 
 typedef struct {
@@ -316,6 +319,50 @@ void mode_fsm_on_channel_gone(mode_fsm_t *fsm);
  * during a radio job (it starts OpenThread itself).
  */
 void mode_fsm_on_channel_back(mode_fsm_t *fsm, const char *id);
+
+/** The board's view of Thread and the channel stored in otbr (design section 6). */
+typedef struct {
+    bool bound;                        /**< a channel is stored in otbr */
+    radio_mux_chan_state_t chan_state; /**< that channel's lifecycle state */
+    radio_mux_fault_kind_t kind;       /**< its fault kind (chan_state fault) */
+    radio_mux_work_t work;             /**< its maintenance (chan_state reinit) */
+    const char *chan_id;
+    const char *chan_reason;           /**< its reason (fault: why) */
+    /** Thread's own state: STARTING (starting, releasing), BR_RUNNING, SNIFFER or RADIO_FAULT while bound and started;
+     *  NO_RADIO otherwise. */
+    br_core_mode_t thread;
+    /** RADIO_FAULT: the start's reason; NO_RADIO on a ready channel: why Thread is not bound to it (the fit). */
+    const char *thread_reason;
+    bool unplugged; /**< the channel went absent after Thread ran on it (not at boot) */
+} mode_fsm_view_t;
+
+/**
+ * The board mode and its reason (into `reason`, cap `cap`) for a view, one row of the design's table per case:
+ * no binding: NO_RADIO "no channel in otbr"; Thread starting: STARTING; running or sniffing on a ready channel:
+ * BR_RUNNING or SNIFFER; in fault on a ready channel: RADIO_FAULT with the start's reason; the channel in a firmware
+ * fault: RADIO_FAULT with its reason; in a link fault: NO_RADIO "<its reason> (<id>)"; in reinit: STARTING for the
+ * built-in RCP's maintenance, NO_RADIO "waiting for <id>" for a dongle's detection; absent: NO_RADIO "waiting for <id>"
+ * ("radio unplugged (<id>)" once it ran); ready but not bound (the fit): NO_RADIO with Thread's reason ("waiting for
+ * <id>" when it has none). Pure.
+ */
+br_core_mode_t mode_fsm_mode_for(const mode_fsm_view_t *v, char *reason, size_t cap);
+
+/**
+ * Thread's answer to a reinit request (maintenance wants its channel): ESP_OK (it lets go once its sessions drained),
+ * or ESP_ERR_INVALID_STATE in SNIFFER and STARTING. The drain's timeout refusal comes from the drain itself. Pure.
+ */
+esp_err_t mode_fsm_reinit_verdict(br_core_mode_t mode);
+
+/**
+ * REINIT (maintenance wants Thread's channel): refused with ESP_ERR_INVALID_STATE in SNIFFER and STARTING (nothing
+ * touched, mode_fsm_reinit_verdict). Otherwise STARTING, then OpenThread stopped after its sessions drained (ot_stop):
+ * a drain timeout puts the mode back and returns MODE_FSM_ERR_DRAIN_TIMEOUT (nothing stopped). ESP_OK: OpenThread is
+ * stopped and the mode stays STARTING until the channel comes back (mode_fsm_on_channel_back) or is lost.
+ */
+esp_err_t mode_fsm_on_reinit(mode_fsm_t *fsm);
+
+/** Whether the orchestrator's input `input_seq` is newer than the last one handled (`seen_seq`), the seq wrapping. */
+bool mode_fsm_input_newer(uint32_t seen_seq, uint32_t input_seq);
 
 #ifdef __cplusplus
 }

@@ -1368,6 +1368,7 @@ static const mode_fsm_ops_t s_ops = {
     .ot_start = core_radio_ot_start,
     .ot_stop = core_radio_ot_stop,
     .store_otbr = core_radio_store_otbr,
+    .mode_changed = core_radio_mode_changed,
 };
 
 // True while OpenThread takes calls. Read under the status mutex; callers that hold the OpenThread lock use it to
