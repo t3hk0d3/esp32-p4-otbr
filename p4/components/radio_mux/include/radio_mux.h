@@ -325,23 +325,36 @@ void radio_mux_set_otbr_mover(esp_err_t (*move)(const char *from, const char *to
 
 /* ---- maintenance of the built-in RCP: the channel's reinit ---- */
 
+// How long radio_mux_maintain waits for the channel's mode to run again after the work (radio_mux_orch_settle).
+#define RADIO_MUX_SETTLE_MS 180000
+
 // What a maintenance did (radio_mux_maintain).
 typedef struct {
     bool ran;       // the channel went through reinit and the work ran (false: refused, nothing touched)
     bool base_only; // a push left the RCP with its updater and no RCP firmware (c6_installer.bin through ESP-Hosted)
+    // The channel's stored mode afterwards and whether it runs again (NONE: no instance, or refused); WAIT means it
+    // had not said by RADIO_MUX_SETTLE_MS. mode_state and mode_reason are what the read API showed for it then.
+    radio_mux_mode_t mode;
+    radio_mux_settle_t settle;
+    char mode_state[16];
+    char mode_reason[RADIO_MUX_REASON_MAX];
 } radio_mux_maint_t;
 
 // Runs maintenance `work` on the built-in RCP's channel `id` as its reinit: RADIO_MUX_WORK_PUSH (`source` a
 // const rcp_fw_source_t *) or RADIO_MUX_WORK_ROM_RECOVERY (`source` NULL). The instance bound to the channel is asked
 // first (REINIT); only once it let go (at once, or after its drain) the channel enters reinit, the work runs on the
-// calling task, then the built-in RCP's boot steps; the channel is ready (BACK to the instance) or in fault (LOST)
-// again before this returns. Refusals touch nothing (out->ran false) and put the reason in `detail`:
+// calling task, then the built-in RCP's boot steps; the channel is ready (BACK to the instance, its state shown as
+// "starting" until it reports) or in fault (LOST). Then this waits until the instance reports a state in which it runs
+// or does not (radio_mux_orch_settle), at most RADIO_MUX_SETTLE_MS, and puts the outcome in `out` (mode, settle,
+// mode_state, mode_reason). Refusals touch nothing and wait for nothing (out->ran false, out->settle NONE) and put the
+// reason in `detail`:
 // ESP_ERR_INVALID_STATE while another maintenance runs (the boot steps: "the radio is still booting") or OpenThread is
 // being moved to the channel; the instance's own code and reason (RADIO_MUX_ERR_PEER_CONNECTED for the proxy's peer,
 // ESP_ERR_INVALID_STATE for Thread); ESP_ERR_INVALID_STATE "<mode> did not let go of the radio in time" when it does
 // not answer within RADIO_MUX_REINIT_REPLY_MS. ESP_ERR_NOT_FOUND for an id that is not the built-in RCP's,
 // ESP_ERR_NOT_SUPPORTED without one, ESP_ERR_TIMEOUT when the owner task did not take the request. Otherwise the
-// work's result. Blocks for the whole work (minutes for a push). Not from the owner task. `out` may be NULL.
+// work's result. Blocks for the whole work and the wait (minutes for a push). Not from the owner task. `out` may be
+// NULL.
 esp_err_t radio_mux_maintain(const char *id, radio_mux_work_t work, const void *source, char *detail, size_t cap,
                              radio_mux_maint_t *out);
 // Whether a maintenance runs (asked, or in reinit; the boot steps included). Any task.

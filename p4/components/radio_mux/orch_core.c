@@ -1,4 +1,6 @@
 // Decisions of the channel/mode orchestrator. Pure: no ESP-IDF calls.
+#include <string.h>
+
 #include "radio_mux_orch_core.h"
 
 static const char *const chan_state_names[] = {
@@ -172,6 +174,37 @@ size_t radio_mux_singleton_dedupe(radio_mux_mode_t *modes, bool *changed, size_t
 const char *radio_mux_orch_lost_state(radio_mux_mode_t mode, radio_mux_fault_kind_t kind)
 {
     return mode == RADIO_MUX_MODE_OTBR && kind == RADIO_MUX_FAULT_FIRMWARE ? "fault" : "no_radio";
+}
+
+static bool state_in(const char *state, const char *const *list, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        if (strcmp(state, list[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+radio_mux_settle_t radio_mux_orch_settle(radio_mux_chan_state_t cs, bool instance, const char *mode_state)
+{
+    static const char *const wait[] = {"", "starting", "releasing"};
+    static const char *const up[] = {"running", "sniffer", "listening", "connecting", "backoff", "connected"};
+    const char *state = mode_state ? mode_state : "";
+
+    if (!instance) {
+        return RADIO_MUX_SETTLE_NONE;
+    }
+    if (cs == RADIO_MUX_CS_REINIT) {
+        return RADIO_MUX_SETTLE_WAIT;
+    }
+    if (cs != RADIO_MUX_CS_READY) {
+        return RADIO_MUX_SETTLE_DOWN;
+    }
+    if (state_in(state, wait, sizeof(wait) / sizeof(wait[0]))) {
+        return RADIO_MUX_SETTLE_WAIT;
+    }
+    return state_in(state, up, sizeof(up) / sizeof(up[0])) ? RADIO_MUX_SETTLE_UP : RADIO_MUX_SETTLE_DOWN;
 }
 
 radio_mux_reinit_act_t radio_mux_reinit_ask(radio_mux_reinit_run_t *r, uint32_t seq, bool bound, int64_t now_ms)

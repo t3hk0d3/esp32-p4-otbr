@@ -668,3 +668,52 @@ TEST_CASE("On LOST for a link fault or an unplug: every mode's state is no_radio
     TEST_ASSERT_EQUAL_STRING("no_radio", radio_mux_orch_lost_state(RADIO_MUX_MODE_ZIGGURAT, RADIO_MUX_FAULT_LINK));
     TEST_ASSERT_EQUAL_STRING("no_radio", radio_mux_orch_lost_state(RADIO_MUX_MODE_RCP_PROXY, RADIO_MUX_FAULT_NONE));
 }
+
+/* ---- radio_mux_orch_settle: has the channel's mode run again after a maintenance ---- */
+
+TEST_CASE("On no instance stored on the channel: settle is NONE", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_NONE, radio_mux_orch_settle(RADIO_MUX_CS_READY, false, ""));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_NONE, radio_mux_orch_settle(RADIO_MUX_CS_FAULT, false, "no_radio"));
+}
+
+TEST_CASE("On the channel in fault or absent: settle is DOWN", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_DOWN, radio_mux_orch_settle(RADIO_MUX_CS_FAULT, true, "fault"));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_DOWN, radio_mux_orch_settle(RADIO_MUX_CS_FAULT, true, "starting"));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_DOWN, radio_mux_orch_settle(RADIO_MUX_CS_ABSENT, true, "running"));
+}
+
+TEST_CASE("On the channel still in reinit: settle is WAIT", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_REINIT, true, "running"));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_REINIT, true, "no_radio"));
+}
+
+TEST_CASE("On a ready channel whose state is \"\", starting or releasing: settle is WAIT", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, ""));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, "starting"));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, "releasing"));
+}
+
+TEST_CASE("On a ready channel whose mode runs (running, sniffer, listening, connecting, backoff, connected): settle "
+          "is UP", "[radio_mux]")
+{
+    static const char *const up[] = {"running", "sniffer", "listening", "connecting", "backoff", "connected"};
+
+    for (size_t i = 0; i < sizeof(up) / sizeof(up[0]); i++) {
+        TEST_ASSERT_EQUAL_MESSAGE(RADIO_MUX_SETTLE_UP, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, up[i]), up[i]);
+    }
+}
+
+TEST_CASE("On a ready channel whose mode does not run (fault, no_radio, incompatible, idle, off, anything else): "
+          "settle is DOWN", "[radio_mux]")
+{
+    static const char *const down[] = {"fault", "no_radio", "incompatible", "idle", "off", "bogus"};
+
+    for (size_t i = 0; i < sizeof(down) / sizeof(down[0]); i++) {
+        TEST_ASSERT_EQUAL_MESSAGE(RADIO_MUX_SETTLE_DOWN, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, down[i]),
+                                  down[i]);
+    }
+}

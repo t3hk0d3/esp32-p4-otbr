@@ -64,6 +64,10 @@ void orch_bind(mux_port_t *p, orch_inst_t *oi, radio_mux_chan_t *h)
                                                                  oi->held[slot]);
 
     oi->held[slot] = true;
+    if (g_mux.maint_ending && p == &g_mux.c6) {
+        // The end of a maintenance: what the instance showed before it is stale; a maintenance waits for its report.
+        set_mode_state(ch, "starting", NULL);
+    }
     // NONE: the instance already holds the binding on a ready channel (a re-attach of the transport): a new handle is
     // a bind back.
     deliver(oi, slot, type == RADIO_MUX_IN_NONE ? RADIO_MUX_IN_BACK : type, h, RADIO_MUX_FAULT_NONE, NULL);

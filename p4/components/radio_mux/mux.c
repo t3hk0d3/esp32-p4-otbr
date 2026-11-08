@@ -887,7 +887,9 @@ static void handle_maint_done(mux_call_t *call)
         snprintf(why, sizeof(why), "%s", C6_JOB_FAILED_REASON);
     }
     c6_list(present, why);
+    g_mux.maint_ending = true;
     c6_apply(false);
+    g_mux.maint_ending = false;
     if (!present) {
         orch_lost(p->chan, p->att_handle, RADIO_MUX_FAULT_FIRMWARE, call->reason[0] ? call->reason : why);
     }

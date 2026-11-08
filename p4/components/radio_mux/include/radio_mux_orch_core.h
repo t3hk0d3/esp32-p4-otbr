@@ -119,6 +119,20 @@ radio_mux_input_type_t radio_mux_orch_input_for(radio_mux_chan_state_t before, r
 // RADIO_FAULT), "no_radio" for anything else. The instance's own report replaces it when it has a handle.
 const char *radio_mux_orch_lost_state(radio_mux_mode_t mode, radio_mux_fault_kind_t kind);
 
+// Whether the mode stored on a channel runs again after a maintenance of it (radio_mux_maintain waits for it).
+typedef enum {
+    RADIO_MUX_SETTLE_NONE, // no instance is stored on the channel: nothing to wait for
+    RADIO_MUX_SETTLE_WAIT, // not yet: the channel is still in reinit, or the instance has not said how it went
+    RADIO_MUX_SETTLE_UP,   // the instance runs on the channel
+    RADIO_MUX_SETTLE_DOWN, // it does not: the channel is absent or in fault, or the instance reports it is not running
+} radio_mux_settle_t;
+
+// The decision on a channel in state `cs`, `instance` whether its stored mode has a registered instance, `mode_state`
+// what that instance (or the orchestrator for it) reports. Waits on "", "starting" and "releasing"; up on the states
+// in which a mode runs (Thread's running and sniffer, Zigbee's running, the proxy's listening, connecting, backoff
+// and connected); every other state is down.
+radio_mux_settle_t radio_mux_orch_settle(radio_mux_chan_state_t cs, bool instance, const char *mode_state);
+
 /* ---- the reinit run: the bound instance is asked to let go before maintenance runs ---- */
 
 // How long the orchestrator waits for the bound instance's answer: Thread's 45 s session drain plus margin. No answer

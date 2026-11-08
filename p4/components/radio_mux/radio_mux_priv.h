@@ -233,6 +233,7 @@ typedef struct {
     radio_mux_work_t maint_work;             // owner: its work
     orch_inst_t *maint_inst;                 // owner: the instance asked (its mode names a timeout)
     atomic_bool maint_running;               // a maintenance is asked or runs (radio_mux_maintenance_running)
+    bool maint_ending; // owner: handle_maint_done binds the C6's instance again (orch_bind shows it "starting")
     const radio_mux_builtin_t *builtin;      // the board's built-in RCP (radio_mux_set_builtin), or NULL
     radio_mux_rules_t rules;
     atomic_bool started;

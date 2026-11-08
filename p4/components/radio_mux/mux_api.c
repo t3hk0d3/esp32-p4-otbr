@@ -8,9 +8,12 @@
 
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "radio_mux_priv.h"
+
+#define MAINT_SETTLE_POLL_MS 100 // how often a maintenance looks whether its channel's mode runs again
 
 static const char *TAG = "radio_mux";
 
@@ -480,6 +483,30 @@ esp_err_t radio_mux_forget(const char *id)
     return err;
 }
 
+// After a maintenance: until the built-in channel's stored mode runs again or says it does not (radio_mux_orch_settle),
+// at most RADIO_MUX_SETTLE_MS; the outcome into *res.
+static void wait_settled(radio_mux_maint_t *res)
+{
+    const int64_t until = esp_timer_get_time() + (int64_t)RADIO_MUX_SETTLE_MS * 1000;
+
+    for (;;) {
+        const struct radio_mux_chan *ch = g_mux.c6.chan;
+
+        mux_lock();
+        res->mode = ch->mode;
+        res->settle = radio_mux_orch_settle(ch->chan_state, orch_find(ch->mode) != NULL, ch->mode_state);
+        snprintf(res->mode_state, sizeof(res->mode_state), "%s", ch->mode_state);
+        snprintf(res->mode_reason, sizeof(res->mode_reason), "%s", ch->mode_reason);
+        mux_unlock();
+        if (res->settle != RADIO_MUX_SETTLE_WAIT || esp_timer_get_time() >= until) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(MAINT_SETTLE_POLL_MS));
+    }
+    ESP_LOGI(TAG, "%s after the maintenance: %s %s%s%s", g_mux.c6.chan->id, radio_mux_mode_name(res->mode),
+             res->mode_state[0] ? res->mode_state : "-", res->mode_reason[0] ? ": " : "", res->mode_reason);
+}
+
 void mux_maint_finish(const char *id)
 {
     const radio_mux_builtin_t *b = g_mux.builtin;
@@ -540,6 +567,7 @@ esp_err_t radio_mux_maintain(const char *id, radio_mux_work_t work, const void *
     res.ran = true;
     err = work == RADIO_MUX_WORK_PUSH ? b->push(source, detail, cap, &res.base_only) : b->rom_recover(detail, cap);
     mux_maint_finish(id);
+    wait_settled(&res);
     if (out) {
         *out = res;
     }
