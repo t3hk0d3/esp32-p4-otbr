@@ -274,6 +274,34 @@ esp_err_t mode_fsm_on_reinit(mode_fsm_t *fsm);
 /** Whether the orchestrator's input `input_seq` is newer than the last one handled (`seen_seq`), the seq wrapping. */
 bool mode_fsm_input_newer(uint32_t seen_seq, uint32_t input_seq);
 
+/**
+ * Thread's inputs from the orchestrator, in two slots: the binding input (BIND, UNBIND, LOST, BACK: each replaces the
+ * last) and the request (REINIT: asked on top of the binding, never replacing it), each with the seq of the one last
+ * taken. All seqs come from Thread's one counter, so the slots compare. The caller locks.
+ */
+typedef struct {
+    radio_mux_input_t bind;
+    radio_mux_input_t req;
+    uint32_t bind_seen;
+    uint32_t req_seen;
+} mode_fsm_inbox_t;
+
+/** Keep `in` in its slot (REINIT in the request's, the others in the binding input's); NONE changes nothing. */
+void mode_fsm_inbox_put(mode_fsm_inbox_t *box, const radio_mux_input_t *in);
+/** The request into *out; true when it was not taken before (it is from now on). */
+bool mode_fsm_inbox_take_req(mode_fsm_inbox_t *box, radio_mux_input_t *out);
+/** The binding input into *out; true when it was not taken before (it is from now on). */
+bool mode_fsm_inbox_take_bind(mode_fsm_inbox_t *box, radio_mux_input_t *out);
+/**
+ * Thread let go for the request `req_seq`: a binding input older than it is taken (the maintenance's end binds Thread
+ * again); a newer one stays to take.
+ */
+void mode_fsm_inbox_let_go(mode_fsm_inbox_t *box, uint32_t req_seq);
+/** The binding input was acted on elsewhere (a move's commit): it is taken. The request is left as it is. */
+void mode_fsm_inbox_handled(mode_fsm_inbox_t *box);
+/** Whether either slot holds an input not taken yet. */
+bool mode_fsm_inbox_pending(const mode_fsm_inbox_t *box);
+
 #ifdef __cplusplus
 }
 #endif

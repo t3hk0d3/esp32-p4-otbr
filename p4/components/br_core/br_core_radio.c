@@ -62,11 +62,10 @@ static radio_mux_chan_t *_Atomic s_attached;
 // The handle Thread's state is reported through (radio_mux_report): set by BIND and BACK, cleared by UNBIND only (a lost
 // channel still shows why).
 static radio_mux_chan_t *_Atomic s_report_ch;
-// The orchestrator's latest input and the seq of the last one acted on (by br_radio, or by a C6 job or a move's commit
-// that acted on it themselves), under s_in_lock.
+// The orchestrator's latest binding input and latest request, each with the seq of the last one acted on (by br_radio,
+// or by a move's commit that acted on the binding input itself), under s_in_lock.
 static portMUX_TYPE s_in_lock = portMUX_INITIALIZER_UNLOCKED;
-static radio_mux_input_t s_in;
-static uint32_t s_in_seen;
+static mode_fsm_inbox_t s_inbox;
 static TaskHandle_t _Atomic s_radio_task;
 static const esp_openthread_mux_ops_t s_mux_ops;
 static bool s_move_probe;   // br_radio: the next probe is a move's (its verdict answers the waiting PUT)
@@ -215,7 +214,8 @@ static const esp_openthread_mux_ops_t s_mux_ops = {
 };
 
 // The Thread instance's input (radio mux owner task): the bound channel noted at once (a C6 job's restart reads it),
-// the input kept as the latest, br_radio woken to act on it. Never blocks.
+// the input kept as the latest of its slot (a REINIT never replaces a binding input), br_radio woken to act on it.
+// Never blocks.
 static void on_input(const radio_mux_input_t *in, void *ctx)
 {
     switch (in->type) {
@@ -241,28 +241,25 @@ static void on_input(const radio_mux_input_t *in, void *ctx)
         break;
     }
     taskENTER_CRITICAL(&s_in_lock);
-    s_in = *in;
+    mode_fsm_inbox_put(&s_inbox, in);
     taskEXIT_CRITICAL(&s_in_lock);
     core_radio_notify();
 }
 
-// The latest input into *in; true when it was not acted on yet (it is from now on).
-static bool take_input(radio_mux_input_t *in)
+// The latest request (want_req) or binding input into *in; true when it was not acted on yet (it is from now on).
+static bool take_input(bool want_req, radio_mux_input_t *in)
 {
     taskENTER_CRITICAL(&s_in_lock);
-    *in = s_in;
-    const bool fresh = mode_fsm_input_newer(s_in_seen, in->seq);
-
-    s_in_seen = in->seq;
+    const bool fresh = want_req ? mode_fsm_inbox_take_req(&s_inbox, in) : mode_fsm_inbox_take_bind(&s_inbox, in);
     taskEXIT_CRITICAL(&s_in_lock);
     return fresh;
 }
 
-// A C6 job's restart or a move's commit acted on the latest input itself (as br_radio would have).
+// A move's commit acted on the latest binding input itself (as br_radio would have).
 static void input_handled(void)
 {
     taskENTER_CRITICAL(&s_in_lock);
-    s_in_seen = s_in.seq;
+    mode_fsm_inbox_handled(&s_inbox);
     taskEXIT_CRITICAL(&s_in_lock);
 }
 
@@ -766,8 +763,8 @@ static void enter_firmware_fault(const char *reason)
 }
 
 // REINIT (maintenance wants Thread's channel): Thread lets go once its sessions drained, or refuses (the sniffer, a
-// start, a drain timeout); the answer goes back through the input's handle.
-static void reinit(const radio_mux_input_t *in)
+// start, a drain timeout); the answer goes back through the input's handle and is returned (ESP_OK: Thread let go).
+static esp_err_t reinit(const radio_mux_input_t *in)
 {
     const char *why = NULL;
     esp_err_t verdict;
@@ -796,24 +793,36 @@ static void reinit(const radio_mux_input_t *in)
     radio_mux_reinit_reply(in->ch, in->seq, verdict, why);
     after_channel_op();
     radio_busy_end();
+    return verdict;
 }
 
-// OpenThread follows the orchestrator's inputs: torn down when its channel went (UNBIND, LOST: OpenThread runs on a
-// channel that is not the bound one any more, or its link is gone), started on a fresh BIND or BACK (boot, plug-in, the
-// end of a maintenance, a mode change) or a retry (a PUT of mode otbr after a failed start). A failed start waits for
-// the next bind. A LOST for a firmware fault of its channel (what the C6's boot steps found) is a RADIO_FAULT with the
-// steps' reason.
+// OpenThread follows the orchestrator's inputs: a fresh request (REINIT) is answered first; then OpenThread is torn
+// down when its channel went (UNBIND, LOST: OpenThread runs on a channel that is not the bound one any more, or its
+// link is gone), started on a fresh BIND or BACK (boot, plug-in, the end of a maintenance, a mode change) or a retry (a
+// PUT of mode otbr after a failed start). A failed start waits for the next bind. A LOST for a firmware fault of its
+// channel (what the C6's boot steps found) is a RADIO_FAULT with the steps' reason. Once Thread let go for a request,
+// only a binding input newer than it is acted on (the maintenance's end binds Thread again); a refused request leaves
+// the binding input to act on (a BIND it arrived on top of still starts OpenThread).
 static void reconcile(void)
 {
+    radio_mux_input_t req;
+    bool let_go = false;
+
+    if (take_input(true, &req) && reinit(&req) == ESP_OK) {
+        taskENTER_CRITICAL(&s_in_lock);
+        mode_fsm_inbox_let_go(&s_inbox, req.seq);
+        taskEXIT_CRITICAL(&s_in_lock);
+        let_go = true;
+    }
     radio_mux_input_t in;
-    const bool fresh = take_input(&in);
+    const bool fresh = take_input(false, &in);
+
+    if (let_go && !fresh) {
+        return; // the maintenance has the channel
+    }
     radio_mux_chan_t *att = atomic_load(&s_attached);
     const bool lost_firmware = fresh && in.type == RADIO_MUX_IN_LOST && in.kind == RADIO_MUX_FAULT_FIRMWARE;
 
-    if (fresh && in.type == RADIO_MUX_IN_REINIT) {
-        reinit(&in);
-        return;
-    }
     if ((s_ot_chan && (s_ot_chan != att || atomic_load(&s_link.gone))) || (!s_ot_chan && !att && s_start_failed)) {
         bool firmware_fault;
 
@@ -1074,7 +1083,7 @@ void br_core_retry_otbr(void)
 bool core_radio_input_pending(void)
 {
     taskENTER_CRITICAL(&s_in_lock);
-    const bool pending = s_in_seen != s_in.seq;
+    const bool pending = mode_fsm_inbox_pending(&s_inbox);
     taskEXIT_CRITICAL(&s_in_lock);
     return pending;
 }

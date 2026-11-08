@@ -39,7 +39,6 @@ extern "C" {
 #define RADIO_MUX_FRAME_MAX 2048
 #define RADIO_MUX_LABEL_MAX 48
 #define RADIO_MUX_SERIAL_MAX 32
-#define RADIO_MUX_REASON_MAX 96
 #define RADIO_MUX_PEER_MAX 64
 // The rcp-proxy's last open or connect failure, as text (rcp_proxy fills it, device_api renders it).
 #define RADIO_MUX_PROXY_ERROR_MAX 48
@@ -79,22 +78,11 @@ typedef struct {
 // no longer stays valid for the life of the firmware, two attaches of the same channel get different handles, and a
 // handle from an earlier attach can no longer take events, raw bytes or the transmit path of the attach after it (it
 // used to work until the next attach on the transport; it still does).
-typedef struct radio_mux_handle radio_mux_chan_t;
+// (radio_mux_chan_t is declared in radio_mux_orch_core.h, with the input that carries it.)
 
 /* ---- mode instances (the orchestrator binds them to channels) ---- */
 
-// One input from the orchestrator to an instance (radio_mux_input_type_t: BIND, UNBIND, REINIT, LOST, BACK).
-typedef struct {
-    radio_mux_input_type_t type;
-    // Grows by 1 with every input to the instance (to each channel's own instance for a per_channel one): the latest
-    // input wins, and a gap tells the instance it missed one.
-    uint32_t seq;
-    // BIND and BACK: the new handle (a new generation). Otherwise the handle the instance holds (NULL when it holds
-    // none). REINIT is answered through it (radio_mux_reinit_reply).
-    radio_mux_chan_t *ch;
-    radio_mux_fault_kind_t kind;      // LOST: firmware or link fault, NONE for an unplug; else NONE
-    char reason[RADIO_MUX_REASON_MAX]; // LOST: the channel's reason; REINIT: the work ("firmware push"); else ""
-} radio_mux_input_t;
+// radio_mux_input_t, one input from the orchestrator to an instance: radio_mux_orch_core.h.
 
 typedef struct {
     radio_mux_mode_t mode;  // otbr, ziggurat or rcp-proxy

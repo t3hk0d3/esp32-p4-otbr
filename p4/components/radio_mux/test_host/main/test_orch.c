@@ -487,8 +487,47 @@ TEST_CASE("On no answer within RADIO_MUX_REINIT_REPLY_MS: refuses (timeout), pha
     TEST_ASSERT_EQUAL(RADIO_MUX_RP_ASKED, r.phase);
     TEST_ASSERT_EQUAL(RADIO_MUX_RA_REFUSE, radio_mux_reinit_tick(&r, NOW + RADIO_MUX_REINIT_REPLY_MS));
     TEST_ASSERT_EQUAL(RADIO_MUX_RP_IDLE, r.phase);
-    // The answer that comes after the timeout is ignored.
+    // A refusal that comes after the timeout changes nothing.
+    TEST_ASSERT_EQUAL(RADIO_MUX_RA_IGNORE, radio_mux_reinit_answer(&r, 7, false));
+    TEST_ASSERT_EQUAL(RADIO_MUX_RP_IDLE, r.phase);
+}
+
+TEST_CASE("On an accept that comes after the timeout: rebinds once, phase stays idle", "[radio_mux]")
+{
+    radio_mux_reinit_run_t r = {0};
+
+    radio_mux_reinit_ask(&r, 7, true, NOW);
+    radio_mux_reinit_tick(&r, NOW + RADIO_MUX_REINIT_REPLY_MS);
+    // The instance let go for a maintenance that no longer runs: it gets its channel back.
+    TEST_ASSERT_EQUAL(RADIO_MUX_RA_REBIND, radio_mux_reinit_answer(&r, 7, true));
+    TEST_ASSERT_EQUAL(RADIO_MUX_RP_IDLE, r.phase);
     TEST_ASSERT_EQUAL(RADIO_MUX_RA_IGNORE, radio_mux_reinit_answer(&r, 7, true));
+}
+
+TEST_CASE("On a late accept of an older seq, or after a new run was asked: is ignored", "[radio_mux]")
+{
+    radio_mux_reinit_run_t r = {0};
+
+    radio_mux_reinit_ask(&r, 7, true, NOW);
+    radio_mux_reinit_tick(&r, NOW + RADIO_MUX_REINIT_REPLY_MS);
+    TEST_ASSERT_EQUAL(RADIO_MUX_RA_IGNORE, radio_mux_reinit_answer(&r, 6, true));
+    // A new run asks with seq 8: its own end binds the instance back.
+    radio_mux_reinit_ask(&r, 8, true, NOW + RADIO_MUX_REINIT_REPLY_MS + 1);
+    TEST_ASSERT_EQUAL(RADIO_MUX_RA_IGNORE, radio_mux_reinit_answer(&r, 7, true));
+    TEST_ASSERT_EQUAL(RADIO_MUX_RP_ASKED, r.phase);
+}
+
+TEST_CASE("On an accept after a refusal or a finished run: is ignored", "[radio_mux]")
+{
+    radio_mux_reinit_run_t r = {0};
+
+    radio_mux_reinit_ask(&r, 7, true, NOW);
+    radio_mux_reinit_answer(&r, 7, false);
+    TEST_ASSERT_EQUAL(RADIO_MUX_RA_IGNORE, radio_mux_reinit_answer(&r, 7, true));
+    radio_mux_reinit_ask(&r, 8, true, NOW);
+    radio_mux_reinit_answer(&r, 8, true);
+    radio_mux_reinit_done(&r);
+    TEST_ASSERT_EQUAL(RADIO_MUX_RA_IGNORE, radio_mux_reinit_answer(&r, 8, true));
 }
 
 TEST_CASE("On a tick while nothing waits for an answer: is ignored", "[radio_mux]")
@@ -613,4 +652,19 @@ TEST_CASE("On the radio lost while it is in reinit (a fault, an unplug): deliver
 {
     TEST_ASSERT_EQUAL(RADIO_MUX_IN_LOST, radio_mux_orch_input_for(RADIO_MUX_CS_REINIT, RADIO_MUX_CS_FAULT, true, true));
     TEST_ASSERT_EQUAL(RADIO_MUX_IN_LOST, radio_mux_orch_input_for(RADIO_MUX_CS_REINIT, RADIO_MUX_CS_ABSENT, true, true));
+}
+
+TEST_CASE("On LOST for a firmware fault: Thread's state is fault, Zigbee's and the proxy's no_radio", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL_STRING("fault", radio_mux_orch_lost_state(RADIO_MUX_MODE_OTBR, RADIO_MUX_FAULT_FIRMWARE));
+    TEST_ASSERT_EQUAL_STRING("no_radio", radio_mux_orch_lost_state(RADIO_MUX_MODE_ZIGGURAT, RADIO_MUX_FAULT_FIRMWARE));
+    TEST_ASSERT_EQUAL_STRING("no_radio", radio_mux_orch_lost_state(RADIO_MUX_MODE_RCP_PROXY, RADIO_MUX_FAULT_FIRMWARE));
+}
+
+TEST_CASE("On LOST for a link fault or an unplug: every mode's state is no_radio", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL_STRING("no_radio", radio_mux_orch_lost_state(RADIO_MUX_MODE_OTBR, RADIO_MUX_FAULT_LINK));
+    TEST_ASSERT_EQUAL_STRING("no_radio", radio_mux_orch_lost_state(RADIO_MUX_MODE_OTBR, RADIO_MUX_FAULT_NONE));
+    TEST_ASSERT_EQUAL_STRING("no_radio", radio_mux_orch_lost_state(RADIO_MUX_MODE_ZIGGURAT, RADIO_MUX_FAULT_LINK));
+    TEST_ASSERT_EQUAL_STRING("no_radio", radio_mux_orch_lost_state(RADIO_MUX_MODE_RCP_PROXY, RADIO_MUX_FAULT_NONE));
 }

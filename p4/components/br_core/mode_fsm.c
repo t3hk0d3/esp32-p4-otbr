@@ -467,6 +467,51 @@ bool mode_fsm_input_newer(uint32_t seen_seq, uint32_t input_seq)
     return (int32_t)(input_seq - seen_seq) > 0;
 }
 
+void mode_fsm_inbox_put(mode_fsm_inbox_t *box, const radio_mux_input_t *in)
+{
+    if (in->type == RADIO_MUX_IN_REINIT) {
+        box->req = *in;
+    } else if (in->type != RADIO_MUX_IN_NONE) {
+        box->bind = *in;
+    }
+}
+
+static bool take(const radio_mux_input_t *slot, uint32_t *seen, radio_mux_input_t *out)
+{
+    const bool fresh = mode_fsm_input_newer(*seen, slot->seq);
+
+    *out = *slot;
+    *seen = slot->seq;
+    return fresh;
+}
+
+bool mode_fsm_inbox_take_req(mode_fsm_inbox_t *box, radio_mux_input_t *out)
+{
+    return take(&box->req, &box->req_seen, out);
+}
+
+bool mode_fsm_inbox_take_bind(mode_fsm_inbox_t *box, radio_mux_input_t *out)
+{
+    return take(&box->bind, &box->bind_seen, out);
+}
+
+void mode_fsm_inbox_let_go(mode_fsm_inbox_t *box, uint32_t req_seq)
+{
+    if (mode_fsm_input_newer(box->bind_seen, req_seq)) {
+        box->bind_seen = req_seq;
+    }
+}
+
+void mode_fsm_inbox_handled(mode_fsm_inbox_t *box)
+{
+    box->bind_seen = box->bind.seq;
+}
+
+bool mode_fsm_inbox_pending(const mode_fsm_inbox_t *box)
+{
+    return mode_fsm_input_newer(box->bind_seen, box->bind.seq) || mode_fsm_input_newer(box->req_seen, box->req.seq);
+}
+
 esp_err_t mode_fsm_on_reinit(mode_fsm_t *fsm)
 {
     const br_core_mode_t prev = mode_fsm_get_mode(fsm);

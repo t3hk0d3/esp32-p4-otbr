@@ -169,12 +169,18 @@ size_t radio_mux_singleton_dedupe(radio_mux_mode_t *modes, bool *changed, size_t
     return count;
 }
 
+const char *radio_mux_orch_lost_state(radio_mux_mode_t mode, radio_mux_fault_kind_t kind)
+{
+    return mode == RADIO_MUX_MODE_OTBR && kind == RADIO_MUX_FAULT_FIRMWARE ? "fault" : "no_radio";
+}
+
 radio_mux_reinit_act_t radio_mux_reinit_ask(radio_mux_reinit_run_t *r, uint32_t seq, bool bound, int64_t now_ms)
 {
     if (r->phase != RADIO_MUX_RP_IDLE) {
         return RADIO_MUX_RA_REFUSE;
     }
     r->seq = seq;
+    r->timed_out = false; // a new run: the timed-out one's late accept is for nothing now
     if (!bound) {
         r->phase = RADIO_MUX_RP_RUNNING;
         return RADIO_MUX_RA_RUN;
@@ -186,6 +192,10 @@ radio_mux_reinit_act_t radio_mux_reinit_ask(radio_mux_reinit_run_t *r, uint32_t 
 
 radio_mux_reinit_act_t radio_mux_reinit_answer(radio_mux_reinit_run_t *r, uint32_t seq, bool accept)
 {
+    if (r->phase == RADIO_MUX_RP_IDLE && r->timed_out && seq == r->seq) {
+        r->timed_out = false;
+        return accept ? RADIO_MUX_RA_REBIND : RADIO_MUX_RA_IGNORE;
+    }
     if (r->phase != RADIO_MUX_RP_ASKED || seq != r->seq) {
         return RADIO_MUX_RA_IGNORE;
     }
@@ -202,6 +212,7 @@ radio_mux_reinit_act_t radio_mux_reinit_tick(radio_mux_reinit_run_t *r, int64_t 
         return RADIO_MUX_RA_WAIT;
     }
     r->phase = RADIO_MUX_RP_IDLE;
+    r->timed_out = true;
     return RADIO_MUX_RA_REFUSE;
 }
 

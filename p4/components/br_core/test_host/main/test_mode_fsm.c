@@ -1403,6 +1403,129 @@ TEST_CASE("On an input older than the latest, or the one handled: is ignored", "
     TEST_ASSERT_FALSE(mode_fsm_input_newer(9, 2));
 }
 
+/* ---- inputs: mode_fsm_inbox (the binding input and the pending request kept apart) ---- */
+
+static void put(mode_fsm_inbox_t *box, radio_mux_input_type_t type, uint32_t seq)
+{
+    const radio_mux_input_t in = {.type = type, .seq = seq};
+
+    mode_fsm_inbox_put(box, &in);
+}
+
+TEST_CASE("On a REINIT after an unhandled BIND: both are taken fresh (the start still happens)", "[mode_fsm]")
+{
+    mode_fsm_inbox_t box = {0};
+    radio_mux_input_t in;
+
+    put(&box, RADIO_MUX_IN_BIND, 1);
+    put(&box, RADIO_MUX_IN_REINIT, 2);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_req(&box, &in));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_REINIT, in.type);
+    TEST_ASSERT_EQUAL_UINT32(2, in.seq);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_bind(&box, &in));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_BIND, in.type);
+    TEST_ASSERT_EQUAL_UINT32(1, in.seq);
+}
+
+TEST_CASE("On a binding input: replaces the last binding input, the request kept", "[mode_fsm]")
+{
+    mode_fsm_inbox_t box = {0};
+    radio_mux_input_t in;
+
+    put(&box, RADIO_MUX_IN_REINIT, 1);
+    put(&box, RADIO_MUX_IN_BIND, 2);
+    put(&box, RADIO_MUX_IN_LOST, 3);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_bind(&box, &in));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_LOST, in.type);
+    TEST_ASSERT_EQUAL_UINT32(3, in.seq);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_req(&box, &in));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_REINIT, in.type);
+    TEST_ASSERT_EQUAL_UINT32(1, in.seq);
+}
+
+TEST_CASE("On an input taken: is not fresh again", "[mode_fsm]")
+{
+    mode_fsm_inbox_t box = {0};
+    radio_mux_input_t in;
+
+    TEST_ASSERT_FALSE(mode_fsm_inbox_take_bind(&box, &in));
+    TEST_ASSERT_FALSE(mode_fsm_inbox_take_req(&box, &in));
+    put(&box, RADIO_MUX_IN_BIND, 1);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_bind(&box, &in));
+    TEST_ASSERT_FALSE(mode_fsm_inbox_take_bind(&box, &in));
+    put(&box, RADIO_MUX_IN_REINIT, 2);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_req(&box, &in));
+    TEST_ASSERT_FALSE(mode_fsm_inbox_take_req(&box, &in));
+}
+
+TEST_CASE("On letting go for a request newer than the binding input: the binding input is not acted on",
+          "[mode_fsm]")
+{
+    mode_fsm_inbox_t box = {0};
+    radio_mux_input_t in;
+
+    put(&box, RADIO_MUX_IN_BACK, 1);
+    put(&box, RADIO_MUX_IN_REINIT, 2);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_req(&box, &in));
+    mode_fsm_inbox_let_go(&box, in.seq); // the maintenance's end binds it back
+    TEST_ASSERT_FALSE(mode_fsm_inbox_take_bind(&box, &in));
+}
+
+TEST_CASE("On a binding input newer than the request let go for: is still acted on", "[mode_fsm]")
+{
+    mode_fsm_inbox_t box = {0};
+    radio_mux_input_t in;
+
+    put(&box, RADIO_MUX_IN_REINIT, 1);
+    put(&box, RADIO_MUX_IN_BACK, 2);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_req(&box, &in));
+    mode_fsm_inbox_let_go(&box, in.seq);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_bind(&box, &in));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_BACK, in.type);
+}
+
+TEST_CASE("On letting go for a request older than the binding input taken: that input stays taken", "[mode_fsm]")
+{
+    mode_fsm_inbox_t box = {0};
+    radio_mux_input_t in;
+
+    put(&box, RADIO_MUX_IN_BIND, 3);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_bind(&box, &in));
+    mode_fsm_inbox_let_go(&box, 2);
+    TEST_ASSERT_FALSE(mode_fsm_inbox_take_bind(&box, &in));
+    put(&box, RADIO_MUX_IN_BACK, 4);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_bind(&box, &in));
+}
+
+TEST_CASE("On an input not taken in either slot: pending until taken", "[mode_fsm]")
+{
+    mode_fsm_inbox_t box = {0};
+    radio_mux_input_t in;
+
+    TEST_ASSERT_FALSE(mode_fsm_inbox_pending(&box));
+    put(&box, RADIO_MUX_IN_BIND, 1);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_pending(&box));
+    mode_fsm_inbox_take_bind(&box, &in);
+    TEST_ASSERT_FALSE(mode_fsm_inbox_pending(&box));
+    put(&box, RADIO_MUX_IN_REINIT, 2);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_pending(&box));
+    mode_fsm_inbox_take_req(&box, &in);
+    TEST_ASSERT_FALSE(mode_fsm_inbox_pending(&box));
+}
+
+TEST_CASE("On a binding input acted on elsewhere (a move's commit): it is taken, the request still fresh",
+          "[mode_fsm]")
+{
+    mode_fsm_inbox_t box = {0};
+    radio_mux_input_t in;
+
+    put(&box, RADIO_MUX_IN_REINIT, 1);
+    put(&box, RADIO_MUX_IN_BIND, 2);
+    mode_fsm_inbox_handled(&box);
+    TEST_ASSERT_FALSE(mode_fsm_inbox_take_bind(&box, &in));
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_req(&box, &in));
+}
+
 /* ---- the mode_changed op (Thread's state reported to the orchestrator) ---- */
 
 TEST_CASE("On every mode change: the mode_changed op hears the new mode", "[mode_fsm]")

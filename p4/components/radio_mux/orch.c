@@ -119,6 +119,18 @@ void orch_reinit_reply(radio_mux_chan_t *h, uint32_t seq, esp_err_t verdict, con
         ESP_LOGD(TAG, "%s: reinit answer %" PRIu32 " ignored (none asked: a notice, or a late answer)", ch->id, seq);
         return;
     }
+    if (act == RADIO_MUX_RA_REBIND) {
+        // The instance let go after the maintenance gave up on it: nothing will bind it back but this.
+        orch_inst_t *oi = orch_find(ch->mode);
+
+        if (oi && p->att.state == RADIO_MUX_AS_ATTACHED && ch->chan_state == RADIO_MUX_CS_READY &&
+                !atomic_load(&g_mux.maint_running)) {
+            ESP_LOGW(TAG, "%s: %s let go after the maintenance gave up: bound back", ch->id,
+                     radio_mux_mode_name(oi->inst.mode));
+            orch_bind(p, oi, p->att_handle);
+        }
+        return;
+    }
     mux_maint_answer(act, verdict, reason);
 }
 
@@ -149,6 +161,8 @@ void orch_lost(struct radio_mux_chan *ch, radio_mux_chan_t *h, radio_mux_fault_k
     orch_inst_t *oi = orch_find(ch->mode);
 
     if (oi && radio_mux_orch_input_for(RADIO_MUX_CS_REINIT, RADIO_MUX_CS_FAULT, true, true) == RADIO_MUX_IN_LOST) {
+        // Shown at once: an instance with no current handle (the channel faulted before its first bind) cannot report.
+        set_mode_state(ch, radio_mux_orch_lost_state(oi->inst.mode, kind), reason);
         deliver(oi, slot_of(ch), RADIO_MUX_IN_LOST, h, kind, reason);
     }
 }

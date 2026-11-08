@@ -87,6 +87,24 @@ typedef enum {
     RADIO_MUX_IN_BACK,   // the channel is ready again, binding unchanged: start again (a new handle)
 } radio_mux_input_type_t;
 
+// A consumer's handle on a channel: one attach or lease (radio_mux.h says how to use it).
+typedef struct radio_mux_handle radio_mux_chan_t;
+
+#define RADIO_MUX_REASON_MAX 96
+
+// One input from the orchestrator to an instance (radio_mux_input_type_t: BIND, UNBIND, REINIT, LOST, BACK).
+typedef struct {
+    radio_mux_input_type_t type;
+    // Grows by 1 with every input to the instance (to each channel's own instance for a per_channel one): the latest
+    // input wins, and a gap tells the instance it missed one.
+    uint32_t seq;
+    // BIND and BACK: the new handle (a new generation). Otherwise the handle the instance holds (NULL when it holds
+    // none). REINIT is answered through it (radio_mux_reinit_reply).
+    radio_mux_chan_t *ch;
+    radio_mux_fault_kind_t kind;      // LOST: firmware or link fault, NONE for an unplug; else NONE
+    char reason[RADIO_MUX_REASON_MAX]; // LOST: the channel's reason; REINIT: the work ("firmware push"); else ""
+} radio_mux_input_t;
+
 // What a channel's change from `before` to `after` delivers to the instance of its stored mode. `fits`: the channel's
 // firmware fits the mode; `bound`: the instance holds the binding (it was sent BIND and no UNBIND since; a LOST keeps
 // it). A ready channel binds an instance that does not hold it (BIND: boot, plug-in, a user's bind) and gives a held
@@ -95,6 +113,11 @@ typedef enum {
 // ready or reinit is LOST. Entering reinit delivers nothing: maintenance asks with REINIT itself.
 radio_mux_input_type_t radio_mux_orch_input_for(radio_mux_chan_state_t before, radio_mux_chan_state_t after, bool fits,
                                                 bool bound);
+
+// The state the orchestrator shows for `mode`'s instance when it delivers LOST (the instance may hold no handle to
+// report through: a channel that faulted before its first bind): Thread's "fault" for a firmware fault (it enters
+// RADIO_FAULT), "no_radio" for anything else. The instance's own report replaces it when it has a handle.
+const char *radio_mux_orch_lost_state(radio_mux_mode_t mode, radio_mux_fault_kind_t kind);
 
 /* ---- the reinit run: the bound instance is asked to let go before maintenance runs ---- */
 
@@ -112,21 +135,24 @@ typedef enum {
     RADIO_MUX_RA_WAIT,   // keep waiting for the answer
     RADIO_MUX_RA_RUN,    // run the work now
     RADIO_MUX_RA_REFUSE, // refused: the instance's refusal, a timeout, or another run in progress; nothing runs
-    RADIO_MUX_RA_IGNORE, // nothing to do (a stale or late answer, a tick with nothing asked)
+    RADIO_MUX_RA_IGNORE, // nothing to do (a stale answer, a late refusal, a tick with nothing asked)
+    RADIO_MUX_RA_REBIND, // the instance let go after the run timed out: bind it back (no maintenance runs)
 } radio_mux_reinit_act_t;
 
 typedef struct {
     radio_mux_reinit_phase_t phase;
     uint32_t seq;        // the seq of the REINIT input the instance was sent
     int64_t deadline_ms; // ASKED: when no answer counts as a refusal
+    bool timed_out;      // IDLE: the last run (seq) ended by its deadline; its instance's accept is still to come
 } radio_mux_reinit_run_t;
 
 // Maintenance asks for the channel at now_ms. With no instance bound: RUN at once. With one bound (sent the REINIT
 // input `seq`): WAIT, until RADIO_MUX_REINIT_REPLY_MS later. While another run is asked or running: REFUSE, the run
 // unchanged.
 radio_mux_reinit_act_t radio_mux_reinit_ask(radio_mux_reinit_run_t *r, uint32_t seq, bool bound, int64_t now_ms);
-// The instance's answer to the REINIT input `seq`: accept → RUN, refuse → REFUSE (back to idle). IGNORE for an answer
-// to another seq or while nothing is asked.
+// The instance's answer to the REINIT input `seq`: accept → RUN, refuse → REFUSE (back to idle). An accept of the last
+// run's seq after that run timed out → REBIND, once (the instance let go for nothing). IGNORE for anything else: an
+// answer to another seq, a late refusal, an answer while the run runs or after it ended.
 radio_mux_reinit_act_t radio_mux_reinit_answer(radio_mux_reinit_run_t *r, uint32_t seq, bool accept);
 // Time passes: REFUSE (back to idle) once an asked run reaches its deadline, WAIT before it, IGNORE when nothing is
 // asked.
