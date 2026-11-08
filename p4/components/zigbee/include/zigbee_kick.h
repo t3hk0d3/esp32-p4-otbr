@@ -33,12 +33,10 @@ void zigbee_kick_unclaim(zigbee_kick_t *k);
 void zigbee_kick_taken(zigbee_kick_t *k);
 
 /**
- * The backstop for a GONE the mux could not post (its queue full). Attachments are numbered from 1 by attach;
- * `detached` is the number of the attachment the mux last detached, `attached` the one the zigbee task last handled
- * the ATTACH of (0: none yet), `gone` the one it last handled a GONE for. true: the current attachment was detached
- * but its GONE never came, so the zigbee task handles it as GONE now.
+ * Whether the orchestrator's input `input_seq` is newer than the last one the zigbee task handled (`seen_seq`), the
+ * seq wrapping at 2^32: false for the same input again or an older one (the latest input wins).
  */
-bool zigbee_gone_lost(uint32_t detached, uint32_t attached, uint32_t gone);
+bool zigbee_input_newer(uint32_t seen_seq, uint32_t input_seq);
 
 #ifdef __cplusplus
 }

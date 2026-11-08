@@ -5,10 +5,11 @@
 //    and zigbee_link_* call. It never calls lwIP.
 //  - the sender task (zigbee_tx, MGMT_CORE) takes frames off the outbound queue and has the HTTP server task send them.
 //  - the HTTP server task runs the WebSocket handlers; the esp_timer task runs the timer and tick callbacks; the mux's
-//    owner task runs attach and detach. These only post to the zigbee task.
+//    owner task delivers the orchestrator's inputs (kept as the latest, then a KICK). These only post to the zigbee
+//    task.
 //
 // The zigbee task's queue (`q`) carries radio_mux_ev_t items: the mux's events (it is the queue the mux is bound to),
-// plus ZIGBEE_EV_ATTACH (posted by attach) and ZIGBEE_EV_KICK (at most one: "the mailbox has work"). Everything else
+// plus ZIGBEE_EV_ATTACH (posted by the zigbee task when it binds the queue) and ZIGBEE_EV_KICK (at most one: "the mailbox has work"). Everything else
 // (inbound frames, connects and disconnects, timer, wake, tick, frames the sender took) waits in the mailbox, so that a
 // property request's wait (zigbee.c op_wait) can take the mux's events out of `q` while the mailbox keeps its order,
 // and so that `q` holds only what the mux sized it for (RADIO_MUX_POOL_SLOTS frames + RESET + GONE).
@@ -83,7 +84,7 @@ typedef struct {
 } zigbee_out_t;
 
 typedef struct {
-    // Made once, by the first attach (the mux's owner task), and never freed.
+    // Made once, by the first bind (the mux's owner task), and never freed.
     QueueHandle_t q;
     QueueHandle_t out;
     SemaphoreHandle_t job_done; // the sender's server-task work finished
@@ -96,8 +97,8 @@ typedef struct {
     _Atomic(httpd_handle_t) server;
     atomic_bool started;      // ziggurat_start ran (or is running): the WebSocket accepts clients
     zigbee_kick_t kick;       // at most one KICK in `q` (zigbee_kick.h)
-    atomic_uint attached;     // attachments numbered by on_attach (1, 2, ...): the last number given
-    atomic_uint detached;     // the number of the attachment on_detach last detached (the GONE backstop)
+    portMUX_TYPE in_lock;     // the orchestrator's latest input (on_input), taken by the zigbee task
+    radio_mux_input_t in;
     atomic_uint sent;         // counted frames the sender took off `out` since the zigbee task last looked
     atomic_uint gen;          // the link's generation, published by the zigbee task (the sender drops older frames)
     atomic_int client_fd;     // the link's client, published by the zigbee task (the sender's LRU refresh)
@@ -118,8 +119,7 @@ typedef struct {
     bool start_due;              // the first ready came: ziggurat_start runs at the top of the loop
     bool start_ran;
     uint8_t scan_channel;        // the channel of the last energy scan asked for (its failure is logged with it)
-    uint32_t attach_seen;        // the number of the last ATTACH handled (0: none)
-    uint32_t gone_seen;          // the attachment number of the last GONE handled (0: none)
+    uint32_t in_seen;            // the seq of the last input handled (0: none)
     bool kick_swallowed;         // op_wait took a KICK out of `q`: the loop looks at the mailbox without blocking
     bool mailbox_more;           // the last mailbox round left messages behind
 } zigbee_t;
