@@ -36,8 +36,8 @@ release's `versions.txt`.
 - Zigbee mode (experimental): a radio set to `ziggurat` runs the Ziggurat Zigbee stack and serves Home Assistant's ZHA
   (radio type Ziggurat, `ws://<board>/zigbee`) to one client; a **Zigbee** section on the Dashboard, `GET /device/zigbee`,
   `zigbee_channel` in `/device/status` and `zigbee_*` metrics. Radio resets are survived and a lost radio shows as
-  `no_radio` without a reboot. On-board tests (`p4/pytest/test_zigbee.py`) are written, not yet run. See
-  `docs/zigbee.md`.
+  `no_radio` without a reboot. On-board tests (`p4/pytest/test_zigbee.py`) pass on the C6; on a USB dongle the
+  pairing test still times out (pairing on the OllyZig CC2652P is slow, on a PC too). See `docs/zigbee.md`.
 
 ### Changed
 
