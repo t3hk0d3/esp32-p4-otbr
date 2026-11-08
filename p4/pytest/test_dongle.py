@@ -467,13 +467,27 @@ def test_unplug_during_rest_load(dut, base_url, dongle):
 
 
 def test_proxy_listen_tcp_latency(base_url, board_ip, dongle):
-    # rcp-proxy listening on TCP, On the dongle: a spinel PROP_VALUE_GET round trip through the proxy takes under 15 ms
-    # at the median, and the second client is refused while the first stays.
+    # rcp-proxy listening on TCP, On the dongle: a client that has sent nothing is not the peer and gives way to a new
+    # connection; a spinel PROP_VALUE_GET round trip through the proxy takes under 15 ms at the median, and the second
+    # client is refused while the first (which has sent) stays.
     assert put_channel(base_url, {"mode": "rcp-proxy"}, dongle).status_code == 200
     wait_proxy_state(base_url, dongle, "listening", PROXY_PEER_WAIT_S)
     port = proxy_state(base_url, dongle)["port"]
-    sock = connect(board_ip, port)
+    idle = connect(board_ip, port)  # an idle preconnect: held, never the peer
     try:
+        time.sleep(1)
+        assert proxy_state(base_url, dongle)["state"] == "listening"
+        sock = connect(board_ip, port)  # replaces the silent one
+        idle.settimeout(5)
+        try:
+            assert idle.recv(1) == b""
+        except ConnectionResetError:
+            pass
+    finally:
+        idle.close()
+    try:
+        sock.sendall(hdlc_frame(spinel_get(SPINEL_PROP_PROTOCOL_VERSION)))
+        read_frame(sock, header=SPINEL_HEADER_FLAG | 1)
         wait_proxy_state(base_url, dongle, "connected", PROXY_PEER_WAIT_S)
         second = connect(board_ip, port)
         second.settimeout(5)
@@ -672,7 +686,9 @@ def test_proxy_connect_refused_soak(base_url, board_ip, dongle):
     )
     wait_proxy_state(base_url, dongle, "listening", PROXY_PEER_WAIT_S)
     port = proxy_state(base_url, dongle)["port"]
-    with connect(board_ip, port):
+    with connect(board_ip, port) as sock:
+        # A client that has sent nothing is never the peer.
+        sock.sendall(hdlc_frame(spinel_get(SPINEL_PROP_PROTOCOL_VERSION)))
         wait_proxy_state(base_url, dongle, "connected", PROXY_PEER_WAIT_S)
 
 

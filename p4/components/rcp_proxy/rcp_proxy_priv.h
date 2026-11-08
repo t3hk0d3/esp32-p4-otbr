@@ -74,7 +74,7 @@ struct proxy {
     socklen_t dst_len;
     int64_t conn_deadline_ms; // TCP connect in progress: give up at
     // TCP listen: a client accepted whose first bytes are not judged yet (rcp_proxy_hold_t). Not the peer until they
-    // pass, or until it was silent RCP_PROXY_SNIFF_MS (hold.up: then the peer, state CONNECTED, its bytes still held).
+    // pass; while it has sent nothing, a new connection replaces it (rcp_proxy_accept).
     bool sniffing;
     rcp_proxy_hold_t hold;
     struct sockaddr_storage sniff_from;

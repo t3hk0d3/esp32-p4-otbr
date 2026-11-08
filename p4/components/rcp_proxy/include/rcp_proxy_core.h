@@ -127,22 +127,25 @@ bool rcp_proxy_lookup_waiting(const rcp_proxy_lookup_t *l);
 bool rcp_proxy_lookup_answer(rcp_proxy_lookup_t *l, uint32_t seq);
 
 typedef enum {
-    RCP_PROXY_TAKE,
-    RCP_PROXY_REFUSE,
+    RCP_PROXY_TAKE,    // the slot is free: hold the new client
+    RCP_PROXY_REFUSE,  // close the new client
+    RCP_PROXY_REPLACE, // close the held client that has sent nothing (an idle preconnect), hold the new one
 } rcp_proxy_accept_t;
 
-// TCP listen: the first client keeps the port; a connection while one is connected is refused. A connection must also
-// pass both netcfg access rules: by the local address it came in on (local_allowed, netcfg_socket_allowed) and by the
-// route back to the client (peer_allowed, netcfg_peer_allowed: a client on the Thread mesh is refused even when it
-// connected to an infrastructure address).
-rcp_proxy_accept_t rcp_proxy_accept(bool peer_connected, bool local_allowed, bool peer_allowed);
+// TCP listen: one client at a time (slot_taken: the peer, or a held client). The first client keeps the port once it
+// sent bytes; a held client that has sent nothing yet (held_silent) gives way to a new connection, so an idle
+// connection (a browser's preconnect) never locks out the real host. A connection must also pass both netcfg access
+// rules: by the local address it came in on (local_allowed, netcfg_socket_allowed) and by the route back to the
+// client (peer_allowed, netcfg_peer_allowed: a client on the Thread mesh is refused even when it connected to an
+// infrastructure address); a refused one never replaces the held client.
+rcp_proxy_accept_t rcp_proxy_accept(bool slot_taken, bool held_silent, bool local_allowed, bool peer_allowed);
 
 // TCP listen: the first bytes a new client ever sends are held until RCP_PROXY_SNIFF_LEN of them came or
 // RCP_PROXY_SNIFF_MS passed since the first of them, whichever is first (earlier when they already decide it), so a
 // web page's cross-protocol request (a POST to http://<board>:6638/ from any LAN browser, also over a connection the
-// browser opened earlier and kept idle: a preconnect) never reaches the radio. A client that has sent nothing
-// RCP_PROXY_SNIFF_MS after the accept becomes the peer (a host that waits for the radio), but its bytes are still held
-// and judged when they come.
+// browser opened earlier and kept idle: a preconnect) never reaches the radio. A client that has sent nothing is never
+// the peer: no radio bytes, no reset replay, no busy flag; it stays held (rcp_proxy_accept: a new connection replaces
+// it), and becomes the peer when its first bytes pass.
 #define RCP_PROXY_SNIFF_LEN 8
 #define RCP_PROXY_SNIFF_MS 50
 
@@ -163,26 +166,26 @@ rcp_proxy_sniff_t rcp_proxy_sniff(const uint8_t *d, size_t n, bool timed_out);
 typedef struct {
     uint8_t buf[RCP_PROXY_SNIFF_LEN];
     size_t len;          // bytes held
-    bool up;             // became the peer while silent (RCP_PROXY_HOLD_UP)
-    int64_t deadline_ms; // the next timer: the silent-start deadline, then the judgement's; -1 none
+    int64_t deadline_ms; // the judgement's timer, from the first byte; -1 none (nothing came yet, or judged)
 } rcp_proxy_hold_t;
 
 typedef enum {
     RCP_PROXY_HOLD_WAIT,   // nothing to do yet
-    RCP_PROXY_HOLD_UP,     // silent RCP_PROXY_SNIFF_MS since the accept: the client becomes the peer, bytes still held
-    RCP_PROXY_HOLD_PASS,   // judged a radio client: the peer (if not up yet), then buf[0..len) to the radio
-    RCP_PROXY_HOLD_REFUSE, // judged an HTTP request: drop the client (and the peer, if up); nothing to the radio
+    RCP_PROXY_HOLD_PASS,   // judged a radio client: the peer now, then buf[0..len) to the radio
+    RCP_PROXY_HOLD_REFUSE, // judged an HTTP request: drop the client; nothing to the radio
 } rcp_proxy_hold_act_t;
 
-// At the accept: nothing held, the silent-start deadline at now_ms + RCP_PROXY_SNIFF_MS.
-void rcp_proxy_hold_start(rcp_proxy_hold_t *h, int64_t now_ms);
+// At the accept: nothing held, no timer until the first byte.
+void rcp_proxy_hold_start(rcp_proxy_hold_t *h);
+// Whether the held client has sent nothing yet (a new connection replaces it: rcp_proxy_accept).
+bool rcp_proxy_hold_silent(const rcp_proxy_hold_t *h);
 // Room for more bytes: read at most this much from the client (0 never happens while undecided).
 size_t rcp_proxy_hold_room(const rcp_proxy_hold_t *h);
 // n bytes (n <= rcp_proxy_hold_room) came at now_ms: the first of them starts the judgement's RCP_PROXY_SNIFF_MS.
 // WAIT, PASS or REFUSE.
 rcp_proxy_hold_act_t rcp_proxy_hold_add(rcp_proxy_hold_t *h, const uint8_t *d, size_t n, int64_t now_ms);
-// The timer at now_ms: WAIT before the deadline; at it, UP when nothing came (once; no deadline after it until the
-// first byte), else the judgement with timed_out (PASS or REFUSE).
+// The timer at now_ms: WAIT without a deadline (nothing came: the client may stay silent for ever) or before it; at it,
+// the judgement with timed_out (PASS or REFUSE).
 rcp_proxy_hold_act_t rcp_proxy_hold_tick(rcp_proxy_hold_t *h, int64_t now_ms);
 
 typedef enum {

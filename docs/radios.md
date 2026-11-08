@@ -107,8 +107,8 @@ channel in `rcp-proxy` listen where another one (also an unplugged one) is store
 
 **Framing.** A USB channel passes bytes as they are. On the C6 the proxy turns spinel frames into HDLC bytes and back,
 so a Linux `otbr-agent` (`spinel+hdlc+uart` through `socat`) can drive the C6; when a TCP client becomes the peer (its
-first bytes passed the check in the security notes below, or it stayed silent 50 ms after the connect) or a UDP peer
-first sends, the board resets the handshake so the host sees the RCP's reset. For UDP, `framing` is `hdlc` (default: the stream
+first bytes passed the check in the security notes below) or a UDP peer first sends, the board resets the handshake so
+the host sees the RCP's reset. For UDP, `framing` is `hdlc` (default: the stream
 is cut at HDLC frame boundaries, one frame per datagram, which suits spinel) or `raw` (each received chunk becomes a
 datagram of at most 1024 bytes; loss and reordering corrupt the stream, so use it for testing only).
 
@@ -134,9 +134,10 @@ browser can open a connection to `http://<board>:6638/` (the port is not on the 
 HTTP request; in TCP listen the proxy therefore holds the first bytes a new client sends, whenever they come (up to
 8, at most 50 ms after the first of them), and refuses the client, counted as refused and logged at most every 10 s,
 when they start with an uppercase HTTP method and a space (`GET `, `POST `, `PUT `, `DELETE `, `HEAD `, `OPTIONS `,
-`PATCH `, `CONNECT `, `TRACE `). A client that sends nothing in the first 50 ms (a host that waits for the radio's
-reset, or a browser's idle preconnected connection) becomes the peer and gets the radio's bytes, but its own first
-bytes are still held and judged when they come. Nothing of such a request reaches the radio. Radio clients start with
+`PATCH `, `CONNECT `, `TRACE `). A client that has sent nothing is not the peer: it gets none of the radio's bytes,
+the C6 is not reset for it and a firmware push is not refused for it (`c6_busy`), and a new connection replaces it (the
+silent one is closed), so a browser's idle preconnected connection cannot lock out the real host. A host therefore
+sends first, as spinel, ZNP and ASH hosts do. Nothing of such a request reaches the radio. Radio clients start with
 a frame byte (`0x7E` spinel, `0xFE` ZNP, ASH (EZSP) with `0x1A` cancel or the `0xC0` reset; `0x7E` ends an ASH frame),
 never with a letter, and pass at their first byte. UDP and `connect` are not checked: a browser can send UDP only
 inside STUN/DTLS (WebRTC), not bytes it chooses, and `connect` dials a host you chose.
@@ -315,7 +316,8 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
 - **HTTP refusal in TCP listen** (port 6638): `curl -X POST http://<board>:6638/ -d x` is refused (`refused` + 1, an RST
   or FIN for curl) with `to_radio` unchanged; `otbr-agent` through `socat` on the C6 still comes up (the reset replay
   once its first bytes pass); a kick during the hold (a client connected with `nc` that has not sent yet) drops it and
-  the next client is served; the preconnect case: a client that connects, stays silent over 50 ms (it becomes the
-  peer: `connected`), then sends `POST / HTTP/1.1` is dropped (`refused` + 1) with `to_radio` unchanged.
+  the next client is served; the preconnect case: a client that connects and stays silent stays `listening` (no peer,
+  no C6 reset), a second connection replaces it (the first is closed) and becomes the peer with its first spinel
+  bytes, and a silent client that then sends `POST / HTTP/1.1` is dropped (`refused` + 1) with `to_radio` unchanged.
 - **Stop with an open session**: hold a REST session longer than 45 s while setting the OTBR channel `off`: the PUT
   answers 202, the channel stays `otbr` running with `error` `drain_timeout`, Thread keeps running.

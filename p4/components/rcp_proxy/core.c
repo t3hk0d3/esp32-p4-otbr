@@ -184,9 +184,12 @@ bool rcp_proxy_lookup_answer(rcp_proxy_lookup_t *l, uint32_t seq)
 
 /* ---- TCP accept rule ---- */
 
-rcp_proxy_accept_t rcp_proxy_accept(bool peer_connected, bool local_allowed, bool peer_allowed)
+rcp_proxy_accept_t rcp_proxy_accept(bool slot_taken, bool held_silent, bool local_allowed, bool peer_allowed)
 {
-    return peer_connected || !local_allowed || !peer_allowed ? RCP_PROXY_REFUSE : RCP_PROXY_TAKE;
+    if (!local_allowed || !peer_allowed || (slot_taken && !held_silent)) {
+        return RCP_PROXY_REFUSE;
+    }
+    return slot_taken ? RCP_PROXY_REPLACE : RCP_PROXY_TAKE;
 }
 
 /* ---- first bytes of a TCP client ---- */
@@ -235,11 +238,15 @@ static rcp_proxy_hold_act_t hold_judge(rcp_proxy_hold_t *h, bool timed_out)
     }
 }
 
-void rcp_proxy_hold_start(rcp_proxy_hold_t *h, int64_t now_ms)
+void rcp_proxy_hold_start(rcp_proxy_hold_t *h)
 {
     h->len = 0;
-    h->up = false;
-    h->deadline_ms = now_ms + RCP_PROXY_SNIFF_MS;
+    h->deadline_ms = -1; // no timer until the first byte: a silent client is never promoted
+}
+
+bool rcp_proxy_hold_silent(const rcp_proxy_hold_t *h)
+{
+    return h->len == 0;
 }
 
 size_t rcp_proxy_hold_room(const rcp_proxy_hold_t *h)
@@ -269,11 +276,6 @@ rcp_proxy_hold_act_t rcp_proxy_hold_tick(rcp_proxy_hold_t *h, int64_t now_ms)
 {
     if (h->deadline_ms < 0 || now_ms < h->deadline_ms) {
         return RCP_PROXY_HOLD_WAIT;
-    }
-    if (h->len == 0) {
-        h->up = true;
-        h->deadline_ms = -1; // until the first byte
-        return RCP_PROXY_HOLD_UP;
     }
     return hold_judge(h, true);
 }
