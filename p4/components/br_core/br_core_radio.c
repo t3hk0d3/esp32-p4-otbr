@@ -575,6 +575,7 @@ esp_err_t core_radio_ot_start(const char *id)
     if (core_test_take_start_abandon(id)) { // ot_start_abandon: this start ends as an abandoned one, at once
         ESP_LOGW(TAG, "test build: OpenThread's start on %s abandoned", id);
         g_core.init_abandoned = true; // as a real one: nothing starts OpenThread again until a reboot
+        core_set_reason(MODE_FSM_FAULT_ABANDONED);
         return MODE_FSM_ERR_START_ABANDONED;
     }
 #endif
@@ -601,6 +602,7 @@ esp_err_t core_radio_ot_start(const char *id)
     // semaphore only one wakes (the other waited BOOT_WAIT_MS, then abandoned a running OpenThread).
     if (err == ESP_OK && xSemaphoreTake(g_core.init_done, pdMS_TO_TICKS(BOOT_WAIT_MS)) != pdTRUE) {
         g_core.init_abandoned = true; // still inside esp_openthread_init: never torn down under it
+        core_set_reason(MODE_FSM_FAULT_ABANDONED); // the RADIO_FAULT says why, and that a reboot is the way out
         return MODE_FSM_ERR_START_ABANDONED;
     }
     if (err == ESP_OK && !core_ot_ready_now()) {
@@ -620,6 +622,7 @@ esp_err_t core_radio_ot_start(const char *id)
         }
         core_radio_stop_openthread(); // with an abandoned init it releases nothing of it (no deinit)
         if (g_core.init_abandoned) {
+            core_set_reason(MODE_FSM_FAULT_ABANDONED);
             return MODE_FSM_ERR_START_ABANDONED; // an error or a park inside esp_openthread_init
         }
     }
