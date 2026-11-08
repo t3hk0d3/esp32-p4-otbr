@@ -227,7 +227,7 @@ TEST_CASE("On a build without TREL: trel is null", "[device_api]")
     device_api_status_t s = sample();
 
     render(&s);
-    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":null,"));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":null,\"otbr_channel\":\"c6\",\"zigbee_channel\""));
 }
 
 TEST_CASE("On a board in NO_RADIO: mode NO_RADIO, otbr_channel as stored, right after trel", "[device_api]")
@@ -239,7 +239,7 @@ TEST_CASE("On a board in NO_RADIO: mode NO_RADIO, otbr_channel as stored, right 
     s.fault_reason = "radio unplugged (usb-10c4-ea60-0001)";
     render(&s);
     TEST_ASSERT_NOT_NULL(strstr(body, "\"mode\":\"NO_RADIO\""));
-    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":null,\"otbr_channel\":\"usb-10c4-ea60-0001\"}"));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":null,\"otbr_channel\":\"usb-10c4-ea60-0001\","));
     TEST_ASSERT_NOT_NULL(strstr(body, "\"fault_reason\":\"radio unplugged (usb-10c4-ea60-0001)\""));
 }
 
@@ -250,10 +250,10 @@ TEST_CASE("On no channel stored in otbr: otbr_channel is null", "[device_api]")
     s.mode = BR_MODE_NO_RADIO;
     s.otbr_channel = "";
     render(&s);
-    TEST_ASSERT_NOT_NULL(strstr(body, "\"otbr_channel\":null}"));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"otbr_channel\":null,"));
     s.otbr_channel = NULL;
     render(&s);
-    TEST_ASSERT_NOT_NULL(strstr(body, "\"otbr_channel\":null}"));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"otbr_channel\":null,"));
 }
 
 TEST_CASE("On TREL whose state could not be read: enabled is written, the rest is null", "[device_api]")
@@ -410,4 +410,24 @@ TEST_CASE("routing not started: routing is null", "[routing]")
     render(&s);
     TEST_ASSERT_NOT_NULL(strstr(body, "\"routing\":null"));
     TEST_ASSERT_NOT_NULL(strstr(body, "\"pd\":{\"state\":\"running\",\"prefix\":\"fd00:1::/64\"}"));
+}
+
+TEST_CASE("On a channel running ziggurat: zigbee_channel is its id", "[device_api]")
+{
+    device_api_status_t s = sample();
+
+    s.zigbee_channel = "usb-303a:1001";
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"zigbee_channel\":\"usb-303a:1001\""));
+}
+
+TEST_CASE("On no channel running ziggurat: zigbee_channel is null", "[device_api]")
+{
+    device_api_status_t s = sample();
+
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"zigbee_channel\":null"));
+    s.zigbee_channel = "";
+    render(&s);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"zigbee_channel\":null"));
 }

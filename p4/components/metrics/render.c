@@ -532,6 +532,24 @@ static void render_routing(metrics_writer_t *w, const routing_metrics_view_t *r)
     }
 }
 
+// ---- zigbee ----
+
+static void render_zigbee(metrics_writer_t *w, const metrics_zigbee_t *z)
+{
+    family(w, "zigbee_frames_total", "counter", "Radio frames received from and transmitted to the RCP by the Zigbee stack.");
+    labelled_u64(w, "zigbee_frames_total", "dir", "rx", z->frames_rx);
+    labelled_u64(w, "zigbee_frames_total", "dir", "tx", z->frames_tx);
+    family(w, "zigbee_tx_results_total", "counter", "Transmit results other than success.");
+    labelled_u64(w, "zigbee_tx_results_total", "result", "no_ack", z->tx_no_ack);
+    labelled_u64(w, "zigbee_tx_results_total", "result", "cca", z->tx_cca);
+    labelled_u64(w, "zigbee_tx_results_total", "result", "failed", z->tx_failed);
+    single(w, "zigbee_rcp_resets_total", "counter", "RCP resets seen by the Zigbee stack.", z->rcp_resets);
+    family(w, "zigbee_heap_bytes", "gauge", "PSRAM heap of the Zigbee stack in use, now and at its peak.");
+    labelled_u64(w, "zigbee_heap_bytes", "kind", "current", z->heap_current);
+    labelled_u64(w, "zigbee_heap_bytes", "kind", "peak", z->heap_peak);
+    single(w, "zigbee_client_connected", "gauge", "A client is connected to the Zigbee WebSocket.", z->client_connected);
+}
+
 esp_err_t metrics_render(metrics_writer_t *w, const metrics_input_t *in)
 {
     const metrics_collector_view_t *c = in->collector;
@@ -552,6 +570,9 @@ esp_err_t metrics_render(metrics_writer_t *w, const metrics_input_t *in)
     }
     if (in->routing) {
         render_routing(w, in->routing);
+    }
+    if (in->device->zigbee.active) {
+        render_zigbee(w, &in->device->zigbee);
     }
     return w->err;
 }

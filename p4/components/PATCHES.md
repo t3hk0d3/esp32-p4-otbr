@@ -368,6 +368,20 @@ reason, spec reference.
    (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md, sections Board mode and API)
    Merged with self-update (patch 26, which took `EXTRA_HANDLER_SLOTS` to 30 for `/device/update`): `device_api` now has
    31 routes (the console WebSocket included) plus the catch-all, so `EXTRA_HANDLER_SLOTS` is 34, two slots of headroom.
+34. Applied (Zigbee mode, Task 5). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 34 -> 36 (on top of patch
+   29 and self-update: `GET /device/zigbee` and `GET /zigbee`, two slots of headroom kept). The extra-handlers callback (`app_main.c`
+   `register_extra_handlers`) also registers the WebSocket `GET /zigbee` (`zigbee_register_ws`) after the device API,
+   before the catch-all. Frontend: `index.html` (the Dashboard) is restructured into three sections, Device and
+   network, Thread and Zigbee, each stack's section showing a one-line placeholder while it does not run; the board
+   line takes the board-wide faults and Reboot, a two-row Radios card replaces the "Thread runs on" chip, and the
+   shared `#threadNotice` banner and the Mode row are gone. `static/status.js` gains `boardHealthFor`,
+   `threadHeroFor` (was `heroFor`), `isThreadActive`, `radiosView` and polls `/device/channels`;
+   `static/zigbee.js` is the Dashboard's Zigbee section (`ZigbeeSection`, loaded before `status.js`); there is no
+   Zigbee page (no `zigbee.html`) and `static/api.js` leaves patch 29's `<li id="nav-slot-zigbee">` empty;
+   `static/device_common.js` `poller` accepts a function as its period; `static/style.css` adds `.zg-*` and
+   `.dash-*` classes and styles `.tile-head h3`. Page tests: `tools/tests/test_status_page.py`,
+   `tools/tests/test_zigbee_page.py`. (docs/superpowers/specs/2026-11-06-zigbee-mode-design.md,
+   docs/superpowers/specs/2026-11-07-unified-dashboard-design.md)
 
 ### REST guard classification (patches 2 and 9)
 

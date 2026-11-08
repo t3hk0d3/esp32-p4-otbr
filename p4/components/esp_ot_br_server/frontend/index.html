@@ -17,13 +17,8 @@
     <div class="page-head">
         <div>
             <h1 class="page-title">Dashboard</h1>
-            <p class="page-desc">What this border router and its Thread network are doing right now. Settings and tools are
-                in the Thread and Device menus.</p>
-        </div>
-        <div>
-            <span class="chip hidden" id="h-thread-on"></span>
-            <button class="btn btn-outline-danger" id="rebootBtn" type="button">Reboot</button>
-            <div class="form-hint" id="rebootMsg" role="status" aria-live="polite"></div>
+            <p class="page-desc">What this board, its Thread network and its Zigbee coordinator are doing right now.
+                Settings and tools are in the Thread and Device menus.</p>
         </div>
     </div>
 
@@ -40,129 +35,215 @@
         <div class="trial-track" aria-hidden="true"><div class="trial-fill" id="trialFill"></div></div>
     </div>
     <div class="form-hint" id="confirmMsg" role="status" aria-live="polite"></div>
-    <div class="disabled-banner hidden" id="threadNotice" role="status" aria-live="polite"></div>
     <div class="disabled-banner hidden" id="s-offline" role="status" aria-live="polite"></div>
 
     <div id="statusSection">
-        <section class="card hero" id="hero">
-            <div class="hero-main">
-                <span class="hero-dot" aria-hidden="true"></span>
-                <div>
-                    <h2 class="hero-title" id="h-title">-</h2>
-                    <p class="hero-text" id="h-text"></p>
-                    <p class="hero-text" id="h-role"></p>
-                    <a class="hidden" id="h-link" href="#">-</a>
+        <section class="dash-section" id="sec-device">
+            <h2 class="dash-heading">Device and network</h2>
+            <section class="card hero" id="board-hero">
+                <div class="hero-main">
+                    <span class="hero-dot" aria-hidden="true"></span>
+                    <div>
+                        <h3 class="hero-title" id="b-title">-</h3>
+                        <p class="hero-text" id="b-text"></p>
+                        <a class="hidden" id="b-link" href="#">-</a>
+                    </div>
                 </div>
+                <dl class="facts hero-facts">
+                    <dt>Uptime</dt><dd id="h-uptime">-</dd>
+                    <dt>Last reset</dt><dd id="h-reset">-</dd>
+                </dl>
+                <div>
+                    <button class="btn btn-outline-danger" id="rebootBtn" type="button">Reboot</button>
+                    <div class="form-hint" id="rebootMsg" role="status" aria-live="polite"></div>
+                </div>
+            </section>
+            <div class="tile-grid">
+                <section class="card">
+                    <div class="tile-head"><h3>Radios</h3><a href="/radios.html">Radios</a></div>
+                    <dl class="facts">
+                        <dt>ESP32-C6 (built-in)</dt><dd id="t-radio-c6">-</dd>
+                        <dt>USB radio</dt><dd id="t-radio-usb">-</dd>
+                    </dl>
+                </section>
+                <section class="card">
+                    <div class="tile-head"><h3>Ethernet</h3><a href="/ethernet.html">Settings</a></div>
+                    <dl class="facts">
+                        <dt>IPv4</dt><dd class="mono" id="t-ipv4">-</dd>
+                        <dt>IPv6</dt><dd class="mono lines" id="t-ipv6">-</dd>
+                    </dl>
+                </section>
+                <section class="card">
+                    <div class="tile-head"><h3>Board firmware</h3><a href="/firmware.html">Update</a></div>
+                    <dl class="facts">
+                        <dt>Version</dt><dd class="mono" id="t-app">-</dd>
+                        <dt>Running from</dt><dd id="t-slot">-</dd>
+                        <dt>Settings storage</dt><dd id="t-storage">-</dd>
+                    </dl>
+                </section>
+                <section class="card">
+                    <div class="tile-head"><h3>Load and memory</h3><a href="/diagnostics.html">Diagnostics</a></div>
+                    <dl class="facts">
+                        <dt>CPU (10 s)</dt><dd id="t-cpu">-</dd>
+                        <dt>Internal RAM free</dt><dd id="t-mem-int">-</dd>
+                        <dt>PSRAM free</dt><dd id="t-mem-psram">-</dd>
+                        <dt>Chip temperature</dt><dd id="t-chip-temp">-</dd>
+                    </dl>
+                </section>
             </div>
-            <dl class="facts hero-facts">
-                <dt>Mode</dt><dd class="mono" id="h-mode">-</dd>
-                <dt>Uptime</dt><dd id="h-uptime">-</dd>
-                <dt>Last reset</dt><dd id="h-reset">-</dd>
-            </dl>
         </section>
 
-        <div class="tile-grid">
-            <section class="card">
-                <div class="tile-head"><h2>Thread network</h2><a href="/network.html">Network</a></div>
-                <p class="form-hint hidden" id="t-net-off">Shown while the border router is running.</p>
-                <p class="hidden" id="t-net-none">This border router is not part of a Thread network yet.
-                    <a href="/network.html">Form or join one</a></p>
-                <dl class="facts">
-                    <dt>Name</dt><dd id="t-net-name">-</dd>
-                    <dt>Role</dt><dd id="t-net-role">-</dd>
-                    <dt>RLOC16</dt><dd class="mono" id="t-net-rloc16">-</dd>
-                    <dt>Channel</dt><dd id="t-net-channel">-</dd>
-                    <dt>TX power</dt><dd id="t-net-txpower">-</dd>
-                    <dt>PAN ID</dt><dd class="mono" id="t-net-panid">-</dd>
-                    <dt>Extended PAN ID</dt><dd class="mono" id="t-net-xpanid">-</dd>
-                    <dt>Partition ID</dt><dd class="mono" id="t-net-partition">-</dd>
-                </dl>
-            </section>
-            <section class="card">
-                <div class="tile-head"><h2>Identifiers</h2></div>
-                <dl class="facts">
-                    <dt>IEEE EUI-64</dt><dd class="mono" id="t-id-eui64">-</dd>
-                    <dt>Border Agent ID</dt><dd class="mono" id="t-id-baid">-</dd>
-                    <dt>RLOC</dt><dd class="mono" id="t-id-rloc">-</dd>
-                    <dt>PSKc</dt><dd><span class="mono" id="t-id-pskc">-</span>
-                        <button class="btn btn-outline btn-sm" id="pskcBtn" type="button" aria-controls="t-id-pskc">Show</button></dd>
-                    <dt>OpenThread</dt><dd class="mono" id="t-id-otver">-</dd>
-                </dl>
-            </section>
-            <section class="card">
-                <div class="tile-head"><h2>Board firmware</h2><a href="/firmware.html">Update</a></div>
-                <dl class="facts">
-                    <dt>Version</dt><dd class="mono" id="t-app">-</dd>
-                    <dt>Running from</dt><dd id="t-slot">-</dd>
-                    <dt>Settings storage</dt><dd id="t-storage">-</dd>
-                </dl>
-            </section>
-            <section class="card">
-                <div class="tile-head"><h2>Radio Co-Processor</h2><a href="/firmware.html">Update</a></div>
-                <dl class="facts">
-                    <dt>Radio firmware</dt><dd class="mono" id="t-rcp">-</dd>
-                    <dt>Matches this build</dt><dd id="t-compat">-</dd>
-                    <dt>Base image</dt><dd id="t-base">-</dd>
-                    <dt>Maintenance jumper</dt><dd id="t-jumper">-</dd>
-                </dl>
-            </section>
-            <section class="card">
-                <div class="tile-head"><h2>Ethernet</h2><a href="/ethernet.html">Settings</a></div>
-                <dl class="facts">
-                    <dt>IPv4</dt><dd class="mono" id="t-ipv4">-</dd>
-                    <dt>IPv6</dt><dd class="mono lines" id="t-ipv6">-</dd>
-                </dl>
-            </section>
-            <section class="card">
-                <div class="tile-head"><h2>Home Assistant</h2><a href="/ethernet.html">Names</a></div>
-                <dl class="facts">
-                    <dt>URL to enter</dt><dd class="mono" id="t-ha-url">-</dd>
-                    <dt>mDNS name</dt><dd class="mono" id="t-ha-mdns">-</dd>
-                    <dt>Shown in Home Assistant as</dt><dd id="t-ha-name">-</dd>
-                    <dt>Announced on</dt><dd id="t-ha-iface">-</dd>
-                </dl>
-                <p class="form-hint" id="t-ha-hint"></p>
-                <p class="form-hint"><a href="https://github.com/t3hk0d3/esp32-p4-otbr/blob/master/docs/home-assistant.md">Home Assistant guide</a></p>
-            </section>
-            <section class="card">
-                <div class="tile-head"><h2>IPv6 prefix delegation</h2></div>
-                <dl class="facts">
-                    <dt>Client</dt><dd id="t-pd-state">-</dd>
-                    <dt>Delegated prefix</dt><dd class="mono" id="t-pd-prefix">-</dd>
-                </dl>
-            </section>
-            <section class="card">
-                <div class="tile-head"><h2>Packet capture</h2><a href="/capture.html">Open</a></div>
-                <dl class="facts">
-                    <dt>State</dt><dd id="t-sniffer-state">-</dd>
-                    <dt>Frames</dt><dd id="t-sniffer-detail">-</dd>
-                </dl>
-            </section>
-            <section class="card">
-                <div class="tile-head"><h2>Load and memory</h2><a href="/diagnostics.html">Diagnostics</a></div>
-                <dl class="facts">
-                    <dt>CPU (10 s)</dt><dd id="t-cpu">-</dd>
-                    <dt>Internal RAM free</dt><dd id="t-mem-int">-</dd>
-                    <dt>PSRAM free</dt><dd id="t-mem-psram">-</dd>
-                    <dt>Chip temperature</dt><dd id="t-chip-temp">-</dd>
-                </dl>
-            </section>
-        </div>
-
-        <section class="card">
-            <div class="tile-head"><h2>Thread addresses</h2><a href="/addresses.html">Manage</a></div>
-            <div class="table-wrap">
-                <table class="diff-table">
-                    <thead><tr><th scope="col">Address</th><th scope="col">Origin</th><th scope="col">State</th></tr></thead>
-                    <tbody id="addr-body"></tbody>
-                </table>
+        <section class="dash-section" id="sec-thread">
+            <h2 class="dash-heading">Thread</h2>
+            <p class="card dash-off hidden" id="thread-off">Thread is not active: no radio runs the Thread border router.
+                <a id="thread-off-link" href="/radios.html">Set a radio to Thread on the Radios page</a></p>
+            <div id="thread-on">
+                <section class="card hero" id="hero">
+                    <div class="hero-main">
+                        <span class="hero-dot" aria-hidden="true"></span>
+                        <div>
+                            <h3 class="hero-title" id="h-title">-</h3>
+                            <p class="hero-text" id="h-text"></p>
+                            <p class="hero-text" id="h-role"></p>
+                            <a class="hidden" id="h-link" href="#">-</a>
+                        </div>
+                    </div>
+                </section>
+                <div class="tile-grid">
+                    <section class="card">
+                        <div class="tile-head"><h3>Thread network</h3><a href="/network.html">Network</a></div>
+                        <p class="form-hint hidden" id="t-net-off">Shown while the border router is running.</p>
+                        <p class="hidden" id="t-net-none">This border router is not part of a Thread network yet.
+                            <a href="/network.html">Form or join one</a></p>
+                        <dl class="facts">
+                            <dt>Name</dt><dd id="t-net-name">-</dd>
+                            <dt>Role</dt><dd id="t-net-role">-</dd>
+                            <dt>RLOC16</dt><dd class="mono" id="t-net-rloc16">-</dd>
+                            <dt>Channel</dt><dd id="t-net-channel">-</dd>
+                            <dt>TX power</dt><dd id="t-net-txpower">-</dd>
+                            <dt>PAN ID</dt><dd class="mono" id="t-net-panid">-</dd>
+                            <dt>Extended PAN ID</dt><dd class="mono" id="t-net-xpanid">-</dd>
+                            <dt>Partition ID</dt><dd class="mono" id="t-net-partition">-</dd>
+                        </dl>
+                    </section>
+                    <section class="card">
+                        <div class="tile-head"><h3>Identifiers</h3></div>
+                        <dl class="facts">
+                            <dt>IEEE EUI-64</dt><dd class="mono" id="t-id-eui64">-</dd>
+                            <dt>Border Agent ID</dt><dd class="mono" id="t-id-baid">-</dd>
+                            <dt>RLOC</dt><dd class="mono" id="t-id-rloc">-</dd>
+                            <dt>PSKc</dt><dd><span class="mono" id="t-id-pskc">-</span>
+                                <button class="btn btn-outline btn-sm" id="pskcBtn" type="button" aria-controls="t-id-pskc">Show</button></dd>
+                            <dt>OpenThread</dt><dd class="mono" id="t-id-otver">-</dd>
+                        </dl>
+                    </section>
+                    <section class="card">
+                        <div class="tile-head"><h3>Radio Co-Processor</h3><a href="/firmware.html">Update</a></div>
+                        <dl class="facts">
+                            <dt>Radio firmware</dt><dd class="mono" id="t-rcp">-</dd>
+                            <dt>Matches this build</dt><dd id="t-compat">-</dd>
+                            <dt>Base image</dt><dd id="t-base">-</dd>
+                            <dt>Maintenance jumper</dt><dd id="t-jumper">-</dd>
+                        </dl>
+                    </section>
+                    <section class="card">
+                        <div class="tile-head"><h3>Home Assistant</h3><a href="/ethernet.html">Names</a></div>
+                        <dl class="facts">
+                            <dt>URL to enter</dt><dd class="mono" id="t-ha-url">-</dd>
+                            <dt>mDNS name</dt><dd class="mono" id="t-ha-mdns">-</dd>
+                            <dt>Shown in Home Assistant as</dt><dd id="t-ha-name">-</dd>
+                            <dt>Announced on</dt><dd id="t-ha-iface">-</dd>
+                        </dl>
+                        <p class="form-hint" id="t-ha-hint"></p>
+                        <p class="form-hint"><a href="https://github.com/t3hk0d3/esp32-p4-otbr/blob/master/docs/home-assistant.md">Home Assistant guide</a></p>
+                    </section>
+                    <section class="card">
+                        <div class="tile-head"><h3>IPv6 prefix delegation</h3></div>
+                        <dl class="facts">
+                            <dt>Client</dt><dd id="t-pd-state">-</dd>
+                            <dt>Delegated prefix</dt><dd class="mono" id="t-pd-prefix">-</dd>
+                        </dl>
+                    </section>
+                    <section class="card">
+                        <div class="tile-head"><h3>Packet capture</h3><a href="/capture.html">Open</a></div>
+                        <dl class="facts">
+                            <dt>State</dt><dd id="t-sniffer-state">-</dd>
+                            <dt>Frames</dt><dd id="t-sniffer-detail">-</dd>
+                        </dl>
+                    </section>
+                </div>
+                <section class="card">
+                    <div class="tile-head"><h3>Thread addresses</h3><a href="/addresses.html">Manage</a></div>
+                    <div class="table-wrap">
+                        <table class="diff-table">
+                            <thead><tr><th scope="col">Address</th><th scope="col">Origin</th><th scope="col">State</th></tr></thead>
+                            <tbody id="addr-body"></tbody>
+                        </table>
+                    </div>
+                </section>
             </div>
+        </section>
+
+        <section class="dash-section" id="sec-zigbee">
+            <h2 class="dash-heading">Zigbee</h2>
+            <p class="card dash-off" id="zigbee-off">Zigbee is not active: no radio runs the Zigbee coordinator.
+                <a id="zigbee-off-link" href="/radios.html">Set a radio to Zigbee on the Radios page</a></p>
+            <div class="hidden" id="zigbee-on">
+                <section class="card hero" id="zg-hero">
+                    <div class="hero-main">
+                        <span class="hero-dot" aria-hidden="true"></span>
+                        <div>
+                            <h3 class="hero-title" id="zg-title">-</h3>
+                            <p class="hero-text" id="zg-text"></p>
+                        </div>
+                    </div>
+                    <dl class="facts hero-facts">
+                        <dt>Radio</dt><dd id="zg-radio">-</dd>
+                        <dt>Running since</dt><dd id="zg-since">-</dd>
+                        <dt>Radio resets</dt><dd id="zg-resets">-</dd>
+                    </dl>
+                </section>
+                <div class="tile-grid">
+                    <section class="card">
+                        <div class="tile-head"><h3>Connect Home Assistant</h3></div>
+                        <p class="zg-why">Add the ZHA integration, choose <b>Ziggurat</b> as the radio type and enter this path:</p>
+                        <div class="zg-path" id="zg-path">-</div>
+                        <button class="btn btn-outline btn-sm" id="zg-copy" type="button" aria-controls="zg-path">Copy</button>
+                        <p class="zg-why mt-8">One client at a time; a new connection takes over. No login: anyone on your
+                            network can reach it.</p>
+                    </section>
+                    <section class="card">
+                        <div class="tile-head"><h3>Client</h3><span class="chip" id="zg-client-chip">-</span></div>
+                        <dl class="facts" id="zg-client"></dl>
+                    </section>
+                    <section class="card">
+                        <div class="tile-head"><h3>Network</h3><span class="zg-why">as ZHA set it</span></div>
+                        <dl class="facts" id="zg-net"></dl>
+                        <p class="zg-why mt-8">Devices, pairing and the extended PAN ID are in ZHA.</p>
+                    </section>
+                    <section class="card">
+                        <div class="tile-head"><h3>Radio traffic</h3><span class="zg-why">since start</span></div>
+                        <dl class="facts" id="zg-traffic"></dl>
+                    </section>
+                    <section class="card">
+                        <div class="tile-head"><h3>Memory</h3><span class="zg-why">PSRAM</span></div>
+                        <div class="zg-big" id="zg-heap">-</div>
+                        <p class="zg-why" id="zg-heap-use"></p>
+                    </section>
+                    <section class="card">
+                        <div class="tile-head"><h3>Firmware</h3></div>
+                        <dl class="facts" id="zg-fw"></dl>
+                    </section>
+                </div>
+            </div>
+            <div class="form-hint" id="zg-note" role="status" aria-live="polite"></div>
         </section>
     </div>
 </div>
 <div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
 <script src="/static/api.js"></script>
 <script src="/static/device_common.js"></script>
+<script src="/static/zigbee.js"></script>
 <script src="/static/status.js"></script>
 </body>
 </html>

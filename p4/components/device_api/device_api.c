@@ -46,6 +46,8 @@
 #include "console_ws.h"
 #include "ot_console.h"
 #include "thread_json.h"
+#include "zigbee.h"
+#include "zigbee_json.h"
 #include "netnames.h"
 #include "radio_mux.h"
 #include "rcp_proxy.h"
@@ -396,6 +398,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     s->otbr_channel = bs.otbr_channel;
     fill_routing(s);
     fill_trel(&s->trel);
+    s->zigbee_channel = zigbee_channel();
 
     esp_err_t err;
 
@@ -416,6 +419,30 @@ static esp_err_t send_metrics_chunk(void *ctx, const char *data, size_t len)
     return httpd_resp_send_chunk((httpd_req_t *)ctx, data, (ssize_t)len);
 }
 
+// The Zigbee series exist only while a channel runs ziggurat.
+static void fill_zigbee_metrics(metrics_device_t *device)
+{
+    zigbee_status_t *st;
+
+    if (!zigbee_channel() || !(st = malloc(sizeof(*st)))) {
+        return;
+    }
+    zigbee_get_status(st);
+    device->zigbee = (metrics_zigbee_t) {
+        .active = true,
+        .frames_rx = st->counters.rx,
+        .frames_tx = st->counters.tx,
+        .tx_no_ack = st->counters.tx_no_ack,
+        .tx_cca = st->counters.tx_cca,
+        .tx_failed = st->counters.tx_failed,
+        .rcp_resets = st->counters.rcp_resets,
+        .heap_current = st->heap.current,
+        .heap_peak = st->heap.peak,
+        .client_connected = st->has_client,
+    };
+    free(st);
+}
+
 // Like /device/status without the OpenThread read: br_core_get_status_brief. The Thread figures come from the collector.
 static esp_err_t metrics_get_handler(httpd_req_t *req)
 {
@@ -425,7 +452,7 @@ static esp_err_t metrics_get_handler(httpd_req_t *req)
     br_core_get_status_brief(&bs);
     sniffer_get_stats(&ss);
     esp_netif_t *netif = mgmt_netif();
-    const metrics_device_t device = {
+    metrics_device_t device = {
         .mode = bs.mode,
         .version = esp_app_get_description()->version,
         .slot = running_slot(),
@@ -440,6 +467,7 @@ static esp_err_t metrics_get_handler(httpd_req_t *req)
         .trial_pending = netcfg_trial_pending(),
     };
 
+    fill_zigbee_metrics(&device);
     httpd_resp_set_type(req, METRICS_CONTENT_TYPE);
     esp_err_t err = metrics_write(&device, send_metrics_chunk, req);
 
@@ -1659,6 +1687,34 @@ static esp_err_t network_confirm_post_handler(httpd_req_t *req)
     return send_json(req, "{\"status\":\"confirmed\"}");
 }
 
+/* ---- GET /device/zigbee ---- */
+
+// 409 while no channel is in mode ziggurat.
+static esp_err_t zigbee_get_handler(httpd_req_t *req)
+{
+    if (!zigbee_channel()) {
+        return send_error(req, 409, "not_zigbee", "no channel is in mode ziggurat", false);
+    }
+    zigbee_status_t *st = malloc(sizeof(*st));
+    char *body = malloc(ZIGBEE_JSON_MAX);
+    esp_err_t err;
+    size_t len;
+
+    if (!st || !body) {
+        err = send_error(req, 500, "no_memory", "out of memory", false);
+    } else {
+        zigbee_get_status(st);
+        if (zigbee_json_status(st, body, ZIGBEE_JSON_MAX, &len) != ESP_OK) {
+            err = send_error(req, 500, "internal", "the status does not fit its buffer", false);
+        } else {
+            err = send_json(req, body);
+        }
+    }
+    free(st);
+    free(body);
+    return err;
+}
+
 /* ---- /device/names ---- */
 
 #define NAMES_BODY_MAX 512
@@ -2119,7 +2175,7 @@ static esp_err_t channel_apply(httpd_req_t *req, radio_mux_snapshot_t *s, const 
         return send_error(req, 400, "bad_value", bad, false);
     }
     otbr_channel_id(otbr);
-    const char *mixed = device_api_channel_move_refusal(set, id, otbr[0] ? otbr : NULL);
+    const char *mixed = device_api_channel_move_refusal(set, id, otbr[0] ? otbr : NULL, s->reboot_modes, c->mode);
 
     if (mixed) { // before port_taken: settings that go with a start, move or stop are never stored
         return send_error(req, 400, "bad_value", mixed, false);
@@ -2142,7 +2198,7 @@ static esp_err_t channel_apply(httpd_req_t *req, radio_mux_snapshot_t *s, const 
     }
     // A move is a long operation: it takes the shared slot before br_core is asked, and br_core gives it back once
     // the move ended (on_move_done). A refusal before the 202 gives it back at once.
-    const bool move = device_api_channel_is_move(set, id, otbr[0] ? otbr : NULL);
+    const bool move = device_api_channel_is_move(set, id, otbr[0] ? otbr : NULL, s->reboot_modes, c->mode);
 
     if (move && !device_api_op_try_begin(DEVICE_API_OP_RADIO_MOVE)) {
         return send_error(req, 409, "busy", device_api_op_busy_detail(DEVICE_API_OP_RADIO_MOVE), false);
@@ -2306,6 +2362,7 @@ esp_err_t device_api_register(httpd_handle_t server)
         {"/device/network", HTTP_GET, network_get_handler},
         {"/device/network", HTTP_PUT, network_put_handler},
         {"/device/network/confirm", HTTP_POST, network_confirm_post_handler},
+        {"/device/zigbee", HTTP_GET, zigbee_get_handler},
         {"/device/names", HTTP_GET, names_get_handler},
         {"/device/names", HTTP_PUT, names_put_handler},
         {"/device/thread", HTTP_GET, thread_get_handler},

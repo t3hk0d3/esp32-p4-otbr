@@ -1,5 +1,5 @@
-idf_component_register(SRCS "test_json.c" "test_query.c" "test_long_op.c" "test_errors.c" "test_status.c" "test_limits.c" "test_names.c" "test_topology.c" "test_thread.c" "test_console_json.c" "test_channels_json.c" "test_update.c"
-                       REQUIRES device_api rcp_sync unity espressif__cjson netnames radio_mux rcp_proxy self_update
+idf_component_register(SRCS "test_json.c" "test_query.c" "test_long_op.c" "test_errors.c" "test_status.c" "test_limits.c" "test_names.c" "test_topology.c" "test_thread.c" "test_console_json.c" "test_channels_json.c" "test_zigbee_json.c" "test_update.c"
+                       REQUIRES device_api rcp_sync unity espressif__cjson netnames radio_mux rcp_proxy zigbee self_update
                        WHOLE_ARCHIVE)
 target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../../br_core/include"
                            "${CMAKE_CURRENT_LIST_DIR}/../../../esp_br_http_ota/include"

@@ -213,6 +213,7 @@ typedef struct {
     uint8_t routing_peers_configured;  /**< written only with ROUTING_METHOD_BGP (null otherwise) */
     device_api_trel_t trel;
     const char *otbr_channel;   /**< id of the channel stored in mode otbr; NULL or "" = none (JSON null) */
+    const char *zigbee_channel; /**< id of the channel in mode ziggurat; NULL or "" = none (JSON null) */
 } device_api_status_t;
 
 /** Name of a br_core_mode_t: "STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT", "NO_RADIO" ("UNKNOWN" otherwise). */

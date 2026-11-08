@@ -78,11 +78,22 @@ jobs:
     container: espressif/idf:v6.1 # keep in step with IDF_VERSION
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true # ziggurat, built from source by the P4 build
       - name: Install packaging and test tools
         run: |
           apt-get update -qq
           # clang++: the vendored REST tests read the OpenThread declarations from a clang AST dump
           apt-get install -y -qq zip clang >/dev/null
+      - name: Install Rust for ziggurat
+        run: |
+          # The IDF container has no Rust. rust-toolchain.toml (p4/components/zigbee) pins the toolchain; the Docker
+          # fallback of the build script is not available inside the container.
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none >/dev/null
+          echo "$HOME/.cargo/bin" >>"$GITHUB_PATH"
+          cd p4/components/zigbee
+          "$HOME/.cargo/bin/rustup" toolchain install
+          "$HOME/.cargo/bin/rustup" target add riscv32imafc-unknown-none-elf
       - name: Build c6_updater, c6_rcp, c6_installer, p4
         run: |
           # version.cmake reads the git hash; the checkout belongs to another user than the container's root

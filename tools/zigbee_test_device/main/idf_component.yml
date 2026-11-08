@@ -1,0 +1,9 @@
+## Versions are pinned exactly. esp-zigbee-lib 2.x carries the ZBOSS stack in its own prebuilt libraries, so there is no
+## separate espressif/esp-zboss-lib dependency (that component belongs to the 1.x line).
+dependencies:
+  idf:
+    version: ">=5.5"
+  espressif/esp-zigbee-lib:
+    version: "2.1.0"
+  espressif/led_strip:
+    version: "3.1.1"

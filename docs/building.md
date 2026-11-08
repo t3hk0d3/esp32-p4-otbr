@@ -4,6 +4,13 @@
 
 - ESP-IDF at the version in `IDF_VERSION` (v6.1). The Makefile activates it by itself from `~/esp/esp-idf-v6.1/export.sh`
   when `idf.py` is not on `PATH`; point `IDF_EXPORT` at another `export.sh` if yours lives elsewhere.
+- The ziggurat submodule (`git clone --recurse-submodules`, or `git submodule update --init` in an existing clone): the P4
+  build compiles its Zigbee stack from source.
+- Rust for that build, either of:
+    - `rustup` with the target of the toolchain pinned in `p4/components/zigbee/rust-toolchain.toml`
+      (`cd p4/components/zigbee && rustup target add riscv32imafc-unknown-none-elf`); cargo then runs on the host.
+    - Docker: without the target `p4/components/zigbee/tools/build_staticlib.sh` runs cargo in the `rust:1.99-slim`
+      image instead, so Docker alone is enough (the image is pulled on first use).
 - `uv` for the tools that are not installed globally (`make lint`, `make test-tools`).
 - `node` (optional): runs the device page tests in `make test-tools`.
 - `clang++` (optional): runs `make test-vendored`.

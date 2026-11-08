@@ -17,7 +17,10 @@
 //                  diag sampler, console_repl (main/console.c), the rest of app_main (CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1),
 //                  routing (the BGP and RIPng sockets), the radio channel mux's owner task radio_mux, rcp_proxy (the
 //                  rcp-proxy mode's sockets) and rcp_resolve (its connect targets' name lookups); br_radio
-//                  (br_core: OpenThread's start and stop on the OTBR channel, moves between channels, the RCP probe).
+//                  (br_core: OpenThread's start and stop on the OTBR channel, moves between channels, the RCP probe);
+//                  zigbee_tx (the Zigbee WebSocket sender, has the HTTP server task send).
+//   ZIGBEE_TASK_CORE  the zigbee task (every ziggurat_* call, the spinel client): NET_CORE, at the OpenThread task's
+//                  priority (ZIGBEE_TASK_PRIORITY = CONFIG_OPENTHREAD_TASK_PRIORITY, checked in the zigbee component).
 //
 // Note: the C6 log UART driver is first installed from net_init (core 0); after a pause/resume handoff the log task
 // (core 1) reinstalls it, so its ISR then lives on core 1. Harmless: it is management traffic.
@@ -26,3 +29,5 @@
 // are per-core by design; test-only tasks and the Wi-Fi provisioning DNS task are not part of the table.
 #define NET_CORE 0
 #define MGMT_CORE 1
+#define ZIGBEE_TASK_CORE NET_CORE
+#define ZIGBEE_TASK_PRIORITY 5

@@ -133,6 +133,41 @@ TEST_CASE("On a rule for a non-mode (unavailable, invalid): it is ignored", "[ra
     TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF), radio_mux_available_modes(&rules));
 }
 
+/* ---- radio_mux_reboot_modes ---- */
+
+TEST_CASE("On no rules: no mode reboots", "[radio_mux]")
+{
+    const radio_mux_rules_t rules = {0};
+
+    TEST_ASSERT_EQUAL_UINT32(0, radio_mux_reboot_modes(&rules));
+}
+
+TEST_CASE("On a ziggurat rule with reboot_on_change and an otbr rule without: only ziggurat reboots", "[radio_mux]")
+{
+    radio_mux_rules_t rules = {0};
+
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_OTBR
+    };
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_ZIGGURAT, .reboot_on_change = true
+    };
+    TEST_ASSERT_EQUAL_UINT32(RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_ZIGGURAT), radio_mux_reboot_modes(&rules));
+}
+
+TEST_CASE("On a reboot rule for a non-mode (unavailable, invalid): it is ignored", "[radio_mux]")
+{
+    radio_mux_rules_t rules = {0};
+
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_UNAVAILABLE, .reboot_on_change = true
+    };
+    rules.rules[rules.n++] = (radio_mux_rule_t) {
+        .mode = RADIO_MUX_MODE_INVALID, .reboot_on_change = true
+    };
+    TEST_ASSERT_EQUAL_UINT32(0, radio_mux_reboot_modes(&rules));
+}
+
 /* ---- radio_mux_mode_parse / radio_mux_mode_name ---- */
 
 TEST_CASE("On each wire name: round-trips unavailable, off, otbr, ziggurat, rcp-proxy", "[radio_mux]")
@@ -424,6 +459,35 @@ TEST_CASE("On leaving otbr for a mode whose registration reboots: returns RADIO_
     zig.rules[0].reboot_on_change = true;
     three_channels(c);
     TEST_ASSERT_EQUAL(RADIO_MUX_APPLY_REBOOT, radio_mux_check_set_mode(&zig, c, N_CHANS, 0, MODE_ZIGGURAT, NULL));
+}
+
+TEST_CASE("On otbr for a channel leaving a mode whose registration reboots: returns RADIO_MUX_APPLY_REBOOT, not a start",
+          "[radio_mux]")
+{
+    radio_mux_rules_t zig = ziggurat_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    size_t from = 99;
+
+    zig.rules[0].reboot_on_change = true;
+    three_channels(c);
+    c[0].mode = RADIO_MUX_MODE_OFF;
+    c[1].mode = MODE_ZIGGURAT;
+    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY_REBOOT, radio_mux_check_set_mode(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, &from));
+    TEST_ASSERT_EQUAL(99, from); // no move: nothing probes the channel the consumer still holds
+}
+
+TEST_CASE("On otbr for a channel leaving a mode that does not reboot: still RADIO_MUX_MOVE from no source (a start)",
+          "[radio_mux]")
+{
+    radio_mux_rules_t zig = ziggurat_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    size_t from = 99;
+
+    three_channels(c);
+    c[0].mode = RADIO_MUX_MODE_OFF;
+    c[1].mode = MODE_ZIGGURAT;
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_check_set_mode(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, &from));
+    TEST_ASSERT_EQUAL(N_CHANS, from);
 }
 
 /* ---- radio_mux_after_detect ---- */

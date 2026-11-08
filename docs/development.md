@@ -18,6 +18,8 @@ no-wires first install through ESP-Hosted).
 - `tools/`: the scripts behind the Makefile (`build_all.sh`, `run_host_tests.sh`, `run_vendored_rest_tests.sh`,
   `package_release.sh`, `make_bundle.py`), `version.cmake`, `base_version.cmake`, `test_build.cmake`,
   `c6_updater_images.cmake`, `otbr_compat.py` (python-otbr-api driver) and `tools/tests/` (tool tests).
+- `tools/zigbee_test_device/`: the rig's Zigbee test device, an on/off light router for the aux C6 devkit
+  (`make zigbee-test-device`; driven by `p4/pytest/zigbee_device.py`).
 - `docs/`: this documentation, the design spec and plan, Phase 0 results (hardware facts).
 - `IDF_VERSION`: the pinned ESP-IDF version.
 

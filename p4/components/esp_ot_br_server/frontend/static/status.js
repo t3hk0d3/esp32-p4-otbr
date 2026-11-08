@@ -38,8 +38,53 @@ function dongleFaultText(reason) {
          'on the Radios page.';
 }
 
-/** The banner of the page: {tone: ok|info|fault|idle, title, text, link: {href, label} | null}. */
-function heroFor(s) {
+/* /device/status's mode is Thread's status. Only these RADIO_FAULT reasons concern the whole board: the board line
+ * says them, whatever runs Thread. The two firmware ones are the C6's, so they count only while no USB radio is
+ * Thread's radio; the settings storage is the board's whatever the radio. */
+var BOARD_FAULTS = [ 'storage unavailable', 'esp-hosted firmware', 'no rcp firmware' ];
+
+function isDongle(s) { return !!s.otbr_channel && s.otbr_channel !== 'c6'; }
+
+function boardFault(s) {
+  if (s.mode !== 'RADIO_FAULT' || BOARD_FAULTS.indexOf(s.fault_reason) < 0)
+    return false;
+  return s.fault_reason === 'storage unavailable' || !isDongle(s);
+}
+
+/** The Device and network line: {tone: ok|fault, title, text, link: {href, label} | null}. */
+function boardHealthFor(s) {
+  if (!boardFault(s))
+    return {tone : 'ok', title : 'Board OK', text : '', link : null};
+  return {
+    tone : 'fault',
+    title : 'Board fault',
+    text : faultText(s.fault_reason),
+    link : s.fault_reason === 'storage unavailable' ? null : {href : '/firmware.html', label : 'Open firmware'}
+  };
+}
+
+/** Thread runs on a radio, or the board predates otbr_channel (then it always did). */
+function isThreadActive(s) { return s.otbr_channel !== null; }
+
+var MODE_WORDS = {otbr : 'Thread', ziggurat : 'Zigbee', 'rcp-proxy' : 'RCP proxy', off : 'Off', unavailable : 'Unavailable'};
+
+/** The Radios card from /device/channels (null: not read): always the two slots, C6 and USB. */
+function radiosView(body) {
+  function word(c) { return MODE_WORDS[c.mode] || String(c.mode); }
+  if (!body || !body.channels)
+    return [ {slot : 'ESP32-C6 (built-in)', mode : '-'}, {slot : 'USB radio', mode : '-'} ];
+  var c6 = body.channels.filter(function(c) { return c.id === 'c6'; })[0];
+  var usb = body.channels.filter(function(c) { return c.kind === 'usb' && c.mode !== 'unavailable'; })[0];
+  return [
+    {slot : 'ESP32-C6 (built-in)', mode : c6 ? word(c6) : '-'},
+    {slot : 'USB radio', mode : usb ? word(usb) : 'Not connected'}
+  ];
+}
+
+/** Thread's status line: {tone: ok|info|fault|idle, title, text, link: {href, label} | null}. */
+function threadHeroFor(s) {
+  if (boardFault(s))
+    return {tone : 'fault', title : 'Thread cannot start', text : 'See the board status above.', link : null};
   if (s.mode === 'BR_RUNNING')
     return {
       tone : 'ok',
@@ -55,7 +100,7 @@ function heroFor(s) {
                  ' frames so far. The Thread network is stopped until the capture ends.',
       link : {href : '/capture.html', label : 'Open packet capture'}
     };
-  var dongle = !!s.otbr_channel && s.otbr_channel !== 'c6'; // Thread's radio is a USB stick: nothing to update here
+  var dongle = isDongle(s); // Thread's radio is a USB stick: nothing to update here
   if (s.mode === 'RADIO_FAULT')
     return {
       tone : 'fault',
@@ -181,7 +226,11 @@ function addressRows(list) {
 }
 
 return {
-  heroFor : heroFor,
+  BOARD_FAULTS : BOARD_FAULTS,
+  boardHealthFor : boardHealthFor,
+  threadHeroFor : threadHeroFor,
+  isThreadActive : isThreadActive,
+  radiosView : radiosView,
   snifferText : snifferText,
   pdText : pdText,
   threadView : threadView,
@@ -195,6 +244,7 @@ return {
 function StatusPage(env) {
 var C = typeof DeviceCommon !== 'undefined' ? DeviceCommon : require('./device_common.js');
 var L = StatusLogic;
+var ZigbeeLib = typeof ZigbeeLogic !== 'undefined' ? {Section : ZigbeeSection} : require('./zigbee.js');
 var kit = C.DeviceKit(env, {
   actionIds : [ 'rebootBtn' ],
   trial : false,
@@ -209,41 +259,14 @@ var pskcShown = false;
 var lastStatus = null; // for the Home Assistant tile, which also needs /device/network
 var lastNet = null;
 var lastNames = null;
+var zigbee = ZigbeeLib.Section(env, kit);
+var zigbeeOn = false; // a radio runs the coordinator (zigbee_channel in the last status)
+var zigbeePoll = null;
 
 function rcpText(installed) {
   if (installed === null || installed === undefined)
     return 'unknown (probe failed)';
   return installed === '' ? 'none (no valid RCP firmware)' : String(installed);
-}
-
-/*
- * Where Thread runs (DeviceCommon.threadChip: "Thread runs on" only while it runs, else a warning with the state): the
- * label comes from /device/channels, asked once per radio the status names.
- */
-var channelLabels = {};
-var labelAsked = null;
-
-function renderThreadOn(s) {
-  var chip = $('h-thread-on');
-  var id = s.otbr_channel;
-  var c = C.threadChip(s, id ? channelLabels[id] : '');
-  if (!c) {
-    chip.classList.add('hidden');
-    return;
-  }
-  chip.classList.remove('hidden');
-  chip.textContent = c.text;
-  chip.className = 'chip ' + c.tone;
-  if (id && !channelLabels[id] && labelAsked !== id) {
-    labelAsked = id;
-    kit.request('GET', '/device/channels', {timeoutMs : 5000}).then(function(r) {
-      if (r.status !== 200 || !r.body || !r.body.channels)
-        return;
-      r.body.channels.forEach(function(c) { channelLabels[c.id] = c.label; });
-      if (lastStatus)
-        renderThreadOn(lastStatus);
-    }, function() {});
-  }
 }
 
 function render(s) {
@@ -255,9 +278,19 @@ function render(s) {
     threadOff();
   lastSeen = env.now();
   show('s-offline', false);
-  kit.renderThreadNotice(s, null, true);
-  renderThreadOn(s);
-  var h = L.heroFor(s);
+  var b = L.boardHealthFor(s);
+  $('board-hero').className = 'card hero hero-' + b.tone;
+  setText('b-title', b.title);
+  setText('b-text', b.text);
+  show('b-link', !!b.link);
+  if (b.link) {
+    $('b-link').setAttribute('href', b.link.href);
+    setText('b-link', b.link.label);
+  }
+  var active = L.isThreadActive(s);
+  show('thread-on', active);
+  show('thread-off', !active);
+  var h = L.threadHeroFor(s);
   $('hero').className = 'card hero hero-' + h.tone;
   setText('h-title', h.title);
   setText('h-text', h.text);
@@ -266,7 +299,6 @@ function render(s) {
     $('h-link').setAttribute('href', h.link.href);
     setText('h-link', h.link.label);
   }
-  setText('h-mode', s.mode);
   setText('t-app', s.app.version);
   setText('t-slot', 'Slot ' + s.app.slot);
   setText('t-storage', s.storage_ok === undefined ? '-' : s.storage_ok ? 'OK' : 'Failed: settings are not saved');
@@ -287,6 +319,7 @@ function render(s) {
   setText('t-sniffer-state', sn.state);
   setText('t-sniffer-detail', sn.detail);
   lastStatus = s;
+  renderZigbee(s);
   renderHa();
 }
 
@@ -321,6 +354,43 @@ function refreshNetwork() {
   }, function() {
     lastNet = null;
     renderHa();
+    return false;
+  });
+}
+
+/* ---- Zigbee section: content only while a radio channel runs the coordinator (zigbee_channel in /device/status) ---- */
+
+function renderZigbee(s) {
+  var on = !!s.zigbee_channel;
+  if (!on) {
+    zigbee.clear(); // the placeholder; nothing from a stopped coordinator stays
+  } else if (!zigbeeOn && zigbeePoll) {
+    zigbeePoll.wake();
+  }
+  zigbeeOn = on;
+}
+
+function refreshZigbee() {
+  if (!zigbeeOn)
+    return Promise.resolve(true); // asked for again when the status names a Zigbee channel
+  // Zigbee can stop while the request runs: a late answer from a stopped coordinator is dropped.
+  return zigbee.refresh(function() { return zigbeeOn; });
+}
+
+/* The Radios card: the two slots and their modes from /device/channels; "-" when it cannot be read. */
+function renderRadios(body) {
+  var rows = L.radiosView(body);
+  setText('t-radio-c6', rows[0].mode);
+  setText('t-radio-usb', rows[1].mode);
+}
+
+function refreshChannels() {
+  return kit.request('GET', '/device/channels', {timeoutMs : 5000}).then(function(r) {
+    var ok = r.status === 200 && !!r.body && !!r.body.channels;
+    renderRadios(ok ? r.body : null);
+    return ok;
+  }, function() {
+    renderRadios(null);
     return false;
   });
 }
@@ -476,6 +546,7 @@ function reboot() {
 
 function init() {
   $('rebootBtn').addEventListener('click', reboot);
+  zigbee.bindCopy();
   $('pskcBtn').addEventListener('click', function() {
     pskcShown = !pskcShown;
     showPskc();
@@ -489,6 +560,8 @@ function init() {
   kit.poller(refreshDiag, 10000, 'statusSection');
   threadPoll = kit.poller(refreshThread, 10000, 'statusSection');
   kit.poller(refreshNetwork, 10000, null);
+  kit.poller(refreshChannels, 10000, 'statusSection');
+  zigbeePoll = kit.poller(refreshZigbee, function() { return zigbee.pollMs(); }, 'statusSection');
 }
 
 return {
@@ -497,6 +570,8 @@ return {
   refreshDiag : refreshDiag,
   refreshThread : refreshThread,
   refreshNetwork : refreshNetwork,
+  refreshChannels : refreshChannels,
+  refreshZigbee : refreshZigbee,
   reboot : reboot,
   kit : kit
 };
@@ -507,5 +582,8 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports.Page = StatusPage;
 }
 
-if (typeof document !== 'undefined')
-  StatusPage(DeviceCommon.DeviceEnv()).init();
+if (typeof document !== 'undefined') {
+  var statusEnv = DeviceCommon.DeviceEnv();
+  statusEnv.navigator = navigator; // the Zigbee section's Copy button
+  StatusPage(statusEnv).init();
+}

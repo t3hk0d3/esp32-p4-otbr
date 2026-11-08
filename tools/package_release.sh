@@ -98,6 +98,7 @@ for entry in \
     cp "$IDF_PATH/${entry#*:}" "$licenses/${entry%%:*}.txt"
 done
 cp "$root/p4/components/esp_ot_br_server/LICENSE" "$licenses/esp-thread-br.txt"
+cp "$root/p4/components/zigbee/ziggurat/LICENSE.md" "$licenses/ziggurat.txt" # the submodule linked into the P4 image
 for component in "$root"/p4/managed_components/*/; do
     license="$(find "$component" -maxdepth 1 \( -iname 'LICENSE*' -o -iname 'COPYING*' \) | head -n 1)"
     [[ -n "$license" ]] && cp "$license" "$licenses/$(basename "$component").txt"

@@ -1,0 +1,18 @@
+CONFIG_IDF_TARGET="esp32c6"
+
+# Waveshare ESP32-C6-DEV-KIT-N8: 8 MB flash; the console is UART0 behind the board's CH343 bridge (the default console)
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+# Console on UART0 only (no USB-Serial-JTAG mirror on the devkit's second USB device)
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Zigbee router (coordinator or router stack, native 802.15.4 radio)
+CONFIG_ZB_ENABLED=y
+CONFIG_ZB_ZCZR=y
+CONFIG_ZB_RADIO_NATIVE=y
+
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y

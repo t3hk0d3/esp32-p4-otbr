@@ -15,6 +15,16 @@ extern "C" {
 
 #define METRICS_CONTENT_TYPE "text/plain; version=0.0.4; charset=utf-8"
 
+/** Zigbee figures (a copy of zigbee_status_t's), written only while a channel runs ziggurat. */
+typedef struct {
+    bool active; /**< false: no Zigbee series */
+    uint32_t frames_rx, frames_tx;
+    uint32_t tx_no_ack, tx_cca, tx_failed; /**< transmit results; frames_tx counts the accepted transmits, so no "acked" */
+    uint32_t rcp_resets;
+    uint64_t heap_current, heap_peak; /**< bytes */
+    bool client_connected;
+} metrics_zigbee_t;
+
 /** Figures that need no OpenThread lock, gathered by the caller. */
 typedef struct {
     int mode;                /**< br_core_mode_t: STARTING, BR_RUNNING, SNIFFER, RADIO_FAULT, NO_RADIO */
@@ -29,6 +39,7 @@ typedef struct {
     uint32_t sniffer_drops;
     bool eth_up;
     bool trial_pending;
+    metrics_zigbee_t zigbee;
 } metrics_device_t;
 
 /** Receives each chunk of the body, in order; a non-ESP_OK result stops the body. */

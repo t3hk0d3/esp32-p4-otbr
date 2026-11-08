@@ -118,9 +118,9 @@ function showLoading(show) {
 
 /*
  * Build navigation bar and highlight current page. Top bar: Dashboard, Thread, [Zigbee slot], Device, About. The slot
- * is an empty hidden <li id="nav-slot-zigbee">: the Zigbee link is put into it by id. The Thread menu is hidden while
- * no radio is in Thread border router mode (GET /device/status otbr_channel null); the last answer is remembered
- * in sessionStorage so the menu does not flash on the next page.
+ * is an empty hidden <li id="nav-slot-zigbee"> (radio-mux, patch 29) that stays empty: Zigbee status is a section of
+ * the Dashboard. The Thread menu is hidden while no radio is in Thread border router mode (GET /device/status
+ * otbr_channel null); the last answer is remembered in sessionStorage so the menu does not flash on the next page.
  */
 (function() {
 var pages = [
@@ -164,7 +164,7 @@ function setThreadMenuHidden(hidden) {
 if (typeof window !== 'undefined')
   window.navSetThreadMenuHidden = setThreadMenuHidden;
 
-/* Asks the board once; no answer, or a board without otbr_channel, leaves the menu as it is. */
+/* Asks the board once; no answer, or a board without otbr_channel, leaves the Thread menu as it is. */
 function watchThreadMenu() {
   if (typeof fetch !== 'function')
     return;

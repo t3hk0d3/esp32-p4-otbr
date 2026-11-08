@@ -62,6 +62,7 @@ nav:
       - Networking: networking.md
       - Sniffer: sniffer.md
       - Radios: radios.md
+      - Zigbee coordinator: zigbee.md
       - Maintenance jumper: maintenance-jumper.md
       - Diagnostics: diagnostics.md
       - Prometheus metrics: metrics.md

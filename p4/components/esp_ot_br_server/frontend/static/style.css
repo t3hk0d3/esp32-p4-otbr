@@ -478,7 +478,12 @@ tr:hover td { background: var(--primary-light); }
 .tile-grid { margin-bottom: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
 .tile-grid .card { margin-bottom: 0; }
 .tile-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
-.tile-head h2 { font-size: 16px; font-weight: 600; }
+.tile-head h2, .tile-head h3 { font-size: 16px; font-weight: 600; }
+/* Dashboard: Device and network, Thread and Zigbee sections; a stack that is not running shows .dash-off. */
+.dash-section { margin-bottom: 28px; }
+.dash-heading { font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--text-light); margin-bottom: 10px; }
+.dash-off { color: var(--text-light); border-style: dashed; }
 .lines { white-space: pre-line; }
 
 .chip { display: inline-block; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 2px 10px; background: var(--muted-bg); color: #33373d; }
@@ -884,3 +889,9 @@ tr:hover td { background: var(--primary-light); }
 .rd-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #4a4a4a; align-self: flex-end; padding-bottom: 10px; }
 .rd-note { font-size: 13px; color: var(--text-light); background: var(--muted-bg); border-radius: 6px; padding: 8px 10px; margin-top: 10px; }
 .rd-note.rd-warn { background: var(--primary-light); color: #8a4700; }
+/* Zigbee page */
+.zg-why { font-size: 13px; color: var(--text-light); }
+.zg-path { font-family: 'Courier New', Consolas, monospace; font-size: 15px; background: var(--muted-bg); border-radius: 6px;
+    padding: 8px 12px; display: inline-block; margin: 6px 8px 6px 0; overflow-wrap: anywhere; }
+.zg-big { font-size: 22px; font-weight: 700; }
+.zg-mono { font-family: 'Courier New', Consolas, monospace; }

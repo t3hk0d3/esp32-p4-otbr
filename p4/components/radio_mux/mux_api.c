@@ -315,11 +315,13 @@ void radio_mux_get_snapshot(radio_mux_snapshot_t *out)
 {
     out->n = 0;
     out->available_modes = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF);
+    out->reboot_modes = 0;
     if (!atomic_load(&g_mux.started)) {
         return;
     }
     mux_lock();
     out->available_modes = radio_mux_available_modes(&g_mux.rules);
+    out->reboot_modes = radio_mux_reboot_modes(&g_mux.rules);
     for (size_t i = 0; i < RADIO_MUX_CHANNELS_MAX; i++) {
         if (g_mux.chans[i].used) {
             fill_info(&g_mux.chans[i], &out->chans[out->n++]);

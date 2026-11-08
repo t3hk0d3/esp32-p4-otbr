@@ -7,7 +7,7 @@ below, any of them can answer 500 `internal` or `no_memory`.
 
 | Method and path | Purpose | Notable errors |
 | --- | --- | --- |
-| `GET /device/status` | mode, app version and slot, `rcp`, `jumper`, `eth` addresses, `pd`, `routing`, `sniffer` stats, `fault_reason`, `storage_ok`, `trel` (`enabled`, `active`, `peers` (this Thread network), `peers_other` (other networks), `tx_packets`, `tx_failures`, `rx_packets`, `peer_list`: at most 8, this network's first, each `ext_address`, `ext_pan_id`, `same_network`, `preference` (`{"ieee802154": 0..255\|null, "trel": 0..255\|null}`, OpenThread's per-radio preference; `null` when the peer is not a Thread neighbour), `address`; `trel` is `null` in a build without TREL; `active`, both counts and the counters `null` when OpenThread's state could not be read) | |
+| `GET /device/status` | mode, app version and slot, `zigbee_channel` (id of the channel in Zigbee mode, `null` when none), `rcp`, `jumper`, `eth` addresses, `pd`, `routing`, `sniffer` stats, `fault_reason`, `storage_ok`, `trel` (`enabled`, `active`, `peers` (this Thread network), `peers_other` (other networks), `tx_packets`, `tx_failures`, `rx_packets`, `peer_list`: at most 8, this network's first, each `ext_address`, `ext_pan_id`, `same_network`, `preference` (`{"ieee802154": 0..255\|null, "trel": 0..255\|null}`, OpenThread's per-radio preference; `null` when the peer is not a Thread neighbour), `address`; `trel` is `null` in a build without TREL; `active`, both counts and the counters `null` when OpenThread's state could not be read) | |
 | `GET /device/sniffer.pcap?channel=&duration=` | stream a pcap capture | 400 `invalid_channel`, `invalid_duration`, `no_channel`; 409 `busy` (not `BR_RUNNING`); 503 `busy` (no channel given and OpenThread's state could not be read within 100 ms: retry); 500 `sniffer_failed` |
 | `DELETE /device/sniffer` | stop the running capture | 404 `not_found` |
 | `GET /device/update[?check=true\|false]` | the cached state of the update check against the latest GitHub release; never waits for the network. `check=true` starts a check on a worker (the reply shows `state: "checking"`; a running check is joined) and the caller polls the plain `GET`. Fields: `state` (`never`, `checking`, `done`, `failed`), `checked_age_s` (seconds since the last finished check, `null` before the first), `error` (detail of the last failed check, else `null`), `release` (`null` until a check succeeded, then kept: `{"tag": <string>\|null, "app", "rcp": <string>\|null, "url": <release page>}`; `tag` and `rcp` are `null` when `versions.txt` has no such line), `repo_url`, `running` (`{"app", "rcp"}`; `rcp` `null` when unknown), `app` (`newer`, `same`, `older`, `unknown`; `null` without a release), `rcp_differs`, `available` (`app` is `newer` or `unknown`, or `rcp_differs`). See [Updates](updates.md) | 400 `invalid_request` (`check` is not `true` or `false`); 409 `busy` (`check=true` while OTA, a radio push or ROM recovery runs) |
@@ -35,6 +35,7 @@ below, any of them can answer 500 `internal` or `no_memory`.
 | `GET /device/channels` | every radio channel and the modes the board offers, see [Radio channels](#radio-channels) | |
 | `PUT /device/channels/{id}` | any of `mode`, `baud`, `flow_control` and an `rcp_proxy` object; replies with the channel (`"reboot": true` when the mode's consumer reboots), or 202 `{"moving": true, "moved_from": "<id>"}` when Thread moves to this channel (also for a start, `moved_from` null, and a stop of Thread, `moved_from` the channel itself) | 400 `bad_value` (`detail` names the field), `length_required`; 404 `unknown_channel`; 409 `unavailable`, `not_available`, `incompatible`, `mode_taken`, `hybrid_not_supported`, `probe_failed`, `port_taken`, `busy`; 413 `payload_too_large` (over 512 bytes); 500 `failed`; 503 `mux_busy` (the radio mux took the change but did not answer in time: a mode, speed or proxy change may still be applied, a start, move or stop will not) |
 | `DELETE /device/channels/{id}` | forget an unplugged radio and its settings; 204 | 404 `unknown_channel`; 409 `in_use` (the C6 or a plugged-in radio); 500 `failed`; 503 `not_started`, `mux_busy` (taken but not answered in time: the radio may still be forgotten) |
+| `GET /device/zigbee` | Zigbee mode status, see [Zigbee coordinator](#zigbee-coordinator-experimental) | 409 `not_zigbee` (no channel runs `ziggurat`) |
 | `POST /device/reboot` | reboot | 409 `busy` while an update or push runs (other reboots, such as the network trial revert, `net reset` and `DELETE /node`, wait until it ends) |
 | `GET /metrics` | device health and Thread figures in the Prometheus text format, see [metrics](metrics.md) | 500 `no_memory` |
 
@@ -249,7 +250,7 @@ websocat ws://<board>/device/console/ws
 
 ### Radio channels
 
-Every radio is a channel: the on-board C6 (`c6`) and a USB dongle (`usb-<vid>-<pid>`, plus `-<serial>` when the device
+Every radio is a channel: the ESP32-C6 (built-in) (`c6`) and a USB dongle (`usb-<vid>-<pid>`, plus `-<serial>` when the device
 reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /device/channels` answers
 
 ```
@@ -320,6 +321,28 @@ Thread on the old channel and shows on the target as `"state": "fault"` with the
 among them); a refused stop leaves the channel `running` in `otbr` with `error` `drain_timeout`. Poll
 `GET /device/channels` after a 202. While OpenThread starts on its channel, that channel shows `starting`.
 
+### Zigbee coordinator (experimental)
+
+A radio in `ziggurat` mode serves ZHA over a WebSocket at `ws://<board>/zigbee` (binary protocol of zigpy-ziggurat, one
+client, a second one takes over; 403 on an interface that does not serve the device API); see
+[Zigbee coordinator](zigbee.md). `GET /device/zigbee` answers:
+
+```
+{"channel": "c6", "firmware": "spinel 1.2 efr32", "state": "running", "reason": "",
+ "client": {"address": "192.168.1.20:51234", "since": 1790000000}, "last_client": null,
+ "radio": {"channel": 15, "pan_id": 6754, "short_address": 0, "extended_address": "00124b00abcdef01", "tx_power_dbm": 8},
+ "counters": {"rx": 10, "rx_dropped": 1, "tx": 9, "tx_no_ack": 2, "tx_cca": 3, "tx_failed": 4, "energy_scans": 5,
+              "rcp_resets": 6, "frames_in": 7, "frames_out": 8},
+ "heap": {"current": 1000, "peak": 2000}, "started": 1789999000}
+```
+
+`state` is `idle`, `starting`, `running`, `no_radio` or `incompatible`; `reason` says why when it is not `running`.
+`client` and `last_client` (`{"address", "since", "left"}`) are `null` when absent, `radio` while the stack has no
+network settings, and times are epoch seconds (0 when the board's clock is not set). `counters.tx` counts transmits the
+radio accepted; `tx_failed` also counts those refused before reaching it. `rx_dropped` is the radio channel's counter: frames
+received from the radio that the board dropped because its frame pool or event queue was full. `heap` is the memory the stack holds, in bytes. The radio's mode is set with
+`PUT /device/channels/<id>`.
+
 ## Thread REST API
 
 Upstream esp-thread-br, ot-br-posix 0.6.0 compatible: `/node`, `/node/state`, `/node/dataset/active|pending`,
@@ -337,16 +360,21 @@ connects to `http://<board>`: `tools/otbr_compat.py` checks the `python-otbr-api
 ## Web UI
 
 `http://<board>/` serves the upstream pages (Dashboard, Network to form or join, Commissioner, Addresses, Tools, Topology,
-About) and the Thread Console (`/console.html`, under Management). The Topology page runs a mesh scan (`/device/topology`) and shows a map of the routers and their links, a device table with search and filters, and a device dialog with its addresses and a ping; the last result is kept in the browser. The Dashboard (`/`) is the status page: mode, versions, radio, Ethernet, prefix delegation, load, chip temperature, and while the
-border router runs the Thread network, identifiers and Thread addresses. Its Home Assistant tile shows the URL to enter
-in the integration (the Thread backbone address in split mode) and the mDNS name. The "Device" menu holds `/ethernet.html` (single or split setup,
+About) and the Thread Console (`/console.html`, under Management). The Topology page runs a mesh scan (`/device/topology`) and shows a map of the routers and their links, a device table with search and filters, and a device dialog with its addresses and a ping; the last result is kept in the browser. The Dashboard (`/`) is the status page, in three sections. **Device and network**: the board's
+status (a board-wide fault such as unavailable settings storage shows here whatever runs Thread), uptime, last reset,
+Reboot, the two radio slots (C6 and USB radio, with their modes or "Not connected"), Ethernet, board firmware, load,
+memory and chip temperature. **Thread**: Thread's status (`mode` in `/device/status`), and while the border router runs
+the Thread network, identifiers, radio co-processor, Home Assistant, prefix delegation, packet capture and Thread
+addresses; its Home Assistant tile shows the URL to enter in the integration (the Thread backbone address in split
+mode) and the mDNS name. **Zigbee**: the coordinator (see [Zigbee](zigbee.md)). A section whose stack is not running
+says so in one line and links the Radios page. The "Device" menu holds `/ethernet.html` (single or split setup,
 VLANs and addresses, with a review step before the reboot), `/routing.html` (route method, OMR prefix, BGP peers and
 sessions, RIPng status; saved live), `/firmware.html` (P4 bundle and C6 radio firmware, radio
 recovery with the jumper), `/capture.html` (packet capture) and `/diagnostics.html`. Every device page shows the trial
 banner with **Keep new settings** while network settings are on trial. They use only `/device/*`, so they also work in
 `RADIO_FAULT` and while sniffing.
 
-<img src="images/dashboard.png" width="640" alt="Dashboard: Border router running, with the Thread network, identifiers, board firmware, radio, Ethernet, prefix delegation, packet capture and load cards, and the Thread address table">
+<img src="images/dashboard.png" width="640" alt="Dashboard in three sections. Device and network: Board OK, the Radios card (ESP32-C6 (built-in) runs Zigbee, USB radio off), Ethernet, board firmware, load and memory. Thread: not active, with a link to the Radios page. Zigbee: Coordinator running on channel 25 on the ESP32-C6 (built-in), ZHA connected; cards for Connect Home Assistant (the ws:// path and a Copy button), the connected client, the network as ZHA set it, radio traffic, memory and the radio firmware">
 
 ## Creating a Thread network
 

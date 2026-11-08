@@ -35,6 +35,12 @@ p4/components/usb_host_cdc_acm
     commit eb0f02163be96dfc753cf43d1207329e44f1ca60). Copyright Espressif Systems (Shanghai) CO LTD. Licensed under
     the Apache License 2.0 (see its LICENSE file). Modified; every change is listed in p4/components/PATCHES.md.
 
+p4/components/zigbee/ziggurat
+    Git submodule: ziggurat (https://github.com/zigpy/ziggurat), pinned to commit
+    f917f9898a1c7da2e5e5aa9add7c6d9d6a48ee76. Licensed under the Apache License 2.0 (see LICENSE.md in the submodule).
+    Built from source as a static library (tools/build_staticlib.sh) and linked into the P4 image; unmodified, apart from
+    a copy of the radium 0.7 dependency that the build patches for riscv32imafc.
+
 c6_rcp/main/esp_ot_rcp.c, c6_rcp/main/esp_ot_config.h and other files marked CC0-1.0 or Unlicense
     Derived from ESP-IDF examples, released into the public domain by Espressif Systems.
 
@@ -43,5 +49,5 @@ Third-party code in firmware images
 -----------------------------------
 
 Built images also contain ESP-IDF (Apache-2.0), OpenThread (BSD-3-Clause), lwIP (BSD-3-Clause), Mbed TLS
-(Apache-2.0), espressif/mdns (Apache-2.0) and Espressif's binary-only libraries (Espressif license). Their license
-texts ship with the respective source trees; a binary release must include their notices.
+(Apache-2.0), espressif/mdns (Apache-2.0), ziggurat (Apache-2.0) and Espressif's binary-only libraries (Espressif
+license). Their license texts ship with the respective source trees; a binary release must include their notices.

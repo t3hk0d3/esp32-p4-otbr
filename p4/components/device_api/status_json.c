@@ -195,6 +195,8 @@ int device_api_status_json(char *buf, size_t cap, const device_api_status_t *s)
     trel_json(&w, &s->trel);
     json_out_raw(&w, ",\"otbr_channel\":");
     str_or_null(&w, s->otbr_channel);
+    json_out_raw(&w, ",\"zigbee_channel\":");
+    str_or_null(&w, s->zigbee_channel);
     json_out_raw(&w, "}");
     return w.overflow ? -1 : (int)w.len;
 }

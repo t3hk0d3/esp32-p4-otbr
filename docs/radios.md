@@ -36,7 +36,7 @@ Without a dongle the board behaves as before: the C6 channel in `otbr` mode.
 | `off` | Listed, unused. The C6 in `off` is held in reset. |
 | `otbr` | The board's Thread border router runs on this channel's RCP. At most one channel. |
 | `rcp-proxy` | The channel's bytes go to one peer over TCP or UDP, see [RCP proxy](#rcp-proxy). Works with any firmware. |
-| `ziggurat` | Reserved for the Zigbee work. Refused with 409 `not_available` in this build and not offered on the page. |
+| `ziggurat` | The board's Zigbee coordinator (Ziggurat) runs on this channel's spinel RCP and serves ZHA, see [Zigbee coordinator](zigbee.md). At most one channel. Setting it, or leaving it, reboots the board (`"reboot": true`). |
 
 Defaults: the C6 is `otbr`; a new dongle is `off`; baud 460800; flow control off.
 
