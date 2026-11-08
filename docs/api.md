@@ -263,7 +263,8 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
                  "state": null, "peer": null, "last_error": null},
    "firmware": {"type": "spinel", "version": "1.4.0", "chip": "esp32c6", "baud": null, "source": "passive", "at": 1762430000},
    "counters": {"frames_in": 10, "frames_out": 9, "bytes_in": 1000, "bytes_out": 900, "drops": 1, "resets": 2, "rx_errors": 3,
-               "uart_errors": 0}},
+               "uart_errors": 0},
+   "channel_state": "ready", "channel_reason": null, "mode_state": "running", "mode_reason": null},
   {"id": "usb-10c4-ea60-abc123", "kind": "usb", "label": "Sonoff Zigbee 3.0 USB Dongle Plus", "mode": "rcp-proxy",
    "stored_mode": "rcp-proxy", "state": "running", "error": null, "line": {"baud": 115200, "flow_control": true},
    "usb": {"vid": "10c4", "pid": "ea60", "serial": "abc123", "driver": "cp210x"},
@@ -272,7 +273,13 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
                  "state": "connected", "peer": "192.168.1.20:9999", "last_error": null},
    "firmware": {"type": "znp", "version": "20240710", "chip": null, "baud": 115200, "source": "probe", "at": null},
    "counters": {"frames_in": 0, "frames_out": 0, "bytes_in": 0, "bytes_out": 0, "drops": 0, "resets": 0, "rx_errors": 0,
-               "uart_errors": 0}}
+               "uart_errors": 0},
+   "channel_state": "ready", "channel_reason": null, "mode_state": "connected", "mode_reason": null}
+ ],
+ "modes": [
+  {"mode": "otbr", "channel": "c6", "state": "running", "reason": null, "reboot_on_change": false},
+  {"mode": "rcp-proxy", "channel": "usb-10c4-ea60-abc123", "state": "connected", "reason": null,
+   "reboot_on_change": false}
  ]}
 ```
 
@@ -280,9 +287,21 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
 - `mode` is what the channel does now: `unavailable` (reported only: not detected, unplugged, no driver), `off`,
   `otbr`, `ziggurat` (reserved) or `rcp-proxy`. `stored_mode` is the mode it returns to, also while unavailable or when
   the firmware does not fit.
-- `state` is `idle`, `starting`, `running`, `fault` (with `error`) or `busy` (a C6 job runs, or the C6's boot steps:
-  `error` "the C6's boot steps run"). A failed start of OpenThread shows as `fault` on its channel, with the board's
-  fault reason.
+- `state` is `idle`, `starting`, `running`, `fault` (with `error`) or `busy` (the C6's maintenance: its boot steps,
+  `error` "the C6's boot steps run", or a firmware push or ROM recovery, "a C6 job holds the radio"). A failed start of
+  OpenThread shows as `fault` on its channel, with the board's fault reason. `state` and `error` are derived from the
+  four fields below, as before them.
+- `channel_state` is the channel's own lifecycle: `absent` (an unplugged dongle), `reinit` (maintenance runs on it;
+  `channel_reason` names it: `boot steps`, `detecting firmware`, `firmware push`, `ROM recovery`), `ready`, or `fault`
+  (`channel_reason` says why). `mode_state` and `mode_reason` are the state of the mode bound to the channel in that
+  mode's own words (Thread: `no_radio`, `starting`, `running`, `sniffer`, `releasing`, `fault`; Zigbee: `idle`,
+  `starting`, `running`, `no_radio`, `incompatible`; the proxy: `off`, `listening`, `connecting`, `backoff`,
+  `connected`, `no_radio`), `null` for a channel in `off` or before its mode reported one. A reason is `null` when
+  there is none.
+- `modes` lists the mode instances: Thread and Zigbee once each, the proxy once per channel in `rcp-proxy`. `channel`
+  is the channel stored in that mode (`null` for none: Thread is `no_radio` "no channel in otbr", Zigbee `idle`);
+  `state` and `reason` are that channel's `mode_state` and `mode_reason`; `reboot_on_change` says whether entering or
+  leaving the mode reboots the board.
 - `usb` is `null` for the C6. `rcp_proxy` always carries the stored settings; `state` (`listening`, `connecting`,
   `backoff`, `connected`) and `peer` are set only while the channel runs `rcp-proxy`. `last_error` says why the
   proxy's last try to listen or connect failed (`"tcp port 6638: Address already in use"`, `"host.local does not

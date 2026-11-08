@@ -27,9 +27,11 @@ static radio_mux_chan_info_t c6_chan(void)
         .caps = {.firmware_update = true, .hw_reset = true, .flow_control = false},
         .firmware = {.rec = {.type = RADIO_MUX_FW_SPINEL, .baud = 0}, .source = RADIO_MUX_FW_SRC_PASSIVE, .at = 1762430000},
         .counters = {.frames_in = 10, .frames_out = 9, .bytes_in = 1000, .bytes_out = 900, .drops = 1, .resets = 2, .rx_errors = 3, .uart_errors = 4},
+        .chan_state = RADIO_MUX_CS_READY,
     };
 
     strcpy(c.id, "c6");
+    strcpy(c.mode_state, "running");
     strcpy(c.label, "ESP32-C6 (built-in)");
     strcpy(c.firmware.rec.version, "1.4.0");
     strcpy(c.firmware.rec.chip, "esp32c6");
@@ -52,9 +54,11 @@ static radio_mux_chan_info_t usb_chan(void)
         .caps = {.firmware_update = false, .hw_reset = false, .flow_control = true},
         .proxy_state = "connected",
         .firmware = {.rec = {.type = RADIO_MUX_FW_ZNP, .baud = 115200}, .source = RADIO_MUX_FW_SRC_PROBE, .at = 0},
+        .chan_state = RADIO_MUX_CS_READY,
     };
 
     strcpy(c.id, "usb-10c4-ea60-abc123");
+    strcpy(c.mode_state, "connected");
     strcpy(c.label, "Sonoff Zigbee 3.0 USB Dongle Plus");
     strcpy(c.usb.serial, "abc123");
     strcpy(c.firmware.rec.version, "20240710");
@@ -79,6 +83,138 @@ static int render_one(const radio_mux_chan_info_t *c)
     return device_api_channels_json(body, sizeof(body), &s);
 }
 
+/* ---- the orchestrator's view: channel_state, channel_reason, mode_state, mode_reason, modes ---- */
+
+// The four fields of the one channel rendered into `body` (after its counters).
+static const char *orchestrator_fields(void)
+{
+    const char *at = strstr(body, "\"channel_state\":");
+
+    TEST_ASSERT_NOT_NULL(at);
+    return at;
+}
+
+TEST_CASE("On a ready channel whose instance runs: channel_state ready, its mode_state, no reasons", "[device_api]")
+{
+    const radio_mux_chan_info_t c = c6_chan();
+
+    TEST_ASSERT_GREATER_THAN(0, render_one(&c));
+    TEST_ASSERT_EQUAL_STRING("\"channel_state\":\"ready\",\"channel_reason\":null,\"mode_state\":\"running\","
+                             "\"mode_reason\":null}],\"modes\":[]}", orchestrator_fields());
+}
+
+TEST_CASE("On an absent dongle stored in otbr: channel_state absent, Thread's state and reason", "[device_api]")
+{
+    radio_mux_chan_info_t c = usb_chan();
+
+    c.present = false;
+    c.mode = RADIO_MUX_MODE_UNAVAILABLE;
+    c.stored_mode = RADIO_MUX_MODE_OTBR;
+    c.chan_state = RADIO_MUX_CS_ABSENT;
+    strcpy(c.mode_state, "no_radio");
+    strcpy(c.mode_reason, "radio unplugged (usb-10c4-ea60-abc123)");
+    TEST_ASSERT_GREATER_THAN(0, render_one(&c));
+    TEST_ASSERT_EQUAL_STRING("\"channel_state\":\"absent\",\"channel_reason\":null,\"mode_state\":\"no_radio\","
+                             "\"mode_reason\":\"radio unplugged (usb-10c4-ea60-abc123)\"}],\"modes\":[]}",
+                             orchestrator_fields());
+}
+
+TEST_CASE("On the C6 in its boot steps: channel_state reinit with the work, nothing reported yet", "[device_api]")
+{
+    radio_mux_chan_info_t c = c6_chan();
+
+    c.chan_state = RADIO_MUX_CS_REINIT;
+    c.work = RADIO_MUX_WORK_BOOT_STEPS;
+    strcpy(c.chan_reason, "boot steps");
+    c.mode_state[0] = '\0';
+    TEST_ASSERT_GREATER_THAN(0, render_one(&c));
+    TEST_ASSERT_EQUAL_STRING("\"channel_state\":\"reinit\",\"channel_reason\":\"boot steps\",\"mode_state\":null,"
+                             "\"mode_reason\":null}],\"modes\":[]}", orchestrator_fields());
+}
+
+TEST_CASE("On the C6 in a firmware fault: channel_state fault with its reason", "[device_api]")
+{
+    radio_mux_chan_info_t c = c6_chan();
+
+    c.chan_state = RADIO_MUX_CS_FAULT;
+    c.fault_kind = RADIO_MUX_FAULT_FIRMWARE;
+    strcpy(c.chan_reason, "no RCP firmware on the C6");
+    strcpy(c.mode_state, "fault");
+    strcpy(c.mode_reason, "no rcp firmware");
+    TEST_ASSERT_GREATER_THAN(0, render_one(&c));
+    TEST_ASSERT_EQUAL_STRING("\"channel_state\":\"fault\",\"channel_reason\":\"no RCP firmware on the C6\","
+                             "\"mode_state\":\"fault\",\"mode_reason\":\"no rcp firmware\"}],\"modes\":[]}",
+                             orchestrator_fields());
+}
+
+TEST_CASE("On a channel stored off: mode_state and mode_reason null", "[device_api]")
+{
+    radio_mux_chan_info_t c = usb_chan();
+
+    c.mode = RADIO_MUX_MODE_OFF;
+    c.stored_mode = RADIO_MUX_MODE_OFF;
+    strcpy(c.mode_state, "stale");
+    TEST_ASSERT_GREATER_THAN(0, render_one(&c));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"mode_state\":null,\"mode_reason\":null}"));
+}
+
+TEST_CASE("On Thread with no channel stored in otbr: modes lists it with channel null and no_radio", "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+
+    memset(&s, 0, sizeof(s));
+    s.available_modes = MODES_BUILT_IN;
+    s.n_modes = 1;
+    s.modes[0] = (radio_mux_mode_info_t) {
+        .mode = RADIO_MUX_MODE_OTBR, .chan = -1, .reboot_on_change = false,
+    };
+    TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\",\"otbr\",\"rcp-proxy\"],\"channels\":[],\"modes\":["
+                             "{\"mode\":\"otbr\",\"channel\":null,\"state\":\"no_radio\","
+                             "\"reason\":\"no channel in otbr\",\"reboot_on_change\":false}]}", body);
+}
+
+TEST_CASE("On two channels in rcp-proxy: modes lists one proxy instance per channel with its state", "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+
+    memset(&s, 0, sizeof(s));
+    s.available_modes = MODES_BUILT_IN;
+    s.n = 2;
+    s.chans[0] = c6_chan();
+    s.chans[0].stored_mode = RADIO_MUX_MODE_RCP_PROXY;
+    strcpy(s.chans[0].mode_state, "listening");
+    s.chans[1] = usb_chan();
+    strcpy(s.chans[1].mode_reason, "x");
+    s.n_modes = 2;
+    s.modes[0] = (radio_mux_mode_info_t) {
+        .mode = RADIO_MUX_MODE_RCP_PROXY, .chan = 0
+    };
+    s.modes[1] = (radio_mux_mode_info_t) {
+        .mode = RADIO_MUX_MODE_RCP_PROXY, .chan = 1
+    };
+    TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"modes\":["
+                                "{\"mode\":\"rcp-proxy\",\"channel\":\"c6\",\"state\":\"listening\",\"reason\":null,"
+                                "\"reboot_on_change\":false},"
+                                "{\"mode\":\"rcp-proxy\",\"channel\":\"usb-10c4-ea60-abc123\",\"state\":\"connected\","
+                                "\"reason\":\"x\",\"reboot_on_change\":false}]}"));
+}
+
+TEST_CASE("On Zigbee with no channel stored in ziggurat: modes lists it idle, reboot_on_change true", "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+
+    memset(&s, 0, sizeof(s));
+    s.n_modes = 1;
+    s.modes[0] = (radio_mux_mode_info_t) {
+        .mode = RADIO_MUX_MODE_ZIGGURAT, .chan = -1, .reboot_on_change = true
+    };
+    TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
+    TEST_ASSERT_NOT_NULL(strstr(body, "{\"mode\":\"ziggurat\",\"channel\":null,\"state\":\"idle\","
+                                "\"reason\":\"no channel in ziggurat\",\"reboot_on_change\":true}"));
+}
+
 /* ---- device_api_channels_json ---- */
 
 TEST_CASE("On the registry snapshot: the C6 has the spec's fields in order, usb null", "[device_api]")
@@ -96,7 +232,9 @@ TEST_CASE("On the registry snapshot: the C6 has the spec's fields in order, usb 
         "\"firmware\":{\"type\":\"spinel\",\"version\":\"1.4.0\",\"chip\":\"esp32c6\",\"baud\":null,\"source\":\"passive\","
         "\"at\":1762430000},"
         "\"counters\":{\"frames_in\":10,\"frames_out\":9,\"bytes_in\":1000,\"bytes_out\":900,\"drops\":1,\"resets\":2,"
-        "\"rx_errors\":3,\"uart_errors\":4}}]}",
+        "\"rx_errors\":3,\"uart_errors\":4},"
+        "\"channel_state\":\"ready\",\"channel_reason\":null,\"mode_state\":\"running\",\"mode_reason\":null}],"
+        "\"modes\":[]}",
         body);
 }
 
@@ -115,7 +253,9 @@ TEST_CASE("On the registry snapshot: a dongle in rcp-proxy has usb, the proxy's 
         "\"state\":\"connected\",\"peer\":\"192.168.1.20:9999\",\"last_error\":null},"
         "\"firmware\":{\"type\":\"znp\",\"version\":\"20240710\",\"chip\":null,\"baud\":115200,\"source\":\"probe\",\"at\":null},"
         "\"counters\":{\"frames_in\":0,\"frames_out\":0,\"bytes_in\":0,\"bytes_out\":0,\"drops\":0,\"resets\":0,"
-        "\"rx_errors\":0,\"uart_errors\":0}}]}",
+        "\"rx_errors\":0,\"uart_errors\":0},"
+        "\"channel_state\":\"ready\",\"channel_reason\":null,\"mode_state\":\"connected\",\"mode_reason\":null}],"
+        "\"modes\":[]}",
         body);
 }
 
@@ -142,7 +282,7 @@ TEST_CASE("On no channel (before the mux starts): an empty list", "[device_api]"
 
     memset(&s, 0, sizeof(s));
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
-    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[],\"channels\":[]}", body);
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[],\"channels\":[],\"modes\":[]}", body);
 }
 
 TEST_CASE("On a build with every consumer: available_modes lists off, otbr, ziggurat, rcp-proxy in enum order",
@@ -153,7 +293,8 @@ TEST_CASE("On a build with every consumer: available_modes lists off, otbr, zigg
     memset(&s, 0, sizeof(s));
     s.available_modes = MODES_BUILT_IN | RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_ZIGGURAT);
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
-    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\",\"otbr\",\"ziggurat\",\"rcp-proxy\"],\"channels\":[]}", body);
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\",\"otbr\",\"ziggurat\",\"rcp-proxy\"],\"channels\":[],\"modes\":[]}",
+                             body);
 }
 
 TEST_CASE("On only off set: available_modes renders [\"off\"]", "[device_api]")
@@ -163,7 +304,7 @@ TEST_CASE("On only off set: available_modes renders [\"off\"]", "[device_api]")
     memset(&s, 0, sizeof(s));
     s.available_modes = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF);
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
-    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\"],\"channels\":[]}", body);
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\"],\"channels\":[],\"modes\":[]}", body);
 }
 
 TEST_CASE("On unavailable and invalid bits set: they are never listed", "[device_api]")
@@ -174,7 +315,7 @@ TEST_CASE("On unavailable and invalid bits set: they are never listed", "[device
     s.available_modes = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF) | RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_UNAVAILABLE) |
                         RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_INVALID);
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
-    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\"],\"channels\":[]}", body);
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\"],\"channels\":[],\"modes\":[]}", body);
 }
 
 TEST_CASE("On an unplugged dongle: mode unavailable, stored_mode the mode it returns to", "[device_api]")
@@ -322,7 +463,8 @@ TEST_CASE("On a label with quotes: it is escaped", "[device_api]")
     TEST_ASSERT_NOT_NULL(strstr(body, "\"label\":\"a \\\"b\\\"\""));
 }
 
-TEST_CASE("On the largest snapshot (8 channels, every text at its longest): fits DEVICE_API_CHANNELS_BODY_MAX",
+TEST_CASE("On the largest snapshot (8 channels and 12 instances, every text at its longest): fits "
+          "DEVICE_API_CHANNELS_BODY_MAX, one channel DEVICE_API_CHANNEL_BODY_MAX",
           "[device_api]")
 {
     static radio_mux_snapshot_t s;
@@ -361,9 +503,26 @@ TEST_CASE("On the largest snapshot (8 channels, every text at its longest): fits
             UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX,
         };
         c.line.baud = 2000000;
+        c.chan_state = RADIO_MUX_CS_FAULT;
+        memset(c.chan_reason, '"', sizeof(c.chan_reason) - 1);
+        c.chan_reason[sizeof(c.chan_reason) - 1] = '\0';
+        memset(c.mode_state, '"', sizeof(c.mode_state) - 1);
+        c.mode_state[sizeof(c.mode_state) - 1] = '\0';
+        memset(c.mode_reason, '"', sizeof(c.mode_reason) - 1);
+        c.mode_reason[sizeof(c.mode_reason) - 1] = '\0';
         s.chans[i] = c;
     }
+    // Every instance listed: one proxy per channel plus the singletons, each with its channel's longest texts.
+    s.n_modes = RADIO_MUX_RULES_MAX + RADIO_MUX_CHANNELS_MAX;
+    for (size_t i = 0; i < s.n_modes; i++) {
+        s.modes[i] = (radio_mux_mode_info_t) {
+            .mode = RADIO_MUX_MODE_RCP_PROXY, .chan = (int8_t)(i % RADIO_MUX_CHANNELS_MAX), .reboot_on_change = true,
+        };
+    }
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
+    char one[DEVICE_API_CHANNEL_BODY_MAX]; // and one of them as a PUT reply that reboots
+
+    TEST_ASSERT_GREATER_THAN(0, device_api_channel_json(one, sizeof(one), &s.chans[0], true));
 }
 
 TEST_CASE("On a buffer too small for the body: returns -1", "[device_api]")
@@ -398,8 +557,8 @@ TEST_CASE("On a PUT that reboots: the channel object ends with reboot true", "[d
     TEST_ASSERT_GREATER_THAN(0, device_api_channel_json(one, sizeof(one), &c, true));
     const size_t n = strlen(one);
 
-    TEST_ASSERT_TRUE(n > 16);
-    TEST_ASSERT_EQUAL_STRING("},\"reboot\":true}", one + n - 16);
+    TEST_ASSERT_TRUE(n > 15);
+    TEST_ASSERT_EQUAL_STRING(",\"reboot\":true}", one + n - 15);
 }
 
 TEST_CASE("On a move: the 202 body says moving and where from", "[device_api]")

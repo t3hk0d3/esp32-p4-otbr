@@ -14,10 +14,11 @@
 extern "C" {
 #endif
 
-// The GET body of RADIO_MUX_CHANNELS_MAX channels with every text at its longest (escaped); a host test checks it.
-#define DEVICE_API_CHANNELS_BODY_MAX 12288
-// One channel (the PUT reply), with "reboot".
-#define DEVICE_API_CHANNEL_BODY_MAX 1536
+// The GET body of RADIO_MUX_CHANNELS_MAX channels and every mode instance with every text at its longest (escaped,
+// 19840 bytes); a host test checks it.
+#define DEVICE_API_CHANNELS_BODY_MAX 20480
+// One channel (the PUT reply), with "reboot" (1961 bytes at its longest).
+#define DEVICE_API_CHANNEL_BODY_MAX 2048
 // A PUT body: every field with the longest host fits several times over.
 #define DEVICE_API_CHANNEL_PUT_MAX 512
 

@@ -26,7 +26,12 @@ CHANNEL_KEYS = [
     "rcp_proxy",
     "firmware",
     "counters",
+    "channel_state",
+    "channel_reason",
+    "mode_state",
+    "mode_reason",
 ]
+MODE_KEYS = ["mode", "channel", "state", "reason", "reboot_on_change"]
 COUNTER_KEYS = [
     "frames_in",
     "frames_out",
@@ -197,6 +202,17 @@ def test_c6_listed_in_otbr(base_url, board_ip):
     assert channel["rcp_proxy"]["state"] is None
     assert channel["rcp_proxy"]["peer"] is None
     assert channel["rcp_proxy"]["last_error"] is None
+    # The orchestrator's view: the channel ready, Thread's own state on it, and Thread in the modes list.
+    assert channel["channel_state"] == "ready"
+    assert channel["channel_reason"] is None
+    assert channel["mode_state"] == "running"
+    assert channel["mode_reason"] is None
+    thread = [m for m in body["modes"] if m["mode"] == "otbr"]
+    assert len(thread) == 1, body["modes"]
+    assert list(thread[0]) == MODE_KEYS
+    assert thread[0]["channel"] == "c6"
+    assert thread[0]["state"] == "running"
+    assert thread[0]["reboot_on_change"] is False
     status = get_status(base_url)
     assert status["mode"] == "BR_RUNNING"
     assert status["otbr_channel"] == "c6"
@@ -328,6 +344,11 @@ def test_c6_off_and_back(dut, base_url, c6_in_otbr):
     assert channel["mode"] == "off"
     assert channel["stored_mode"] == "off"
     assert channel["state"] == "idle"
+    assert channel["mode_state"] is None  # nothing is bound to it
+    thread = next(m for m in get_channels(base_url)["modes"] if m["mode"] == "otbr")
+    assert thread["channel"] is None
+    assert thread["state"] == "no_radio"
+    assert thread["reason"] == "no channel in otbr"
     on = set_mode(
         base_url, "otbr"
     )  # a start of Thread: 202, probe, start, stored once it runs
@@ -336,6 +357,7 @@ def test_c6_off_and_back(dut, base_url, c6_in_otbr):
     status = wait_mode(base_url, "BR_RUNNING")
     assert status["otbr_channel"] == "c6"
     assert get_channel(base_url)["state"] == "running"
+    assert get_channel(base_url)["mode_state"] == "running"
     wait_ot_state(dut, {"leader", "router", "child"}, THREAD_TIMEOUT_S)
     assert ot(dut, "dataset active -x")[-1] == dataset
 
