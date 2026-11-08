@@ -184,8 +184,19 @@ device_api_error_t device_api_map_recover_error(esp_err_t err)
     };
 }
 
-int device_api_recover_reply(esp_err_t err, const char *err_detail, int mode, const char *fault_reason, bool rcp_known,
-                             const char *rcp_installed, char *buf, size_t cap, int *http_status)
+const char *device_api_radio_job_busy(int mode, bool thread_on_c6)
+{
+    if (!thread_on_c6) {
+        return NULL;
+    }
+    if (mode == BR_MODE_SNIFFER) {
+        return "a capture is running";
+    }
+    return mode == BR_MODE_STARTING ? "the border router is starting" : NULL;
+}
+
+int device_api_recover_reply(esp_err_t err, const char *err_detail, int mode, bool thread_on_c6, const char *fault_reason,
+                             bool rcp_known, const char *rcp_installed, char *buf, size_t cap, int *http_status)
 {
     if (err != ESP_OK) {
         const device_api_error_t error = device_api_map_recover_error(err);
@@ -199,10 +210,13 @@ int device_api_recover_reply(esp_err_t err, const char *err_detail, int mode, co
     char detail[160];
     json_out_t w;
 
-    if (mode == BR_MODE_BR_RUNNING) {
+    if (thread_on_c6 && mode == BR_MODE_BR_RUNNING) {
         snprintf(detail, sizeof(detail), "C6 base image rewritten; the RCP firmware in its slot is running");
     } else if (!has_rcp) {
         snprintf(detail, sizeof(detail), "C6 base image rewritten; no RCP firmware: upload c6_rcp.bin");
+    } else if (!thread_on_c6) { // the board mode and its fault are another channel's
+        snprintf(detail, sizeof(detail), "C6 base image rewritten; the RCP firmware in its slot is kept (OpenThread "
+                 "runs on another radio)");
     } else {
         snprintf(detail, sizeof(detail), "C6 base image rewritten; the border router is not running (%s)",
                  fault_reason && fault_reason[0] ? fault_reason : "see /device/status");

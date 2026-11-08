@@ -14,6 +14,7 @@
 static const char *TAG = "radio_mux";
 
 #define CALL_WAIT_MS 5000
+#define RESET_POST_WAIT_MS 1000 // a reset must not be lost to a queue that is full for a moment
 #define END_ALLOC_RETRY_MS 100
 
 /* ---- registration ---- */
@@ -181,7 +182,11 @@ esp_err_t radio_mux_reset(radio_mux_chan_t *ch)
                         "not started");
     const mux_msg_t m = {.type = MUX_MSG_RESET, .h = ch}; // the owner checks the generation
 
-    return mux_post(&m) ? ESP_OK : ESP_ERR_NO_MEM;
+    if (xQueueSend(g_mux.queue, &m, pdMS_TO_TICKS(RESET_POST_WAIT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "reset not posted: the owner task's queue stayed full for %d ms", RESET_POST_WAIT_MS);
+        return ESP_ERR_TIMEOUT;
+    }
+    return ESP_OK;
 }
 
 size_t radio_mux_read_raw(radio_mux_chan_t *ch, uint8_t *out, size_t cap)

@@ -17,6 +17,9 @@ extern "C" {
 #define MODE_FSM_MAX_CHANNEL 26
 #define MODE_FSM_MAX_RECOVERIES 3
 #define MODE_FSM_RECOVERY_WINDOW_US (10LL * 60 * 1000 * 1000)
+/** A reset the radio mux could not post (ESP_ERR_TIMEOUT, ESP_ERR_NO_MEM: its queue full) is tried once more after
+ * this long before it counts as failed. */
+#define MODE_FSM_RESET_RETRY_MS 100
 /** The on-board C6's channel id (RADIO_MUX_C6_ID; mode_fsm stays free of the mux). */
 #define MODE_FSM_C6_ID "c6"
 /** mode_fsm_move_otbr results besides ESP_OK and ESP_ERR_INVALID_STATE (busy). */
@@ -51,8 +54,13 @@ typedef struct {
     esp_err_t (*restore_channel)(void);
     esp_err_t (*netif_up)(void);
     esp_err_t (*thread_start)(void);
-    /** Hardware reset of the RCP (GPIO54). */
+    /**
+     * Hardware reset of the OTBR channel's RCP through the radio mux. ESP_ERR_TIMEOUT or ESP_ERR_NO_MEM: the request
+     * could not be posted (the mux's queue stayed full); mode_fsm tries once more after MODE_FSM_RESET_RETRY_MS.
+     */
     esp_err_t (*reset_rcp)(void);
+    /** Block the calling task for `ms` milliseconds (the reset's retry delay). */
+    void (*sleep_ms)(uint32_t ms);
     /**
      * Stop OpenThread, push the firmware, hardware-reset the C6, start OpenThread again. Returns the push error
      * (or the restart error when the push worked). *restarted tells whether OpenThread runs again, whatever the
@@ -189,6 +197,13 @@ esp_err_t mode_fsm_rom_recover(mode_fsm_t *fsm, char *err_detail, size_t err_cap
 void mode_fsm_on_rcp_failure(mode_fsm_t *fsm);
 
 /**
+ * The RCP reset of a failure round (`reset_rcp`): when it returns ESP_ERR_TIMEOUT or ESP_ERR_NO_MEM (the radio mux
+ * could not take the request), it is tried once more after MODE_FSM_RESET_RETRY_MS (`sleep_ms`). Returns the last
+ * result.
+ */
+esp_err_t mode_fsm_reset_rcp(mode_fsm_t *fsm);
+
+/**
  * What a failed ROM recovery in the boot probe means: RADIO_FAULT "rom recovery failed" only when the updater was
  * silent before the attempt. When it was reachable (the trigger was a base version mismatch) an RCP may be installed
  * and the boot goes on with it; the failure is only recorded in the status. False when no recovery failed.
@@ -221,9 +236,40 @@ void mode_fsm_installed_after_push(bool probe_ok, const char *probed_version, bo
 /**
  * The board mode at boot from the channel stored in otbr (NULL: none). The C6: true, the mode stays STARTING and the
  * C6's boot (rcp_sync probe, recovery, then the start on its channel) goes on as before the mux. No channel or a
- * dongle: NO_RADIO (no fault) and false; a dongle starts when it attaches (mode_fsm_on_channel_back).
+ * dongle: NO_RADIO (no fault) and false; a dongle starts when it attaches (mode_fsm_on_channel_back). The C6's boot
+ * steps run in both cases; false only means they do not decide the board mode.
  */
 bool mode_fsm_boot(mode_fsm_t *fsm, const char *otbr_id);
+
+/**
+ * Whether the C6 is listed and its stored mode attached after its boot steps (core_c6_boot_steps returned `steps`):
+ * only when they passed (ESP_OK). A fault they found ("no rcp firmware", a failed ROM recovery, the factory firmware,
+ * a failed reset into the RCP, the test build's c6_hold or forced empty probe) leaves the C6 unavailable, so no start
+ * of OpenThread through the channel overrides the fault the boot entered. Pure.
+ */
+bool mode_fsm_c6_usable_after_steps(esp_err_t steps);
+
+/**
+ * Whether a C6 job (push, ROM recovery) runs alone, leaving OpenThread and the board mode untouched: the channel stored
+ * in otbr (`otbr_id`, NULL for none) is not the C6. Then the board mode's gates (SNIFFER, STARTING, a booting radio)
+ * do not apply to it: that mode is another channel's. Pure.
+ */
+bool mode_fsm_c6_job_alone(const char *otbr_id);
+
+/**
+ * Whether a running C6 job (`job_running`) holds OpenThread, which keeps br_radio's reconcile out: OpenThread runs on
+ * the C6 (`ot_chan_id`, NULL when stopped) or the C6 is the channel stored in otbr (`otbr_id`, NULL for none), so the
+ * job stops and starts it itself. A job while OpenThread runs on (or waits for) a dongle holds nothing: that channel's
+ * GONE or attach is handled at once. Pure.
+ */
+bool mode_fsm_job_holds_openthread(bool job_running, const char *ot_chan_id, const char *otbr_id);
+
+/**
+ * Whether an OpenThread (re)start failed in a way a PUT of mode otbr on its channel retries (br_core_retry_otbr): the
+ * mode is RADIO_FAULT and OpenThread is not running (`ot_running`). Every path that tries a start (br_radio's start on
+ * an attach, the restart after a C6 job, a move with its start back on the source) records it. Pure.
+ */
+bool mode_fsm_start_failed(br_core_mode_t mode, bool ot_running);
 
 /**
  * Move OpenThread from channel `from` ("" for a start: no channel runs it) to `to` ("" for a stop of OpenThread on

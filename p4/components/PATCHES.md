@@ -543,6 +543,16 @@ the sequence above.
    traffic on the board. With the patch: 300 reopens under traffic, 4 late transfers caught by a second round, no
    abort. The race existed upstream with both tasks on one core too, rarer (it needs a preemption inside the callback).
    Host test: none (no USB host mocks, see patch 30).
+   Extended 2026-11-08 (code review): the notification interface, when it is a separate one (a CDC-ACM device opened
+   at interface 0: COMM + DATA), is released inside the same retried rounds (its interrupt transfer can be in flight
+   like a bulk IN one), and a close whose data OR notification release still fails returns the error without
+   removing or freeing the device (before, a failed notification release was only logged and the device, its
+   interrupt transfer included, was freed: a use-after-free where upstream aborted). `cdc_dev_t` gains
+   `data_released` and `notif_released` (set when that interface's release succeeded, so a retried close of a device
+   whose first close failed releases only what is still claimed and does not halt endpoints of a released interface).
+   radio_mux keeps the handle of a failed close and closes it again (usb_transport.c, a few seconds of retries).
+   The notification interface counts as separate only when open claimed it, i.e. with an interrupt transfer (a device
+   whose notification element is EP0 has none and its interface is never claimed, so releasing it would fail forever).
 
 ## Known upstream behaviour (not patches)
 

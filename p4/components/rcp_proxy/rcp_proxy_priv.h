@@ -80,6 +80,7 @@ struct proxy {
     int64_t http_log_ms; // the last log of a refused HTTP request (rate-limited)
     rcp_proxy_lookup_t lookup; // connect: the name lookup the session waits for (the resolver task answers)
     rcp_proxy_udp_lock_t lock;
+    rcp_proxy_refusal_t refusal; // UDP listen: the last source the access rules refused, and the refusals' log
     rcp_proxy_peer_memo_t memo; // the previous peer of this socket session (UDP: reset replay only for a new one)
 
     // Buffers of the session (allocated when it opens).
@@ -123,4 +124,6 @@ void rcp_proxy_from_peer(proxy_t *p, const uint8_t *d, size_t n);
 // retry, a close, new settings) is discarded.
 esp_err_t rcp_proxy_resolve(proxy_t *p, int socktype);
 void rcp_proxy_addr_from(const struct sockaddr *sa, rcp_proxy_addr_t *out);
+// "a.b.c.d:port" (IPv4, also mapped on a dual-stack socket) or "[addr]:port".
+void rcp_proxy_peer_text(const struct sockaddr *sa, char *out, size_t cap);
 void rcp_proxy_set_nonblocking(int fd);

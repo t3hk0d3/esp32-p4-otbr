@@ -270,13 +270,26 @@ static void finish_sniffer_recovery(void *ctx)
     }
 }
 
+esp_err_t mode_fsm_reset_rcp(mode_fsm_t *fsm)
+{
+    const mode_fsm_ops_t *ops = fsm->ops;
+    const esp_err_t err = ops->reset_rcp();
+
+    if (err != ESP_ERR_TIMEOUT && err != ESP_ERR_NO_MEM) {
+        return err;
+    }
+    ESP_LOGW(TAG, "the RCP reset was not taken (%s): trying once more", esp_err_to_name(err));
+    ops->sleep_ms(MODE_FSM_RESET_RETRY_MS);
+    return ops->reset_rcp();
+}
+
 void mode_fsm_on_rcp_failure(mode_fsm_t *fsm)
 {
     const mode_fsm_ops_t *ops = fsm->ops;
     const br_core_mode_t mode = mode_fsm_get_mode(fsm);
 
     if (mode == BR_MODE_STARTING) {
-        ops->reset_rcp();
+        mode_fsm_reset_rcp(fsm);
         return;
     }
     if (mode == BR_MODE_SNIFFER) {
@@ -296,7 +309,7 @@ void mode_fsm_on_rcp_failure(mode_fsm_t *fsm)
     }
     fsm->recovery_us[fsm->recovery_count++] = now;
 
-    if (ops->reset_rcp() != ESP_OK) {
+    if (mode_fsm_reset_rcp(fsm) != ESP_OK) {
         ESP_LOGE(TAG, "resetting the RCP failed, staying in the radio fault");
         return;
     }
@@ -347,6 +360,31 @@ bool mode_fsm_boot(mode_fsm_t *fsm, const char *otbr_id)
     }
     set_mode(fsm, BR_MODE_NO_RADIO);
     return false;
+}
+
+bool mode_fsm_c6_usable_after_steps(esp_err_t steps)
+{
+    return steps == ESP_OK;
+}
+
+static bool is_c6(const char *id)
+{
+    return id && strcmp(id, MODE_FSM_C6_ID) == 0;
+}
+
+bool mode_fsm_c6_job_alone(const char *otbr_id)
+{
+    return !is_c6(otbr_id);
+}
+
+bool mode_fsm_job_holds_openthread(bool job_running, const char *ot_chan_id, const char *otbr_id)
+{
+    return job_running && (is_c6(ot_chan_id) || is_c6(otbr_id));
+}
+
+bool mode_fsm_start_failed(br_core_mode_t mode, bool ot_running)
+{
+    return mode == BR_MODE_RADIO_FAULT && !ot_running;
 }
 
 // STARTING, then OpenThread on `id`. The border router start sets BR_RUNNING (mode_fsm_set_started).

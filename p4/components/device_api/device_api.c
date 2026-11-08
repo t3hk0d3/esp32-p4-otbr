@@ -1123,10 +1123,11 @@ static esp_err_t radio_firmware_post_handler(httpd_req_t *req)
                                      : "the image needs a Content-Length");
         }
     }
-    const br_core_mode_t mode = br_core_get_mode();
+    // The board mode refuses only a job that stops OpenThread: with Thread on another channel it is that channel's.
+    const char *mode_busy = device_api_radio_job_busy(br_core_get_mode(), br_core_c6_job_touches_openthread());
 
-    if (mode == BR_MODE_SNIFFER || mode == BR_MODE_STARTING) {
-        return send_error(req, 409, "busy", mode == BR_MODE_SNIFFER ? "a capture is running" : "the border router is starting", upload);
+    if (mode_busy) {
+        return send_error(req, 409, "busy", mode_busy, upload);
     }
     if (!device_api_op_try_begin(DEVICE_API_OP_RADIO_PUSH)) {
         return send_error(req, 409, "busy", device_api_op_busy_detail(DEVICE_API_OP_RADIO_PUSH), upload);
@@ -1168,8 +1169,11 @@ static void recover_task(void *arg)
         ESP_LOGW(TAG, "ROM recovery failed: %s (%s)", esp_err_to_name(err), detail);
     }
     br_core_get_status(&bs); // the state after the restart: BR_RUNNING with the RCP, or RADIO_FAULT "no rcp firmware"
-    if (device_api_recover_reply(err, detail[0] ? detail : esp_err_to_name(err), bs.mode, bs.fault_reason, bs.rcp_installed_known, bs.rcp_installed,
-                                 body, sizeof(body), &http_status) < 0) {
+    // With Thread on another channel the mode and its fault are that channel's: the reply describes the C6 alone.
+    const bool thread_on_c6 = strcmp(bs.otbr_channel, RADIO_MUX_C6_ID) == 0;
+
+    if (device_api_recover_reply(err, detail[0] ? detail : esp_err_to_name(err), bs.mode, thread_on_c6, bs.fault_reason,
+                                 bs.rcp_installed_known, bs.rcp_installed, body, sizeof(body), &http_status) < 0) {
         http_status = 500;
         strlcpy(body, "{\"error\":\"internal\",\"detail\":\"reply too large\"}", sizeof(body));
     }
@@ -1190,10 +1194,10 @@ static esp_err_t radio_recover_post_handler(httpd_req_t *req)
 
         return send_mapped_error(req, error, error.detail, false);
     }
-    const br_core_mode_t mode = br_core_get_mode();
+    const char *mode_busy = device_api_radio_job_busy(br_core_get_mode(), br_core_c6_job_touches_openthread());
 
-    if (mode == BR_MODE_SNIFFER || mode == BR_MODE_STARTING) {
-        return send_error(req, 409, "busy", mode == BR_MODE_SNIFFER ? "a capture is running" : "the border router is starting", false);
+    if (mode_busy) {
+        return send_error(req, 409, "busy", mode_busy, false);
     }
     if (!device_api_op_try_begin(DEVICE_API_OP_ROM_RECOVER)) {
         return send_error(req, 409, "busy", device_api_op_busy_detail(DEVICE_API_OP_ROM_RECOVER), false);
@@ -1466,11 +1470,12 @@ static bool run_update(update_job_t *job)
         send_mapped_error(req, error, error.detail, false);
         return false;
     }
-    const br_core_mode_t mode = br_core_get_mode();
+    const char *mode_busy = install_rcp ? device_api_radio_job_busy(br_core_get_mode(),
+                                                                    br_core_c6_job_touches_openthread()) : NULL;
 
-    if (install_rcp && (mode == BR_MODE_SNIFFER || mode == BR_MODE_STARTING)) {
+    if (mode_busy) {
         // Before the bundle: the push would be refused, and nothing is changed yet.
-        send_error(req, 409, "busy", mode == BR_MODE_SNIFFER ? "a capture is running" : "the border router is starting", false);
+        send_error(req, 409, "busy", mode_busy, false);
         return false;
     }
     ESP_LOGI(TAG, "update to %s: app %s, radio firmware %s", rel->tag[0] ? rel->tag : "the latest release",

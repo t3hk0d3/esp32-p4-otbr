@@ -51,6 +51,39 @@ bool rcp_proxy_addr_eq(const rcp_proxy_addr_t *a, const rcp_proxy_addr_t *b)
     return a->port == b->port && a->scope == b->scope && memcmp(a->ip, b->ip, sizeof(a->ip)) == 0;
 }
 
+void rcp_proxy_refusal_init(rcp_proxy_refusal_t *r)
+{
+    memset(r, 0, sizeof(*r));
+}
+
+bool rcp_proxy_refusal_cached(const rcp_proxy_refusal_t *r, const rcp_proxy_addr_t *src, int64_t now_ms)
+{
+    return r->cached && now_ms >= r->at_ms && now_ms - r->at_ms < RCP_PROXY_REFUSAL_CACHE_MS &&
+           rcp_proxy_addr_eq(&r->addr, src);
+}
+
+void rcp_proxy_refusal_note(rcp_proxy_refusal_t *r, const rcp_proxy_addr_t *src, const char *why, int64_t now_ms)
+{
+    r->cached = true;
+    r->addr = *src;
+    r->why = why;
+    r->at_ms = now_ms;
+}
+
+uint32_t rcp_proxy_refusal_log(rcp_proxy_refusal_t *r, int64_t now_ms)
+{
+    r->count++;
+    if (r->logged && now_ms >= r->log_ms && now_ms - r->log_ms < RCP_PROXY_REFUSAL_LOG_MS) {
+        return 0;
+    }
+    const uint32_t n = r->count;
+
+    r->logged = true;
+    r->log_ms = now_ms;
+    r->count = 0;
+    return n;
+}
+
 void rcp_proxy_udp_lock_init(rcp_proxy_udp_lock_t *lock)
 {
     memset(lock, 0, sizeof(*lock));

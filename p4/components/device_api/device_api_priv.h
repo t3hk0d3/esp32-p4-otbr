@@ -68,9 +68,20 @@ device_api_error_t device_api_map_recover_error(esp_err_t err);
  * `err` ESP_OK: *http_status 200 and `{"recovered":true,"rcp":<installed version | "no rcp firmware" | "unknown">,"mode":<mode name>,
  * "detail":<text>}` (BR_RUNNING: the RCP in its slot runs; otherwise `fault_reason` and, without RCP firmware, the upload hint; the restart finding no RCP firmware is not a failure of the recovery); otherwise the mapped error and its
  * `{"error","detail"}` body (`err_detail` replaces the default detail when not empty). Returns the body length, -1 if it does not fit.
+ * `thread_on_c6` false (OpenThread runs on another channel, or none): the board mode and `fault_reason` are that
+ * channel's, so the detail describes only the C6 (its RCP firmware in the slot, or the upload hint); "mode" stays the
+ * board mode.
  */
-int device_api_recover_reply(esp_err_t err, const char *err_detail, int mode, const char *fault_reason, bool rcp_known,
-                             const char *rcp_installed, char *buf, size_t cap, int *http_status);
+int device_api_recover_reply(esp_err_t err, const char *err_detail, int mode, bool thread_on_c6, const char *fault_reason,
+                             bool rcp_known, const char *rcp_installed, char *buf, size_t cap, int *http_status);
+
+/**
+ * Why a C6 job (POST /device/radio/firmware, /device/radio/recover, an update that installs the RCP) is refused in
+ * board mode `mode` before it starts: "a capture is running" (SNIFFER), "the border router is starting" (STARTING), or
+ * NULL (allowed). Only when the job stops OpenThread (`thread_on_c6`, br_core_c6_job_touches_openthread): with Thread
+ * on another channel the mode is that channel's, and the job leaves it alone (NULL).
+ */
+const char *device_api_radio_job_busy(int mode, bool thread_on_c6);
 
 /** Error of netcfg_set_trial (PUT /device/network): ESP_ERR_INVALID_ARG 400 "invalid_config" (the caller puts the field in detail). */
 device_api_error_t device_api_map_network_set_error(esp_err_t err);

@@ -73,7 +73,10 @@ What each firmware shows in the Firmware column:
 becomes the channel's baud if none was set. When a channel runs `otbr`, the version the handshake returns is recorded
 again with source `passive`. There is no detection endpoint: unplug and replug, or reboot.
 
-The C6 is not probed this way; the boot probe reports its firmware.
+The C6 is not probed this way; the boot probe reports its firmware. It runs at every boot, whatever channel is in
+`otbr` (with Thread elsewhere it only updates the C6's status and listing), together with the maintenance jumper's
+detection and the automatic ROM recovery. A fault it finds with the C6 in `otbr` ("no rcp firmware", "rcp
+incompatible") stays: the C6 is listed unavailable and Thread does not start on it until a push.
 
 ## RCP proxy
 
@@ -267,8 +270,9 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
   after a reopen on the bench, also after forced overruns (`usb_stall <ms>` masks a core's interrupts) and with spinel
   resets in between (about 400 reopens); `ch34x diag|init|clear` (test build) read the chip's registers and send the
   open-time init that ESP-IDF's ch34x driver skips, if it ever does.
-- **C6 jobs**: a firmware push with OpenThread on the dongle leaves OpenThread alone; with a proxy peer on the C6 it gives
-  409 `c6_busy`.
+- **C6 jobs**: a firmware push with OpenThread on the dongle leaves OpenThread alone, also while the dongle captures or
+  starts (the board mode is the dongle's); unplugging the dongle during it gives `NO_RADIO` at once; with a proxy peer on
+  the C6 it gives 409 `c6_busy`.
 - **Boot**: a stored dongle that is unplugged gives `NO_RADIO` without a fault; plugging it in gives `BR_RUNNING`.
 - **Heap**: about 21 KB of internal DMA RAM is taken at the first C6 open, about 39 KB (pool, buffers, 16 KB ring) at
   the first dongle open (never on a board without a dongle); a proxy session takes an 8 KB ring (TCP) plus codec

@@ -22,7 +22,8 @@ extern "C" {
 #endif
 
 // Channels the mux knows at once: c6 plus up to 7 USB channels (attached or remembered in NVS). Only one USB device
-// is open at a time. When an 8th USB channel appears, the unplugged one seen longest ago is forgotten.
+// is open at a time. When an 8th USB channel appears, the unplugged one in mode off seen longest ago is forgotten (one
+// stored in another mode never is, and a device with no driver never makes room); with none, the new one is not listed.
 #define RADIO_MUX_CHANNELS_MAX 8
 // Eventfds the mux creates: one per channel it can have open at once (c6, one USB). app_main adds them to the eventfd
 // VFS registration.
@@ -133,7 +134,8 @@ esp_err_t radio_mux_tx(radio_mux_chan_t *ch, const uint8_t *data, size_t n);
 // DTR/RTS pulses, never VBUS), RESET when it is back,
 // GONE when it did not reopen. The C6 gets a 20 ms pulse of its reset GPIO; the next SPI transaction carries the reset
 // bit, and RESET is posted on the RCP's first header with its own reset bit (before its first frame), or after 2 s
-// without one (the consumer's own timeouts then see a dead RCP). Does not wait.
+// without one (the consumer's own timeouts then see a dead RCP). Does not wait for the reset; waits up to 1 s for room
+// in the owner task's queue (ESP_ERR_TIMEOUT when there was none: nothing was asked). Not from the owner task.
 esp_err_t radio_mux_reset(radio_mux_chan_t *ch);
 // Raw channels: takes up to cap received bytes without waiting; 0 when there are none.
 size_t radio_mux_read_raw(radio_mux_chan_t *ch, uint8_t *out, size_t cap);
@@ -263,10 +265,11 @@ void radio_mux_set_otbr_mover(esp_err_t (*move)(const char *from, const char *to
 // on it while OpenThread may still run elsewhere. It must have no consumer attached (rcp-proxy on it: refused, "set it
 // off first"), detected spinel firmware, no C6 job; the C6 is opened (out of reset, no reset pulse). Frames then go to
 // the channel's own queue and eventfd (radio_mux_poll, radio_mux_eventfd, radio_mux_release), radio_mux_tx takes
-// frames; radio_mux_reset does nothing on it. The channel shows otbr, state starting. An unplug posts GONE and ends the
-// lease. *out gets the lease's handle (a new generation, as an attach); ESP_ERR_NOT_FOUND (unknown id),
-// ESP_ERR_INVALID_STATE (not leasable), ESP_FAIL (the C6 did not open), ESP_ERR_TIMEOUT (the owner did not answer;
-// nothing was leased), with `err` (may be NULL) saying why.
+// frames; radio_mux_reset works on it as on an attached channel (USB reopen or the C6's reset pulse, RESET into the
+// lease's queue; a USB reopen that fails posts GONE and ends the lease). The channel shows otbr, state starting. An
+// unplug posts GONE and ends the lease. *out gets the lease's handle (a new generation, as an attach);
+// ESP_ERR_NOT_FOUND (unknown id), ESP_ERR_INVALID_STATE (not leasable), ESP_FAIL (the C6 did not open),
+// ESP_ERR_TIMEOUT (the owner did not answer; nothing was leased), with `err` (may be NULL) saying why.
 // Not from the owner task.
 esp_err_t radio_mux_lease(const char *id, radio_mux_chan_t **out, char *err, size_t cap);
 // Gives a leased channel back (no-op once committed or gone): delivery stops, the C6 returns to its stored mode (off:
@@ -299,7 +302,6 @@ esp_err_t radio_mux_c6_job_begin(void);
 // Never dropped: it waits as long as it takes to post (and to allocate its record); the answer is waited for up to
 // 5 s (later: logged). No-op before radio_mux_start.
 void radio_mux_c6_job_end(bool c6_ok);
-
 
 #ifdef OTBR_TEST_BUILD
 /* ---- test build only: CH340 experiments (2026-11-07) ---- */

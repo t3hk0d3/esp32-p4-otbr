@@ -106,29 +106,59 @@ static esp_err_t store_index(nvs_handle_t nvs)
     return n ? nvs_set_blob(nvs, NVS_INDEX, ids, n * RADIO_MUX_ID_MAX) : nvs_erase_key(nvs, NVS_INDEX);
 }
 
-// Owner. Writes the channel's blob, and the index when the channel is new to NVS.
-esp_err_t mux_store_chan(struct radio_mux_chan *ch)
+// Writes the channel's blob into the open handle; *index set when the channel is new to NVS (marked remembered).
+static esp_err_t set_chan(nvs_handle_t nvs, struct radio_mux_chan *ch, bool *index)
 {
-    nvs_handle_t nvs;
     char key[16];
     chan_blob_t b;
 
-    ESP_RETURN_ON_ERROR(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs), TAG, "nvs_open");
     radio_mux_nvs_key(ch->id, key);
     blob_from_chan(ch, &b);
-    esp_err_t err = nvs_set_blob(nvs, key, &b, sizeof(b));
+    const esp_err_t err = nvs_set_blob(nvs, key, &b, sizeof(b));
 
     if (err == ESP_OK && !ch->remembered) {
         ch->remembered = true;
+        *index = true;
+    }
+    return err;
+}
+
+// Owner. Writes the blobs of a and b (b may be NULL or a), and the index when one of them is new to NVS, in one NVS
+// handle with one commit. A failure leaves the remembered flags as they were.
+esp_err_t mux_store_chans(struct radio_mux_chan *a, struct radio_mux_chan *b)
+{
+    nvs_handle_t nvs;
+    const bool a_known = a->remembered, b_known = b ? b->remembered : true;
+    bool index = false;
+
+    if (b == a) {
+        b = NULL;
+    }
+    ESP_RETURN_ON_ERROR(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs), TAG, "nvs_open");
+    esp_err_t err = set_chan(nvs, a, &index);
+
+    if (err == ESP_OK && b) {
+        err = set_chan(nvs, b, &index);
+    }
+    if (err == ESP_OK && index) {
         err = store_index(nvs);
-        if (err != ESP_OK) {
-            ch->remembered = false;
-        }
     }
     err = err == ESP_OK ? nvs_commit(nvs) : err;
     nvs_close(nvs);
-    ESP_RETURN_ON_ERROR(err, TAG, "storing %s", ch->id);
+    if (err != ESP_OK) {
+        a->remembered = a_known;
+        if (b) {
+            b->remembered = b_known;
+        }
+    }
+    ESP_RETURN_ON_ERROR(err, TAG, "storing %s%s%s", a->id, b ? " and " : "", b ? b->id : "");
     return ESP_OK;
+}
+
+// Owner. Writes the channel's blob, and the index when the channel is new to NVS.
+esp_err_t mux_store_chan(struct radio_mux_chan *ch)
+{
+    return mux_store_chans(ch, NULL);
 }
 
 // Owner. Erases the channel's blob and drops it from the index.
@@ -170,6 +200,32 @@ void mux_chan_defaults(struct radio_mux_chan *ch, const char *id, radio_mux_kind
     ch->eff_mode = RADIO_MUX_MODE_UNAVAILABLE;
     ch->supported = true;
     snprintf(ch->reason, sizeof(ch->reason), "not detected");
+}
+
+// At load: OTBR stored on more than one channel (a move's stores cut apart) keeps the first in slot order (the C6 is
+// slot 0); the others are stored off.
+static void dedupe_otbr(void)
+{
+    radio_mux_mode_t modes[RADIO_MUX_CHANNELS_MAX];
+    bool changed[RADIO_MUX_CHANNELS_MAX];
+
+    for (size_t i = 0; i < RADIO_MUX_CHANNELS_MAX; i++) {
+        modes[i] = g_mux.chans[i].used ? g_mux.chans[i].mode : RADIO_MUX_MODE_OFF;
+    }
+    if (radio_mux_otbr_dedupe(modes, changed, RADIO_MUX_CHANNELS_MAX) == 0) {
+        return;
+    }
+    for (size_t i = 0; i < RADIO_MUX_CHANNELS_MAX; i++) {
+        struct radio_mux_chan *ch = &g_mux.chans[i];
+
+        if (changed[i]) {
+            ch->mode = RADIO_MUX_MODE_OFF;
+            ESP_LOGW(TAG, "%s: stored in otbr next to another otbr channel (an interrupted move): stored off", ch->id);
+            if (mux_store_chan(ch) != ESP_OK) {
+                ESP_LOGW(TAG, "%s: storing off failed: off until the next boot's repair", ch->id);
+            }
+        }
+    }
 }
 
 void mux_load_chans(void)
@@ -219,4 +275,5 @@ void mux_load_chans(void)
         ch->remembered = true;
     }
     nvs_close(nvs);
+    dedupe_otbr();
 }

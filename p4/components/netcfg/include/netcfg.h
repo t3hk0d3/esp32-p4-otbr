@@ -73,6 +73,13 @@ bool netcfg_peer_allowed(const struct sockaddr *peer, netcfg_service_t svc);
 bool netcfg_peer_allowed_as(const struct sockaddr *peer, netcfg_service_t svc, const char *noun);
 
 /**
+ * netcfg_peer_allowed without its log: a refusal's reason ("on a mesh address", "its interface is unknown", ...; a
+ * string literal) goes to *why (may be NULL; set to NULL when allowed), for a caller that rate-limits its own log (the
+ * RCP proxy's UDP sources).
+ */
+bool netcfg_peer_check(const struct sockaddr *peer, netcfg_service_t svc, const char **why);
+
+/**
  * Validate `cfg` and store it as the pending trial, then reboot (after a short delay, so the reply can be sent) into it.
  * ESP_ERR_INVALID_ARG for an invalid config (nothing stored; netcfg_validate names the field).
  */

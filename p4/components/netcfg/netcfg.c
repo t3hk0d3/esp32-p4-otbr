@@ -220,19 +220,27 @@ bool netcfg_request_allowed(httpd_req_t *req, netcfg_service_t svc)
 
 #define SOCKET_LOCK_WAIT_MS 100 /* the interface lookup is short; a longer wait means a trial is being applied */
 
-// Logs why netcfg_policy_conn_allowed refused `what`, and returns its verdict.
+#define WHY_LOCK "the interface lookup did not get the lock"
+#define WHY_MESH "on a mesh address"
+#define WHY_UNKNOWN "its interface is unknown"
+#define WHY_SERVICE "service not available on this interface"
+
+// The verdict of netcfg_policy_conn_allowed for `what`. A refusal is logged, or with `why` set (not NULL) only its
+// reason (a string literal) is put there.
 static bool conn_verdict(const char *what, netcfg_mode_t mode, bool found, netcfg_side_t side, bool on_mesh,
-                         netcfg_service_t svc)
+                         netcfg_service_t svc, const char **why)
 {
     if (netcfg_policy_conn_allowed(mode, found, side, on_mesh, svc)) {
         return true;
     }
-    if (on_mesh) {
-        ESP_LOGW(TAG, "refused %s on a mesh address", what);
-    } else if (!found) {
-        ESP_LOGW(TAG, "refused %s: its interface is unknown", what);
+    const char *reason = on_mesh ? WHY_MESH : !found ? WHY_UNKNOWN : WHY_SERVICE;
+
+    if (why) {
+        *why = reason;
+    } else if (on_mesh) {
+        ESP_LOGW(TAG, "refused %s " WHY_MESH, what);
     } else {
-        ESP_LOGW(TAG, "refused %s: service not available on this interface", what);
+        ESP_LOGW(TAG, "refused %s: %s", what, reason);
     }
     return false;
 }
@@ -242,8 +250,10 @@ static bool conn_verdict(const char *what, netcfg_mode_t mode, bool found, netcf
 typedef bool (*side_lookup_fn)(const void *what, netcfg_side_t *side, bool *on_mesh);
 
 // The lookup under the netcfg lock (at most SOCKET_LOCK_WAIT_MS; refused when it cannot get it), then the verdict;
-// `noun` names the refused thing in the log ("a connection", "a source").
-static bool lookup_allowed(side_lookup_fn side_of, const void *what, const char *noun, netcfg_service_t svc)
+// `noun` names the refused thing in the log ("a connection", "a source"). With `why` (not NULL) nothing is logged: the
+// refusal's reason goes there.
+static bool lookup_allowed(side_lookup_fn side_of, const void *what, const char *noun, netcfg_service_t svc,
+                           const char **why)
 {
     netcfg_side_t side = NETCFG_SIDE_MGMT;
     bool on_mesh = false;
@@ -252,7 +262,11 @@ static bool lookup_allowed(side_lookup_fn side_of, const void *what, const char 
 
     if (s.ready) {
         if (xSemaphoreTake(s.lock, pdMS_TO_TICKS(SOCKET_LOCK_WAIT_MS)) != pdTRUE) {
-            ESP_LOGW(TAG, "refused %s: the interface lookup did not get the lock in %d ms", noun, SOCKET_LOCK_WAIT_MS);
+            if (why) {
+                *why = WHY_LOCK;
+            } else {
+                ESP_LOGW(TAG, "refused %s: " WHY_LOCK " in %d ms", noun, SOCKET_LOCK_WAIT_MS);
+            }
             return false;
         }
         mode = netcfg_ifaces_mode();
@@ -262,7 +276,7 @@ static bool lookup_allowed(side_lookup_fn side_of, const void *what, const char 
         mode = NETCFG_MODE_SINGLE;
         found = side_of(what, &side, &on_mesh);
     }
-    return conn_verdict(noun, mode, found, side, on_mesh, svc);
+    return conn_verdict(noun, mode, found, side, on_mesh, svc, why);
 }
 
 static bool socket_side(const void *what, netcfg_side_t *side, bool *on_mesh)
@@ -277,12 +291,23 @@ static bool peer_side(const void *what, netcfg_side_t *side, bool *on_mesh)
 
 bool netcfg_socket_allowed(int fd, netcfg_service_t svc)
 {
-    return lookup_allowed(socket_side, &fd, "a connection", svc);
+    return lookup_allowed(socket_side, &fd, "a connection", svc, NULL);
 }
 
 bool netcfg_peer_allowed_as(const struct sockaddr *peer, netcfg_service_t svc, const char *noun)
 {
-    return lookup_allowed(peer_side, peer, noun, svc);
+    return lookup_allowed(peer_side, peer, noun, svc, NULL);
+}
+
+bool netcfg_peer_check(const struct sockaddr *peer, netcfg_service_t svc, const char **why)
+{
+    const char *reason = "";
+    const bool allowed = lookup_allowed(peer_side, peer, "a source", svc, &reason);
+
+    if (why) {
+        *why = allowed ? NULL : reason;
+    }
+    return allowed;
 }
 
 bool netcfg_peer_allowed(const struct sockaddr *peer, netcfg_service_t svc)

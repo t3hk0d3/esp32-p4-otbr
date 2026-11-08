@@ -68,6 +68,10 @@ typedef struct mux_port {
     // owner holds it while it drains the queue and moves att_gen on, so an earlier handle never takes a later event.
     SemaphoreHandle_t ev_lock;
     atomic_bool dev_gone; // the transport saw the device disconnect (set by its callback, cleared by the open)
+    // USB: a CDC_ACM_HOST_ERROR stopped the device's polling (set by its callback, cleared by the owner's reopen, the
+    // close and the open); usb_error_us: when the owner last reopened for one (0: never), owner only.
+    atomic_bool usb_error;
+    int64_t usb_error_us;
 
     // Delivery. Changed by the owner with rx_lock held, read by the transport with rx_lock held.
     QueueHandle_t evq;   // the channel's own queue (consumers without a bound queue)
@@ -105,6 +109,7 @@ typedef struct mux_port {
 typedef enum {
     MUX_MSG_NEW_DEV,  // new_dev_cb: a USB device appeared
     MUX_MSG_GONE,     // event_cb: the open device was disconnected
+    MUX_MSG_USB_ERROR, // event_cb: a transfer error stopped the open device's polling (p->usb_error is set)
     MUX_MSG_SET,      // radio_mux_set
     MUX_MSG_FORGET,   // radio_mux_forget
     MUX_MSG_RESET,    // radio_mux_reset
@@ -158,6 +163,7 @@ struct radio_mux_chan {
     char reason[RADIO_MUX_REASON_MAX];
     radio_mux_counters_t ctr; // while not on its port
     radio_mux_mode_t leave_mode; // owner: the mode a stop of OpenThread on it stores at its commit (radio_mux_set)
+    bool det_failed; // runtime: its last detection found nothing and the earlier record was kept (shown as the reason)
 };
 
 struct mux_call {
@@ -249,9 +255,12 @@ void mux_drain_evq(mux_port_t *p);
 /* ---- mux_nvs.c (owner) ---- */
 
 esp_err_t mux_store_chan(struct radio_mux_chan *ch);
+// Both channels' blobs (b may be NULL or a) in one NVS handle and one commit (a move's two mode changes).
+esp_err_t mux_store_chans(struct radio_mux_chan *a, struct radio_mux_chan *b);
 esp_err_t mux_erase_chan(struct radio_mux_chan *ch);
 void mux_chan_defaults(struct radio_mux_chan *ch, const char *id, radio_mux_kind_t kind);
-// Lists c6 and every remembered channel from NVS.
+// Lists c6 and every remembered channel from NVS. OTBR stored on more than one channel keeps the first in slot order
+// (the C6 first); the others are stored off.
 void mux_load_chans(void);
 
 /* ---- mux_api.c ---- */
@@ -271,7 +280,15 @@ esp_err_t usb_transport_open(mux_port_t *p, const mux_usb_dev_t *dev, uint32_t b
 // New line settings on the open device. A failure (or a baud read back far off) closes the device.
 esp_err_t usb_transport_line(mux_port_t *p, uint32_t baud, bool flow, char *err, size_t cap);
 // The single closer: takes tx_lock so no sender is inside the driver, then cdc_acm_host_close once. No-op when closed.
+// A close the driver refuses keeps the handle for usb_transport_close_retry; until it closes, nothing opens (an open
+// fails with RADIO_MUX_USB_CLOSE_PENDING_REASON, or RADIO_MUX_USB_CLOSE_FAILED_REASON once the retries are spent; an
+// open then tries the close once more first).
 void usb_transport_close(mux_port_t *p);
+// Whether a failed close is being retried.
+bool usb_transport_close_pending(void);
+// Owner loop: closes a device whose close failed again when a retry is due (radio_mux_close_retry_t). DONE once it
+// closed, GAVE_UP once after the last failed retry; IDLE, WAIT otherwise.
+radio_mux_close_act_t usb_transport_close_retry(void);
 bool usb_transport_is_open(void);
 bool usb_transport_is(const void *hdl);
 // Any task, with p->tx_lock held. ESP_ERR_INVALID_STATE when no device is open.

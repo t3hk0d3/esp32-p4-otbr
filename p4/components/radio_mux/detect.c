@@ -18,20 +18,25 @@ typedef enum { KIND_SPINEL, KIND_ZNP, KIND_ASH } kind_t;
 typedef struct {
     uint32_t baud;
     kind_t kind;
-    int64_t budget_ms;
+    int64_t budget_ms; // per request
+    uint8_t tries;     // requests sent before the step gives up
 } step_t;
 
 // The probe order of the Global Constraints.
 static const step_t STEPS[] = {
-    {460800, KIND_SPINEL, RADIO_MUX_DETECT_SPINEL_MS},
-    {115200, KIND_SPINEL, RADIO_MUX_DETECT_SPINEL_MS},
-    {115200, KIND_ZNP, RADIO_MUX_DETECT_ZNP_MS},
-    {115200, KIND_ASH, RADIO_MUX_DETECT_EZSP_MS},
-    {460800, KIND_ASH, RADIO_MUX_DETECT_EZSP_MS},
+    {460800, KIND_SPINEL, RADIO_MUX_DETECT_SPINEL_MS, RADIO_MUX_DETECT_SPINEL_TRIES},
+    {115200, KIND_SPINEL, RADIO_MUX_DETECT_SPINEL_MS, 1},
+    {115200, KIND_ZNP, RADIO_MUX_DETECT_ZNP_MS, 1},
+    {115200, KIND_ASH, RADIO_MUX_DETECT_EZSP_MS, 1},
+    {460800, KIND_ASH, RADIO_MUX_DETECT_EZSP_MS, 1},
 };
 #define N_STEPS (sizeof(STEPS) / sizeof(STEPS[0]))
 
 #define SPINEL_HEADER 0x81 // TID 1
+#define SPINEL_HEADER_TID_MASK 0xCF // flag bits and TID; the IID bits (0x30) may be anything
+#define SPINEL_HEADER_UNSOLICITED 0x80 // TID 0: a notice the RCP sends on its own
+#define SPINEL_STATUS_RESET_BEGIN 112 // SPINEL_STATUS_RESET__BEGIN: LAST_STATUS after an RCP (re)start
+#define SPINEL_STATUS_RESET_END 128
 #define SPINEL_CMD_GET 2
 #define SPINEL_CMD_IS 6
 #define SPINEL_PROP_LAST_STATUS 0
@@ -86,6 +91,8 @@ static void enter_step(radio_mux_detect_t *d, int64_t now)
 
     d->deadline_ms = now + s->budget_ms;
     d->new_step = true;
+    d->attempt = 1;
+    d->reset_seen = false;
     d->acc_n = 0;
     d->ash_esc = false;
     switch (s->kind) {
@@ -180,12 +187,29 @@ bool radio_mux_detect_parse_spinel_version(const char *s, char *version, size_t 
 
 // ---- spinel
 
+// An unsolicited frame while the version is asked: a RESET notice (LAST_STATUS RESET_*) means a spinel RCP at this
+// baud has just (re)started; the version is asked once more. Every other unsolicited frame is ignored.
+static void spinel_notice(radio_mux_detect_t *d, int64_t now, uint32_t prop, const uint8_t *v, size_t n)
+{
+    uint32_t status;
+
+    if (d->stage != ST_SPINEL || d->reset_seen || prop != SPINEL_PROP_LAST_STATUS ||
+            radio_mux_spinel_uint_unpack(v, n, &status) == 0 || status < SPINEL_STATUS_RESET_BEGIN ||
+            status >= SPINEL_STATUS_RESET_END) {
+        return;
+    }
+    d->reset_seen = true;
+    d->deadline_ms = now + STEPS[d->step].budget_ms;
+    tx_spinel_get(d, SPINEL_PROP_NCP_VERSION);
+}
+
 static void spinel_frame(radio_mux_detect_t *d, int64_t now, const uint8_t *f, size_t n)
 {
     uint32_t cmd, prop;
     size_t used, at = 1;
+    const bool notice = n >= 3 && (f[0] & SPINEL_HEADER_TID_MASK) == SPINEL_HEADER_UNSOLICITED;
 
-    if (n < 3 || f[0] != SPINEL_HEADER) { // answers to our requests only: TID 1; TID 0 is unsolicited
+    if (n < 3 || (f[0] != SPINEL_HEADER && !notice)) { // answers to our requests (TID 1), and TID 0 notices
         return;
     }
     used = radio_mux_spinel_uint_unpack(f + at, n - at, &cmd);
@@ -198,6 +222,10 @@ static void spinel_frame(radio_mux_detect_t *d, int64_t now, const uint8_t *f, s
         return;
     }
     at += used;
+    if (notice) {
+        spinel_notice(d, now, prop, f + at, n - at);
+        return;
+    }
     if (d->stage == ST_SPINEL && prop == SPINEL_PROP_NCP_VERSION) {
         char s[RADIO_MUX_DETECT_RX_MAX];
         size_t len = 0;
@@ -403,8 +431,8 @@ radio_mux_probe_action_t radio_mux_detect_next(radio_mux_detect_t *d, int64_t no
     d->tx_n = 0;
     d->new_step = false;
     if (d->stage != ST_DONE && now_ms >= cap_end(d)) {
-        // The cap wins over everything but a spinel firmware already seen.
-        finish(d, d->stage == ST_VENDOR ? RADIO_MUX_FW_SPINEL : RADIO_MUX_FW_UNKNOWN);
+        // The cap wins over everything but a spinel firmware already seen (an answer, or its RESET notice).
+        finish(d, d->stage == ST_VENDOR || d->reset_seen ? RADIO_MUX_FW_SPINEL : RADIO_MUX_FW_UNKNOWN);
     } else if (d->stage == ST_START) {
         enter_step(d, now_ms);
     } else if (d->stage != ST_DONE) {
@@ -426,6 +454,12 @@ radio_mux_probe_action_t radio_mux_detect_next(radio_mux_detect_t *d, int64_t no
                 finish(d, RADIO_MUX_FW_SPINEL);
             } else if (d->stage == ST_ZNP_VER) {
                 finish(d, RADIO_MUX_FW_ZNP);
+            } else if (d->stage == ST_SPINEL && d->reset_seen) {
+                finish(d, RADIO_MUX_FW_SPINEL); // it announced itself, but did not answer the version
+            } else if (d->stage == ST_SPINEL && d->attempt < STEPS[d->step].tries) {
+                d->attempt++; // still booting, perhaps: ask again at the same baud
+                d->deadline_ms = now_ms + STEPS[d->step].budget_ms;
+                tx_spinel_get(d, SPINEL_PROP_NCP_VERSION);
             } else if (++d->step >= N_STEPS) {
                 d->step = N_STEPS - 1;
                 finish(d, RADIO_MUX_FW_UNKNOWN);

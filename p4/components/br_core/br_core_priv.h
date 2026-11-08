@@ -89,8 +89,15 @@ void core_radio_notify(void);
 void core_radio_boot(void);
 // OpenThread stopped (no session drain) and its channel forgotten.
 void core_radio_stop_openthread(void);
-// OpenThread on the C6 again after a C6 job (probe and start).
+// OpenThread on the C6 again after a C6 job (probe and start). Records whether a PUT of mode otbr retries it.
 esp_err_t core_radio_restart_on_c6(void);
+// Whether the last start on the attached channel failed (RADIO_FAULT from it, a PUT of mode otbr retries it). Owned by
+// br_radio; a C6 job that holds OpenThread sets it while br_radio stays out.
+void core_radio_set_start_failed(bool failed);
+// A C6 job runs (push_busy) and holds OpenThread: OpenThread runs on, or is stored on, the C6 (br_radio stays out).
+bool core_radio_job_holds_openthread(void);
+// The C6's boot steps run (core_radio_boot): no other C6 job meanwhile.
+bool core_radio_c6_boot_running(void);
 // The mode_fsm channel operations.
 esp_err_t core_radio_probe_channel(const char *id, char *err, size_t cap);
 esp_err_t core_radio_ot_start(const char *id);

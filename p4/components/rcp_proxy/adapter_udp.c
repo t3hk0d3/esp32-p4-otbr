@@ -5,6 +5,7 @@
 // 30 s of silence. The reset replay runs for a new peer session only (rcp_proxy_peer_new): once per socket session in
 // connect, and in listen when the locked source differs from the previous peer.
 #include <errno.h>
+#include <inttypes.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -79,6 +80,7 @@ static esp_err_t udp_open(proxy_t *p)
 {
     p->fd = -1;
     rcp_proxy_udp_lock_init(&p->lock);
+    rcp_proxy_refusal_init(&p->refusal);
     rcp_proxy_peer_memo_init(&p->memo); // a new socket session: the next peer is new
     p->state = waiting_state(p);
     if (is_listen(p)) {
@@ -123,6 +125,31 @@ static void let_go(proxy_t *p, const char *why)
     rcp_proxy_peer_lost(p, waiting_state(p));
 }
 
+// Listen without a peer: whether the netcfg access rules let src lock. A source refused within the last second is
+// refused again without the lookup (the netcfg lock, a route lookup on the tcpip task); the refusals are logged at most
+// once per 10 s with their count.
+static bool source_allowed(proxy_t *p, const struct sockaddr_storage *src, const rcp_proxy_addr_t *a, int64_t now)
+{
+    if (!rcp_proxy_refusal_cached(&p->refusal, a, now)) {
+        const char *why = NULL;
+
+        if (netcfg_peer_check((const struct sockaddr *)src, NETCFG_SVC_RCP_PROXY, &why)) {
+            return true;
+        }
+        rcp_proxy_refusal_note(&p->refusal, a, why ? why : "", now);
+    }
+    const uint32_t n = rcp_proxy_refusal_log(&p->refusal, now);
+
+    if (n > 0) {
+        char from[RADIO_MUX_PEER_MAX];
+
+        rcp_proxy_peer_text((const struct sockaddr *)src, from, sizeof(from));
+        ESP_LOGW(TAG, "%s: refused %" PRIu32 " datagram(s) from sources the access rules refuse (last: %s, %s)", p->id,
+                 n, from, p->refusal.why);
+    }
+    return false;
+}
+
 // Whether a datagram from src is the peer's; a first one (or the first after a silence) makes it the peer.
 static bool take_source(proxy_t *p, const struct sockaddr_storage *src, socklen_t len, int64_t now)
 {
@@ -139,7 +166,7 @@ static bool take_source(proxy_t *p, const struct sockaddr_storage *src, socklen_
             p->refused++;
             return false;
         }
-    } else if (!p->lock.locked && !netcfg_peer_allowed((const struct sockaddr *)src, NETCFG_SVC_RCP_PROXY)) {
+    } else if (!p->lock.locked && !source_allowed(p, src, &a, now)) {
         p->refused++;
         return false;
     }
