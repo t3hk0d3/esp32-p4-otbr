@@ -576,7 +576,6 @@ static int cmd_busy(int argc, char **argv)
     return 0;
 }
 
-
 /* ---- CH340 experiments (2026-11-07, uncommitted PoC) ---- */
 
 static void ch34x_print(const char *what, esp_err_t err, const uint8_t *d, int n)
@@ -605,11 +604,11 @@ static esp_err_t ch34x_out(const char *what, uint8_t bm, uint8_t req, uint16_t v
     return err;
 }
 
-// ch34x diag|init|clear|ctrl <bm> <req> <val> <idx> [len]
+// ch34x diag|init|clear|ctrl <bm> <req> <val> <idx> [len]: len 0..8 (the data stage's buffer); others are refused
 static int cmd_ch34x(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("usage: ch34x diag|init|clear|ctrl <bm> <req> <val> <idx> [len]\n");
+        printf("usage: ch34x diag|init|clear|ctrl <bm> <req> <val> <idx> [len 0..8]\n");
         return 1;
     }
     if (strcmp(argv[1], "diag") == 0) {
@@ -630,11 +629,17 @@ static int cmd_ch34x(int argc, char **argv)
         ch34x_out("clear halt 02", 0x02, 0x01, 0, 0x0002);
     } else if (strcmp(argv[1], "ctrl") == 0 && argc >= 6) {
         uint8_t d[8] = {0};
-        const int len = argc >= 7 ? atoi(argv[6]) : 0;
+        char *end = NULL;
+        const long len = argc >= 7 ? strtol(argv[6], &end, 0) : 0;
+
+        if (argc >= 7 && (end == argv[6] || *end != '\0' || len < 0 || len > (long)sizeof(d))) {
+            printf("ch34x ctrl: len must be 0..%u\n", (unsigned)sizeof(d)); // the data stage lands in d
+            return 1;
+        }
         const esp_err_t err = radio_mux_test_usb_ctrl((uint8_t)strtoul(argv[2], NULL, 0), (uint8_t)strtoul(argv[3], NULL, 0),
-                              (uint16_t)strtoul(argv[4], NULL, 0), (uint16_t)strtoul(argv[5], NULL, 0),
-                              (uint16_t)(len > 8 ? 8 : len), len ? d : NULL);
-        ch34x_print("ctrl", err, d, len > 8 ? 8 : len);
+                                                      (uint16_t)strtoul(argv[4], NULL, 0), (uint16_t)strtoul(argv[5], NULL, 0),
+                                                      (uint16_t)len, len ? d : NULL);
+        ch34x_print("ctrl", err, d, (int)len);
     } else {
         printf("ch34x: unknown step\n");
         return 1;
