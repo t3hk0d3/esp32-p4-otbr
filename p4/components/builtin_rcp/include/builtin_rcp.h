@@ -5,6 +5,7 @@
 
 #include <stdbool.h>
 
+#include "builtin_rcp_core.h"
 #include "esp_err.h"
 #include "rcp_sync.h"
 
@@ -27,18 +28,19 @@ esp_err_t builtin_rcp_register(void);
 void builtin_rcp_get_status(builtin_rcp_status_t *out);
 
 /*
- * Push an RCP image to the built-in RCP on request (R14), as its channel's maintenance (radio_mux_maintain): the
- * mode instance on the channel lets go first (Thread: its sessions drain, OpenThread stops, the mode is STARTING; the
- * proxy refuses while a peer is connected; Zigbee pauses with its client connected), then rcp_sync_push_firmware, the
- * boot steps (the probe reads the pushed version), and the instance gets the channel back. Waits until that instance
- * runs again or says it does not (at most RADIO_MUX_SETTLE_MS). A push that worked whose mode then does not run is
+ * Push an RCP image to the built-in RCP on request (R14), as its channel's maintenance (radio_mux_maintain): the mode
+ * instance on the channel lets go first (Thread: its sessions drain, OpenThread stops, the mode is STARTING; the proxy
+ * refuses while a peer is connected; Zigbee pauses with its client connected), then rcp_sync_push_firmware, the boot
+ * steps (the probe reads the pushed version), and the instance gets the channel back. Waits until that instance runs
+ * again or says it does not (at most RADIO_MUX_SETTLE_MS). A push that worked whose mode then does not run is
  * RCP_SYNC_ERR_RESTART with `detail` "the image is installed, but <mode> did not start on it: <why>"; a failed push
  * returns its error (the previous firmware stays, the mode starts on it again). A base-only push (c6_installer.bin
  * through ESP-Hosted) returns ESP_OK and leaves the mode on "no rcp firmware". Refusals touch nothing:
  * ESP_ERR_INVALID_STATE while another maintenance or the boot steps run, OpenThread is being moved, or Thread refuses
  * (sniffer, starting, sessions open 45 s); RADIO_MUX_ERR_PEER_CONNECTED ("c6_busy: rcp-proxy on the C6 has a peer");
- * ESP_ERR_INVALID_ARG for a NULL source or read. `detail` (may be NULL) gets a short reason on failure. Blocks for
- * seconds to minutes; not from the radio mux owner task or the OpenThread task.
+ * ESP_ERR_INVALID_ARG for a NULL source or read. `detail` (may be NULL; BUILTIN_RCP_DETAIL_MAX holds every text whole)
+ * gets a short reason on failure. Blocks for seconds to minutes; not from the radio mux owner task or the OpenThread
+ * task.
  */
 esp_err_t builtin_rcp_push_firmware(const rcp_fw_source_t *source, char *detail, size_t cap);
 

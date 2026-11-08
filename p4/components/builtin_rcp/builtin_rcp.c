@@ -65,7 +65,7 @@ static esp_err_t maintain(radio_mux_work_t work, const rcp_fw_source_t *source, 
                                                     done.settle);
 
     if (result == RCP_SYNC_ERR_RESTART) {
-        char why[RADIO_MUX_REASON_MAX + 64];
+        char why[BUILTIN_RCP_DETAIL_MAX];
 
         builtin_rcp_restart_detail(why, sizeof(why), &done);
         ESP_LOGW(TAG, "%s: %s", what, why);

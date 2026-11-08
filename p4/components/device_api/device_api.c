@@ -1063,7 +1063,7 @@ static void push_task(void *arg)
     push_job_t *job = arg;
     httpd_req_t *req = job->req;
     const bool upload = job->url[0] == '\0';
-    char detail[96] = "";
+    char detail[BUILTIN_RCP_DETAIL_MAX] = "";
     body_source_t body_src = {.req = req};
     url_source_t url_src = {0};
     rcp_fw_source_t source = {0};
@@ -1167,11 +1167,13 @@ static esp_err_t radio_firmware_post_handler(httpd_req_t *req)
 /* ---- POST /device/radio/recover, GET /device/radio/log (maintenance jumper, spec 5.10) ---- */
 
 #define RECOVER_STACK 8192
+#define RECOVER_SETTLE_MS 2000    // how long the reply waits for Thread on the C6 to leave STARTING after the recovery
+#define RECOVER_SETTLE_POLL_MS 50
 
 static void recover_task(void *arg)
 {
     httpd_req_t *req = arg;
-    char detail[96] = "";
+    char detail[BUILTIN_RCP_DETAIL_MAX] = "";
     cancel_scan(); // the recovery tears OpenThread down
     const esp_err_t err = builtin_rcp_rom_recover(detail, sizeof(detail));
     br_core_status_t bs;
@@ -1181,6 +1183,13 @@ static void recover_task(void *arg)
 
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "ROM recovery failed: %s (%s)", esp_err_to_name(err), detail);
+    }
+    // The recovery returns once the C6 is ready or in fault; Thread on it acts on that a moment later on its own task.
+    const bool on_c6 = thread_on_builtin();
+
+    for (int i = 0; i < RECOVER_SETTLE_MS / RECOVER_SETTLE_POLL_MS && device_api_recover_waits(br_core_get_mode(), on_c6);
+            i++) {
+        vTaskDelay(pdMS_TO_TICKS(RECOVER_SETTLE_POLL_MS));
     }
     br_core_get_status(&bs); // the state after the restart: BR_RUNNING with the RCP, or RADIO_FAULT "no rcp firmware"
     builtin_rcp_get_status(&rs);

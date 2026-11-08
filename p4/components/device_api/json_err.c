@@ -185,6 +185,11 @@ device_api_error_t device_api_map_recover_error(esp_err_t err)
     };
 }
 
+bool device_api_recover_waits(int mode, bool thread_on_c6)
+{
+    return thread_on_c6 && mode == BR_MODE_STARTING;
+}
+
 const char *device_api_radio_job_busy(int mode, bool thread_on_c6, bool moving)
 {
     if (moving) {

@@ -37,6 +37,10 @@ void builtin_rcp_installed_after_push(bool probe_ok, const char *probed_version,
 // or had not said by the deadline, is RCP_SYNC_ERR_RESTART: the image is installed, so a retry of the push cannot help.
 esp_err_t builtin_rcp_job_result(bool base_only, esp_err_t job_err, radio_mux_settle_t settle);
 
+// The size a maintenance's `detail` buffer needs to hold every text builtin_rcp writes whole (a restart detail with
+// the longest reason a mode can report).
+#define BUILTIN_RCP_DETAIL_MAX (RADIO_MUX_REASON_MAX + 64)
+
 // The detail of RCP_SYNC_ERR_RESTART into `out`: "the image is installed, but <who> did not start on it: <why>", who
 // OpenThread, Zigbee or rcp-proxy, why the mode's reason, else its state, and for a mode that had not said by the
 // deadline "still starting after 180 s". Truncated to `cap`, always terminated.

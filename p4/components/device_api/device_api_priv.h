@@ -84,6 +84,13 @@ int device_api_recover_reply(esp_err_t err, const char *err_detail, int mode, bo
  */
 const char *device_api_radio_job_busy(int mode, bool thread_on_c6, bool moving);
 
+/**
+ * Whether POST /device/radio/recover keeps waiting before it reads the board mode for its reply: while Thread is on the
+ * C6 (`thread_on_c6`) and still STARTING. The recovery returns once the C6 is ready or in fault; Thread acts on that
+ * (its start, or RADIO_FAULT "no rcp firmware") a moment later on its own task.
+ */
+bool device_api_recover_waits(int mode, bool thread_on_c6);
+
 /** Error of netcfg_set_trial (PUT /device/network): ESP_ERR_INVALID_ARG 400 "invalid_config" (the caller puts the field in detail). */
 device_api_error_t device_api_map_network_set_error(esp_err_t err);
 

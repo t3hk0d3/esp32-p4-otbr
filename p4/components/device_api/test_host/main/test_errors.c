@@ -108,6 +108,20 @@ TEST_CASE("On a push whose image the C6 rejected at END: 400 invalid_image", "[d
     TEST_ASSERT_EQUAL_STRING("invalid_image", e.code);
 }
 
+TEST_CASE("On a recovery with Thread on the C6 still STARTING: the reply waits for Thread's own state",
+          "[device_api]")
+{
+    TEST_ASSERT_TRUE(device_api_recover_waits(BR_MODE_STARTING, true));
+}
+
+TEST_CASE("On a recovery with Thread settled, or on another radio: the reply does not wait", "[device_api]")
+{
+    TEST_ASSERT_FALSE(device_api_recover_waits(BR_MODE_RADIO_FAULT, true));
+    TEST_ASSERT_FALSE(device_api_recover_waits(BR_MODE_BR_RUNNING, true));
+    TEST_ASSERT_FALSE(device_api_recover_waits(BR_MODE_NO_RADIO, true));
+    TEST_ASSERT_FALSE(device_api_recover_waits(BR_MODE_STARTING, false));
+}
+
 TEST_CASE("On a move running: the radio job is busy with today's move text", "[device_api]")
 {
     TEST_ASSERT_EQUAL_STRING("OpenThread is being moved to another radio",

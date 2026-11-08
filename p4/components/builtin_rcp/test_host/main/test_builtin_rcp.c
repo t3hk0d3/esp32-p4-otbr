@@ -264,3 +264,28 @@ TEST_CASE("On a buffer too small for the detail: truncated and terminated", "[bu
     TEST_ASSERT_EQUAL(15, strlen(out));
     TEST_ASSERT_EQUAL_STRING("the image is in", out);
 }
+
+TEST_CASE("On the abandoned-start reason: the documented detail fits BUILTIN_RCP_DETAIL_MAX whole", "[builtin_rcp]")
+{
+    const radio_mux_maint_t m = outcome(RADIO_MUX_MODE_OTBR, RADIO_MUX_SETTLE_DOWN, "fault",
+                                        "an earlier OpenThread start was abandoned: reboot");
+    char out[BUILTIN_RCP_DETAIL_MAX];
+
+    builtin_rcp_restart_detail(out, sizeof(out), &m);
+    TEST_ASSERT_EQUAL_STRING("the image is installed, but OpenThread did not start on it: an earlier OpenThread start "
+                             "was abandoned: reboot", out);
+}
+
+TEST_CASE("On the longest reason a mode can report: the detail fits BUILTIN_RCP_DETAIL_MAX whole", "[builtin_rcp]")
+{
+    char reason[RADIO_MUX_REASON_MAX];
+    char out[BUILTIN_RCP_DETAIL_MAX];
+
+    memset(reason, 'x', sizeof(reason) - 1);
+    reason[sizeof(reason) - 1] = '\0';
+    const radio_mux_maint_t m = outcome(RADIO_MUX_MODE_OTBR, RADIO_MUX_SETTLE_DOWN, "fault", reason);
+
+    builtin_rcp_restart_detail(out, sizeof(out), &m);
+    TEST_ASSERT_EQUAL(strlen("the image is installed, but OpenThread did not start on it: ") + strlen(reason),
+                      strlen(out));
+}
