@@ -19,7 +19,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "radio_mux_priv.h"
-#include "rcp_sync.h"
 
 static const char *TAG = "radio_mux";
 
@@ -639,20 +638,18 @@ static void feed(mux_port_t *p, radio_mux_attach_ev_t ev)
 
 /* ---- owner: the C6 ---- */
 
-// Whether rcp_sync's last probe leaves the C6 listed (radio_mux_c6_present); why not in `why`.
+// Whether the built-in RCP's last probe leaves the C6 listed (its `present` op); why not in `why`. No built-in RCP
+// described: listed (its installed firmware is tried).
 static bool c6_probe_present(char *why, size_t cap)
 {
-    rcp_sync_probe_result_t r;
+    const radio_mux_builtin_t *b = g_mux.builtin;
+    radio_mux_fault_kind_t kind;
 
-    rcp_sync_get_last_probe(&r);
-    const radio_mux_c6_probe_t probe = {
-        .updater_reachable = r.updater_reachable,
-        .installed_valid = r.installed_valid,
-        .esp_hosted = r.esp_hosted,
-        .rom_recovery_failed = r.rom_recovery_failed,
-    };
-
-    return radio_mux_c6_present(&probe, why, cap);
+    if (b == NULL) {
+        snprintf(why, cap, "%s", "");
+        return true;
+    }
+    return b->present(&kind, why, cap);
 }
 
 // Lists c6 present (firmware spinel unless a record says otherwise) or unavailable with `why`. Not while attached.
@@ -732,7 +729,7 @@ static void c6_apply(bool reattach)
     refresh(p);
 }
 
-// Owner task start: c6 listed from rcp_sync's last probe (none yet: present), then held for its boot steps
+// Owner task start: c6 listed from its last probe (none yet: present), then held for its boot steps
 // (radio_mux_c6_hold_t): busy, nothing attached, SPI2 and the pins untouched, until the boot job's end attaches the
 // stored mode's consumer once, after the steps (or until the hold expires: c6_hold_check).
 static void c6_init(void)
@@ -751,7 +748,7 @@ static void c6_init(void)
 }
 
 // Owner loop: a boot hold no job took within RADIO_MUX_C6_BOOT_HOLD_MS (br_core never ran its boot, or failed before
-// it) is let go: c6 is listed from rcp_sync's last probe and its stored mode attached, without the boot steps.
+// it) is let go: c6 is listed from its last probe and its stored mode attached, without the boot steps.
 static void c6_hold_check(void)
 {
     mux_port_t *p = &g_mux.c6;

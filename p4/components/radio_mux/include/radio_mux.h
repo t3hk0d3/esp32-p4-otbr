@@ -126,6 +126,33 @@ void radio_mux_report(radio_mux_chan_t *ch, const char *state, const char *reaso
 // seq. Never blocks: ESP_FAIL when the owner's queue was full (the answer is lost: the maintenance times out).
 esp_err_t radio_mux_reinit_reply(radio_mux_chan_t *ch, uint32_t seq, esp_err_t verdict, const char *reason);
 
+/* ---- the built-in RCP (the board's own radio: the C6 on this board) ---- */
+
+// A board's built-in RCP as its implementation (the builtin_rcp component) describes it: the channel's id, label and
+// chip, and the maintenance ops. The ops run on the caller's task while the channel is in reinit (until maintenance is
+// the reinit state: inside a C6 job), never on the owner task, except `present`, which never blocks.
+typedef struct {
+    const char *id;    // the channel's id
+    const char *label; // the channel's label
+    const char *chip;  // e.g. "esp32c6"
+    // Whether the RCP is usable after its last probe; otherwise *kind (RADIO_MUX_FAULT_FIRMWARE) and why in `reason`.
+    bool (*present)(radio_mux_fault_kind_t *kind, char *reason, size_t cap);
+    // The boot steps (probe the installed image, the jumper, the automatic ROM recovery, reset into the RCP): ESP_OK
+    // when the RCP runs; otherwise the fault's kind and reason (ESP_ERR_INVALID_STATE: the test build holds it in reset;
+    // ESP_ERR_NOT_FOUND: the RCP cannot run).
+    esp_err_t (*boot_steps)(radio_mux_fault_kind_t *kind, char *reason, size_t cap);
+    // Push an image (`source`: a const rcp_fw_source_t *): rcp_sync's result, its text in `detail`. *base_only: the
+    // RCP is left with its updater and no RCP firmware (c6_installer.bin through ESP-Hosted).
+    esp_err_t (*push)(const void *source, char *detail, size_t cap, bool *base_only);
+    // The ROM recovery of the base image: ESP_ERR_NOT_SUPPORTED without the maintenance jumper.
+    esp_err_t (*rom_recover)(char *detail, size_t cap);
+} radio_mux_builtin_t;
+
+// Before radio_mux_start (ESP_ERR_INVALID_STATE after it). The descriptor is kept, not copied: it must outlive the mux.
+esp_err_t radio_mux_set_builtin(const radio_mux_builtin_t *b);
+// The built-in RCP's descriptor; NULL when none was set. Any task.
+const radio_mux_builtin_t *radio_mux_builtin(void);
+
 // Loads the channels from NVS, lists c6, creates the eventfds (the eventfd VFS must be registered), starts the owner
 // task (MGMT_CORE), which installs the USB host from NET_CORE (its interrupt and the CDC driver's task run there, off
 // the management core's interrupt-masking code) and attaches registered consumers to present channels. Once.

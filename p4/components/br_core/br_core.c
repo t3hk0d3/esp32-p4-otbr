@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "board.h"
+#include "builtin_rcp.h"
 #include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_event.h"
@@ -64,13 +65,10 @@ static const char *TAG = "br_core";
 #define LEADER_NVS_NAMESPACE "thread"
 #define LEADER_NVS_KEY "leader_adj"
 #define REBOOT_DELAY_MS 1500 // lets the caller of a push report its result before the reboot
-#define FAULT_NO_RCP "no rcp firmware"
 #define FAULT_INCOMPATIBLE MODE_FSM_FAULT_INCOMPATIBLE
-#define FAULT_ROM_RECOVERY "rom recovery failed"
 #define TREL_SET_LOCK_MS 1000
 #define TREL_QUERY_MS 3000 // how long a peer query collects answers (esp mdns sends it about once a second)
 #define TREL_QUERY_DELAY_MS 100 // after an address event: a burst of them gets one query
-#define FAULT_C6_HELD FAULT_INCOMPATIBLE // the test build's c6_hold: the C6 stays in reset, as an RCP that never answers
 
 core_state_t g_core;
 bool g_storage_degraded; // set by br_core_note_storage_init before br_core_start
@@ -231,7 +229,7 @@ static esp_err_t reset_rcp(void)
         return ESP_ERR_INVALID_STATE;
     }
 #ifdef OTBR_TEST_BUILD
-    if (strcmp(radio_mux_chan_id(ch), RADIO_MUX_C6_ID) == 0 && br_core_test_c6_hold()) {
+    if (strcmp(radio_mux_chan_id(ch), RADIO_MUX_C6_ID) == 0 && builtin_rcp_test_c6_hold()) {
         ESP_LOGW(TAG, "test build: holding the C6 in reset");
         gpio_set_level(P4_PIN_C6_RESET, 0);
         return ESP_OK;
@@ -518,92 +516,31 @@ static esp_err_t init_openthread(void)
     return ESP_OK;
 }
 
-// The boot-time probe, best effort. The test build can force the result of the first probe of a boot; the probe
-// after a firmware push (which restarts the radio through here) is always real.
-static esp_err_t run_probe(rcp_sync_probe_result_t *probe)
-{
-#ifdef OTBR_TEST_BUILD
-    static bool override_used;
-    const br_core_test_probe_t forced = override_used ? BR_CORE_TEST_PROBE_REAL : br_core_test_probe_override();
-
-    override_used = true;
-    if (forced != BR_CORE_TEST_PROBE_REAL) {
-        ESP_LOGW(TAG, "test build: probe forced to %s", forced == BR_CORE_TEST_PROBE_EMPTY ? "empty" : "fail");
-        memset(probe, 0, sizeof(*probe));
-        probe->updater_reachable = forced == BR_CORE_TEST_PROBE_EMPTY;
-        strlcpy(probe->last_error, "forced by the test build", sizeof(probe->last_error));
-        return ESP_OK;
-    }
-#endif
-    return rcp_sync_probe(probe);
-}
-
-// The C6's own boot steps (spec 5.3 steps 3 and 4), inside a C6 job (radio_mux_c6_job_begin/_end): probe the installed
-// RCP over the updater (rcp_sync, SPI3), the ROM recovery it may run, then reset the C6 into its RCP. Nothing is pushed.
-// The status fields follow the probe (rcp.compatible becomes unknown). `affects_mode`: the C6 is the OTBR channel, so
-// what stops it from running OpenThread is a radio fault (as before the mux); otherwise only the status changes.
-// Returns ESP_OK when the C6 should run its RCP; ESP_ERR_INVALID_STATE for the test build's c6_hold (the C6 stays in
-// reset), ESP_ERR_NOT_FOUND otherwise.
+// The C6's own boot steps (the built-in RCP's boot_steps op: the probe, the ROM recovery it may run, the reset into the
+// RCP), inside a C6 job (radio_mux_c6_job_begin/_end). OpenThread has not judged what the C6 holds now: rcp.compatible
+// becomes unknown. `affects_mode`: the C6 is the OTBR channel, so what stops it from running OpenThread is a radio
+// fault (as before the mux); otherwise only the status changes. Returns the op's result: ESP_OK when the C6 should run
+// its RCP; ESP_ERR_INVALID_STATE for the test build's c6_hold (the C6 stays in reset), ESP_ERR_NOT_FOUND otherwise.
 esp_err_t core_c6_boot_steps(bool affects_mode)
 {
-    rcp_sync_probe_result_t probe;
-    esp_err_t err = run_probe(&probe);
-    const char *fault = NULL;
-    bool held = false;
+    const radio_mux_builtin_t *b = radio_mux_builtin();
+    radio_mux_fault_kind_t kind = RADIO_MUX_FAULT_NONE;
+    char fault[RADIO_MUX_REASON_MAX] = "no built-in RCP";
+    const esp_err_t steps = b ? b->boot_steps(&kind, fault, sizeof(fault)) : ESP_ERR_NOT_FOUND;
 
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "RCP probe could not run: %s", esp_err_to_name(err));
-        memset(&probe, 0, sizeof(probe));
-    }
     xSemaphoreTake(g_core.mutex, portMAX_DELAY);
-    g_core.rcp_installed_known = probe.updater_reachable;
-    strlcpy(g_core.rcp_installed, probe.installed_version, sizeof(g_core.rcp_installed));
     // Whatever channel OpenThread runs on: the steps follow a boot or a C6 job (an image pushed, a recovery), and
     // OpenThread has not judged what the C6 holds now. Only a start on the C6 judges it again (set_compatible).
     g_core.rcp_compatible = false;
     g_core.rcp_compatible_known = false;
-    g_core.rom_recovery_failed = mode_fsm_next_recovery_failed(g_core.rom_recovery_failed,
-                                                               probe.rom_recovery_failed || probe.rom_recovered, probe.rom_recovered);
     xSemaphoreGive(g_core.mutex);
-    if (mode_fsm_rom_failure_is_fault(&probe)) {
-        // Spec 7: the updater was silent and the recovery failed; no further automatic attempt this boot.
-        ESP_LOGE(TAG, "the ROM recovery of the C6 base image failed");
-        fault = FAULT_ROM_RECOVERY;
-    } else if (probe.esp_hosted) {
-        // A factory C6: OpenThread cannot run on it. The device page asks for c6_installer.bin.
-        ESP_LOGE(TAG, "the C6 runs its factory ESP-Hosted firmware: upload c6_installer.bin, then c6_rcp.bin");
-        fault = RCP_SYNC_ESP_HOSTED_ERROR;
-    } else if (probe.updater_reachable && !probe.installed_valid) {
-        ESP_LOGE(TAG, "the C6 holds no RCP firmware");
-        fault = FAULT_NO_RCP;
-    }
-    if (probe.rom_recovery_failed && !fault) {
-        // The updater answered (base version mismatch): an RCP may be installed, so the boot goes on with it.
-        ESP_LOGE(TAG, "the ROM recovery of the C6 base image failed; continuing with the installed RCP (see status jumper.recovery_failed)");
-    }
-    if (!fault && !probe.updater_reachable) {
-        ESP_LOGW(TAG, "RCP probe failed (%s), trying the installed firmware", probe.last_error);
-    } else if (!fault) {
-        ESP_LOGI(TAG, "installed RCP firmware %s", probe.installed_version);
-    }
-#ifdef OTBR_TEST_BUILD
-    if (!fault && br_core_test_c6_hold()) {
-        ESP_LOGW(TAG, "test build: holding the C6 in reset");
-        gpio_set_level(P4_PIN_C6_RESET, 0);
-        fault = FAULT_C6_HELD;
-        held = true;
-    }
-#endif
-    if (!fault && rcp_sync_boot_rcp() != ESP_OK) {
-        fault = "resetting the RCP failed";
-    }
-    if (fault && affects_mode) {
-        if (held) {
+    if (steps != ESP_OK && affects_mode) {
+        if (steps == ESP_ERR_INVALID_STATE) {
             core_set_c6_compatible(false); // as an RCP that never answers (core_radio_probe_channel's verdict)
         }
         core_enter_fault(fault);
     }
-    return held ? ESP_ERR_INVALID_STATE : fault ? ESP_ERR_NOT_FOUND : ESP_OK;
+    return steps;
 }
 
 // The OpenThread task: initialises OpenThread on the channel of core_radio_chan (core_radio_ot_start), then runs its main loop.
@@ -781,11 +718,8 @@ static void get_status_brief(br_core_status_t *out, bool *ot_ready, bool *border
     }
     radio_mux_otbr_channel(out->otbr_channel, sizeof(out->otbr_channel)); // not under br_core's mutex: the mux's lock
     xSemaphoreTake(g_core.mutex, portMAX_DELAY);
-    strlcpy(out->rcp_installed, g_core.rcp_installed, sizeof(out->rcp_installed));
-    out->rcp_installed_known = g_core.rcp_installed_known;
     out->rcp_compatible = g_core.rcp_compatible;
     out->rcp_compatible_known = g_core.rcp_compatible_known;
-    out->rom_recovery_failed = g_core.rom_recovery_failed;
     strlcpy(out->fault_reason, g_core.fault_reason, sizeof(out->fault_reason));
     *ot_ready = g_core.ot_ready && out->mode != BR_MODE_RADIO_FAULT;
     *border_router = g_core.bringup_started;
@@ -1194,24 +1128,13 @@ void core_schedule_reboot(void)
 // *base_only: the job leaves the C6 with its updater and no RCP (a ROM recovery, or c6_installer.bin through ESP-Hosted).
 static esp_err_t run_c6_job(const rcp_fw_source_t *source, char *err_detail, size_t err_cap, bool *base_only)
 {
+    const radio_mux_builtin_t *b = radio_mux_builtin();
+
     *base_only = source == NULL;
-    if (source) {
-        return rcp_sync_push_firmware(source, err_detail, err_cap, base_only);
+    if (!b) {
+        return ESP_ERR_NOT_SUPPORTED;
     }
-    // A failed manual recovery still restarts OpenThread, whose boot probe may then run the one automatic recovery of
-    // this boot (the probe sees the same trigger): a second attempt after a manual one is intended, not a loop.
-    const esp_err_t err = rcp_sync_rom_recover();
-    // Refusals (no jumper, busy, no image) are no attempt; anything else is, and decides the status flag.
-    const bool attempted = err != ESP_ERR_NOT_SUPPORTED && err != ESP_ERR_INVALID_STATE;
-
-    xSemaphoreTake(g_core.mutex, portMAX_DELAY);
-    g_core.rom_recovery_failed = mode_fsm_next_recovery_failed(g_core.rom_recovery_failed, attempted, err == ESP_OK);
-    xSemaphoreGive(g_core.mutex);
-
-    if (err != ESP_OK && err_detail && err_cap > 0) {
-        strlcpy(err_detail, err == ESP_ERR_NOT_SUPPORTED ? "no maintenance jumper" : "ROM recovery of the C6 base image failed", err_cap);
-    }
-    return err;
+    return source ? b->push(source, err_detail, err_cap, base_only) : b->rom_recover(err_detail, err_cap);
 }
 
 // A C6 job inside radio_mux_c6_job_begin/_end, then the C6's boot steps (the status reads the result).

@@ -713,23 +713,6 @@ uint32_t radio_mux_spi_gap_wait_us(int64_t now_us, int64_t last_end_us, uint32_t
     return since >= (int64_t)gap_us ? 0 : (uint32_t)((int64_t)gap_us - since);
 }
 
-bool radio_mux_c6_present(const radio_mux_c6_probe_t *probe, char *reason, size_t cap)
-{
-    const char *why = NULL;
-
-    if (probe->esp_hosted) {
-        why = "the C6 runs its factory ESP-Hosted firmware";
-    } else if (probe->rom_recovery_failed && !probe->updater_reachable) {
-        why = "the ROM recovery of the C6 failed";
-    } else if (probe->updater_reachable && !probe->installed_valid) {
-        why = "no RCP firmware on the C6";
-    }
-    if (reason && cap > 0) {
-        snprintf(reason, cap, "%s", why ? why : "");
-    }
-    return why == NULL;
-}
-
 bool radio_mux_c6_job_refused(radio_mux_mode_t stored_mode, bool attached, bool has_peer)
 {
     return stored_mode == RADIO_MUX_MODE_RCP_PROXY && attached && has_peer;

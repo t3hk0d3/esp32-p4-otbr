@@ -23,6 +23,7 @@
 
 #include "board_cores.h"
 #include "br_core.h"
+#include "builtin_rcp.h"
 #include "c6_board.h"
 #include "esp_partition.h"
 #include "ota_bundle.h"
@@ -357,6 +358,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     device_api_status_t *s = calloc(1, sizeof(*s));
     char *body = malloc(STATUS_BODY_MAX);
     br_core_status_t bs;
+    builtin_rcp_status_t rs;
     sniffer_stats_t ss;
     char ipv4_text[16];
     char base_expected[BASE_VERSION_MAX];
@@ -367,6 +369,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
         return send_error(req, 500, "no_memory", "out of memory", false);
     }
     br_core_get_status(&bs);
+    builtin_rcp_get_status(&rs);
     sniffer_get_stats(&ss);
     rcp_sync_probe_result_t probe;
 
@@ -375,12 +378,12 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     s->mode = bs.mode;
     s->app_version = esp_app_get_description()->version;
     s->app_slot = running_slot();
-    s->rcp_installed_known = bs.rcp_installed_known;
-    s->rcp_installed = bs.rcp_installed;
+    s->rcp_installed_known = rs.installed_known;
+    s->rcp_installed = rs.installed;
     s->rcp_compatible = bs.rcp_compatible;
     s->rcp_compatible_known = bs.rcp_compatible_known;
-    s->jumper_present = rcp_sync_jumper_present();
-    s->jumper_recovery_failed = bs.rom_recovery_failed;
+    s->jumper_present = rs.jumper;
+    s->jumper_recovery_failed = rs.rom_recovery_failed;
     s->base_expected = base_expected;
     s->base_installed = probe.updater_reachable ? probe.updater_version : "";
     fill_eth(s, ipv4_text, sizeof(ipv4_text));
@@ -447,16 +450,18 @@ static void fill_zigbee_metrics(metrics_device_t *device)
 static esp_err_t metrics_get_handler(httpd_req_t *req)
 {
     br_core_status_t bs;
+    builtin_rcp_status_t rs;
     sniffer_stats_t ss;
 
     br_core_get_status_brief(&bs);
+    builtin_rcp_get_status(&rs);
     sniffer_get_stats(&ss);
     esp_netif_t *netif = mgmt_netif();
     metrics_device_t device = {
         .mode = bs.mode,
         .version = esp_app_get_description()->version,
         .slot = running_slot(),
-        .rcp_version = bs.rcp_installed_known ? bs.rcp_installed : "",
+        .rcp_version = rs.installed_known ? rs.installed : "",
         .rcp_compatible = bs.rcp_compatible,
         .rcp_compatible_known = bs.rcp_compatible_known,
         .storage_ok = !bs.storage_degraded,
@@ -1035,11 +1040,11 @@ static void push_reply_result(httpd_req_t *req, esp_err_t err, const char *detai
     }
     // After an abandoned OpenThread start the mode stays RADIO_FAULT for ~1.5 s until br_core reboots by itself:
     // the reply goes out at once.
-    br_core_status_t status;
+    builtin_rcp_status_t rs;
     char body[96];
 
-    br_core_get_status(&status);
-    if (device_api_installed_json(body, sizeof(body), status.rcp_installed_known, status.rcp_installed) < 0) {
+    builtin_rcp_get_status(&rs);
+    if (device_api_installed_json(body, sizeof(body), rs.installed_known, rs.installed) < 0) {
         send_error(req, 500, "internal", "reply does not fit its buffer", false);
         return;
     }
@@ -1163,6 +1168,7 @@ static void recover_task(void *arg)
     cancel_scan(); // the recovery tears OpenThread down
     const esp_err_t err = br_core_rom_recover(detail, sizeof(detail));
     br_core_status_t bs;
+    builtin_rcp_status_t rs;
     char body[384];
     int http_status = 0;
 
@@ -1170,11 +1176,12 @@ static void recover_task(void *arg)
         ESP_LOGW(TAG, "ROM recovery failed: %s (%s)", esp_err_to_name(err), detail);
     }
     br_core_get_status(&bs); // the state after the restart: BR_RUNNING with the RCP, or RADIO_FAULT "no rcp firmware"
+    builtin_rcp_get_status(&rs);
     // With Thread on another channel the mode and its fault are that channel's: the reply describes the C6 alone.
     const bool thread_on_c6 = strcmp(bs.otbr_channel, RADIO_MUX_C6_ID) == 0;
 
     if (device_api_recover_reply(err, detail[0] ? detail : esp_err_to_name(err), bs.mode, thread_on_c6, bs.fault_reason,
-                                 bs.rcp_installed_known, bs.rcp_installed, body, sizeof(body), &http_status) < 0) {
+                                 rs.installed_known, rs.installed, body, sizeof(body), &http_status) < 0) {
         http_status = 500;
         strlcpy(body, "{\"error\":\"internal\",\"detail\":\"reply too large\"}", sizeof(body));
     }
@@ -1271,16 +1278,16 @@ static esp_err_t send_update_state(httpd_req_t *req)
 {
     char *body = malloc(UPDATE_BODY_MAX);
     self_update_snapshot_t snap;
-    br_core_status_t bs;
+    builtin_rcp_status_t rs;
     esp_err_t err;
 
     if (!body) {
         return send_error(req, 500, "no_memory", "out of memory", false);
     }
     self_update_get(&snap);
-    br_core_get_status(&bs);
+    builtin_rcp_get_status(&rs);
     if (device_api_update_json(body, UPDATE_BODY_MAX, &snap, self_update_base(), esp_app_get_description()->version,
-                               bs.rcp_installed_known, bs.rcp_installed) < 0) {
+                               rs.installed_known, rs.installed) < 0) {
         err = send_error(req, 500, "internal", "update state does not fit its buffer", false);
     } else {
         err = send_json(req, body);
@@ -1455,7 +1462,7 @@ static bool run_update(update_job_t *job)
     httpd_req_t *req = job->req;
     const self_update_release_t *rel = &job->release;
     device_api_error_t error;
-    br_core_status_t bs;
+    builtin_rcp_status_t rs;
     bool install_app;
     bool install_rcp;
 
@@ -1463,9 +1470,9 @@ static bool run_update(update_job_t *job)
         send_error(req, 502, "check_failed", job->detail, false);
         return false;
     }
-    br_core_get_status(&bs);
+    builtin_rcp_get_status(&rs);
     error = device_api_update_decide(self_update_compare(rel->app, esp_app_get_description()->version),
-                                     self_update_rcp_differs(rel->rcp, bs.rcp_installed, bs.rcp_installed_known),
+                                     self_update_rcp_differs(rel->rcp, rs.installed, rs.installed_known),
                                      rel->rcp[0] != '\0', job->force, &install_app, &install_rcp);
     if (error.http_status != 0) {
         send_mapped_error(req, error, error.detail, false);

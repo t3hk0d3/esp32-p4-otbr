@@ -438,21 +438,6 @@ size_t radio_mux_spi_xfer_len(uint16_t tx_len, uint16_t accept);
 // yet), else the rest of the gap. A clock that went backwards counts as "just ended" (the whole gap).
 uint32_t radio_mux_spi_gap_wait_us(int64_t now_us, int64_t last_end_us, uint32_t gap_us);
 
-// What rcp_sync's last probe of the C6 said (the fields of rcp_sync_probe_result_t the mux reads). All false: no probe
-// ran yet.
-typedef struct {
-    bool updater_reachable;
-    bool installed_valid;
-    bool esp_hosted;
-    bool rom_recovery_failed;
-} radio_mux_c6_probe_t;
-
-// Whether c6 is listed present: not when the C6 runs the factory ESP-Hosted firmware, when a ROM recovery failed and
-// the updater stayed silent, or when the updater answered with no RCP installed; `reason` (may be NULL) then names
-// which, else it is empty. No probe yet, or a silent updater without a failed recovery: present (the installed
-// firmware is tried, as br_core does).
-bool radio_mux_c6_present(const radio_mux_c6_probe_t *probe, char *reason, size_t cap);
-
 // Whether a C6 job (push, recovery, probe) is refused: only while the C6's stored mode is rcp-proxy, its consumer is
 // attached and it reported a connected peer.
 bool radio_mux_c6_job_refused(radio_mux_mode_t stored_mode, bool attached, bool has_peer);

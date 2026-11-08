@@ -164,3 +164,18 @@ esp_err_t radio_mux_register_instance(const radio_mux_instance_t *inst)
     ESP_LOGI(TAG, "%s instance registered", radio_mux_mode_name(inst->mode));
     return ESP_OK;
 }
+
+esp_err_t radio_mux_set_builtin(const radio_mux_builtin_t *b)
+{
+    ESP_RETURN_ON_FALSE(b && b->id && b->present && b->boot_steps && b->push && b->rom_recover, ESP_ERR_INVALID_ARG, TAG,
+                        "the built-in RCP needs an id and its ops");
+    ESP_RETURN_ON_FALSE(!atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "set it before radio_mux_start");
+    g_mux.builtin = b;
+    ESP_LOGI(TAG, "built-in RCP: %s (%s)", b->id, b->chip ? b->chip : "?");
+    return ESP_OK;
+}
+
+const radio_mux_builtin_t *radio_mux_builtin(void)
+{
+    return g_mux.builtin;
+}

@@ -188,67 +188,6 @@ TEST_CASE("On a short frame of ours (accept 32): clocks 64 bytes; on 100 bytes: 
     TEST_ASSERT_EQUAL(128, radio_mux_spi_xfer_len(100, 100));
 }
 
-/* ---- radio_mux_c6_present ---- */
-
-TEST_CASE("On no probe yet: present, reason empty", "[radio_mux]")
-{
-    const radio_mux_c6_probe_t p = {0};
-    char why[64] = "x";
-
-    TEST_ASSERT_TRUE(radio_mux_c6_present(&p, why, sizeof(why)));
-    TEST_ASSERT_EQUAL_STRING("", why);
-}
-
-TEST_CASE("On an RCP installed: present", "[radio_mux]")
-{
-    const radio_mux_c6_probe_t p = {.updater_reachable = true, .installed_valid = true};
-
-    TEST_ASSERT_TRUE(radio_mux_c6_present(&p, NULL, 0));
-}
-
-TEST_CASE("On a silent updater without a failed recovery: present (the installed firmware is tried)", "[radio_mux]")
-{
-    const radio_mux_c6_probe_t p = {.updater_reachable = false};
-    char why[64];
-
-    TEST_ASSERT_TRUE(radio_mux_c6_present(&p, why, sizeof(why)));
-    TEST_ASSERT_EQUAL_STRING("", why);
-}
-
-TEST_CASE("On the factory ESP-Hosted firmware: unavailable, the reason names it", "[radio_mux]")
-{
-    const radio_mux_c6_probe_t p = {.esp_hosted = true};
-    char why[64];
-
-    TEST_ASSERT_FALSE(radio_mux_c6_present(&p, why, sizeof(why)));
-    TEST_ASSERT_EQUAL_STRING("the C6 runs its factory ESP-Hosted firmware", why);
-}
-
-TEST_CASE("On a failed ROM recovery with a silent updater: unavailable, the reason names it", "[radio_mux]")
-{
-    const radio_mux_c6_probe_t p = {.rom_recovery_failed = true};
-    char why[64];
-
-    TEST_ASSERT_FALSE(radio_mux_c6_present(&p, why, sizeof(why)));
-    TEST_ASSERT_EQUAL_STRING("the ROM recovery of the C6 failed", why);
-}
-
-TEST_CASE("On a failed ROM recovery with the updater answering and an RCP installed: present", "[radio_mux]")
-{
-    const radio_mux_c6_probe_t p = {.rom_recovery_failed = true, .updater_reachable = true, .installed_valid = true};
-
-    TEST_ASSERT_TRUE(radio_mux_c6_present(&p, NULL, 0));
-}
-
-TEST_CASE("On the updater answering with no RCP installed: unavailable, the reason names it", "[radio_mux]")
-{
-    const radio_mux_c6_probe_t p = {.updater_reachable = true, .installed_valid = false};
-    char why[64];
-
-    TEST_ASSERT_FALSE(radio_mux_c6_present(&p, why, sizeof(why)));
-    TEST_ASSERT_EQUAL_STRING("no RCP firmware on the C6", why);
-}
-
 /* ---- radio_mux_c6_job_refused ---- */
 
 TEST_CASE("On rcp-proxy attached with a connected peer: the job is refused", "[radio_mux]")

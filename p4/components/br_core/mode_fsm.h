@@ -209,19 +209,6 @@ void mode_fsm_on_rcp_failure(mode_fsm_t *fsm);
 esp_err_t mode_fsm_reset_rcp(mode_fsm_t *fsm);
 
 /**
- * What a failed ROM recovery in the boot probe means: RADIO_FAULT "rom recovery failed" only when the updater was
- * silent before the attempt. When it was reachable (the trigger was a base version mismatch) an RCP may be installed
- * and the boot goes on with it; the failure is only recorded in the status. False when no recovery failed.
- */
-bool mode_fsm_rom_failure_is_fault(const rcp_sync_probe_result_t *probe);
-
-/**
- * The sticky "a ROM recovery failed" flag of the status: unchanged without an attempt, set by a failed attempt, cleared
- * by a successful one. Applies to automatic (boot probe) and manual recoveries alike.
- */
-bool mode_fsm_next_recovery_failed(bool previous, bool attempted, bool succeeded);
-
-/**
  * Result of a C6 job (the part of op_radio_job after the job ran): `job_err` is the push or the ROM recovery, `restart_err`
  * the OpenThread restart that follows. A firmware push reports its own error first; a push that worked followed by a
  * failed restart is RCP_SYNC_ERR_RESTART (the image is installed, so a retry of the push cannot help). A ROM recovery
@@ -230,13 +217,6 @@ bool mode_fsm_next_recovery_failed(bool previous, bool attempted, bool succeeded
  * c6_installer.bin through ESP-Hosted leaves the same state and counts as base-only too (`base_only` true for both).
  */
 esp_err_t mode_fsm_radio_job_result(bool base_only, esp_err_t job_err, esp_err_t restart_err);
-
-/**
- * What the status shows as the installed RCP version after a push whose version was read back from the C6 (`probe_ok`) or
- * not: the read-back version, or, when it could not be read, unknown (`*known` false, `out` empty) — never the version
- * from before the push.
- */
-void mode_fsm_installed_after_push(bool probe_ok, const char *probed_version, bool *known, char *out, size_t cap);
 
 /**
  * The board mode at boot from the channel stored in otbr (NULL: none). The C6: true, the mode stays STARTING and the

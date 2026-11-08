@@ -31,11 +31,8 @@ extern "C" {
 typedef struct {
     br_core_mode_t mode;
     bool storage_degraded;        /**< NVS did not initialise: OpenThread does not start (RADIO_FAULT "storage unavailable"), everything else runs */
-    char rcp_installed[32];       /**< version of the RCP firmware installed in the C6; "" = none (or unknown) */
-    bool rcp_installed_known;     /**< false when the boot-time probe could not read the version */
     bool rcp_compatible;          /**< OpenThread accepted the C6's RCP at its last start on the C6 (a dongle never sets it) */
     bool rcp_compatible_known;    /**< OpenThread judged the C6's RCP this boot; false: not checked (Thread never ran there) */
-    bool rom_recovery_failed;     /**< a ROM recovery failed and none worked since (the boot went on with the installed RCP, or RADIO_FAULT) */
     uint8_t channel;     /**< channel of the active dataset; 0 without one */
     bool ot_state_valid; /**< channel, has_dataset and pd_* were read from OpenThread; false when it is not up or its lock was not free within 100 ms (then they are unknown, not "none") */
     bool has_dataset;    /**< an active dataset is stored; only meaningful with ot_state_valid */
@@ -335,23 +332,6 @@ esp_err_t br_core_become_leader(br_core_leader_refusal_t *refusal, uint8_t *weig
  * OpenThread state are deliberately not criteria. Safe to call early: the 60 s count from boot.
  */
 void validity_start(void);
-
-#ifdef OTBR_TEST_BUILD
-/** Test builds: hold the C6 in reset instead of booting the RCP (persisted in NVS across reboots). */
-esp_err_t br_core_test_set_c6_hold(bool hold);
-bool br_core_test_c6_hold(void);
-
-typedef enum {
-    BR_CORE_TEST_PROBE_REAL, /**< run the real probe */
-    BR_CORE_TEST_PROBE_EMPTY, /**< pretend the C6 boot slot is empty */
-    BR_CORE_TEST_PROBE_FAIL, /**< pretend the probe failed */
-} br_core_test_probe_t;
-
-/** Test builds: force the boot-time probe result (persisted in NVS across reboots). */
-esp_err_t br_core_test_set_probe_override(br_core_test_probe_t mode);
-br_core_test_probe_t br_core_test_probe_override(void);
-
-#endif
 
 #ifdef __cplusplus
 }

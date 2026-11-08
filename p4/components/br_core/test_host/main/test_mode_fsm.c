@@ -910,78 +910,12 @@ TEST_CASE("On RCP failure in SNIFFER without a registered callback: ends the cap
     TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
 }
 
-TEST_CASE("On a push whose version was read back: the new version is known", "[br_core]")
-{
-    bool known = false;
-    char installed[32] = "1.0.0";
-
-    mode_fsm_installed_after_push(true, "2.0.0", &known, installed, sizeof(installed));
-    TEST_ASSERT_TRUE(known);
-    TEST_ASSERT_EQUAL_STRING("2.0.0", installed);
-}
-
-TEST_CASE("On a push whose version could not be read back: unknown and the old version is gone", "[br_core]")
-{
-    bool known = true;
-    char installed[32] = "1.0.0";
-
-    mode_fsm_installed_after_push(false, "", &known, installed, sizeof(installed));
-    TEST_ASSERT_FALSE(known);
-    TEST_ASSERT_EQUAL_STRING("", installed);
-}
-
 void app_main(void)
 {
     UNITY_BEGIN();
     unity_run_all_tests();
     int failures = (int)UNITY_END();
     exit(failures == 0 ? 0 : 1);
-}
-
-TEST_CASE("On a failed ROM recovery after a silent updater: the boot enters RADIO_FAULT", "[mode_fsm]")
-{
-    rcp_sync_probe_result_t probe = {.rom_recovery_failed = true, .updater_reachable = false};
-
-    TEST_ASSERT_TRUE(mode_fsm_rom_failure_is_fault(&probe));
-}
-
-TEST_CASE("On a failed ROM recovery after a version mismatch (updater reachable): the boot goes on with the installed RCP", "[mode_fsm]")
-{
-    rcp_sync_probe_result_t probe = {.rom_recovery_failed = true, .updater_reachable = true, .installed_valid = true};
-
-    TEST_ASSERT_FALSE(mode_fsm_rom_failure_is_fault(&probe));
-}
-
-TEST_CASE("On a probe without a failed recovery: no fault from the recovery", "[mode_fsm]")
-{
-    rcp_sync_probe_result_t probe = {.updater_reachable = false};
-
-    TEST_ASSERT_FALSE(mode_fsm_rom_failure_is_fault(&probe));
-}
-
-TEST_CASE("On an automatic recovery failing and then a manual one succeeding: the failed flag is cleared", "[mode_fsm]")
-{
-    bool flag = mode_fsm_next_recovery_failed(false, true, false);
-
-    TEST_ASSERT_TRUE(flag);
-    flag = mode_fsm_next_recovery_failed(flag, true, true);
-    TEST_ASSERT_FALSE(flag);
-}
-
-TEST_CASE("On a manual recovery failing: the failed flag is set", "[mode_fsm]")
-{
-    TEST_ASSERT_TRUE(mode_fsm_next_recovery_failed(false, true, false));
-}
-
-TEST_CASE("On a probe-time recovery succeeding after an earlier failure: the failed flag is cleared", "[mode_fsm]")
-{
-    TEST_ASSERT_FALSE(mode_fsm_next_recovery_failed(true, true, true));
-}
-
-TEST_CASE("On no recovery attempt: the failed flag is unchanged", "[mode_fsm]")
-{
-    TEST_ASSERT_TRUE(mode_fsm_next_recovery_failed(true, false, false));
-    TEST_ASSERT_FALSE(mode_fsm_next_recovery_failed(false, false, false));
 }
 
 /* ---- result of a C6 job ---- */

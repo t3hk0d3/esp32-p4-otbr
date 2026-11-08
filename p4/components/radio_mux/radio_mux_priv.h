@@ -227,6 +227,7 @@ typedef struct {
     orch_inst_t insts[RADIO_MUX_RULES_MAX]; // the registered instances (orch.c)
     size_t n_insts;
     radio_mux_reinit_run_t reinit;           // owner: the maintenance's reinit run (nothing asks yet)
+    const radio_mux_builtin_t *builtin;      // the board's built-in RCP (radio_mux_set_builtin), or NULL
     radio_mux_rules_t rules;
     atomic_bool started;
     esp_err_t (*_Atomic mover)(const char *from, const char *to, char *reason, size_t cap);

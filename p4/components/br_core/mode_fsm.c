@@ -332,28 +332,6 @@ void mode_fsm_on_rcp_failure(mode_fsm_t *fsm)
     set_mode(fsm, BR_MODE_BR_RUNNING);
 }
 
-void mode_fsm_installed_after_push(bool probe_ok, const char *probed_version, bool *known, char *out, size_t cap)
-{
-    *known = probe_ok;
-    if (cap == 0) {
-        return;
-    }
-    out[0] = '\0';
-    if (probe_ok && probed_version) {
-        strlcpy(out, probed_version, cap);
-    }
-}
-
-bool mode_fsm_rom_failure_is_fault(const rcp_sync_probe_result_t *probe)
-{
-    return probe->rom_recovery_failed && !probe->updater_reachable;
-}
-
-bool mode_fsm_next_recovery_failed(bool previous, bool attempted, bool succeeded)
-{
-    return attempted ? !succeeded : previous;
-}
-
 esp_err_t mode_fsm_radio_job_result(bool base_only, esp_err_t job_err, esp_err_t restart_err)
 {
     if (base_only || job_err != ESP_OK) {

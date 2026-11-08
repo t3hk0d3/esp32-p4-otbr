@@ -34,11 +34,8 @@ typedef struct {
     esp_netif_t *ot_netif;
     TaskHandle_t ot_task;
     char fault_reason[64];
-    char rcp_installed[32];    // version from the last probe, "" = none
-    bool rcp_installed_known;  // the last probe reached the updater
     bool rcp_compatible;       // OpenThread accepted the C6's RCP at its last start on the C6 (set_compatible)
     bool rcp_compatible_known; // OpenThread has judged the C6's RCP this boot (false: Thread never ran on the C6)
-    bool rom_recovery_failed;  // a ROM recovery failed and no later one worked
     bool ot_ready;             // OpenThread runs and takes calls; cleared before a push tears it down
     bool ot_initialised;       // esp_openthread_init succeeded and not yet torn down
     bool init_abandoned;       // OpenThread's start was abandoned half-way (its SPI driver stays registered): only a reboot restarts it
