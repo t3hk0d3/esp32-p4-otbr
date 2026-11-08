@@ -135,8 +135,7 @@ void rcp_proxy_addr_from(const struct sockaddr *sa, rcp_proxy_addr_t *out)
     }
 }
 
-// "a.b.c.d:port" (IPv4, also mapped on a dual-stack socket) or "[addr]:port".
-static void peer_text(const struct sockaddr *sa, char *out, size_t cap)
+void rcp_proxy_peer_text(const struct sockaddr *sa, char *out, size_t cap)
 {
     rcp_proxy_addr_t a;
     char ip[INET6_ADDRSTRLEN] = "";
@@ -432,7 +431,7 @@ static void session_close(proxy_t *p)
 
 void rcp_proxy_peer_up(proxy_t *p, const struct sockaddr *peer, bool new_session)
 {
-    peer_text(peer, p->peer, sizeof(p->peer));
+    rcp_proxy_peer_text(peer, p->peer, sizeof(p->peer));
     p->state = PROXY_CONNECTED;
     p->last_error[0] = '\0';
     radio_mux_set_busy_peer(p->ch, true); // a C6 job is refused while a peer is connected (409 c6_busy)

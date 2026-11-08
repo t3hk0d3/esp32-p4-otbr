@@ -62,6 +62,66 @@ TEST_CASE("On a failure after a connection shorter than 60 s: keeps doubling", "
     TEST_ASSERT_EQUAL_UINT32(30, rcp_proxy_backoff_next(30, 1000));
 }
 
+/* ---- rcp_proxy_refusal (UDP listen: refused sources) ---- */
+
+TEST_CASE("On a source refused within the last second: cached, refused again without a lookup", "[rcp_proxy]")
+{
+    rcp_proxy_refusal_t r;
+    const rcp_proxy_addr_t a = addr(9, 4000);
+
+    rcp_proxy_refusal_init(&r);
+    TEST_ASSERT_FALSE(rcp_proxy_refusal_cached(&r, &a, 1000));
+    rcp_proxy_refusal_note(&r, &a, "on a mesh address", 1000);
+    TEST_ASSERT_TRUE(rcp_proxy_refusal_cached(&r, &a, 1000));
+    TEST_ASSERT_TRUE(rcp_proxy_refusal_cached(&r, &a, 1000 + RCP_PROXY_REFUSAL_CACHE_MS - 1));
+    TEST_ASSERT_EQUAL_STRING("on a mesh address", r.why);
+}
+
+TEST_CASE("On a refused source after the cache time, another source or a clock gone back: not cached", "[rcp_proxy]")
+{
+    rcp_proxy_refusal_t r;
+    const rcp_proxy_addr_t a = addr(9, 4000);
+    const rcp_proxy_addr_t b = addr(10, 4000);
+    const rcp_proxy_addr_t a_port = addr(9, 4001);
+
+    rcp_proxy_refusal_init(&r);
+    rcp_proxy_refusal_note(&r, &a, "x", 1000);
+    TEST_ASSERT_FALSE(rcp_proxy_refusal_cached(&r, &a, 1000 + RCP_PROXY_REFUSAL_CACHE_MS));
+    TEST_ASSERT_FALSE(rcp_proxy_refusal_cached(&r, &b, 1001));
+    TEST_ASSERT_FALSE(rcp_proxy_refusal_cached(&r, &a_port, 1001));
+    TEST_ASSERT_FALSE(rcp_proxy_refusal_cached(&r, &a, 999));
+}
+
+TEST_CASE("On the first refused datagram: logged at once with a count of 1", "[rcp_proxy]")
+{
+    rcp_proxy_refusal_t r;
+
+    rcp_proxy_refusal_init(&r);
+    TEST_ASSERT_EQUAL_UINT32(1, rcp_proxy_refusal_log(&r, 0));
+}
+
+TEST_CASE("On refused datagrams within 10 s of a log line: not logged, counted into the next line", "[rcp_proxy]")
+{
+    rcp_proxy_refusal_t r;
+
+    rcp_proxy_refusal_init(&r);
+    rcp_proxy_refusal_log(&r, 5000);
+    for (int i = 0; i < 40; i++) {
+        TEST_ASSERT_EQUAL_UINT32(0, rcp_proxy_refusal_log(&r, 5000 + i * 100));
+    }
+    TEST_ASSERT_EQUAL_UINT32(41, rcp_proxy_refusal_log(&r, 5000 + RCP_PROXY_REFUSAL_LOG_MS));
+    TEST_ASSERT_EQUAL_UINT32(0, rcp_proxy_refusal_log(&r, 5001 + RCP_PROXY_REFUSAL_LOG_MS));
+}
+
+TEST_CASE("On a clock gone back since the last log line: logged at once", "[rcp_proxy]")
+{
+    rcp_proxy_refusal_t r;
+
+    rcp_proxy_refusal_init(&r);
+    rcp_proxy_refusal_log(&r, 50000);
+    TEST_ASSERT_EQUAL_UINT32(1, rcp_proxy_refusal_log(&r, 1000));
+}
+
 /* ---- rcp_proxy_udp_lock ---- */
 
 TEST_CASE("On the first datagram: locks to its source", "[rcp_proxy]")

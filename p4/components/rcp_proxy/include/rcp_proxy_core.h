@@ -57,6 +57,32 @@ bool rcp_proxy_udp_lock_expire(rcp_proxy_udp_lock_t *lock, int64_t now_ms);
 // When the lock expires; -1 when unlocked.
 int64_t rcp_proxy_udp_lock_deadline(const rcp_proxy_udp_lock_t *lock);
 
+// UDP listen: sources the netcfg access rules refuse. The last refused source and its reason are kept for
+// RCP_PROXY_REFUSAL_CACHE_MS, so a stream from it is refused without another rule lookup (the netcfg lock and a route
+// lookup on the tcpip task per datagram); the refusals are logged at most once per RCP_PROXY_REFUSAL_LOG_MS, with
+// their count.
+#define RCP_PROXY_REFUSAL_CACHE_MS 1000
+#define RCP_PROXY_REFUSAL_LOG_MS 10000
+
+typedef struct {
+    bool cached;
+    rcp_proxy_addr_t addr; // the last refused source
+    const char *why;       // its reason (a string literal)
+    int64_t at_ms;         // when the rules refused it
+    bool logged;           // a log line was written (log_ms is valid)
+    int64_t log_ms;        // the last log line
+    uint32_t count;        // refusals since the last log line
+} rcp_proxy_refusal_t;
+
+void rcp_proxy_refusal_init(rcp_proxy_refusal_t *r);
+// Whether src was refused by the rules within the last RCP_PROXY_REFUSAL_CACHE_MS (a clock that went back: no).
+bool rcp_proxy_refusal_cached(const rcp_proxy_refusal_t *r, const rcp_proxy_addr_t *src, int64_t now_ms);
+// The rules refused src at now_ms for `why`: kept as the last refused source.
+void rcp_proxy_refusal_note(rcp_proxy_refusal_t *r, const rcp_proxy_addr_t *src, const char *why, int64_t now_ms);
+// Counts one refused datagram at now_ms. Returns how many to report in a log line now (this one included), or 0 while
+// the last line is younger than RCP_PROXY_REFUSAL_LOG_MS (a clock that went back logs at once).
+uint32_t rcp_proxy_refusal_log(rcp_proxy_refusal_t *r, int64_t now_ms);
+
 // Whether a peer that just became the session's peer starts a new peer session, which replays the radio's reset
 // handshake (frame channels). TCP: every accept and every connect is new (init before each). UDP: init once per socket
 // session; connect is then new once, and listen only when the newly locked source differs from the previous peer, so
