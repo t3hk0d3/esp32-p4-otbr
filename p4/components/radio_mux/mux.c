@@ -1403,21 +1403,13 @@ static void handle(const mux_msg_t *m)
         handle_reset(m->h);
         break;
 #ifdef OTBR_TEST_BUILD
-    case MUX_MSG_TEST_REOPEN: { // the USB part of handle_reset, without the consumer's handle check
+    case MUX_MSG_TEST_REOPEN: { // handle_reset's USB path for whoever holds the dongle, without a handle
         mux_port_t *p = &g_mux.usb;
 
-        if (p->chan && usb_transport_is_open()) {
-            atomic_store(&p->tx_ok, false);
-            mux_set_rx(p, MUX_RX_DISCARD);
-            usb_transport_close(p);
-            const bool ok = open_dev(p, mux_eff_baud(p->chan));
-
-            mux_set_rx(p, p->tx_frames ? MUX_RX_FRAMES : MUX_RX_RAW);
-            atomic_store(&p->tx_ok, ok);
-            if (ok) {
-                mux_post_ctl(p, RADIO_MUX_EV_RESET);
-            }
-            ESP_LOGW(TAG, "test: %s reopened: %s", p->chan->id, ok ? "ok" : "FAILED");
+        if (p->chan && usb_transport_is_open() && radio_mux_reset_applies(p->att.state, p->leased, true, true)) {
+            usb_reset(p, "test usb_reopen"); // a failed reopen detaches (GONE) or ends the lease, as a reset's does
+        } else {
+            ESP_LOGW(TAG, "test: usb_reopen ignored: no dongle attached or leased");
         }
         break;
     }

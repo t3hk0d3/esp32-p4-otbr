@@ -273,7 +273,9 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
   request after the last reopen may be lost, a cut outgoing frame). Checked 2026-11-07. The CH340 never stayed silent
   after a reopen on the bench, also after forced overruns (`usb_stall <ms>` masks a core's interrupts) and with spinel
   resets in between (about 400 reopens); `ch34x diag|init|clear` (test build) read the chip's registers and send the
-  open-time init that ESP-IDF's ch34x driver skips, if it ever does.
+  open-time init that ESP-IDF's ch34x driver skips, if it ever does. `usb_reopen` runs the reset path of a consumer's
+  reset (only on an attached or leased dongle; a failed reopen detaches it, and three in a row with nothing received
+  give up with "no answer after 3 resets"), so the test sends a burst the dongle answers between two reopens.
 - **C6 jobs**: a firmware push with OpenThread on the dongle leaves OpenThread alone, also while the dongle captures or
   starts (the board mode is the dongle's); unplugging the dongle during it gives `NO_RADIO` at once; with a proxy peer on
   the C6 it gives 409 `c6_busy`.

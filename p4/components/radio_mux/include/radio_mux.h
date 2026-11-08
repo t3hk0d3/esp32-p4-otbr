@@ -314,7 +314,9 @@ void radio_mux_c6_job_end(bool c6_ok);
 // unplug meanwhile waits for it. ESP_ERR_INVALID_STATE when no dongle is open.
 esp_err_t radio_mux_test_usb_ctrl(uint8_t bm_request_type, uint8_t b_request, uint16_t w_value, uint16_t w_index,
                                   uint16_t w_length, uint8_t *data);
-// The owner's USB reset path (close, open, RESET event) on the dongle, whatever is attached. Waits for nothing.
+// The owner's USB reset path (handle_reset's: close, open, RESET to the holder; a failed reopen detaches the consumer
+// with GONE or ends the lease; counted by the dead-reset rule) on the dongle, when a consumer is attached or it is
+// leased; ignored (logged) otherwise. Waits for nothing: ESP_OK means posted.
 esp_err_t radio_mux_test_usb_reopen(void);
 #endif
 
