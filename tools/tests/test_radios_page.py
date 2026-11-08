@@ -1347,6 +1347,40 @@ class TestSettleMove:
         )
         assert "Thread now runs on OllyZig CC2652P" in r
 
+    def test_committed_target_whose_start_failed_is_a_failure_and_stays_there(self):
+        # On a move committed to the target (otbr_channel is it) whose start then failed (RADIO_FAULT, the target in
+        # fault): the move failed, Thread stays on the target in fault; no word of going back to the old radio.
+        starting = json.dumps({"channels": [C6, OLLY_STARTING]})
+        fault = json.dumps(
+            {
+                "channels": [
+                    {**C6, "mode": "off", "stored_mode": "off"},
+                    {
+                        **OLLY,
+                        "mode": "otbr",
+                        "stored_mode": "otbr",
+                        "state": "fault",
+                        "error": "rcp incompatible",
+                    },
+                ]
+            }
+        )
+        failed = {
+            "mode": "RADIO_FAULT",
+            "otbr_channel": "usb-10c4-ea60-abc123",
+            "fault_reason": "rcp incompatible",
+        }
+        r = scenario(
+            self.accept()
+            + f"await t.advance(10); t.snap = {starting}; await t.advance(2500);"
+            + f"t.snap = {fault}; t.status = {json.dumps(failed)}; await t.advance(2500);"
+            + "return t.el('rMsg').textContent;"
+        )
+        assert "did not start" in r and "rcp incompatible" in r, r
+        assert "now runs" not in r
+        assert "previous radio" not in r
+        assert "stays" in r
+
     def test_nothing_after_90_seconds_is_a_failure(self):
         # On a target never seen starting and never becoming otbr_channel: failed after 90 s, not before.
         r = scenario(

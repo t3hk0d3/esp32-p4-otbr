@@ -57,8 +57,9 @@ runs Zigbee it says so in one line and links the Radios page, and nothing is pol
 - **Reset.** When the radio resets (the C6 restarts, a dongle is reopened), the board sets the radio up again by
   itself (it replays the radio configuration) and the client stays connected. ZHA sees no event. A transmit that was
   in flight fails, as a lost frame does. `counters.rcp_resets` counts them.
-- **Radio gone.** When the radio disappears (a dongle is unplugged, the C6 is held in reset or being updated) the
-  state is `no_radio` with a reason. The board does not reboot, the stack keeps running and the client stays
+- **Radio gone.** When the radio disappears (a dongle is unplugged, the C6 is held in reset) the state is
+  `no_radio` with a reason. A firmware push or ROM recovery of the C6 pauses it the same way, with the reason "radio
+  reinit: firmware push" ("radio reinit: ROM recovery"; before the first start, "radio reinit: boot steps"). The board does not reboot, the stack keeps running and the client stays
   connected; transmits fail meanwhile. When the radio returns, the board replays the radio configuration and the
   state is `running` again.
 - **Firmware that does not fit.** A radio whose firmware cannot run the stack shows `incompatible` with the reason.

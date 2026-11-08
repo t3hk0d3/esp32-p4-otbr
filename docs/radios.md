@@ -23,8 +23,11 @@ Without a dongle the board behaves as before: the C6 channel in `otbr` mode.
   10 s with the packet's bytes. Rising `uart_errors` with `rx_errors` points at the bridge losing bytes, not the RCP.
   The decoding of the packet follows the ch34x driver's own defines (`CH34X_UART_STATE_TRANSIENT_MASK`, byte 0) and is
   not confirmed against a datasheet; confirm it on a board.
-- A channel's `state` is `idle` (mode `off`), `starting`, `running`, `fault` (with a reason) or `busy` (a C6 job runs,
-  or the C6's boot steps).
+- A channel's `state` is `idle` (mode `off`), `starting`, `running`, `fault` (with a reason) or `busy` (the C6's
+  maintenance: its boot steps, a firmware push or a ROM recovery).
+- There are two kinds of channel: the board's built-in RCP (`builtin`: the C6 over SPI here, its maintenance done by the
+  board) and USB dongles (`usb`). `channel_state` (`absent`, `reinit`, `ready`, `fault`) is the channel's own lifecycle;
+  `mode_state` is the state of the mode bound to it in that mode's words (see [API](api.md#radio-channels)).
 - `DELETE /device/channels/{id}` (the page's "Forget this radio") removes an unplugged dongle and its settings. The C6
   and attached radios cannot be forgotten (409 `in_use`).
 
@@ -74,13 +77,14 @@ What each firmware shows in the Firmware column:
 becomes the channel's baud if none was set. When a channel runs `otbr`, the version the handshake returns is recorded
 again with source `passive`. There is no detection endpoint: unplug and replug, or reboot.
 
-The C6 is not probed this way; the boot probe reports its firmware. It runs at every boot, whatever channel is in
-`otbr` (with Thread elsewhere it only updates the C6's status and listing), together with the maintenance jumper's
-detection and the automatic ROM recovery. A fault it finds with the C6 in `otbr` ("no rcp firmware", "rcp
-incompatible") stays: the C6 is listed unavailable and Thread does not start on it until a push. Until those steps
-end, the C6 is listed `busy` ("the C6's boot steps run") and nothing runs on it: its stored mode (`otbr`, `rcp-proxy`)
-starts once, after the steps, so a proxy peer never sees the RCP reset by the boot. Should the boot steps never begin
-(the network did not come up, so the border router never started), the stored mode starts after 30 s without them.
+The C6 is not probed this way; its boot steps report its firmware. They run at every boot, whatever channel is in
+`otbr` (with Thread elsewhere they only update the C6's status and listing), together with the maintenance jumper's
+detection and the automatic ROM recovery, as the C6's first maintenance (see [Maintenance](#maintenance-reinit)). A
+fault they find ("no rcp firmware", "rcp incompatible") stays: the C6 is listed unavailable, Thread on it shows
+`RADIO_FAULT` with that reason, and nothing starts on it until a push. Until the steps end the C6 is in `reinit`, listed
+`busy` ("the C6's boot steps run"), and nothing runs on it: its stored mode (`otbr`, `ziggurat`, `rcp-proxy`) starts
+once, after the steps, so a proxy peer never sees the RCP reset by the boot. The steps run on a task of their own, also
+when the network does not come up.
 
 ## RCP proxy
 
@@ -127,7 +131,7 @@ The channel's counters and the peer's address are in `GET /device/channels` (`rc
 connect fails (the host does not resolve, the access rules refuse it, no answer), the proxy backs off and tries again;
 `rcp_proxy.last_error` says why the last try failed, and while it backs off that is also the channel's `error` (the
 Radios page shows a warning "Backoff" with it). A firmware push or recovery of the C6 is refused with 409 `c6_busy`
-while its proxy has a peer.
+while its proxy has a peer (the proxy refuses to let go: see [Maintenance](#maintenance-reinit)).
 
 **Security notes.** The proxy has no authentication and no encryption: anyone the [network access
 rules](networking.md) let through can drive the radio, so serve it only on a trusted VLAN. A web page in any LAN
@@ -157,14 +161,17 @@ The stored Thread network (dataset) is kept; only the radio changes.
 1. The target is probed first, through the channel, while Thread still runs on the old radio. If it does not answer as a
    spinel RCP, the PUT is refused (409 `probe_failed`, with the reason) and nothing changes.
 2. The PUT answers **202** `{"moving": true, "moved_from": "<id>"}`. The target shows `starting` until it settles.
-3. Open sessions (REST calls, the console) are given up to 45 s to end; then OpenThread stops on the old radio and starts
-   on the new one. Thread devices lose the border router for a few seconds.
-4. The stored modes change only after the new radio runs: the old channel becomes `off`.
-5. **Rollback.** If OpenThread does not start on the target, it is started again on the old radio and the target shows
-   `fault` with the reason (`GET /device/channels`). Only if that also fails does the board enter `RADIO_FAULT`.
-6. **Reboot.** If OpenThread's own initialisation gets stuck on the new radio (it cannot be abandoned from outside) or
-   on the old radio during the rollback, the board reboots and comes back on the old radio; the stored modes are
-   unchanged. The fault reason says "rebooting" first.
+3. Open sessions (REST calls, the console) are given up to 45 s to end; then OpenThread stops on the old radio. Thread
+   devices lose the border router for a few seconds. If the sessions do not end, nothing changes (`drain_timeout`).
+4. **Commit.** The stored modes change now, before the new radio starts: the target becomes `otbr`, the old channel
+   `off` (both in one store). A move is a rebind: from here on Thread belongs to the target.
+5. **No rollback.** OpenThread starts on the target. If it does not start, Thread stays there: the target shows `fault`
+   with the reason and the board is `RADIO_FAULT`. Retry with another PUT of `otbr` on the target, or move Thread back
+   (another move).
+6. **No reboot.** If OpenThread's own initialisation gets stuck on the target (it cannot be abandoned from outside), the
+   board shows `RADIO_FAULT` "an earlier OpenThread start was abandoned: reboot" and does not reboot by itself: nothing
+   can start OpenThread again until a reboot. A PUT of `otbr` on another channel moves the binding there (its start is
+   refused the same way); then reboot, and Thread starts on that channel.
 
 A move takes up to about a minute, runs as a long operation (an update, a firmware push or a recovery at the same
 time give 409 `busy`, and so does a mode change while a move runs, or while the board is still stopping or starting
@@ -175,14 +182,36 @@ A **start** (`otbr` on a channel while no channel has it) and a **stop** (anothe
 work the same way, as long operations with **202**, and cannot carry baud, flow control or proxy settings either
 (400 `bad_value`): send the new mode's proxy settings in a request of their own, before or after it.
 
-- Start: `{"moving": true, "moved_from": null}`. The target is probed first (409 `probe_failed`, nothing changed), then
-  OpenThread starts on it; its mode is stored only once it runs. If it does not start, the target shows `fault` with
-  the reason and the board stays `NO_RADIO`.
+- Start: `{"moving": true, "moved_from": null}`. The target is probed first (409 `probe_failed`, nothing changed), its
+  mode is stored, then OpenThread starts on it. If it does not start, the target shows `fault` with the reason and the
+  board is `RADIO_FAULT`.
 - Stop: `{"moving": true, "moved_from": "<the channel itself>"}`. Open sessions are given up to 45 s to end, OpenThread
   stops, and only then the new mode (`off` or `rcp-proxy`) is stored and applied; the board becomes `NO_RADIO`. If the sessions do not end, nothing changes: the channel keeps running `otbr`
   with `error` `drain_timeout`, and Thread runs on.
 - A channel that runs `rcp-proxy` cannot take `otbr` directly (409 `probe_failed`, "set it off first"): set it `off`
   first. The Radios page does that by itself.
+
+## Maintenance (reinit)
+
+Work on a radio itself is the channel's `reinit` state: the C6's boot steps, a firmware push and a ROM recovery on the
+C6, and a dongle's firmware detection after plug-in. While a channel is in `reinit` no mode may use it: what its mode
+sends is refused, its resets are not carried out, and nothing reaches it from the radio.
+
+Before a push or a recovery of the C6, the mode on it is asked to let go of the radio, and the work runs only once it
+did:
+
+- **Thread** lets go once its open sessions ended (up to 45 s; the board is `STARTING` meanwhile), then OpenThread
+  stops. It refuses while it captures (`SNIFFER`) or starts (`STARTING`), and after the 45 s ("OpenThread is busy, try
+  again"): 409 `busy`.
+- **Zigbee** always lets go: it shows `no_radio` "radio reinit: firmware push" (or "ROM recovery") and its client stays
+  connected; transmits fail meanwhile.
+- **The RCP proxy** refuses while a peer is connected (409 `c6_busy`); otherwise its session and listener close.
+- A mode that does not answer within 50 s refused ("<mode> did not let go of the radio in time").
+
+When the work and the C6's boot steps end, the C6 is `ready` and its mode starts again (Thread on the new firmware,
+Zigbee replays its radio configuration, the proxy listens again), or the C6 is in `fault` (no RCP firmware, a failed
+recovery) and its mode shows why. A refused maintenance changes nothing. A reset a mode asks for, and the recovery of a
+dongle after a USB error, are not maintenance: the mode gets its usual `RESET`.
 
 ## Unplugging the Thread radio
 
@@ -279,9 +308,9 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
   open-time init that ESP-IDF's ch34x driver skips, if it ever does. `usb_reopen` runs the reset path of a consumer's
   reset (only on an attached or leased dongle; a failed reopen detaches it, and three in a row with nothing received
   give up with "no answer after 3 resets"), so the test sends a burst the dongle answers between two reopens.
-- **C6 jobs**: a firmware push with OpenThread on the dongle leaves OpenThread alone, also while the dongle captures or
-  starts (the board mode is the dongle's); unplugging the dongle during it gives `NO_RADIO` at once; with a proxy peer on
-  the C6 it gives 409 `c6_busy`.
+- **C6 maintenance**: a firmware push with OpenThread on the dongle leaves OpenThread alone, also while the dongle
+  captures or starts (the board mode is the dongle's); unplugging the dongle during it gives `NO_RADIO` at once; with a
+  proxy peer on the C6 it gives 409 `c6_busy`.
 - **Boot**: a stored dongle that is unplugged gives `NO_RADIO` without a fault; plugging it in gives `BR_RUNNING`.
 - **Heap**: about 21 KB of internal DMA RAM is taken at the first C6 open, about 39 KB (pool, buffers, 16 KB ring) at
   the first dongle open (never on a board without a dongle); a proxy session takes an 8 KB ring (TCP) plus codec

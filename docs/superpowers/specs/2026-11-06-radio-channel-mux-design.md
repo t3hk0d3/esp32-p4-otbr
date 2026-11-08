@@ -1,5 +1,7 @@
 # Radio channel mux: every radio is a channel: design
 
+> **Partly replaced:** section 3's "Modes and rules", "OTBR mode" and "Board mode, faults and status" by the channel/mode orchestrator design, `2026-11-08-channel-mode-orchestrator-design.md` (moves are rebinds, maintenance is the channel's `reinit`, the built-in channel is `builtin-c6`).
+
 Status: draft for review, 2026-11-06, after a builder check. Research: five research agents (OpenThread integration,
 transports, Ziggurat, prior art, firmware coupling), plus the Ziggurat session's input. The consumer API (section 3,
 "Frames, events and copies") was reviewed and agreed with the Zigbee session. Spike: branch `spike/dongle-rcp` (throwaway).

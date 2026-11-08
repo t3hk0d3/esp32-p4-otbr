@@ -421,12 +421,15 @@ function settleMove() {
   var name = L.labelOf(snap, moving.to);
   if (to && (to.state === 'starting' || to.state === 'fault'))
     moving.seen = true;
-  var ok = !!status && status.otbr_channel === moving.to;
+  // A move commits before it starts (otbr_channel names the target from then on): it worked once Thread runs there.
+  var ok = !!status && status.otbr_channel === moving.to &&
+           (status.mode === 'BR_RUNNING' || status.mode === 'SNIFFER');
   if (ok && !anyStarting()) {
     note('rMsg', 'Thread now runs on ' + name + '.', false);
   } else if ((moving.seen && !anyStarting()) || env.now() - moving.at > MOVE_GIVE_UP_MS) {
     note('rMsg', 'Thread did not start on ' + name + (to && to.error ? ' (' + to.error + ')' : '') +
-                     '. It goes back to the previous radio if that is still there.', true);
+                     '. Thread stays on it, in fault: save otbr on it again to retry, or move Thread to another radio.',
+         true);
   } else {
     return;
   }
