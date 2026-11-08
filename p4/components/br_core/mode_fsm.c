@@ -362,6 +362,31 @@ bool mode_fsm_boot(mode_fsm_t *fsm, const char *otbr_id)
     return false;
 }
 
+bool mode_fsm_c6_usable_after_steps(esp_err_t steps)
+{
+    return steps == ESP_OK;
+}
+
+static bool is_c6(const char *id)
+{
+    return id && strcmp(id, MODE_FSM_C6_ID) == 0;
+}
+
+bool mode_fsm_c6_job_alone(const char *otbr_id)
+{
+    return !is_c6(otbr_id);
+}
+
+bool mode_fsm_job_holds_openthread(bool job_running, const char *ot_chan_id, const char *otbr_id)
+{
+    return job_running && (is_c6(ot_chan_id) || is_c6(otbr_id));
+}
+
+bool mode_fsm_start_failed(br_core_mode_t mode, bool ot_running)
+{
+    return mode == BR_MODE_RADIO_FAULT && !ot_running;
+}
+
 // STARTING, then OpenThread on `id`. The border router start sets BR_RUNNING (mode_fsm_set_started).
 static esp_err_t start_on(mode_fsm_t *fsm, const char *id)
 {

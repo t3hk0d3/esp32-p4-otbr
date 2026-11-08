@@ -236,9 +236,40 @@ void mode_fsm_installed_after_push(bool probe_ok, const char *probed_version, bo
 /**
  * The board mode at boot from the channel stored in otbr (NULL: none). The C6: true, the mode stays STARTING and the
  * C6's boot (rcp_sync probe, recovery, then the start on its channel) goes on as before the mux. No channel or a
- * dongle: NO_RADIO (no fault) and false; a dongle starts when it attaches (mode_fsm_on_channel_back).
+ * dongle: NO_RADIO (no fault) and false; a dongle starts when it attaches (mode_fsm_on_channel_back). The C6's boot
+ * steps run in both cases; false only means they do not decide the board mode.
  */
 bool mode_fsm_boot(mode_fsm_t *fsm, const char *otbr_id);
+
+/**
+ * Whether the C6 is listed and its stored mode attached after its boot steps (core_c6_boot_steps returned `steps`):
+ * only when they passed (ESP_OK). A fault they found ("no rcp firmware", a failed ROM recovery, the factory firmware,
+ * a failed reset into the RCP, the test build's c6_hold or forced empty probe) leaves the C6 unavailable, so no start
+ * of OpenThread through the channel overrides the fault the boot entered. Pure.
+ */
+bool mode_fsm_c6_usable_after_steps(esp_err_t steps);
+
+/**
+ * Whether a C6 job (push, ROM recovery) runs alone, leaving OpenThread and the board mode untouched: the channel stored
+ * in otbr (`otbr_id`, NULL for none) is not the C6. Then the board mode's gates (SNIFFER, STARTING, a booting radio)
+ * do not apply to it: that mode is another channel's. Pure.
+ */
+bool mode_fsm_c6_job_alone(const char *otbr_id);
+
+/**
+ * Whether a running C6 job (`job_running`) holds OpenThread, which keeps br_radio's reconcile out: OpenThread runs on
+ * the C6 (`ot_chan_id`, NULL when stopped) or the C6 is the channel stored in otbr (`otbr_id`, NULL for none), so the
+ * job stops and starts it itself. A job while OpenThread runs on (or waits for) a dongle holds nothing: that channel's
+ * GONE or attach is handled at once. Pure.
+ */
+bool mode_fsm_job_holds_openthread(bool job_running, const char *ot_chan_id, const char *otbr_id);
+
+/**
+ * Whether an OpenThread (re)start failed in a way a PUT of mode otbr on its channel retries (br_core_retry_otbr): the
+ * mode is RADIO_FAULT and OpenThread is not running (`ot_running`). Every path that tries a start (br_radio's start on
+ * an attach, the restart after a C6 job, a move with its start back on the source) records it. Pure.
+ */
+bool mode_fsm_start_failed(br_core_mode_t mode, bool ot_running);
 
 /**
  * Move OpenThread from channel `from` ("" for a start: no channel runs it) to `to` ("" for a stop of OpenThread on

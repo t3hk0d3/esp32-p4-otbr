@@ -116,7 +116,9 @@ esp_err_t br_core_mdns_start(const char *hostname, const char *instance);
  * OpenThread starts when that dongle attaches. With the C6 (the default), inside a C6 job of the radio mux: probe the
  * installed RCP version (best effort, nothing is ever pushed at boot) and reset the C6 into its RCP; at the job's end the
  * mux attaches the C6, and OpenThread starts on it through the mux (the RCP probed through the channel first) on core 0;
- * the border router starts once `backbone` has an IPv6 address. The border router start
+ * the border router starts once `backbone` has an IPv6 address. The C6's boot steps (the probe, the jumper's detection,
+ * the automatic ROM recovery) run at every boot: with another channel in otbr, or none, they only update the C6's status
+ * and listing, and OpenThread starts on its own channel meanwhile. The border router start
  * enables DHCPv6-PD and starts Thread when an active dataset is stored; otherwise Thread stays idle.
  *
  * Blocks until OpenThread is initialised, the radio fault mode was entered or the mode is NO_RADIO, and returns ESP_OK in
@@ -253,8 +255,19 @@ void br_core_sniffer_keepalive(void);
  * After an abandoned OpenThread start ("rcp incompatible": OpenThread's SPI driver stays registered and cannot be
  * released) the push runs without stopping OpenThread and a successful push ends in a reboot ~1.5 s later (the
  * return value is ESP_OK, the mode stays RADIO_FAULT until then); a failed push leaves everything as it was.
+ * When the C6 is not the channel stored in otbr (br_core_c6_job_touches_openthread false) the push leaves OpenThread
+ * and the board mode alone, and the mode's refusals (SNIFFER, STARTING, the booting OpenThread task) do not apply;
+ * the C6's boot steps still running at boot refuse it ("the radio is still booting").
  */
 esp_err_t br_core_push_radio_firmware(const rcp_fw_source_t *source, char *err_detail, size_t err_cap);
+
+/**
+ * Whether a C6 job (br_core_push_radio_firmware, br_core_rom_recover) stops and restarts OpenThread: the C6 is the
+ * channel stored in otbr. Otherwise the job leaves OpenThread and the board mode alone, and the mode's refusals
+ * (SNIFFER, STARTING, a booting OpenThread task) do not apply to it: the mode is another channel's. A snapshot; the
+ * job decides again once it holds the C6 job slot.
+ */
+bool br_core_c6_job_touches_openthread(void);
 
 /**
  * ROM recovery of the C6 base image on request (spec 5.10, replaces the former resync-with-recovery): the same

@@ -770,8 +770,7 @@ TEST_CASE("On a C6 push or recovery while rcp-proxy on the C6 has a peer: 409 c6
     char out[160];
     int status = 0;
 
-    TEST_ASSERT_GREATER_THAN(0, device_api_recover_reply(RCP_SYNC_ERR_C6_BUSY, "c6_busy: rcp-proxy on the C6 has a peer",
-                                                         BR_MODE_BR_RUNNING, "", true, "1.0", out, sizeof(out), &status));
+    TEST_ASSERT_GREATER_THAN(0, device_api_recover_reply(RCP_SYNC_ERR_C6_BUSY, "c6_busy: rcp-proxy on the C6 has a peer", BR_MODE_BR_RUNNING, true, "", true, "1.0", out, sizeof(out), &status));
     TEST_ASSERT_EQUAL(409, status);
     TEST_ASSERT_NOT_NULL(strstr(out, "\"error\":\"c6_busy\""));
 }
