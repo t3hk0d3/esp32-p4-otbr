@@ -452,6 +452,8 @@ TEST_CASE("Settings and status: renders the GET shape of spec section 6; status.
     memset(&st, 0, sizeof(st));
     st.omr_prefix_known = true;
     st.omr_prefix = CUSTOM;
+    st.own_omr_prefix_known = true;
+    st.own_omr_prefix = CUSTOM;
     st.ula_prefix_known = true;
     st.ula_prefix = (routing_prefix64_t) {
         {
@@ -477,7 +479,8 @@ TEST_CASE("Settings and status: renders the GET shape of spec section 6; status.
         "{\"method\":\"bgp\",\"omr\":{\"mode\":\"custom\",\"prefix\":\"2001:db8:42:100::/64\"},\"announce_ula\":true,"
         "\"bgp\":{\"local_asn\":4200000001,\"router_id\":null,\"hold_time\":90,"
         "\"peers\":[{\"address\":\"2001:db8:42::1\",\"asn\":4200000001}]},"
-        "\"status\":{\"omr_prefix\":\"2001:db8:42:100::/64\",\"ula_prefix\":\"fd98:2656:4740:1::/64\","
+        "\"status\":{\"omr_prefix\":\"2001:db8:42:100::/64\",\"own_omr_prefix\":\"2001:db8:42:100::/64\","
+        "\"ula_prefix\":\"fd98:2656:4740:1::/64\","
         "\"announced\":[\"2001:db8:42:100::/64\",\"fd98:2656:4740:1::/64\"],"
         "\"bgp\":{\"router_id\":\"192.168.20.15\",\"blocked\":null,\"peers\":[{\"address\":\"2001:db8:42::1\","
         "\"state\":\"established\",\"uptime_s\":8123,\"last_error\":null,\"received_dropped\":3}]},"
@@ -490,6 +493,7 @@ TEST_CASE("Settings and status: renders the GET shape of spec section 6; status.
     s.router_id_set = true;
     s.router_id = 0x0a000001;
     st.omr_prefix_known = false;
+    st.own_omr_prefix = st.ula_prefix;
     st.announced.count = 1;
     st.announced.p[0] = st.ula_prefix;
     json = routing_settings_to_json(&s, &st);
@@ -497,7 +501,8 @@ TEST_CASE("Settings and status: renders the GET shape of spec section 6; status.
         "{\"method\":\"ripng\",\"omr\":{\"mode\":\"auto\",\"prefix\":null},\"announce_ula\":true,"
         "\"bgp\":{\"local_asn\":4200000001,\"router_id\":\"10.0.0.1\",\"hold_time\":90,"
         "\"peers\":[{\"address\":\"2001:db8:42::1\",\"asn\":4200000001}]},"
-        "\"status\":{\"omr_prefix\":null,\"ula_prefix\":\"fd98:2656:4740:1::/64\","
+        "\"status\":{\"omr_prefix\":null,\"own_omr_prefix\":\"fd98:2656:4740:1::/64\","
+        "\"ula_prefix\":\"fd98:2656:4740:1::/64\","
         "\"announced\":[\"fd98:2656:4740:1::/64\"],\"bgp\":null,"
         "\"ripng\":{\"last_update_s_ago\":12,\"updates_sent\":7,\"requests_answered\":2,\"responses_dropped\":1}}}",
         json);

@@ -154,6 +154,40 @@ class TestMethodHint:
         )
 
 
+OWN = "fdd4:4ca2:a97b:1::/64"
+FAVORED = "fd87:9b49:8264:1::/64"
+
+
+@needs_node
+class TestOwnPrefixNote:
+    """RoutingLogic.ownPrefixNote"""
+
+    def test_own_equals_in_use_no_note(self):
+        # own prefix equals the one in use: nothing extra to show
+        assert (
+            rl(f"L.ownPrefixNote({{omr_prefix: '{OWN}', own_omr_prefix: '{OWN}'}})")
+            is None
+        )
+
+    def test_own_unknown_no_note(self):
+        # own prefix unknown: nothing to show
+        assert (
+            rl(f"L.ownPrefixNote({{omr_prefix: '{FAVORED}', own_omr_prefix: null}})")
+            is None
+        )
+
+    def test_another_border_router_preferred(self):
+        # own prefix differs from the one in use: says it is not in use
+        r = rl(f"L.ownPrefixNote({{omr_prefix: '{FAVORED}', own_omr_prefix: '{OWN}'}})")
+        assert r == OWN + " (not in use: another border router's prefix is preferred)"
+
+    def test_in_use_unknown_shows_own_prefix_alone(self):
+        # in-use prefix unknown: the own prefix without a claim about it
+        assert (
+            rl(f"L.ownPrefixNote({{omr_prefix: null, own_omr_prefix: '{OWN}'}})") == OWN
+        )
+
+
 @needs_node
 class TestRoutingPage:
     """routing.js run against a fake DOM and fetch"""
@@ -267,6 +301,49 @@ class TestRoutingPage:
             + "return t.el('methodHint').textContent;"
         )
         assert r == "DHCPv6 PD: soliciting, nothing delegated yet."
+
+    def test_own_prefix_row_shown_when_another_prefix_is_in_use(self):
+        # status: another border router's prefix in use: both rows, the own one marked not in use
+        state = PD_STATE | {
+            "status": PD_STATE["status"]
+            | {"omr_prefix": FAVORED, "own_omr_prefix": OWN}
+        }
+        r = scenario(
+            page("routing", routes(state))
+            + START
+            + "return [t.el('omrInUse').textContent, t.el('omrOwn').hidden(), t.el('omrOwn').textContent,"
+            " t.el('omrOwnLabel').hidden()];"
+        )
+        assert r == [
+            FAVORED,
+            False,
+            OWN + " (not in use: another border router's prefix is preferred)",
+            False,
+        ]
+
+    def test_own_prefix_row_hidden_when_it_is_the_one_in_use(self):
+        # status: own prefix in use: only the in-use row
+        state = PD_STATE | {
+            "status": PD_STATE["status"] | {"omr_prefix": OWN, "own_omr_prefix": OWN}
+        }
+        r = scenario(
+            page("routing", routes(state))
+            + START
+            + "return [t.el('omrInUse').textContent, t.el('omrOwn').hidden(), t.el('omrOwnLabel').hidden()];"
+        )
+        assert r == [OWN, True, True]
+
+    def test_in_use_unknown_reads_unknown(self):
+        # status: in-use prefix unknown: "unknown", the own prefix listed on its own row
+        state = PD_STATE | {
+            "status": PD_STATE["status"] | {"omr_prefix": None, "own_omr_prefix": OWN}
+        }
+        r = scenario(
+            page("routing", routes(state))
+            + START
+            + "return [t.el('omrInUse').textContent, t.el('omrOwn').textContent];"
+        )
+        assert r == ["unknown", OWN]
 
 
 @needs_node

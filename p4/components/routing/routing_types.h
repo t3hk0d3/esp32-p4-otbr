@@ -98,7 +98,9 @@ typedef struct {
 
 typedef struct {
     bool omr_prefix_known;
-    routing_prefix64_t omr_prefix; /**< local OMR prefix in use: custom, delegated or ULA */
+    routing_prefix64_t omr_prefix; /**< the OMR prefix the mesh uses: the favored one, possibly another BR's */
+    bool own_omr_prefix_known;
+    routing_prefix64_t own_omr_prefix; /**< this border router's OMR prefix: custom, delegated or ULA */
     bool ula_prefix_known;
     routing_prefix64_t ula_prefix; /**< the self-generated ULA */
     routing_prefix_set_t announced;

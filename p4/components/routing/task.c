@@ -596,6 +596,8 @@ static void read_ot(otInstance *ins, routing_engine_state_t *st)
 {
     otDeviceRole role = otThreadGetDeviceRole(ins);
     otBorderRoutingPrefixTableEntry pd;
+    otIp6Prefix favored;
+    otRoutePreference favored_pref;
     const routing_settings_t *s = routing_engine_settings(&s_engine);
 
     st->br_up = role == OT_DEVICE_ROLE_CHILD || role == OT_DEVICE_ROLE_ROUTER || role == OT_DEVICE_ROLE_LEADER;
@@ -618,6 +620,10 @@ static void read_ot(otInstance *ins, routing_engine_state_t *st)
     if (otBorderRoutingGetPdOmrPrefix(ins, &pd) == OT_ERROR_NONE && pd.mPrefix.mLength == 64) {
         st->pd_known = true;
         memcpy(st->pd_prefix.b, pd.mPrefix.mPrefix.mFields.m8, sizeof(st->pd_prefix.b));
+    }
+    if (otBorderRoutingGetFavoredOmrPrefix(ins, &favored, &favored_pref) == OT_ERROR_NONE && favored.mLength == 64) {
+        st->favored_known = true;
+        memcpy(st->favored_prefix.b, favored.mPrefix.mFields.m8, sizeof(st->favored_prefix.b));
     }
 }
 
