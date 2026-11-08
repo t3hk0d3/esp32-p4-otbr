@@ -56,6 +56,8 @@ PROXY_DEFAULTS = {
 }
 OFFERED_MODES = {"off", "otbr", "rcp-proxy"}
 NO_RADIO_DETAIL = "no radio in OTBR mode"
+# spinel PROP_VALUE_GET PROTOCOL_VERSION (TID 1), HDLC framed with its FCS: a first frame a proxy client sends.
+SPINEL_GET_PROTOCOL_VERSION_HDLC = bytes.fromhex("7e810201c5b27e")
 STATUS_TIMEOUT_S = 90
 SETTLE_TIMEOUT_S = 120  # a move, start or stop of Thread: drain, probe and start
 THREAD_TIMEOUT_S = 120
@@ -274,7 +276,12 @@ def test_put_validation_c6_busy(base_url, c6_in_otbr):
         base_url, "rcp-proxy"
     )  # a stop of Thread on the C6 (202), then the proxy listens
     host = base_url.removeprefix("http://")
-    with socket.create_connection((host, PROXY_PORT), timeout=PROXY_PEER_WAIT_S):
+    with socket.create_connection(
+        (host, PROXY_PORT), timeout=PROXY_PEER_WAIT_S
+    ) as client:
+        # A TCP client becomes the peer only once its first bytes pass the proxy's HTTP check (a silent one never
+        # does): send a spinel PROP_VALUE_GET PROTOCOL_VERSION, HDLC framed, as a host would.
+        client.sendall(SPINEL_GET_PROTOCOL_VERSION_HDLC)
         deadline = time.monotonic() + PROXY_PEER_WAIT_S
         while get_channel(base_url)["rcp_proxy"]["peer"] is None:
             assert time.monotonic() < deadline, "the proxy never saw the peer"
