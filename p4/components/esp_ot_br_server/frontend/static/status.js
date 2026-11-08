@@ -216,26 +216,25 @@ function rcpText(installed) {
   return installed === '' ? 'none (no valid RCP firmware)' : String(installed);
 }
 
-/* "Thread runs on: <label>": the label comes from /device/channels, asked once per radio the status names. */
+/*
+ * Where Thread runs (DeviceCommon.threadChip: "Thread runs on" only while it runs, else a warning with the state): the
+ * label comes from /device/channels, asked once per radio the status names.
+ */
 var channelLabels = {};
 var labelAsked = null;
 
 function renderThreadOn(s) {
   var chip = $('h-thread-on');
   var id = s.otbr_channel;
-  if (id === undefined) {
+  var c = C.threadChip(s, id ? channelLabels[id] : '');
+  if (!c) {
     chip.classList.add('hidden');
     return;
   }
   chip.classList.remove('hidden');
-  if (id === null) {
-    chip.textContent = 'Thread runs on: no radio';
-    chip.className = 'chip chip-warn';
-    return;
-  }
-  chip.textContent = 'Thread runs on: ' + (channelLabels[id] || id);
-  chip.className = 'chip chip-ok';
-  if (!channelLabels[id] && labelAsked !== id) {
+  chip.textContent = c.text;
+  chip.className = 'chip ' + c.tone;
+  if (id && !channelLabels[id] && labelAsked !== id) {
     labelAsked = id;
     kit.request('GET', '/device/channels', {timeoutMs : 5000}).then(function(r) {
       if (r.status !== 200 || !r.body || !r.body.channels)

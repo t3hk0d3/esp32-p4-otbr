@@ -346,9 +346,23 @@ class TestTable:
         assert r == "Thread runs on: ESP32-C6 (built-in)"
 
     def test_head_says_when_no_radio_runs_thread(self):
-        # On otbr_channel null: the chip reads "Thread runs on: no radio".
+        # On otbr_channel null: the chip reads "No radio in Thread mode".
         r = scenario(setup(SNAP, NO_RADIO) + "return t.el('radios-chip').textContent;")
-        assert r == "Thread runs on: no radio"
+        assert r == "No radio in Thread mode"
+
+    def test_head_warns_when_the_otbr_radio_is_unplugged(self):
+        # On NO_RADIO with Thread stored on the unplugged OllyZig: a warning "Thread on <label>: <reason>", never
+        # "Thread runs on".
+        status = {
+            "mode": "NO_RADIO",
+            "otbr_channel": OLLY["id"],
+            "fault_reason": "radio unplugged",
+        }
+        r = scenario(
+            setup(SNAP, status)
+            + "return [t.el('radios-chip').textContent, t.el('radios-chip').className];"
+        )
+        assert r == ["Thread on OllyZig CC2652P: radio unplugged", "chip chip-warn"]
 
     def test_unanswered_list_shows_the_stale_line(self):
         # On a failing GET: the stale line says so and the rows stay as they were.
@@ -903,6 +917,23 @@ class TestHideRule:
         assert r[1] is True
         assert r[2] is False
         assert r[3] == "Thread runs on: ESP32-C6 (built-in)"
+
+    def test_dashboard_chip_warns_on_a_radio_fault(self):
+        # On RADIO_FAULT with the C6 stored in otbr: the chip says "Thread on <label>: fault: <reason>" (warning).
+        status = {
+            "mode": "RADIO_FAULT",
+            "otbr_channel": "c6",
+            "fault_reason": "rcp incompatible",
+        }
+        r = scenario(
+            page("index", ROUTES)
+            + f"t.snap = {json.dumps(SNAP)}; t.status = {json.dumps(status)}; t.page.init(); await t.advance(100);"
+            + "return [t.el('h-thread-on').textContent, t.el('h-thread-on').className];"
+        )
+        assert r == [
+            "Thread on ESP32-C6 (built-in): fault: rcp incompatible",
+            "chip chip-warn",
+        ]
 
     def test_dashboard_leaves_a_radio_fault_to_its_hero(self):
         # On RADIO_FAULT: the hero explains it and the notice stays hidden.

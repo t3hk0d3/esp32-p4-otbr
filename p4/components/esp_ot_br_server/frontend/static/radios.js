@@ -369,21 +369,18 @@ function renderRow(ch) {
   return tr;
 }
 
+/* Where Thread runs: DeviceCommon.threadChip ("Thread runs on" only while it runs, else a warning with the state). */
 function renderChip() {
   var chip = $('radios-chip');
   var id = status ? status.otbr_channel : undefined;
-  if (id === undefined && !status) {
+  var c = status ? C.threadChip(status, id ? L.labelOf(snap, id) : '') : null;
+  if (!c) {
     chip.classList.add('hidden');
     return;
   }
   chip.classList.remove('hidden');
-  if (id === null || id === undefined) {
-    chip.textContent = 'Thread runs on: no radio';
-    chip.className = 'chip chip-warn';
-  } else {
-    chip.textContent = 'Thread runs on: ' + L.labelOf(snap, id);
-    chip.className = 'chip chip-ok';
-  }
+  chip.textContent = c.text;
+  chip.className = 'chip ' + c.tone;
 }
 
 function anyStarting() {

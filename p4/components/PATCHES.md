@@ -361,6 +361,10 @@ reason, spec reference.
    and a stop of Thread ("Stopping Thread on", then stopped or refused with the reason); `status.js` has a
    `NO_RADIO` hero linking the Radios page, and the `RADIO_FAULT` hero links Radios instead of Firmware while Thread's
    radio is a dongle.
+   Patch step (2026-11-08): `device_common.js` gains `threadChip`, which `status.js` and `radios.js` use for the chip:
+   "Thread runs on" only in `BR_RUNNING` or `SNIFFER`, otherwise a warning "Thread on <label>: <state or reason>" or
+   "No radio in Thread mode"; `radios.js` `saveFailureText` says the radio was switched off when Thread's start after
+   the PUT off is refused; `console.js` counts the wait for the radio as a retry (the toggle reads Disconnect).
    (docs/superpowers/specs/2026-11-06-radio-channel-mux-design.md, sections Board mode and API)
    Merged with self-update (patch 26, which took `EXTRA_HANDLER_SLOTS` to 30 for `/device/update`): `device_api` now has
    31 routes (the console WebSocket included) plus the catch-all, so `EXTRA_HANDLER_SLOTS` is 34, two slots of headroom.

@@ -38,7 +38,7 @@ below, any of them can answer 500 `internal` or `no_memory`.
 | `POST /device/reboot` | reboot | 409 `busy` while an update or push runs (other reboots, such as the network trial revert, `net reset` and `DELETE /node`, wait until it ends) |
 | `GET /metrics` | device health and Thread figures in the Prometheus text format, see [metrics](metrics.md) | 500 `no_memory` |
 
-`/device/status` modes: `STARTING`, `BR_RUNNING`, `SNIFFER`, `RADIO_FAULT`, `NO_RADIO` (no present radio channel is in `otbr`: Thread is switched off on purpose or its dongle is unplugged; the Thread REST API and the console WebSocket answer 503 `no radio in OTBR mode`). `otbr_channel` is the id of the channel OpenThread runs on, or `null`. `POST /device/radio/firmware` and `POST /device/radio/recover` also answer 409 `c6_busy` while `rcp-proxy` on the C6 has a peer.
+`/device/status` modes: `STARTING`, `BR_RUNNING`, `SNIFFER`, `RADIO_FAULT`, `NO_RADIO` (no present radio channel is in `otbr`: Thread is switched off on purpose or its dongle is unplugged; the Thread REST API and the console WebSocket answer 503 `no radio in OTBR mode`). `otbr_channel` is the id of the channel stored in mode `otbr` (present or not), or `null` when none is: it is not proof that Thread runs there, which only `mode` `BR_RUNNING` or `SNIFFER` says (in `NO_RADIO` it names the unplugged dongle, in `RADIO_FAULT` the faulted radio). The Dashboard and the Radios page show "Thread runs on" only then, otherwise a warning with the state. `POST /device/radio/firmware` and `POST /device/radio/recover` also answer 409 `c6_busy` while `rcp-proxy` on the C6 has a peer.
 
 ### Service records in the topology scan
 

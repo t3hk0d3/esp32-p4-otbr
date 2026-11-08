@@ -196,6 +196,27 @@ function threadState(s) {
 }
 
 /*
+ * The chip that says where Thread runs, from /device/status and the label of its `otbr_channel` (`label`, may be empty:
+ * the id is shown then): {text, tone} or null (hidden: an older board without otbr_channel). `otbr_channel` is the
+ * channel stored in mode otbr, not proof that Thread runs there: "Thread runs on" (chip-ok) only in BR_RUNNING or
+ * SNIFFER; otherwise a warning "Thread on <label>: <state or reason>", or "No radio in Thread mode" when none is.
+ */
+function threadChip(s, label) {
+  if (!s || s.otbr_channel === undefined)
+    return null;
+  if (s.otbr_channel === null)
+    return {text : 'No radio in Thread mode', tone : 'chip-warn'};
+  var name = label || s.otbr_channel;
+  if (s.mode === 'BR_RUNNING' || s.mode === 'SNIFFER')
+    return {text : 'Thread runs on: ' + name, tone : 'chip-ok'};
+  var why = s.mode === 'STARTING'        ? 'starting'
+            : s.mode === 'RADIO_FAULT' ? 'fault' + (s.fault_reason ? ': ' + s.fault_reason : '')
+            : s.mode === 'NO_RADIO'    ? (s.fault_reason || 'not available')
+                                       : String(s.mode).toLowerCase();
+  return {text : 'Thread on ' + name + ': ' + why, tone : 'chip-warn'};
+}
+
+/*
  * The notice of a Thread page while no radio runs Thread: {text, href, label, fault}, or null. `fault` marks a
  * RADIO_FAULT, which the pages that already explain faults (Dashboard, Thread management) leave to themselves.
  * `kind` 'capture' is the Packet capture page, which asks for a radio in OTBR mode instead of reporting Thread as off.
@@ -245,6 +266,7 @@ function showThreadNotice(doc, n) {
 return {
   showThreadNotice : showThreadNotice,
   threadState : threadState,
+  threadChip : threadChip,
   threadNotice : threadNotice,
   wholeNumber : wholeNumber,
   compatText : compatText,
