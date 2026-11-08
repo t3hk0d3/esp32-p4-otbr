@@ -751,7 +751,11 @@ static void run_move(void)
     }
 
     // A failed start on the target whose start back on the source failed too is a fault a PUT of mode otbr retries.
-    s_start_failed = mode_fsm_start_failed(br_core_get_mode(), s_ot_chan != NULL);
+    // Only a move that tried a start says so: one refused before (probe failed, busy, drain timeout) changed nothing,
+    // and must not turn an earlier fault (e.g. the C6's "no rcp firmware") into a start failure reconcile acts on.
+    if (ret == ESP_OK || ret == MODE_FSM_ERR_START_FAILED) {
+        s_start_failed = mode_fsm_start_failed(br_core_get_mode(), s_ot_chan != NULL);
+    }
     if (ret == ESP_OK) {
         if (stop) {
             note_no_radio_reason(NULL); // "no channel in otbr"
