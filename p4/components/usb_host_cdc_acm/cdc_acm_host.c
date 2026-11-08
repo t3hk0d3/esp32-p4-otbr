@@ -786,9 +786,16 @@ esp_err_t cdc_acm_host_close(cdc_acm_dev_hdl_t cdc_hdl)
     // may still resubmit its transfer once; the interface release then fails (a transfer in flight). So the halt,
     // flush, clear and release are retried a few ticks apart (the late transfer is cancelled in the next round, and a
     // cancelled transfer is never resubmitted), and a close that still fails returns the error instead of aborting.
+    // [patch 33] The notification interface (when it is a separate one) is released inside the same rounds: its
+    // interrupt transfer can be in flight just like a bulk IN one. Each interface's release is remembered in the
+    // device, so a later close of a device whose first close failed releases only what is still claimed.
+    const bool notif_separate = (cdc_dev->notif.intf_desc != NULL) && (cdc_dev->notif.intf_desc != cdc_dev->data.intf_desc);
+    if (!notif_separate) {
+        cdc_dev->notif_released = true;
+    }
     esp_err_t release_err = ESP_FAIL;
     int attempt = 0;
-    for (; attempt < CDC_ACM_CLOSE_ATTEMPTS && release_err != ESP_OK; attempt++) {
+    for (; attempt < CDC_ACM_CLOSE_ATTEMPTS && !(cdc_dev->data_released && cdc_dev->notif_released); attempt++) {
         if (attempt > 0) {
             vTaskDelay(1);
         }
@@ -796,26 +803,35 @@ esp_err_t cdc_acm_host_close(cdc_acm_dev_hdl_t cdc_hdl)
             cdc_dev->data.in_polling[i] = false;
         }
         cdc_dev->notif.xfer_polling = false;
-        if (cdc_dev->data.in_xfer[0]) {
+        if (cdc_dev->data.in_xfer[0] && !cdc_dev->data_released) {
             ESP_ERROR_CHECK_WITHOUT_ABORT(cdc_acm_reset_transfer_endpoint(cdc_dev->dev_hdl, cdc_dev->data.in_xfer[0]));
         }
-        if (cdc_dev->notif.xfer != NULL) {
+        if (cdc_dev->notif.xfer != NULL && !(notif_separate ? cdc_dev->notif_released : cdc_dev->data_released)) {
             ESP_ERROR_CHECK_WITHOUT_ABORT(cdc_acm_reset_transfer_endpoint(cdc_dev->dev_hdl, cdc_dev->notif.xfer));
         }
-        release_err = usb_host_interface_release(p_cdc_acm_obj->cdc_acm_client_hdl, cdc_dev->dev_hdl,
-                      cdc_dev->data.intf_desc->bInterfaceNumber);
+        if (!cdc_dev->data_released) {
+            release_err = usb_host_interface_release(p_cdc_acm_obj->cdc_acm_client_hdl, cdc_dev->dev_hdl,
+                          cdc_dev->data.intf_desc->bInterfaceNumber);
+            cdc_dev->data_released = (release_err == ESP_OK);
+        }
+        if (!cdc_dev->notif_released) {
+            release_err = usb_host_interface_release(p_cdc_acm_obj->cdc_acm_client_hdl, cdc_dev->dev_hdl,
+                          cdc_dev->notif.intf_desc->bInterfaceNumber);
+            cdc_dev->notif_released = (release_err == ESP_OK);
+        }
     }
-    if (release_err == ESP_OK && attempt > 1) {
-        ESP_LOGW(TAG, "close: a late transfer, interface released after %d rounds", attempt);
+    const bool released = cdc_dev->data_released && cdc_dev->notif_released;
+    if (released && attempt > 1) {
+        ESP_LOGW(TAG, "close: a late transfer, interfaces released after %d rounds", attempt);
     }
-    if (release_err != ESP_OK) {
-        ESP_LOGE(TAG, "close: interface release failed: %s", esp_err_to_name(release_err));
+    if (!released) {
+        // [patch 33] The device stays listed and allocated: a transfer may still be in flight, so nothing is freed.
+        // The caller keeps the handle and may close again.
+        ESP_LOGE(TAG, "close: interface release failed (data %s, notification %s): %s",
+                 cdc_dev->data_released ? "released" : "claimed", cdc_dev->notif_released ? "released" : "claimed",
+                 esp_err_to_name(release_err));
         xSemaphoreGive(p_cdc_acm_obj->open_close_mutex);
-        return release_err;
-    }
-    if ((cdc_dev->notif.intf_desc != NULL) && (cdc_dev->notif.intf_desc != cdc_dev->data.intf_desc)) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(usb_host_interface_release(p_cdc_acm_obj->cdc_acm_client_hdl, cdc_dev->dev_hdl,
-                                      cdc_dev->notif.intf_desc->bInterfaceNumber));
+        return (release_err != ESP_OK) ? release_err : ESP_ERR_INVALID_STATE;
     }
 
     CDC_ACM_ENTER_CRITICAL();
