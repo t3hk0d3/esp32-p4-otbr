@@ -770,8 +770,12 @@ def agent_container():
                 if ":" in AGENT_BOARD
                 else f"tcp:{AGENT_BOARD}:{port}"
             )
+        # socat dials first (retried: a new macvlan container's address is not usable at once, "No route to host") and
+        # makes the pty only once connected; the agent starts when the pty exists, so its spinel init never runs into
+        # an unconnected pty.
         script = (
-            f"socat pty,link={AGENT_TTY},raw,echo=0 {target} & sleep 2; "
+            f"socat {target},retry=20,interval=0.5 pty,link={AGENT_TTY},raw,echo=0 & "
+            f"i=0; while [ ! -e {AGENT_TTY} ] && [ $i -lt 100 ]; do sleep 0.2; i=$((i+1)); done; "
             f"exec otbr-agent --vendor-name=Test --model-name=Proxy -I wpan0 -B {backbone} "
             f"'spinel+hdlc+uart://{AGENT_TTY}?uart-baudrate=460800' 'trel://{backbone}'"
         )
