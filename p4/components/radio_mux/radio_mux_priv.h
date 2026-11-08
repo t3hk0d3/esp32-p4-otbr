@@ -53,7 +53,8 @@ typedef struct mux_port {
     int64_t det_wait_ms;
     uint32_t det_baud;
     int64_t presence_check_us;
-    bool busy; // owner, C6: a C6 job (radio_mux_c6_job_begin) holds the radio
+    bool busy; // owner, C6: a C6 job (radio_mux_c6_job_begin) or the boot hold holds the radio
+    radio_mux_c6_hold_t hold; // owner, C6: the boot hold (from the start until the boot job's end, or its expiry)
     // owner: the channel on this port is leased for OTBR (radio_mux_lease): frames to its own queue and eventfd, no
     // consumer, until radio_mux_lease_end or radio_mux_commit_otbr; an unplug posts GONE and ends it
     bool leased;

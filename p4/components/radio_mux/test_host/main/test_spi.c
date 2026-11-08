@@ -1,5 +1,5 @@
 // Host tests of the C6 transport's pure parts: the SPI header (OpenThread's spi_frame.hpp layout), the check of one
-// transaction, its length, the C6's availability from rcp_sync's probe and the job refusal rule.
+// transaction, its length, the C6's availability from rcp_sync's probe, the job refusal rule and the boot hold.
 #include <string.h>
 #include "radio_mux_core.h"
 #include "unity.h"
@@ -262,6 +262,84 @@ TEST_CASE("On rcp-proxy without a peer, otbr, off, or a detached rcp-proxy: the 
     TEST_ASSERT_FALSE(radio_mux_c6_job_refused(RADIO_MUX_MODE_OTBR, true, true));
     TEST_ASSERT_FALSE(radio_mux_c6_job_refused(RADIO_MUX_MODE_OFF, false, false));
     TEST_ASSERT_FALSE(radio_mux_c6_job_refused(RADIO_MUX_MODE_RCP_PROXY, false, true));
+}
+
+/* ---- radio_mux_c6_hold (the C6's boot hold) ---- */
+
+#define HOLD_START 7000
+
+TEST_CASE("On the mux's start: the C6 is held, waiting for its boot job", "[radio_mux]")
+{
+    radio_mux_c6_hold_t h = {0};
+
+    radio_mux_c6_hold_start(&h, HOLD_START);
+    TEST_ASSERT_EQUAL(RADIO_MUX_C6_HOLD_WAIT, h.state);
+    TEST_ASSERT_FALSE(radio_mux_c6_hold_expired(&h, HOLD_START));
+}
+
+TEST_CASE("On the first job while held: it runs inside the hold, the hold is the job's", "[radio_mux]")
+{
+    radio_mux_c6_hold_t h;
+
+    radio_mux_c6_hold_start(&h, HOLD_START);
+    TEST_ASSERT_TRUE(radio_mux_c6_hold_job_begin(&h));
+    TEST_ASSERT_EQUAL(RADIO_MUX_C6_HOLD_JOB, h.state);
+}
+
+TEST_CASE("On a second job while the first runs inside the hold: not inside it (the C6 is busy)", "[radio_mux]")
+{
+    radio_mux_c6_hold_t h;
+
+    radio_mux_c6_hold_start(&h, HOLD_START);
+    radio_mux_c6_hold_job_begin(&h);
+    TEST_ASSERT_FALSE(radio_mux_c6_hold_job_begin(&h));
+    TEST_ASSERT_EQUAL(RADIO_MUX_C6_HOLD_JOB, h.state);
+}
+
+TEST_CASE("On a job without a hold: not inside one (the job takes the C6 as usual)", "[radio_mux]")
+{
+    radio_mux_c6_hold_t h = {0};
+
+    TEST_ASSERT_FALSE(radio_mux_c6_hold_job_begin(&h));
+    TEST_ASSERT_EQUAL(RADIO_MUX_C6_HOLD_NONE, h.state);
+}
+
+TEST_CASE("On no job within RADIO_MUX_C6_BOOT_HOLD_MS: the hold expires", "[radio_mux]")
+{
+    radio_mux_c6_hold_t h;
+
+    radio_mux_c6_hold_start(&h, HOLD_START);
+    TEST_ASSERT_FALSE(radio_mux_c6_hold_expired(&h, HOLD_START + RADIO_MUX_C6_BOOT_HOLD_MS - 1));
+    TEST_ASSERT_TRUE(radio_mux_c6_hold_expired(&h, HOLD_START + RADIO_MUX_C6_BOOT_HOLD_MS));
+}
+
+TEST_CASE("On a job running inside the hold: the hold never expires (its end lets go)", "[radio_mux]")
+{
+    radio_mux_c6_hold_t h;
+
+    radio_mux_c6_hold_start(&h, HOLD_START);
+    radio_mux_c6_hold_job_begin(&h);
+    TEST_ASSERT_FALSE(radio_mux_c6_hold_expired(&h, HOLD_START + 10 * RADIO_MUX_C6_BOOT_HOLD_MS));
+}
+
+TEST_CASE("On a clock that went backwards while held: the hold expires", "[radio_mux]")
+{
+    radio_mux_c6_hold_t h;
+
+    radio_mux_c6_hold_start(&h, HOLD_START);
+    TEST_ASSERT_TRUE(radio_mux_c6_hold_expired(&h, HOLD_START - 1));
+}
+
+TEST_CASE("On the hold's end: no hold, nothing expires, a later job is not inside it", "[radio_mux]")
+{
+    radio_mux_c6_hold_t h;
+
+    radio_mux_c6_hold_start(&h, HOLD_START);
+    radio_mux_c6_hold_job_begin(&h);
+    radio_mux_c6_hold_end(&h);
+    TEST_ASSERT_EQUAL(RADIO_MUX_C6_HOLD_NONE, h.state);
+    TEST_ASSERT_FALSE(radio_mux_c6_hold_expired(&h, HOLD_START + RADIO_MUX_C6_BOOT_HOLD_MS));
+    TEST_ASSERT_FALSE(radio_mux_c6_hold_job_begin(&h));
 }
 
 /* ---- radio_mux_spi_gap_wait_us ---- */

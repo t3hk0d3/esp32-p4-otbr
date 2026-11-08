@@ -277,8 +277,9 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
 - `mode` is what the channel does now: `unavailable` (reported only: not detected, unplugged, no driver), `off`,
   `otbr`, `ziggurat` (reserved) or `rcp-proxy`. `stored_mode` is the mode it returns to, also while unavailable or when
   the firmware does not fit.
-- `state` is `idle`, `starting`, `running`, `fault` (with `error`) or `busy` (a C6 job runs). A failed start of OpenThread
-  shows as `fault` on its channel, with the board's fault reason.
+- `state` is `idle`, `starting`, `running`, `fault` (with `error`) or `busy` (a C6 job runs, or the C6's boot steps:
+  `error` "the C6's boot steps run"). A failed start of OpenThread shows as `fault` on its channel, with the board's
+  fault reason.
 - `usb` is `null` for the C6. `rcp_proxy` always carries the stored settings; `state` (`listening`, `connecting`,
   `backoff`, `connected`) and `peer` are set only while the channel runs `rcp-proxy`. `last_error` says why the
   proxy's last try to listen or connect failed (`"tcp port 6638: Address already in use"`, `"host.local does not

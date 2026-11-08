@@ -463,6 +463,37 @@ bool radio_mux_c6_present(const radio_mux_c6_probe_t *probe, char *reason, size_
 // attached and it reported a connected peer.
 bool radio_mux_c6_job_refused(radio_mux_mode_t stored_mode, bool attached, bool has_peer);
 
+// The C6's boot hold. From the mux's start the C6 is held for its boot steps (br_core's boot job: rcp_sync's probe over
+// SPI3 and the INT pin, the ROM recovery, the reset into the RCP): listed busy with RADIO_MUX_C6_BOOT_REASON, no
+// consumer attached, SPI2 not opened. The first C6 job that begins while it is held runs inside the hold (nothing to
+// detach or release), and that job's end lets go: the stored mode's consumer is attached once, after the steps. When
+// no job begins within RADIO_MUX_C6_BOOT_HOLD_MS (br_core never ran its boot, or it failed early), the mux lets go by
+// itself and attaches the stored mode without the steps.
+#define RADIO_MUX_C6_BOOT_HOLD_MS 30000
+#define RADIO_MUX_C6_BOOT_REASON "the C6's boot steps run"
+
+typedef enum {
+    RADIO_MUX_C6_HOLD_NONE, // not held for the boot (never held, or let go)
+    RADIO_MUX_C6_HOLD_WAIT, // held, no job yet: let go at the deadline
+    RADIO_MUX_C6_HOLD_JOB,  // a job began inside the hold: its end lets go
+} radio_mux_c6_hold_state_t;
+
+typedef struct {
+    radio_mux_c6_hold_state_t state;
+    int64_t since_ms; // when the hold started
+} radio_mux_c6_hold_t;
+
+// The mux starts: the C6 is held from now_ms, waiting for its boot job.
+void radio_mux_c6_hold_start(radio_mux_c6_hold_t *h, int64_t now_ms);
+// A C6 job begins: true when it runs inside the hold (WAIT, which becomes JOB). False otherwise: no hold (the job
+// takes the C6 as usual), or a job already runs inside it (the C6 is busy: the new job is refused).
+bool radio_mux_c6_hold_job_begin(radio_mux_c6_hold_t *h);
+// Whether the mux lets go of a hold no job took: WAIT, and RADIO_MUX_C6_BOOT_HOLD_MS or more since it started (a clock
+// that went backwards counts as passed: the C6 is never held for ever).
+bool radio_mux_c6_hold_expired(const radio_mux_c6_hold_t *h, int64_t now_ms);
+// The hold ends (its job ended, or it expired): NONE.
+void radio_mux_c6_hold_end(radio_mux_c6_hold_t *h);
+
 /* ---- attach handles ---- */
 
 // A consumer's handle (radio_mux_chan_t *, radio_mux.h) is one attach or lease, not the channel: the pointer value

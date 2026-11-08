@@ -806,8 +806,9 @@ static esp_err_t start_radio_task(void)
 
 // The board's radio at boot (spec: Board mode): no channel stored in otbr, or a dongle, is NO_RADIO until it attaches;
 // the C6 runs its boot steps inside a C6 job (R29: rcp_sync drives SPI3 and the INT pin) at every boot, whatever channel
-// is in otbr: the probe of its installed RCP, the jumper's detection, the automatic ROM recovery. With the C6 in otbr it
-// is attached again at the job's end, which starts OpenThread on br_radio; a fault the steps found stays (the C6 is not
+// is in otbr: the probe of its installed RCP, the jumper's detection, the automatic ROM recovery. The mux holds the C6
+// unattached from its start, and this job runs in that hold, so the C6's stored mode is attached once, at the job's
+// end. With the C6 in otbr that attach starts OpenThread on br_radio; a fault the steps found stays (the C6 is not
 // listed, nothing starts on it). Otherwise they only update the C6's status and listing, and OpenThread starts on its
 // own channel meanwhile (br_radio is not held).
 void core_radio_boot(void)

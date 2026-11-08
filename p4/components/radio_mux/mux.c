@@ -146,6 +146,12 @@ static bool want_attach(const mux_port_t *p)
     return radio_mux_attach_wanted(&g_mux.rules, &v, mux_find_consumer(ch->mode) != NULL);
 }
 
+// Why the C6 is busy: its boot hold (the boot steps, or the wait for them) or another C6 job.
+static const char *c6_busy_reason(const mux_port_t *p)
+{
+    return p->hold.state != RADIO_MUX_C6_HOLD_NONE ? RADIO_MUX_C6_BOOT_REASON : C6_BUSY_REASON;
+}
+
 // Owner: what the API shows for the channel on port p (mode, state, reason), from the attach state.
 static void refresh(mux_port_t *p)
 {
@@ -158,7 +164,7 @@ static void refresh(mux_port_t *p)
     if (p->kind == RADIO_MUX_KIND_C6 && (p->busy || !ch->present)) { // a job holds it, or the probe found no RCP
         ch->eff_mode = p->busy ? ch->mode : RADIO_MUX_MODE_UNAVAILABLE;
         ch->state = p->busy ? RADIO_MUX_STATE_BUSY : RADIO_MUX_STATE_IDLE;
-        snprintf(ch->reason, sizeof(ch->reason), "%s", p->busy ? C6_BUSY_REASON : p->fault);
+        snprintf(ch->reason, sizeof(ch->reason), "%s", p->busy ? c6_busy_reason(p) : p->fault);
         mux_unlock();
         return;
     }
@@ -670,23 +676,55 @@ static void c6_apply(bool reattach)
     refresh(p);
 }
 
-// Owner task start: c6 listed from rcp_sync's last probe (none yet: present), then attached when its mode wants it.
+// Owner task start: c6 listed from rcp_sync's last probe (none yet: present), then held for its boot steps
+// (radio_mux_c6_hold_t): busy, nothing attached, SPI2 and the pins untouched, until the boot job's end attaches the
+// stored mode's consumer once, after the steps (or until the hold expires: c6_hold_check).
 static void c6_init(void)
 {
+    mux_port_t *p = &g_mux.c6;
     char why[RADIO_MUX_REASON_MAX];
 
-    g_mux.c6.chan = &g_mux.chans[0];
+    p->chan = &g_mux.chans[0];
+    c6_list(c6_probe_present(why, sizeof(why)), why);
+    p->busy = true;
+    p->att.state = RADIO_MUX_AS_ABSENT;
+    radio_mux_c6_hold_start(&p->hold, now_ms());
+    refresh(p);
+    ESP_LOGI(TAG, "c6: held for its boot steps");
+}
+
+// Owner loop: a boot hold no job took within RADIO_MUX_C6_BOOT_HOLD_MS (br_core never ran its boot, or failed before
+// it) is let go: c6 is listed from rcp_sync's last probe and its stored mode attached, without the boot steps.
+static void c6_hold_check(void)
+{
+    mux_port_t *p = &g_mux.c6;
+    char why[RADIO_MUX_REASON_MAX];
+
+    if (!radio_mux_c6_hold_expired(&p->hold, now_ms())) {
+        return;
+    }
+    radio_mux_c6_hold_end(&p->hold);
+    p->busy = false;
+    ESP_LOGW(TAG, "c6: no boot job began within %d s: its stored mode attaches without the boot steps",
+             RADIO_MUX_C6_BOOT_HOLD_MS / 1000);
     c6_list(c6_probe_present(why, sizeof(why)), why);
     c6_apply(false);
 }
 
 // A C6 job (push, ROM recovery, probe) takes the C6: refused while rcp-proxy has a peer (409 c6_busy) or another job
-// runs; otherwise GONE to its consumer, SPI2, INT and the reset GPIO released (the C6 left running) for rcp_sync.
+// runs; otherwise GONE to its consumer, SPI2, INT and the reset GPIO released (the C6 left running) for rcp_sync. The
+// first job while the boot hold waits (the boot steps) runs in the hold: nothing was attached or opened.
 static void handle_c6_job_begin(mux_call_t *call)
 {
     mux_port_t *p = &g_mux.c6;
     bool peer;
 
+    if (radio_mux_c6_hold_job_begin(&p->hold)) { // the boot job: nothing is attached or opened, it runs in the hold
+        refresh(p);
+        call->err = ESP_OK;
+        ESP_LOGI(TAG, "c6: the boot job runs in the hold");
+        return;
+    }
     taskENTER_CRITICAL(&p->lock);
     peer = p->busy_peer;
     taskEXIT_CRITICAL(&p->lock);
@@ -709,7 +747,8 @@ static void handle_c6_job_begin(mux_call_t *call)
 }
 
 // The job's end: c6 listed again from rcp_sync's last probe (unavailable when the job says the C6 does not work),
-// then its consumer attached again (SPI2 opened). Without a job: the listing is refreshed when nothing is attached.
+// then its consumer attached again (SPI2 opened); the boot job's end lets go of the boot hold, so the stored mode
+// attaches once, after the boot steps. Without a job: the listing is refreshed when nothing is attached.
 static void handle_c6_job_end(mux_call_t *call)
 {
     mux_port_t *p = &g_mux.c6;
@@ -720,6 +759,7 @@ static void handle_c6_job_end(mux_call_t *call)
         return; // no job ran: what is attached stays
     }
     p->busy = false;
+    radio_mux_c6_hold_end(&p->hold); // the boot job's end lets go of the boot hold
     bool present = c6_probe_present(why, sizeof(why));
 
     if (present && !call->c6_ok) {
@@ -751,7 +791,7 @@ static void handle_lease(mux_call_t *call)
     if (p->chan != ch || !ch->present || !ch->supported) {
         why = "not detected";
     } else if (p->busy) {
-        why = C6_BUSY_REASON;
+        why = c6_busy_reason(p);
     } else if (p->leased) {
         why = "OpenThread is already being moved to it";
     } else if (p->att.state == RADIO_MUX_AS_ATTACHED || p->consumer) {
@@ -1439,8 +1479,8 @@ static void owner_task(void *arg)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "USB host start: %s, no USB radios", esp_err_to_name(err));
     }
-    // R13 at start: every present channel whose stored mode has a consumer: the C6 here, USB devices attached at boot
-    // through new_dev_cb like any plug-in.
+    // R13 at start: every present channel whose stored mode has a consumer: the C6 once its boot steps ended (c6_init
+    // holds it until the boot job's end), USB devices attached at boot through new_dev_cb like any plug-in.
     c6_init();
     for (;;) {
         const bool probing = g_mux.usb.att.state == RADIO_MUX_AS_PROBING;
@@ -1459,6 +1499,7 @@ static void owner_task(void *arg)
         check_presence(&g_mux.usb);
         usb_error_check(&g_mux.usb);
         usb_close_check(&g_mux.usb);
+        c6_hold_check();
     }
 }
 

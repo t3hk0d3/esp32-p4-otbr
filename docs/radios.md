@@ -23,7 +23,8 @@ Without a dongle the board behaves as before: the C6 channel in `otbr` mode.
   10 s with the packet's bytes. Rising `uart_errors` with `rx_errors` points at the bridge losing bytes, not the RCP.
   The decoding of the packet follows the ch34x driver's own defines (`CH34X_UART_STATE_TRANSIENT_MASK`, byte 0) and is
   not confirmed against a datasheet; confirm it on a board.
-- A channel's `state` is `idle` (mode `off`), `starting`, `running`, `fault` (with a reason) or `busy` (a C6 job runs).
+- A channel's `state` is `idle` (mode `off`), `starting`, `running`, `fault` (with a reason) or `busy` (a C6 job runs,
+  or the C6's boot steps).
 - `DELETE /device/channels/{id}` (the page's "Forget this radio") removes an unplugged dongle and its settings. The C6
   and attached radios cannot be forgotten (409 `in_use`).
 
@@ -76,7 +77,10 @@ again with source `passive`. There is no detection endpoint: unplug and replug, 
 The C6 is not probed this way; the boot probe reports its firmware. It runs at every boot, whatever channel is in
 `otbr` (with Thread elsewhere it only updates the C6's status and listing), together with the maintenance jumper's
 detection and the automatic ROM recovery. A fault it finds with the C6 in `otbr` ("no rcp firmware", "rcp
-incompatible") stays: the C6 is listed unavailable and Thread does not start on it until a push.
+incompatible") stays: the C6 is listed unavailable and Thread does not start on it until a push. Until those steps
+end, the C6 is listed `busy` ("the C6's boot steps run") and nothing runs on it: its stored mode (`otbr`, `rcp-proxy`)
+starts once, after the steps, so a proxy peer never sees the RCP reset by the boot. Should the boot steps never begin
+(the network did not come up, so the border router never started), the stored mode starts after 30 s without them.
 
 ## RCP proxy
 
