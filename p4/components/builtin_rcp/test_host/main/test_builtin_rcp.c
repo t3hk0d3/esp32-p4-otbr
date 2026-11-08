@@ -171,3 +171,96 @@ void app_main(void)
     int failures = (int)UNITY_END();
     exit(failures == 0 ? 0 : 1);
 }
+
+/* ---- builtin_rcp_job_result (was mode_fsm_radio_job_result) ---- */
+
+TEST_CASE("On a push or a recovery that failed: the job result is its error, whatever the mode did", "[builtin_rcp]")
+{
+    TEST_ASSERT_EQUAL(ESP_FAIL, builtin_rcp_job_result(true, ESP_FAIL, RADIO_MUX_SETTLE_UP));
+    TEST_ASSERT_EQUAL(ESP_FAIL, builtin_rcp_job_result(true, ESP_FAIL, RADIO_MUX_SETTLE_DOWN));
+    TEST_ASSERT_EQUAL(ESP_FAIL, builtin_rcp_job_result(false, ESP_FAIL, RADIO_MUX_SETTLE_UP));
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, builtin_rcp_job_result(false, ESP_ERR_TIMEOUT, RADIO_MUX_SETTLE_DOWN));
+}
+
+TEST_CASE("On a base-only push or a ROM recovery that worked: the job result is ESP_OK whatever the mode did",
+          "[builtin_rcp]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, builtin_rcp_job_result(true, ESP_OK, RADIO_MUX_SETTLE_DOWN));
+    TEST_ASSERT_EQUAL(ESP_OK, builtin_rcp_job_result(true, ESP_OK, RADIO_MUX_SETTLE_WAIT));
+    TEST_ASSERT_EQUAL(ESP_OK, builtin_rcp_job_result(true, ESP_OK, RADIO_MUX_SETTLE_UP));
+}
+
+TEST_CASE("On a push that worked and a mode that is up, or no mode: the job result is ESP_OK", "[builtin_rcp]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, builtin_rcp_job_result(false, ESP_OK, RADIO_MUX_SETTLE_UP));
+    TEST_ASSERT_EQUAL(ESP_OK, builtin_rcp_job_result(false, ESP_OK, RADIO_MUX_SETTLE_NONE));
+}
+
+TEST_CASE("On a push that worked and a mode that is down or still waiting: the job result is RCP_SYNC_ERR_RESTART",
+          "[builtin_rcp]")
+{
+    TEST_ASSERT_EQUAL(RCP_SYNC_ERR_RESTART, builtin_rcp_job_result(false, ESP_OK, RADIO_MUX_SETTLE_DOWN));
+    TEST_ASSERT_EQUAL(RCP_SYNC_ERR_RESTART, builtin_rcp_job_result(false, ESP_OK, RADIO_MUX_SETTLE_WAIT));
+}
+
+/* ---- builtin_rcp_restart_detail ---- */
+
+static radio_mux_maint_t outcome(radio_mux_mode_t mode, radio_mux_settle_t settle, const char *state,
+                                 const char *reason)
+{
+    radio_mux_maint_t m = {.ran = true, .mode = mode, .settle = settle};
+
+    snprintf(m.mode_state, sizeof(m.mode_state), "%s", state);
+    snprintf(m.mode_reason, sizeof(m.mode_reason), "%s", reason);
+    return m;
+}
+
+TEST_CASE("On Thread down with a reason: the detail names OpenThread and the reason", "[builtin_rcp]")
+{
+    const radio_mux_maint_t m = outcome(RADIO_MUX_MODE_OTBR, RADIO_MUX_SETTLE_DOWN, "fault", "no rcp firmware");
+    char out[128];
+
+    builtin_rcp_restart_detail(out, sizeof(out), &m);
+    TEST_ASSERT_EQUAL_STRING("the image is installed, but OpenThread did not start on it: no rcp firmware", out);
+}
+
+TEST_CASE("On Zigbee down with a reason: the detail names Zigbee and the reason", "[builtin_rcp]")
+{
+    const radio_mux_maint_t m = outcome(RADIO_MUX_MODE_ZIGGURAT, RADIO_MUX_SETTLE_DOWN, "incompatible",
+                                        "firmware too old");
+    char out[128];
+
+    builtin_rcp_restart_detail(out, sizeof(out), &m);
+    TEST_ASSERT_EQUAL_STRING("the image is installed, but Zigbee did not start on it: firmware too old", out);
+}
+
+TEST_CASE("On the proxy down with no reason: the detail names rcp-proxy and its state", "[builtin_rcp]")
+{
+    const radio_mux_maint_t m = outcome(RADIO_MUX_MODE_RCP_PROXY, RADIO_MUX_SETTLE_DOWN, "no_radio", "");
+    char out[128];
+
+    builtin_rcp_restart_detail(out, sizeof(out), &m);
+    TEST_ASSERT_EQUAL_STRING("the image is installed, but rcp-proxy did not start on it: no_radio", out);
+}
+
+TEST_CASE("On a mode still waiting after the timeout: the detail says it is still starting after 180 s",
+          "[builtin_rcp]")
+{
+    const radio_mux_maint_t m = outcome(RADIO_MUX_MODE_OTBR, RADIO_MUX_SETTLE_WAIT, "starting", "");
+    char out[128];
+
+    builtin_rcp_restart_detail(out, sizeof(out), &m);
+    TEST_ASSERT_EQUAL_STRING("the image is installed, but OpenThread did not start on it: still starting after 180 s",
+                             out);
+}
+
+TEST_CASE("On a buffer too small for the detail: truncated and terminated", "[builtin_rcp]")
+{
+    const radio_mux_maint_t m = outcome(RADIO_MUX_MODE_OTBR, RADIO_MUX_SETTLE_DOWN, "fault", "no rcp firmware");
+    char out[16];
+
+    memset(out, 'x', sizeof(out));
+    builtin_rcp_restart_detail(out, sizeof(out), &m);
+    TEST_ASSERT_EQUAL(15, strlen(out));
+    TEST_ASSERT_EQUAL_STRING("the image is in", out);
+}

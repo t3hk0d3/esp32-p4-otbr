@@ -133,6 +133,21 @@ typedef enum {
 // and connected); every other state is down.
 radio_mux_settle_t radio_mux_orch_settle(radio_mux_chan_state_t cs, bool instance, const char *mode_state);
 
+// How long radio_mux_maintain waits for the channel's mode to run again after the work (radio_mux_orch_settle).
+#define RADIO_MUX_SETTLE_MS 180000
+
+// What a maintenance did (radio_mux_maintain).
+typedef struct {
+    bool ran;       // the channel went through reinit and the work ran (false: refused, nothing touched)
+    bool base_only; // a push left the RCP with its updater and no RCP firmware (c6_installer.bin through ESP-Hosted)
+    // The channel's stored mode afterwards and whether it runs again (NONE: no instance, or refused); WAIT means it
+    // had not said by RADIO_MUX_SETTLE_MS. mode_state and mode_reason are what the read API showed for it then.
+    radio_mux_mode_t mode;
+    radio_mux_settle_t settle;
+    char mode_state[16];
+    char mode_reason[RADIO_MUX_REASON_MAX];
+} radio_mux_maint_t;
+
 /* ---- the reinit run: the bound instance is asked to let go before maintenance runs ---- */
 
 // How long the orchestrator waits for the bound instance's answer: Thread's 45 s session drain plus margin. No answer

@@ -31,6 +31,17 @@ bool builtin_rcp_next_recovery_failed(bool previous, bool attempted, bool succee
 // from before the push.
 void builtin_rcp_installed_after_push(bool probe_ok, const char *probed_version, bool *known, char *out, size_t cap);
 
+// A maintenance's result once it ran: `job_err` the push or the ROM recovery, `settle` whether the C6's mode ran again
+// after it. A failed job reports its own error. A ROM recovery and a base-only push (the updater and no RCP firmware:
+// the status shows "no rcp firmware") report only their own result. A push that worked followed by a mode that is down,
+// or had not said by the deadline, is RCP_SYNC_ERR_RESTART: the image is installed, so a retry of the push cannot help.
+esp_err_t builtin_rcp_job_result(bool base_only, esp_err_t job_err, radio_mux_settle_t settle);
+
+// The detail of RCP_SYNC_ERR_RESTART into `out`: "the image is installed, but <who> did not start on it: <why>", who
+// OpenThread, Zigbee or rcp-proxy, why the mode's reason, else its state, and for a mode that had not said by the
+// deadline "still starting after 180 s". Truncated to `cap`, always terminated.
+void builtin_rcp_restart_detail(char *out, size_t cap, const radio_mux_maint_t *m);
+
 #ifdef __cplusplus
 }
 #endif

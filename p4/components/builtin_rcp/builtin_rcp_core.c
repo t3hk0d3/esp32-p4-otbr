@@ -45,3 +45,38 @@ void builtin_rcp_installed_after_push(bool probe_ok, const char *probed_version,
         strlcpy(out, probed_version, cap);
     }
 }
+
+esp_err_t builtin_rcp_job_result(bool base_only, esp_err_t job_err, radio_mux_settle_t settle)
+{
+    if (base_only || job_err != ESP_OK) {
+        return job_err;
+    }
+    return settle == RADIO_MUX_SETTLE_DOWN || settle == RADIO_MUX_SETTLE_WAIT ? RCP_SYNC_ERR_RESTART : ESP_OK;
+}
+
+static const char *who(radio_mux_mode_t mode)
+{
+    switch (mode) {
+    case RADIO_MUX_MODE_OTBR:
+        return "OpenThread";
+    case RADIO_MUX_MODE_ZIGGURAT:
+        return "Zigbee";
+    default:
+        return radio_mux_mode_name(mode);
+    }
+}
+
+void builtin_rcp_restart_detail(char *out, size_t cap, const radio_mux_maint_t *m)
+{
+    char waited[48];
+    const char *why = m->mode_reason[0] ? m->mode_reason : m->mode_state;
+
+    if (cap == 0) {
+        return;
+    }
+    if (m->settle == RADIO_MUX_SETTLE_WAIT) {
+        snprintf(waited, sizeof(waited), "still starting after %d s", RADIO_MUX_SETTLE_MS / 1000);
+        why = waited;
+    }
+    snprintf(out, cap, "the image is installed, but %s did not start on it: %s", who(m->mode), why);
+}

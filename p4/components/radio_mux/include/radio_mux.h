@@ -325,20 +325,7 @@ void radio_mux_set_otbr_mover(esp_err_t (*move)(const char *from, const char *to
 
 /* ---- maintenance of the built-in RCP: the channel's reinit ---- */
 
-// How long radio_mux_maintain waits for the channel's mode to run again after the work (radio_mux_orch_settle).
-#define RADIO_MUX_SETTLE_MS 180000
-
-// What a maintenance did (radio_mux_maintain).
-typedef struct {
-    bool ran;       // the channel went through reinit and the work ran (false: refused, nothing touched)
-    bool base_only; // a push left the RCP with its updater and no RCP firmware (c6_installer.bin through ESP-Hosted)
-    // The channel's stored mode afterwards and whether it runs again (NONE: no instance, or refused); WAIT means it
-    // had not said by RADIO_MUX_SETTLE_MS. mode_state and mode_reason are what the read API showed for it then.
-    radio_mux_mode_t mode;
-    radio_mux_settle_t settle;
-    char mode_state[16];
-    char mode_reason[RADIO_MUX_REASON_MAX];
-} radio_mux_maint_t;
+// radio_mux_maint_t (what a maintenance did) and RADIO_MUX_SETTLE_MS: radio_mux_orch_core.h.
 
 // Runs maintenance `work` on the built-in RCP's channel `id` as its reinit: RADIO_MUX_WORK_PUSH (`source` a
 // const rcp_fw_source_t *) or RADIO_MUX_WORK_ROM_RECOVERY (`source` NULL). The instance bound to the channel is asked
