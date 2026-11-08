@@ -152,6 +152,31 @@ bool rcp_proxy_peer_new(rcp_proxy_peer_memo_t *m, const rcp_proxy_addr_t *peer)
     return fresh;
 }
 
+void rcp_proxy_replay_init(rcp_proxy_replay_t *r)
+{
+    r->active = false;
+    r->start_ms = 0;
+}
+
+void rcp_proxy_replay_start(rcp_proxy_replay_t *r, int64_t now_ms)
+{
+    r->active = true;
+    r->start_ms = now_ms;
+}
+
+void rcp_proxy_replay_done(rcp_proxy_replay_t *r)
+{
+    r->active = false;
+}
+
+bool rcp_proxy_replay_blocks(rcp_proxy_replay_t *r, int64_t now_ms)
+{
+    if (r->active && (now_ms < r->start_ms || now_ms - r->start_ms >= RCP_PROXY_REPLAY_MAX_MS)) {
+        r->active = false;
+    }
+    return r->active;
+}
+
 /* ---- connect target lookup ---- */
 
 uint32_t rcp_proxy_lookup_ask(rcp_proxy_lookup_t *l, uint32_t *seq)

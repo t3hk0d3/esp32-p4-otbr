@@ -370,6 +370,59 @@ TEST_CASE("On TCP accept or connect (init before each): every peer session repla
     }
 }
 
+/* ---- rcp_proxy_replay (the peer's frames wait out the replayed reset) ---- */
+
+TEST_CASE("On a replayed reset: the peer's frames are dropped until the radio reports the reset", "[rcp_proxy]")
+{
+    rcp_proxy_replay_t r;
+
+    rcp_proxy_replay_init(&r);
+    rcp_proxy_replay_start(&r, 1000);
+    TEST_ASSERT_TRUE(rcp_proxy_replay_blocks(&r, 1000));
+    TEST_ASSERT_TRUE(rcp_proxy_replay_blocks(&r, 1000 + RCP_PROXY_REPLAY_MAX_MS - 1));
+    rcp_proxy_replay_done(&r);
+    TEST_ASSERT_FALSE(rcp_proxy_replay_blocks(&r, 1001));
+}
+
+TEST_CASE("On no reset report within RCP_PROXY_REPLAY_MAX_MS: the peer's frames pass", "[rcp_proxy]")
+{
+    rcp_proxy_replay_t r;
+
+    rcp_proxy_replay_init(&r);
+    rcp_proxy_replay_start(&r, 1000);
+    TEST_ASSERT_FALSE(rcp_proxy_replay_blocks(&r, 1000 + RCP_PROXY_REPLAY_MAX_MS));
+    TEST_ASSERT_FALSE(rcp_proxy_replay_blocks(&r, 1001)); // over for good, not only past the deadline
+}
+
+TEST_CASE("On no replay (none started, or a reset report without one): nothing is dropped", "[rcp_proxy]")
+{
+    rcp_proxy_replay_t r;
+
+    rcp_proxy_replay_init(&r);
+    TEST_ASSERT_FALSE(rcp_proxy_replay_blocks(&r, 1000));
+    rcp_proxy_replay_done(&r);
+    TEST_ASSERT_FALSE(rcp_proxy_replay_blocks(&r, 1000));
+}
+
+TEST_CASE("On a clock gone back since the replay started: nothing is dropped", "[rcp_proxy]")
+{
+    rcp_proxy_replay_t r;
+
+    rcp_proxy_replay_init(&r);
+    rcp_proxy_replay_start(&r, 1000);
+    TEST_ASSERT_FALSE(rcp_proxy_replay_blocks(&r, 999));
+}
+
+TEST_CASE("On a new session (init): a replay of the previous session no longer drops", "[rcp_proxy]")
+{
+    rcp_proxy_replay_t r;
+
+    rcp_proxy_replay_init(&r);
+    rcp_proxy_replay_start(&r, 1000);
+    rcp_proxy_replay_init(&r);
+    TEST_ASSERT_FALSE(rcp_proxy_replay_blocks(&r, 1000));
+}
+
 /* ---- rcp_proxy_lookup (connect target, resolved off the proxy task) ---- */
 
 TEST_CASE("On the answer to the pending ask: it is taken once and the session no longer waits", "[rcp_proxy]")

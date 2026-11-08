@@ -108,6 +108,27 @@ void rcp_proxy_peer_memo_init(rcp_proxy_peer_memo_t *m);
 // Records peer; true when it starts a new peer session (no peer before, or a different one).
 bool rcp_proxy_peer_new(rcp_proxy_peer_memo_t *m, const rcp_proxy_addr_t *peer);
 
+// A new peer session's replayed reset (frame channels): the peer's frames are dropped until the radio reports the reset
+// done (RADIO_MUX_EV_RESET), or RCP_PROXY_REPLAY_MAX_MS passed. Passed at once, a spinel host's RESET could reach the
+// RCP before the reset, be answered there, and the host's next request be lost in the reset (otbr-agent then gives
+// up); dropped, the host's RESET is answered by the reset's own notification.
+#define RCP_PROXY_REPLAY_MAX_MS 1000
+
+typedef struct {
+    bool active;
+    int64_t start_ms; // when the replayed reset was posted
+} rcp_proxy_replay_t;
+
+// None pending (a new session, or one that replays nothing).
+void rcp_proxy_replay_init(rcp_proxy_replay_t *r);
+// The replayed reset was posted at now_ms.
+void rcp_proxy_replay_start(rcp_proxy_replay_t *r, int64_t now_ms);
+// The radio reported the reset done.
+void rcp_proxy_replay_done(rcp_proxy_replay_t *r);
+// Whether a frame from the peer at now_ms is dropped: a replay is pending and less than RCP_PROXY_REPLAY_MAX_MS old.
+// Past that (or with a clock that went back) the replay is over.
+bool rcp_proxy_replay_blocks(rcp_proxy_replay_t *r, int64_t now_ms);
+
 // Connect: the target's name lookup runs off the proxy task (rcp_resolve) and its answer comes back later. A session
 // waits for the answer to its latest ask only: an answer to an earlier ask, or one that comes after the session
 // stopped waiting (a retry, a close, new settings: rcp_proxy_lookup_cancel, or a new session), is discarded.

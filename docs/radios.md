@@ -107,8 +107,9 @@ channel in `rcp-proxy` listen where another one (also an unplugged one) is store
 
 **Framing.** A USB channel passes bytes as they are. On the C6 the proxy turns spinel frames into HDLC bytes and back,
 so a Linux `otbr-agent` (`spinel+hdlc+uart` through `socat`) can drive the C6; when a TCP client becomes the peer (its
-first bytes passed the check in the security notes below) or a UDP peer first sends, the board resets the handshake so
-the host sees the RCP's reset. For UDP, `framing` is `hdlc` (default: the stream
+first bytes passed the check in the security notes below) or a UDP peer first sends, the board resets the RCP so the
+host sees its reset. Frames the host sends before that reset is done (at most 1 s) are dropped, so the host's own
+RESET is answered by the reset's notification. For UDP, `framing` is `hdlc` (default: the stream
 is cut at HDLC frame boundaries, one frame per datagram, which suits spinel) or `raw` (each received chunk becomes a
 datagram of at most 1024 bytes; loss and reordering corrupt the stream, so use it for testing only).
 

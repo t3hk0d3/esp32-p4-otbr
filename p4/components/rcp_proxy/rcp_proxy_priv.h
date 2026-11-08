@@ -83,6 +83,8 @@ struct proxy {
     rcp_proxy_udp_lock_t lock;
     rcp_proxy_refusal_t refusal; // UDP listen: the last source the access rules refused, and the refusals' log
     rcp_proxy_peer_memo_t memo; // the previous peer of this socket session (UDP: reset replay only for a new one)
+    rcp_proxy_replay_t replay;  // frame channel: the new session's replayed reset the peer's frames wait out
+    uint32_t replay_dropped;    // the peer's frames dropped while it ran (logged with the reset)
 
     // Buffers of the session (allocated when it opens).
     uint8_t *ring_buf; // TCP: radio -> peer bytes the socket has not taken yet

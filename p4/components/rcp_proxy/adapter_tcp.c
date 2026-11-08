@@ -263,9 +263,8 @@ static void hold_act(proxy_t *p, rcp_proxy_hold_act_t a)
     }
     case RCP_PROXY_HOLD_PASS:
         p->sniffing = false;
-        // The replayed reset is only posted to the radio's owner task, and the held bytes follow at once, so on the C6
-        // a spinel host's first frame can meet the radio while it resets and be lost. Harmless: the host retries its
-        // RESET and gets the replayed reset notification.
+        // On the C6 the held bytes' frames wait out the replayed reset (dropped, rcp_proxy_replay_t): a spinel host's
+        // RESET is answered by the reset's own notification, never by the RCP before the reset.
         rcp_proxy_peer_up(p, (struct sockaddr *)&p->sniff_from, true); // every passed client is a new peer session
         rcp_proxy_from_peer(p, p->hold.buf, p->hold.len); // may drop the peer (a raw write that failed)
         return;

@@ -445,11 +445,15 @@ void rcp_proxy_peer_up(proxy_t *p, const struct sockaddr *peer, bool new_session
     if (p->dec_buf) {
         radio_mux_hdlc_dec_init(&p->dec, p->dec_buf, DEC_CAP);
     }
+    rcp_proxy_replay_init(&p->replay);
+    p->replay_dropped = 0;
     ESP_LOGI(TAG, "%s: peer %s (%s)%s", p->id, p->peer, p->ad->name, new_session ? "" : ", same peer again");
     if (p->frames && new_session) { // the peer's host starts from the radio's reset handshake
         const esp_err_t err = radio_mux_reset(p->ch);
 
-        if (err != ESP_OK) {
+        if (err == ESP_OK) {
+            rcp_proxy_replay_start(&p->replay, rcp_proxy_now_ms()); // the peer's frames wait out the reset
+        } else {
             ESP_LOGW(TAG, "%s: radio reset for the new peer: %s", p->id, esp_err_to_name(err));
         }
     }
@@ -512,7 +516,10 @@ void rcp_proxy_from_peer(proxy_t *p, const uint8_t *d, size_t n)
         d += used;
         n -= used;
         if (done) {
-            if (radio_mux_tx(p->ch, p->dec.buf, p->dec.len) == ESP_OK) {
+            if (rcp_proxy_replay_blocks(&p->replay, rcp_proxy_now_ms())) {
+                p->replay_dropped++; // sent before the replayed reset: the reset's notification answers it
+                p->discarded += p->dec.len;
+            } else if (radio_mux_tx(p->ch, p->dec.buf, p->dec.len) == ESP_OK) {
                 p->to_radio += p->dec.len;
             } else {
                 p->tx_errors++;
@@ -595,7 +602,14 @@ static void radio_in(proxy_t *p)
             radio_mux_release(p->ch, ev.slot);
             break;
         case RADIO_MUX_EV_RESET:
-            ESP_LOGI(TAG, "%s: the radio was reset", p->id);
+            rcp_proxy_replay_done(&p->replay);
+            if (p->replay_dropped > 0) {
+                ESP_LOGI(TAG, "%s: the radio was reset (%lu frames the peer sent meanwhile dropped)", p->id,
+                         (unsigned long)p->replay_dropped);
+                p->replay_dropped = 0;
+            } else {
+                ESP_LOGI(TAG, "%s: the radio was reset", p->id);
+            }
             break;
         case RADIO_MUX_EV_GONE:
             ESP_LOGI(TAG, "%s: the channel is gone: peer dropped", p->id);
