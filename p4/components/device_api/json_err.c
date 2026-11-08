@@ -152,7 +152,7 @@ device_api_error_t device_api_map_push_error(esp_err_t err)
     }
     if (err == RCP_SYNC_ERR_RESTART) {
         return (device_api_error_t) {
-            502, "restart_failed", "the image is installed, but OpenThread did not start on it"
+            502, "restart_failed", "the image is installed, but the radio's mode did not start on it"
         };
     }
     return (device_api_error_t) {
@@ -185,8 +185,11 @@ device_api_error_t device_api_map_recover_error(esp_err_t err)
     };
 }
 
-const char *device_api_radio_job_busy(int mode, bool thread_on_c6)
+const char *device_api_radio_job_busy(int mode, bool thread_on_c6, bool moving)
 {
+    if (moving) {
+        return "OpenThread is being moved to another radio";
+    }
     if (!thread_on_c6) {
         return NULL;
     }

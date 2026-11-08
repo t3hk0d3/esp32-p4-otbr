@@ -1028,6 +1028,15 @@ static void push_finish(httpd_req_t *req, const sock_timeouts_t *saved)
     device_api_op_end(DEVICE_API_OP_RADIO_PUSH);
 }
 
+// Whether Thread is stored on the built-in RCP's channel: a maintenance of it then stops and restarts OpenThread, and
+// the board mode's refusals (SNIFFER, STARTING) apply to it. A snapshot.
+static bool thread_on_builtin(void)
+{
+    char otbr[RADIO_MUX_ID_MAX];
+
+    return radio_mux_otbr_channel(otbr, sizeof(otbr)) && strcmp(otbr, RADIO_MUX_BUILTIN_ID) == 0;
+}
+
 static void push_reply_result(httpd_req_t *req, esp_err_t err, const char *detail, bool upload)
 {
     if (err != ESP_OK) {
@@ -1038,8 +1047,6 @@ static void push_reply_result(httpd_req_t *req, esp_err_t err, const char *detai
         send_mapped_error(req, device_api_map_push_error(err), detail[0] ? detail : esp_err_to_name(err), upload);
         return;
     }
-    // After an abandoned OpenThread start the mode stays RADIO_FAULT for ~1.5 s until br_core reboots by itself:
-    // the reply goes out at once.
     builtin_rcp_status_t rs;
     char body[96];
 
@@ -1086,7 +1093,7 @@ static void push_task(void *arg)
         };
     }
     cancel_scan(); // the push tears OpenThread down
-    err = br_core_push_radio_firmware(&source, detail, sizeof(detail));
+    err = builtin_rcp_push_firmware(&source, detail, sizeof(detail));
     push_reply_result(req, err, detail, upload);
 done:
     if (url_src.client) {
@@ -1130,7 +1137,7 @@ static esp_err_t radio_firmware_post_handler(httpd_req_t *req)
         }
     }
     // The board mode refuses only a job that stops OpenThread: with Thread on another channel it is that channel's.
-    const char *mode_busy = device_api_radio_job_busy(br_core_get_mode(), br_core_c6_job_touches_openthread());
+    const char *mode_busy = device_api_radio_job_busy(br_core_get_mode(), thread_on_builtin(), br_core_move_running());
 
     if (mode_busy) {
         return send_error(req, 409, "busy", mode_busy, upload);
@@ -1166,7 +1173,7 @@ static void recover_task(void *arg)
     httpd_req_t *req = arg;
     char detail[96] = "";
     cancel_scan(); // the recovery tears OpenThread down
-    const esp_err_t err = br_core_rom_recover(detail, sizeof(detail));
+    const esp_err_t err = builtin_rcp_rom_recover(detail, sizeof(detail));
     br_core_status_t bs;
     builtin_rcp_status_t rs;
     char body[384];
@@ -1202,7 +1209,7 @@ static esp_err_t radio_recover_post_handler(httpd_req_t *req)
 
         return send_mapped_error(req, error, error.detail, false);
     }
-    const char *mode_busy = device_api_radio_job_busy(br_core_get_mode(), br_core_c6_job_touches_openthread());
+    const char *mode_busy = device_api_radio_job_busy(br_core_get_mode(), thread_on_builtin(), br_core_move_running());
 
     if (mode_busy) {
         return send_error(req, 409, "busy", mode_busy, false);
@@ -1409,7 +1416,7 @@ static esp_err_t update_bundle(update_job_t *job, device_api_error_t *error)
     return err;
 }
 
-// RCP step: the release's c6_rcp.bin through url_source_* and br_core_push_radio_firmware. On failure the reply error
+// RCP step: the release's c6_rcp.bin through url_source_* and builtin_rcp_push_firmware. On failure the reply error
 // (as POST /device/radio/firmware?from_url gives it) is in *error and job->detail says why.
 static esp_err_t update_rcp(update_job_t *job, device_api_error_t *error)
 {
@@ -1438,7 +1445,7 @@ static esp_err_t update_rcp(update_job_t *job, device_api_error_t *error)
 
         job->detail[0] = '\0';
         cancel_scan(); // the push tears OpenThread down
-        err = br_core_push_radio_firmware(&source, job->detail, sizeof(job->detail));
+        err = builtin_rcp_push_firmware(&source, job->detail, sizeof(job->detail));
         if (err != ESP_OK) {
             *error = device_api_map_push_error(err);
             if (job->detail[0] == '\0') {
@@ -1478,8 +1485,8 @@ static bool run_update(update_job_t *job)
         send_mapped_error(req, error, error.detail, false);
         return false;
     }
-    const char *mode_busy = install_rcp ? device_api_radio_job_busy(br_core_get_mode(),
-                                                                    br_core_c6_job_touches_openthread()) : NULL;
+    const char *mode_busy = install_rcp ? device_api_radio_job_busy(br_core_get_mode(), thread_on_builtin(),
+                                                                    br_core_move_running()) : NULL;
 
     if (mode_busy) {
         // Before the bundle: the push would be refused, and nothing is changed yet.
