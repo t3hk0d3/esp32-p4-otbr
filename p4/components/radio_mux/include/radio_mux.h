@@ -100,8 +100,9 @@ typedef struct {
     bool frames;            // as radio_mux_consumer_t.frames
     bool per_channel;       // one instance per channel bound to the mode (the RCP proxy); else a singleton
     // Called on the owner task for every input. Copy *in as the latest input and wake the instance's own task: never
-    // block, never call the mux from here. The instance acts on the latest input from its task and ignores one whose
-    // seq is older than one it already handled.
+    // block, and call nothing of the mux that posts to the owner task or waits for it (reading the channel through the
+    // handle is fine: radio_mux_chan_id, radio_mux_chan_frames, radio_mux_get_proxy). The instance acts on the latest
+    // input from its task and ignores one whose seq is older than one it already handled.
     void (*input)(const radio_mux_input_t *in, void *ctx);
     void *ctx;
 } radio_mux_instance_t;

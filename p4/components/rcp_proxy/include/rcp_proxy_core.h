@@ -253,6 +253,20 @@ void rcp_proxy_cut_init(rcp_proxy_cut_t *c, uint8_t *buf, size_t cap);
 size_t rcp_proxy_cut_feed(rcp_proxy_cut_t *c, const uint8_t *in, size_t n, rcp_proxy_emit_fn emit, void *ctx);
 void rcp_proxy_cut_clear(rcp_proxy_cut_t *c);
 
+/* ---- the orchestrator instance (one per channel in rcp-proxy) ---- */
+
+typedef enum {
+    RCP_PROXY_REINIT_ACCEPT,      // no peer: the session and the listener close, the channel is let go
+    RCP_PROXY_REINIT_REFUSE_PEER, // a peer is connected: maintenance is refused (409 c6_busy)
+} rcp_proxy_reinit_t;
+
+// The proxy's answer to a reinit request (maintenance wants its channel).
+rcp_proxy_reinit_t rcp_proxy_reinit_verdict(bool peer_connected);
+
+// Whether an input with seq `input_seq` is newer than the last one handled (`seen_seq`), the seq wrapping at 2^32:
+// false for the same input again or an older one.
+bool rcp_proxy_input_current(uint32_t seen_seq, uint32_t input_seq);
+
 #ifdef __cplusplus
 }
 #endif

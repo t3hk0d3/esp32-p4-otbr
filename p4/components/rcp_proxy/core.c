@@ -437,3 +437,13 @@ size_t rcp_proxy_cut_feed(rcp_proxy_cut_t *c, const uint8_t *in, size_t n, rcp_p
     }
     return frames;
 }
+
+rcp_proxy_reinit_t rcp_proxy_reinit_verdict(bool peer_connected)
+{
+    return peer_connected ? RCP_PROXY_REINIT_REFUSE_PEER : RCP_PROXY_REINIT_ACCEPT;
+}
+
+bool rcp_proxy_input_current(uint32_t seen_seq, uint32_t input_seq)
+{
+    return (int32_t)(input_seq - seen_seq) > 0;
+}

@@ -903,6 +903,32 @@ TEST_CASE("On a write that failed on the device: ends the peer session", "[rcp_p
     TEST_ASSERT_EQUAL(RCP_PROXY_TX_END, rcp_proxy_raw_tx_failed(ESP_ERR_INVALID_RESPONSE));
 }
 
+/* ---- the orchestrator instance: rcp_proxy_reinit_verdict, rcp_proxy_input_current ---- */
+
+TEST_CASE("On a reinit request with a connected peer: refuses (RCP_PROXY_REINIT_REFUSE_PEER)", "[rcp_proxy]")
+{
+    TEST_ASSERT_EQUAL(RCP_PROXY_REINIT_REFUSE_PEER, rcp_proxy_reinit_verdict(true));
+}
+
+TEST_CASE("On a reinit request with no peer: accepts (the session and the listener close)", "[rcp_proxy]")
+{
+    TEST_ASSERT_EQUAL(RCP_PROXY_REINIT_ACCEPT, rcp_proxy_reinit_verdict(false));
+}
+
+TEST_CASE("On an input newer than the last one handled: is current", "[rcp_proxy]")
+{
+    TEST_ASSERT_TRUE(rcp_proxy_input_current(0, 1));
+    TEST_ASSERT_TRUE(rcp_proxy_input_current(4, 7)); // inputs it never saw in between: the latest wins
+    TEST_ASSERT_TRUE(rcp_proxy_input_current(UINT32_MAX, 0)); // the seq wraps
+}
+
+TEST_CASE("On an input older than the latest, or the one already handled: is ignored", "[rcp_proxy]")
+{
+    TEST_ASSERT_FALSE(rcp_proxy_input_current(7, 7));
+    TEST_ASSERT_FALSE(rcp_proxy_input_current(7, 6));
+    TEST_ASSERT_FALSE(rcp_proxy_input_current(0, UINT32_MAX));
+}
+
 void app_main(void)
 {
     UNITY_BEGIN();
