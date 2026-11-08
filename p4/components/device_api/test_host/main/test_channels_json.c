@@ -759,18 +759,18 @@ TEST_CASE("On a verdict out of range: 500 failed", "[device_api]")
 
 TEST_CASE("On a C6 push or recovery while rcp-proxy on the C6 has a peer: 409 c6_busy", "[device_api]")
 {
-    device_api_error_t e = device_api_map_push_error(RCP_SYNC_ERR_C6_BUSY);
+    device_api_error_t e = device_api_map_push_error(RADIO_MUX_ERR_PEER_CONNECTED);
 
     TEST_ASSERT_EQUAL(409, e.http_status);
     TEST_ASSERT_EQUAL_STRING("c6_busy", e.code);
-    e = device_api_map_recover_error(RCP_SYNC_ERR_C6_BUSY);
+    e = device_api_map_recover_error(RADIO_MUX_ERR_PEER_CONNECTED);
     TEST_ASSERT_EQUAL(409, e.http_status);
     TEST_ASSERT_EQUAL_STRING("c6_busy", e.code);
 
     char out[160];
     int status = 0;
 
-    TEST_ASSERT_GREATER_THAN(0, device_api_recover_reply(RCP_SYNC_ERR_C6_BUSY, "c6_busy: rcp-proxy on the C6 has a peer", BR_MODE_BR_RUNNING, true, "", true, "1.0", out, sizeof(out), &status));
+    TEST_ASSERT_GREATER_THAN(0, device_api_recover_reply(RADIO_MUX_ERR_PEER_CONNECTED, "rcp-proxy has a connected peer", BR_MODE_BR_RUNNING, true, "", true, "1.0", out, sizeof(out), &status));
     TEST_ASSERT_EQUAL(409, status);
     TEST_ASSERT_NOT_NULL(strstr(out, "\"error\":\"c6_busy\""));
 }

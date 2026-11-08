@@ -608,3 +608,9 @@ TEST_CASE("On a PUT of another mode: the new mode's instance binds on the ready 
     TEST_ASSERT_TRUE(radio_mux_orch_should_bind(RADIO_MUX_CS_READY, true, false));
     TEST_ASSERT_EQUAL(RADIO_MUX_IN_BIND, radio_mux_orch_input_for(RADIO_MUX_CS_READY, RADIO_MUX_CS_READY, true, false));
 }
+
+TEST_CASE("On the radio lost while it is in reinit (a fault, an unplug): delivers LOST, not BACK", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_LOST, radio_mux_orch_input_for(RADIO_MUX_CS_REINIT, RADIO_MUX_CS_FAULT, true, true));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_LOST, radio_mux_orch_input_for(RADIO_MUX_CS_REINIT, RADIO_MUX_CS_ABSENT, true, true));
+}

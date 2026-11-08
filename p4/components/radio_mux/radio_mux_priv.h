@@ -65,9 +65,8 @@ typedef struct mux_port {
     int64_t det_wait_ms;
     uint32_t det_baud;
     int64_t presence_check_us;
-    bool busy; // owner, C6: a C6 job (radio_mux_c6_job_begin) or the boot hold holds the radio
-    radio_mux_work_t work; // owner, C6: what holds it while busy (the boot hold: BOOT_STEPS; a job: PUSH)
-    radio_mux_c6_hold_t hold; // owner, C6: the boot hold (from the start until the boot job's end, or its expiry)
+    bool busy; // owner, C6: in reinit (maintenance: the boot steps, a push, a ROM recovery)
+    radio_mux_work_t work; // owner, C6: the maintenance while busy
     // owner: the channel on this port is leased for OTBR (radio_mux_lease): frames to its own queue and eventfd, no
     // consumer, until radio_mux_lease_end or radio_mux_commit_otbr; an unplug posts GONE and ends it
     bool leased;
@@ -108,7 +107,6 @@ typedef struct mux_port {
     portMUX_TYPE lock;
     radio_mux_pool_t pool;
     radio_mux_counters_t ctr;
-    bool busy_peer; // the consumer reported a connected peer (radio_mux_set_busy_peer); cleared at detach
     int64_t uart_err_log_us; // USB, the CDC driver task only: when the last UART error warning was logged (0: never)
 
     // Transmit: tx_lock serialises senders and the owner's close (on the C6 also the INT-driven receive transactions:
@@ -128,8 +126,8 @@ typedef enum {
     MUX_MSG_FORGET,   // radio_mux_forget
     MUX_MSG_RESET,    // radio_mux_reset
     MUX_MSG_NOTE_FW,  // radio_mux_note_firmware
-    MUX_MSG_C6_JOB_BEGIN, // radio_mux_c6_job_begin
-    MUX_MSG_C6_JOB_END,   // radio_mux_c6_job_end
+    MUX_MSG_MAINT_ASK,    // radio_mux_maintain: may the channel enter reinit?
+    MUX_MSG_MAINT_DONE,   // radio_mux_maintain or the boot task: the work and the boot steps ended
     MUX_MSG_LEASE,        // radio_mux_lease
     MUX_MSG_LEASE_END,    // radio_mux_lease_end
     MUX_MSG_COMMIT_OTBR,  // radio_mux_commit_otbr
@@ -146,7 +144,7 @@ typedef struct {
     union {
         mux_usb_dev_t dev;        // NEW_DEV
         const void *hdl;          // GONE: the CDC handle that went away
-        mux_call_t *call;         // SET, FORGET, C6_JOB_BEGIN, C6_JOB_END, LEASE, LEASE_END, COMMIT_OTBR
+        mux_call_t *call;         // SET, FORGET, MAINT_ASK, MAINT_DONE, LEASE, LEASE_END, COMMIT_OTBR
         radio_mux_chan_t *h;      // RESET: the consumer's handle
         struct {
             radio_mux_chan_t *h;
@@ -201,13 +199,17 @@ struct mux_call {
     radio_mux_set_req_t req;
     bool have_mover;
     bool stop; // SET: the MOVE is a stop of OpenThread on this channel (it leaves otbr), not a move to it
-    bool c6_ok; // C6_JOB_END: the job left a working C6
-    atomic_int claim; // C6_JOB_BEGIN: MUX_CALL_PENDING until the owner takes it (TAKEN) or the caller gives up
+    radio_mux_work_t work;       // MAINT_ASK: the maintenance
+    esp_err_t steps;             // MAINT_DONE: what the built-in RCP's boot steps returned
+    radio_mux_fault_kind_t kind; // MAINT_DONE: their fault's kind (reason: its text)
+    atomic_int claim; // MAINT_ASK, LEASE, COMMIT_OTBR: MUX_CALL_PENDING until the owner takes it (TAKEN) or the caller
+    // gives up
     radio_mux_verdict_t verdict;
     esp_err_t err;
     char from[RADIO_MUX_ID_MAX];         // SET: the source of a MOVE; COMMIT_OTBR: the channel that leaves otbr
     radio_mux_chan_t *handle;            // LEASE: the lease's handle; LEASE_END: the lease to give back
-    char reason[RADIO_MUX_REASON_MAX];   // LEASE: why it was refused; LEASE_END: the fault to show ("" none)
+    char reason[RADIO_MUX_REASON_MAX];   // LEASE: why it was refused; LEASE_END: the fault to show ("" none);
+    // MAINT_ASK: why it was refused; MAINT_DONE: the boot steps' fault
 };
 
 // mux_call_t.claim (calloc: PENDING).
@@ -226,7 +228,11 @@ typedef struct {
     mux_port_t usb;
     orch_inst_t insts[RADIO_MUX_RULES_MAX]; // the registered instances (orch.c)
     size_t n_insts;
-    radio_mux_reinit_run_t reinit;           // owner: the maintenance's reinit run (nothing asks yet)
+    radio_mux_reinit_run_t reinit;           // owner: the maintenance's reinit run
+    mux_call_t *maint_call;                  // owner: the MAINT_ASK waiting for the instance's answer
+    radio_mux_work_t maint_work;             // owner: its work
+    orch_inst_t *maint_inst;                 // owner: the instance asked (its mode names a timeout)
+    atomic_bool maint_running;               // a maintenance is asked or runs (radio_mux_maintenance_running)
     const radio_mux_builtin_t *builtin;      // the board's built-in RCP (radio_mux_set_builtin), or NULL
     radio_mux_rules_t rules;
     atomic_bool started;
@@ -270,8 +276,28 @@ void orch_release(struct radio_mux_chan *ch, radio_mux_mode_t mode);
 void orch_forget_slot(size_t slot);
 // A REINIT_REPLY message.
 void orch_reinit_reply(radio_mux_chan_t *h, uint32_t seq, esp_err_t verdict, const char *reason);
+// Maintenance asks for the channel on p: REINIT to `oi` (the instance bound to it, NULL for none) with the next seq,
+// and the run's verdict (RUN at once without an instance, else WAIT).
+radio_mux_reinit_act_t orch_reinit_ask(mux_port_t *p, orch_inst_t *oi, radio_mux_work_t work, int64_t now_ms);
+// Maintenance runs on p's channel with no instance bound to it: REINIT as a notice to the instance of its stored mode
+// (its answer is not waited for). Thread shows the maintenance (STARTING) where it was in fault.
+void orch_reinit_notice(mux_port_t *p, radio_mux_work_t work);
+// The channel `ch` ended its reinit in fault: LOST (`kind`, `reason`) to the instance of its stored mode, bound or not
+// (it hears why its channel cannot be used). `h`: the channel's last handle.
+void orch_lost(struct radio_mux_chan *ch, radio_mux_chan_t *h, radio_mux_fault_kind_t kind, const char *reason);
 // Under mux_lock: the instances list of the snapshot.
 void orch_fill_modes(radio_mux_snapshot_t *out);
+
+/* ---- mux.c: the maintenance runner (owner) ---- */
+
+// The pending maintenance's verdict: RUN (the channel enters reinit) or REFUSE (`verdict`, `reason`); WAIT and IGNORE
+// change nothing.
+void mux_maint_answer(radio_mux_reinit_act_t act, esp_err_t verdict, const char *reason);
+
+/* ---- mux_api.c ---- */
+
+// Any task but the owner: the built-in RCP's boot steps on the channel in reinit, then MAINT_DONE (never dropped).
+void mux_maint_finish(const char *id);
 
 /* ---- mux_deliver.c ---- */
 

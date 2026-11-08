@@ -189,12 +189,6 @@ bool br_core_ot_session_begin(void);
 void br_core_ot_session_end(void);
 
 /**
- * True while a radio push or ROM recovery runs. OpenThread may still be running in its drain window, so a caller that
- * cannot open a session must not touch OpenThread state at all, not even without the lock.
- */
-bool br_core_radio_job_running(void);
-
-/**
  * BR_RUNNING to SNIFFER (spec 5.4): Thread stops, the OpenThread netif goes down (Ethernet stays up), the raw link
  * receives promiscuously on `channel`. `receive_cb` runs in the OpenThread task for every frame.
  * ESP_ERR_INVALID_STATE unless BR_RUNNING (also while a firmware push has taken OpenThread over), ESP_ERR_INVALID_ARG unless 11..26 and `receive_cb` is not NULL (nothing changes then). If the raw link cannot be enabled,
@@ -236,46 +230,38 @@ esp_err_t br_core_leave_sniffer(void);
 void br_core_sniffer_keepalive(void);
 
 /**
- * Push an RCP image to the C6 on request (R14): stop OpenThread, rcp_sync_push_firmware, hardware-reset the C6,
- * probe again (rcp_installed shows the pushed version) and restart OpenThread and the border router. Works from
- * BR_RUNNING and RADIO_FAULT (also "no rcp firmware"); leaves RADIO_FAULT on success. A failed push restarts
- * OpenThread with the previous firmware and returns the push error. Blocks for seconds to minutes; it runs on
- * the caller's (management) task and takes the OpenThread lock only around the stop/start. Not callable from
- * the OpenThread task. The Thread REST API is switched off before OpenThread stops.
- * The mode is STARTING while the job runs. ESP_ERR_INVALID_STATE (nothing is started then) in SNIFFER and STARTING,
- * while the boot of the radio is still running, while another push runs, or when OpenThread sessions
- * (br_core_ot_session_begin) stay open for 45 s ("OpenThread is busy, try again");
- * ESP_ERR_INVALID_ARG for a NULL source or read. `err_detail` (may be NULL) gets a short reason on failure.
- * RCP_SYNC_ERR_C6_BUSY (nothing touched; OpenThread keeps running) while rcp-proxy on the C6 has a connected peer.
- * Refused with ESP_ERR_INVALID_STATE as well when called from the OpenThread task, before anything is touched.
- * Refusal in STARTING also covers a border router start that failed (the mode stays STARTING): reboot instead.
- * After an abandoned OpenThread start ("rcp incompatible": OpenThread's SPI driver stays registered and cannot be
- * released) the push runs without stopping OpenThread and a successful push ends in a reboot ~1.5 s later (the
- * return value is ESP_OK, the mode stays RADIO_FAULT until then); a failed push leaves everything as it was.
- * When the C6 is not the channel stored in otbr (br_core_c6_job_touches_openthread false) the push leaves OpenThread
- * and the board mode alone, and the mode's refusals (SNIFFER, STARTING, the booting OpenThread task) do not apply;
- * the C6's boot steps still running at boot refuse it ("the radio is still booting").
+ * Push an RCP image to the C6 on request (R14), as the C6 channel's maintenance (radio_mux_maintain): the C6's instance
+ * lets go first, then rcp_sync_push_firmware, the C6's boot steps (the probe reads the pushed version), and the
+ * instance gets the C6 back. With Thread on the C6: its sessions drain, OpenThread stops (the mode is STARTING and the
+ * Thread REST API off meanwhile), and this waits until OpenThread runs on the C6 again; works from BR_RUNNING and
+ * RADIO_FAULT (also "no rcp firmware"), leaves RADIO_FAULT on success, and a failed push restarts OpenThread with the
+ * previous firmware and returns the push error. Blocks for seconds to minutes on the caller's (management) task.
+ * Refusals touch nothing: ESP_ERR_INVALID_STATE from the OpenThread task, in SNIFFER and STARTING (Thread on the C6),
+ * while the boot steps run ("the radio is still booting"), another push or recovery runs, OpenThread is being moved,
+ * or OpenThread sessions (br_core_ot_session_begin) stay open for 45 s ("OpenThread is busy, try again");
+ * RADIO_MUX_ERR_PEER_CONNECTED while rcp-proxy on the C6 has a connected peer. ESP_ERR_INVALID_ARG for a NULL source
+ * or read. `err_detail` (may be NULL) gets a short reason on failure. After an abandoned OpenThread start a push that
+ * worked ends in a reboot ~1.5 s later (the return value is ESP_OK, the mode RADIO_FAULT until then). When the C6 is
+ * not the channel stored in otbr (br_core_c6_job_touches_openthread false) OpenThread and the board mode are left
+ * alone.
  */
 esp_err_t br_core_push_radio_firmware(const rcp_fw_source_t *source, char *err_detail, size_t err_cap);
 
 /**
- * Whether a C6 job (br_core_push_radio_firmware, br_core_rom_recover) stops and restarts OpenThread: the C6 is the
- * channel stored in otbr. Otherwise the job leaves OpenThread and the board mode alone, and the mode's refusals
- * (SNIFFER, STARTING, a booting OpenThread task) do not apply to it: the mode is another channel's. A snapshot; the
- * job decides again once it holds the C6 job slot.
+ * Whether a maintenance of the C6 (br_core_push_radio_firmware, br_core_rom_recover) stops and restarts OpenThread:
+ * the C6 is the channel stored in otbr. Otherwise it leaves OpenThread and the board mode alone, and the mode's
+ * refusals (SNIFFER, STARTING) do not apply to it: the mode is another channel's. A snapshot.
  */
 bool br_core_c6_job_touches_openthread(void);
 
 /**
- * ROM recovery of the C6 base image on request (spec 5.10, replaces the former resync-with-recovery): the same
- * discipline as br_core_push_radio_firmware (one C6 job at a time, the Thread REST API off before OpenThread stops
- * and restored from the final state, refused from the OpenThread task, an abandoned start recovers without stopping
- * OpenThread and ends in a reboot). OpenThread stops, rcp_sync_rom_recover rewrites bootloader, partition table and
- * updater (no RCP firmware), the probe reads the result and OpenThread restarts: with the RCP that survived in its
- * slot the BR runs again, otherwise the mode is RADIO_FAULT "no rcp firmware" until firmware is uploaded.
- * ESP_ERR_NOT_SUPPORTED without the jumper (nothing is touched), ESP_ERR_INVALID_STATE in SNIFFER and STARTING or
- * while another C6 job runs, RCP_SYNC_ERR_C6_BUSY while rcp-proxy on the C6 has a peer. A failed recovery restarts OpenThread (the boot probe decides the mode) and returns the error.
- * `err_detail` (may be NULL) gets a short reason on failure. Blocks for tens of seconds.
+ * ROM recovery of the C6 base image on request (spec 5.10), as the C6 channel's maintenance with the discipline of
+ * br_core_push_radio_firmware: rcp_sync_rom_recover rewrites bootloader, partition table and updater (no RCP firmware),
+ * the boot steps' probe reads the result, and with Thread on the C6 OpenThread starts again: with the RCP that
+ * survived in its slot the BR runs again, otherwise the mode is RADIO_FAULT "no rcp firmware" until firmware is
+ * uploaded. ESP_ERR_NOT_SUPPORTED without the jumper (nothing is touched); the refusals of a push. A failed recovery
+ * returns its error (the boot steps decide the mode). `err_detail` (may be NULL) gets a short reason on failure.
+ * Blocks for tens of seconds.
  */
 esp_err_t br_core_rom_recover(char *err_detail, size_t err_cap);
 

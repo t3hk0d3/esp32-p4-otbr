@@ -54,11 +54,11 @@ device_api_error_t device_api_map_ota_error(esp_err_t err);
  */
 device_api_error_t device_api_pcap_default_channel_error(bool ot_state_valid, bool has_dataset);
 
-/** Error of br_core_push_radio_firmware (RCP_SYNC_ERR_C6_BUSY: 409 "c6_busy"). */
+/** Error of br_core_push_radio_firmware (RADIO_MUX_ERR_PEER_CONNECTED, the proxy's refusal: 409 "c6_busy"). */
 device_api_error_t device_api_map_push_error(esp_err_t err);
 
 /**
- * Error of br_core_rom_recover: ESP_ERR_NOT_SUPPORTED (no jumper) 412, RCP_SYNC_ERR_C6_BUSY 409 "c6_busy",
+ * Error of br_core_rom_recover: ESP_ERR_NOT_SUPPORTED (no jumper) 412, RADIO_MUX_ERR_PEER_CONNECTED 409 "c6_busy",
  * ESP_ERR_INVALID_STATE 409, anything else 502.
  */
 device_api_error_t device_api_map_recover_error(esp_err_t err);

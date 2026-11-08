@@ -15,6 +15,7 @@ to `off`.
 
 import asyncio
 import contextlib
+import os
 import statistics
 import time
 
@@ -58,6 +59,11 @@ ZIGBEE_MODE = "ziggurat"
 ENERGY_CHANNELS = 16  # 802.15.4 channels 11..26
 USB_CHANNEL_KIND = "usb"
 EXPECTED_STATE = "running"
+PUSH_TIMEOUT_S = (
+    300  # a full RCP image over the C6's updater, its boot steps, the radio back
+)
+REINIT_SEEN_S = 60  # the push's reinit shows in /device/zigbee within this
+REINIT_REASON = "radio reinit: firmware push"
 
 
 def radio_params():
@@ -564,12 +570,72 @@ class TestZigbeeMode:
         run(body())
         assert get_json(base_url, "/device/diag")["uptime_s"] > uptime_before
 
+    def test_push_with_a_client_pauses_and_resumes(self, base_url, zigbee_mode, radio):
+        """A C6 firmware push under a connected client: Zigbee lets go of the radio for the push's reinit (no_radio
+        "radio reinit: firmware push"), the client stays connected, Zigbee runs again once the C6 is back, no reboot,
+        and the stack answers. Needs a good RCP image (env OTBR_RCP_IMAGE, as test_rcp_push)."""
+        if radio != C6:
+            pytest.skip("only the C6 takes a firmware push")
+        path = os.environ.get("OTBR_RCP_IMAGE")
+        if not path or not os.path.isfile(path):
+            pytest.skip("OTBR_RCP_IMAGE does not point to an RCP image")
+        with open(path, "rb") as f:
+            image = f.read()
+        zigbee_mode(radio)
+        address = base_url.removeprefix("http://")
+        uptime_before = get_json(base_url, "/device/diag")["uptime_s"]
+
+        def push():
+            return requests.post(
+                f"{base_url}/device/radio/firmware", data=image, timeout=PUSH_TIMEOUT_S
+            )
+
+        async def body():
+            async with zigpy_app(address) as app:
+                pushing = asyncio.get_running_loop().run_in_executor(None, push)
+                seen = None
+                deadline = time.monotonic() + REINIT_SEEN_S
+                while (
+                    seen is None and time.monotonic() < deadline and not pushing.done()
+                ):
+                    status = zigbee_status(base_url)
+                    if status["state"] == "no_radio":
+                        seen = status
+                    await asyncio.sleep(0.2)
+                assert seen is not None, "Zigbee never let go of the radio for the push"
+                assert seen["reason"] == REINIT_REASON, seen
+                assert seen["client"] is not None, (
+                    seen
+                )  # the client stays while the radio is paused
+                reply = await pushing
+                assert reply.status_code == requests.codes.ok, reply.text
+                deadline = time.monotonic() + RUNNING_TIMEOUT_S
+                now = zigbee_status(base_url)
+                while now["state"] != EXPECTED_STATE and time.monotonic() < deadline:
+                    await asyncio.sleep(1)
+                    now = zigbee_status(base_url)
+                assert now["state"] == EXPECTED_STATE, now
+                assert now["client"] is not None, now
+                scan = await asyncio.wait_for(
+                    app.energy_scan(
+                        channels=zigpy_types.Channels.ALL_CHANNELS,
+                        duration_exp=2,
+                        count=1,
+                    ),
+                    SCAN_TIMEOUT_S,
+                )
+                assert len(scan) == ENERGY_CHANNELS
+
+        run(body())
+        assert get_json(base_url, "/device/diag")["uptime_s"] > uptime_before
+
     def test_radio_gone_and_back(self, base_url, radio):
-        """The radio disappears (GONE): state no_radio, no reboot; after its return the stack answers. On the C6 GONE
-        comes only from a C6 firmware job: test_radio_held_comes_back covers the C6's loss."""
+        """The radio disappears (GONE): state no_radio, no reboot; after its return the stack answers. The C6 never
+        goes away (a push pauses it: test_push_with_a_client_pauses_and_resumes; test_radio_held_comes_back covers
+        its loss)."""
         if radio == C6:
             pytest.skip(
-                "the C6 has no GONE without a firmware job; test_radio_held_comes_back covers its loss"
+                "the C6 never goes away; test_radio_held_comes_back covers its loss"
             )
         pytest.skip(
             "TODO: a dongle needs a person to unplug it (no manual opt-in in conftest yet)"

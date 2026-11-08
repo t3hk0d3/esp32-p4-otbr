@@ -113,8 +113,43 @@ void orch_reinit_reply(radio_mux_chan_t *h, uint32_t seq, esp_err_t verdict, con
     if (ch == NULL || p->chan != ch || !radio_mux_handle_current(gen, atomic_load(&p->att_gen))) {
         return; // a stale handle
     }
-    if (radio_mux_reinit_answer(&g_mux.reinit, seq, verdict == ESP_OK) == RADIO_MUX_RA_IGNORE) {
-        ESP_LOGD(TAG, "%s: reinit answer %" PRIu32 " ignored (%s)", ch->id, seq, reason);
+    const radio_mux_reinit_act_t act = radio_mux_reinit_answer(&g_mux.reinit, seq, verdict == ESP_OK);
+
+    if (act == RADIO_MUX_RA_IGNORE) {
+        ESP_LOGD(TAG, "%s: reinit answer %" PRIu32 " ignored (none asked: a notice, or a late answer)", ch->id, seq);
+        return;
+    }
+    mux_maint_answer(act, verdict, reason);
+}
+
+radio_mux_reinit_act_t orch_reinit_ask(mux_port_t *p, orch_inst_t *oi, radio_mux_work_t work, int64_t now_ms)
+{
+    const size_t slot = slot_of(p->chan);
+    const uint32_t seq = oi ? oi->seq[oi->inst.per_channel ? slot : 0] + 1 : 0; // what deliver() sends next
+    const radio_mux_reinit_act_t act = radio_mux_reinit_ask(&g_mux.reinit, seq, oi != NULL, now_ms);
+
+    if (oi && act == RADIO_MUX_RA_WAIT) {
+        deliver(oi, slot, RADIO_MUX_IN_REINIT, p->att_handle, RADIO_MUX_FAULT_NONE, radio_mux_work_reason(work));
+    }
+    return act;
+}
+
+void orch_reinit_notice(mux_port_t *p, radio_mux_work_t work)
+{
+    orch_inst_t *oi = orch_find(p->chan->mode);
+
+    if (oi && p->att.state != RADIO_MUX_AS_ATTACHED) {
+        deliver(oi, slot_of(p->chan), RADIO_MUX_IN_REINIT, p->att_handle, RADIO_MUX_FAULT_NONE,
+                radio_mux_work_reason(work));
+    }
+}
+
+void orch_lost(struct radio_mux_chan *ch, radio_mux_chan_t *h, radio_mux_fault_kind_t kind, const char *reason)
+{
+    orch_inst_t *oi = orch_find(ch->mode);
+
+    if (oi && radio_mux_orch_input_for(RADIO_MUX_CS_REINIT, RADIO_MUX_CS_FAULT, true, true) == RADIO_MUX_IN_LOST) {
+        deliver(oi, slot_of(ch), RADIO_MUX_IN_LOST, h, kind, reason);
     }
 }
 

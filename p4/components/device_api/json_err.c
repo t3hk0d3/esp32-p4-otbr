@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include "br_core_mode.h"
 #include "ota_bundle.h"
+#include "radio_mux.h"
 #include "rcp_sync.h"
 
 #define OTA_ERR_BASE 0x1500   // ESP_ERR_OTA_BASE (esp_ota_ops.h): esp_ota_end's image validation errors
@@ -111,12 +112,12 @@ device_api_error_t device_api_pcap_default_channel_error(bool ot_state_valid, bo
     };
 }
 
-// A C6 job refused by the radio mux: rcp-proxy on the C6 has a peer.
+// A maintenance of the C6 refused by its instance: rcp-proxy on the C6 has a connected peer.
 static const device_api_error_t C6_BUSY = {409, "c6_busy", "rcp-proxy on the C6 has a connected peer"};
 
 device_api_error_t device_api_map_push_error(esp_err_t err)
 {
-    if (err == RCP_SYNC_ERR_C6_BUSY) {
+    if (err == RADIO_MUX_ERR_PEER_CONNECTED) {
         return C6_BUSY;
     }
     if (err == ESP_ERR_INVALID_STATE) {
@@ -166,7 +167,7 @@ device_api_error_t device_api_map_recover_error(esp_err_t err)
             412, "no_jumper", "the maintenance jumper is not detected"
         };
     }
-    if (err == RCP_SYNC_ERR_C6_BUSY) {
+    if (err == RADIO_MUX_ERR_PEER_CONNECTED) {
         return C6_BUSY;
     }
     if (err == ESP_ERR_INVALID_STATE) {

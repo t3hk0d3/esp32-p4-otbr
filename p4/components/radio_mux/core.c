@@ -713,37 +713,6 @@ uint32_t radio_mux_spi_gap_wait_us(int64_t now_us, int64_t last_end_us, uint32_t
     return since >= (int64_t)gap_us ? 0 : (uint32_t)((int64_t)gap_us - since);
 }
 
-bool radio_mux_c6_job_refused(radio_mux_mode_t stored_mode, bool attached, bool has_peer)
-{
-    return stored_mode == RADIO_MUX_MODE_RCP_PROXY && attached && has_peer;
-}
-
-void radio_mux_c6_hold_start(radio_mux_c6_hold_t *h, int64_t now_ms)
-{
-    h->state = RADIO_MUX_C6_HOLD_WAIT;
-    h->since_ms = now_ms;
-}
-
-bool radio_mux_c6_hold_job_begin(radio_mux_c6_hold_t *h)
-{
-    if (h->state != RADIO_MUX_C6_HOLD_WAIT) {
-        return false;
-    }
-    h->state = RADIO_MUX_C6_HOLD_JOB;
-    return true;
-}
-
-bool radio_mux_c6_hold_expired(const radio_mux_c6_hold_t *h, int64_t now_ms)
-{
-    return h->state == RADIO_MUX_C6_HOLD_WAIT &&
-           (now_ms < h->since_ms || now_ms - h->since_ms >= RADIO_MUX_C6_BOOT_HOLD_MS);
-}
-
-void radio_mux_c6_hold_end(radio_mux_c6_hold_t *h)
-{
-    h->state = RADIO_MUX_C6_HOLD_NONE;
-}
-
 uint32_t radio_mux_gen_next(uint32_t gen)
 {
     return gen >= RADIO_MUX_GEN_MAX ? 1 : gen + 1;

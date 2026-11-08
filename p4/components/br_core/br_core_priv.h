@@ -45,7 +45,6 @@ typedef struct {
     bool loop_running;
     bool push_pending;         // a firmware push asked the OpenThread task to leave its main loop
     uint32_t ot_sessions;      // open br_core_ot_session_begin sessions; teardown waits for 0
-    atomic_bool push_busy;     // a firmware push is running (one long operation at a time)
     bool started;
     bool mdns_started;
     char mdns_hostname[64]; // as given to br_core_mdns_start, for the retry in br_core_start
@@ -70,8 +69,6 @@ void core_schedule_reboot(void);
 bool core_ot_ready_now(void);
 esp_err_t core_start_ot_task(void);
 bool core_backbone_has_ip6(void);
-// The C6's boot steps inside a C6 job (see br_core.c).
-esp_err_t core_c6_boot_steps(bool affects_mode);
 // The C6's rcp.compatible verdict (known from now on), whatever channel OpenThread runs on.
 void core_set_c6_compatible(bool compatible);
 
@@ -90,15 +87,8 @@ void core_radio_mode_changed(br_core_mode_t mode);
 void core_radio_boot(void);
 // OpenThread stopped (no session drain) and its channel forgotten.
 void core_radio_stop_openthread(void);
-// OpenThread on the C6 again after a C6 job (probe and start). Records whether a PUT of mode otbr retries it.
-esp_err_t core_radio_restart_on_c6(void);
-// Whether the last start on the attached channel failed (RADIO_FAULT from it, a PUT of mode otbr retries it). Owned by
-// br_radio; a C6 job that holds OpenThread sets it while br_radio stays out.
-void core_radio_set_start_failed(bool failed);
-// A C6 job runs (push_busy) and holds OpenThread: OpenThread runs on, or is stored on, the C6 (br_radio stays out).
-bool core_radio_job_holds_openthread(void);
-// The C6's boot steps run (core_radio_boot): no other C6 job meanwhile.
-bool core_radio_c6_boot_running(void);
+// Whether br_radio has an input of the orchestrator it has not acted on yet (a maintenance waits for Thread's start).
+bool core_radio_input_pending(void);
 // The mode_fsm channel operations.
 esp_err_t core_radio_probe_channel(const char *id, char *err, size_t cap);
 esp_err_t core_radio_ot_start(const char *id);

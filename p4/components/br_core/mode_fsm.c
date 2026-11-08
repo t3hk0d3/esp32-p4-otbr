@@ -65,7 +65,6 @@ void mode_fsm_init(mode_fsm_t *fsm, const mode_fsm_ops_t *ops)
     fsm->recovery_count = 0;
     fsm->sniffer_end_cb = NULL;
     fsm->thread_stopped_by_capture = false;
-    fsm->radio_job = false;
     atomic_init(&fsm->mode, BR_MODE_STARTING);
 }
 
@@ -81,9 +80,6 @@ bool mode_fsm_thread_ops_allowed(const mode_fsm_t *fsm)
 
 bool mode_fsm_set_started(mode_fsm_t *fsm)
 {
-    if (fsm->radio_job) {
-        return false; // the restart inside a push or ROM recovery: the job sets the final mode when it ends
-    }
     br_core_mode_t expected = BR_MODE_STARTING;
     const bool started = atomic_compare_exchange_strong(&fsm->mode, &expected, BR_MODE_BR_RUNNING);
 
@@ -166,14 +162,6 @@ esp_err_t mode_fsm_leave_sniffer(mode_fsm_t *fsm)
     return err;
 }
 
-esp_err_t mode_fsm_push_allowed(br_core_mode_t mode, bool caller_is_openthread_task)
-{
-    if (caller_is_openthread_task || mode == BR_MODE_SNIFFER || mode == BR_MODE_STARTING) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    return ESP_OK;
-}
-
 bool mode_fsm_storage_degraded(esp_err_t storage_init_err)
 {
     return storage_init_err != ESP_OK;
@@ -187,66 +175,6 @@ bool mode_fsm_radio_start_allowed(bool storage_degraded)
 mode_fsm_fault_action_t mode_fsm_fault_action(bool caller_is_openthread_task)
 {
     return caller_is_openthread_task ? MODE_FSM_FAULT_PARK_TASK : MODE_FSM_FAULT_REBOOT;
-}
-
-bool mode_fsm_rest_ready_after_push(br_core_mode_t mode, bool openthread_ready)
-{
-    return mode == BR_MODE_BR_RUNNING && openthread_ready;
-}
-
-esp_err_t mode_fsm_begin_radio_job(mode_fsm_t *fsm)
-{
-    const br_core_mode_t mode = mode_fsm_get_mode(fsm);
-
-    if (fsm->radio_job || mode_fsm_push_allowed(mode, false) != ESP_OK) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    fsm->radio_job = true;
-    fsm->radio_job_prev = mode;
-    set_mode(fsm, BR_MODE_STARTING); // OpenThread is stopped and started again: nothing may use it until then
-    return ESP_OK;
-}
-
-void mode_fsm_cancel_radio_job(mode_fsm_t *fsm)
-{
-    if (fsm->radio_job) {
-        fsm->radio_job = false;
-        br_core_mode_t expected = BR_MODE_STARTING; // a fault entered meanwhile stays
-        if (atomic_compare_exchange_strong(&fsm->mode, &expected, fsm->radio_job_prev)) {
-            changed(fsm, fsm->radio_job_prev);
-        }
-    }
-}
-
-// The job of a radio request (a firmware push, a ROM recovery): `source` set = push, NULL = ROM recovery.
-static esp_err_t run_radio_job(mode_fsm_t *fsm, const rcp_fw_source_t *source, char *err_detail, size_t err_cap)
-{
-    bool restarted = false;
-
-    if (!fsm->radio_job && mode_fsm_begin_radio_job(fsm) != ESP_OK) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    esp_err_t err = source ? fsm->ops->push_firmware(source, err_detail, err_cap, &restarted)
-                    : fsm->ops->rom_recover(err_detail, err_cap, &restarted);
-    if (restarted) {
-        fsm->thread_stopped_by_capture = false; // OpenThread started afresh
-    }
-    fsm->radio_job = false;
-    set_mode(fsm, restarted ? BR_MODE_BR_RUNNING : BR_MODE_RADIO_FAULT);
-    return err;
-}
-
-esp_err_t mode_fsm_push_firmware(mode_fsm_t *fsm, const rcp_fw_source_t *source, char *err_detail, size_t err_cap)
-{
-    if (!source) {
-        return ESP_ERR_INVALID_ARG; // NULL would select the ROM recovery job
-    }
-    return run_radio_job(fsm, source, err_detail, err_cap);
-}
-
-esp_err_t mode_fsm_rom_recover(mode_fsm_t *fsm, char *err_detail, size_t err_cap)
-{
-    return run_radio_job(fsm, NULL, err_detail, err_cap);
 }
 
 // Drop the recoveries older than the window; true when another one may start.
@@ -349,11 +277,6 @@ bool mode_fsm_boot(mode_fsm_t *fsm, const char *otbr_id)
     return false;
 }
 
-bool mode_fsm_c6_usable_after_steps(esp_err_t steps)
-{
-    return steps == ESP_OK;
-}
-
 static bool is_c6(const char *id)
 {
     return id && strcmp(id, MODE_FSM_C6_ID) == 0;
@@ -362,16 +285,6 @@ static bool is_c6(const char *id)
 bool mode_fsm_probe_fault_incompatible(const char *id, esp_err_t probe_err)
 {
     return is_c6(id) && probe_err != ESP_OK && probe_err != ESP_ERR_INVALID_STATE;
-}
-
-bool mode_fsm_c6_job_alone(const char *otbr_id)
-{
-    return !is_c6(otbr_id);
-}
-
-bool mode_fsm_job_holds_openthread(bool job_running, const char *ot_chan_id, const char *otbr_id)
-{
-    return job_running && (is_c6(ot_chan_id) || is_c6(otbr_id));
 }
 
 bool mode_fsm_start_failed(br_core_mode_t mode, bool ot_running)
@@ -422,8 +335,8 @@ esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, 
     if (cap > 0) {
         err[0] = '\0';
     }
-    if (fsm->radio_job || prev == BR_MODE_STARTING || prev == BR_MODE_SNIFFER) {
-        snprintf(err, cap, "OpenThread is busy (%s), try again", fsm->radio_job ? "radio job" : mode_name(prev));
+    if (prev == BR_MODE_STARTING || prev == BR_MODE_SNIFFER) {
+        snprintf(err, cap, "OpenThread is busy (%s), try again", mode_name(prev));
         return ESP_ERR_INVALID_STATE;
     }
     // 1. The probe, while OpenThread still runs on the source (a stop has no target: the op only accepts it).
@@ -475,9 +388,6 @@ esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, 
 
 void mode_fsm_on_channel_gone(mode_fsm_t *fsm)
 {
-    if (fsm->radio_job) {
-        return; // the job took the radio: it starts OpenThread again itself
-    }
     // NO_RADIO before the teardown: the guards refuse new Thread sessions (503) at once while the open ones drain.
     const br_core_mode_t before = atomic_exchange(&fsm->mode, BR_MODE_NO_RADIO);
 
@@ -490,7 +400,7 @@ void mode_fsm_on_channel_gone(mode_fsm_t *fsm)
     if (fsm->ops->ot_stop() != ESP_OK) {
         ESP_LOGE(TAG, "tearing OpenThread down after the OTBR channel went failed");
         mode_fsm_set_fault(fsm);
-    } else if (!fsm->radio_job) {
+    } else {
         // OpenThread is gone: NO_RADIO again, also when its task parked itself into RADIO_FAULT during the drain.
         set_mode(fsm, BR_MODE_NO_RADIO);
     }
@@ -500,9 +410,6 @@ void mode_fsm_on_channel_back(mode_fsm_t *fsm, const char *id)
 {
     char err[64];
 
-    if (fsm->radio_job) {
-        return;
-    }
     set_mode(fsm, BR_MODE_STARTING);
     if (fsm->ops->probe_channel(id, err, sizeof(err)) != ESP_OK) {
         ESP_LOGE(TAG, "%s: the RCP probe failed: %s", id, err);

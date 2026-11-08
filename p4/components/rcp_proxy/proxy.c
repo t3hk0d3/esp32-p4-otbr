@@ -380,7 +380,6 @@ void rcp_proxy_retry(proxy_t *p, const char *why)
     p->retry_ms = now + (int64_t)p->backoff_s * 1000;
     p->state = PROXY_BACKOFF;
     p->peer[0] = '\0';
-    radio_mux_set_busy_peer(p->ch, false);
     ESP_LOGW(TAG, "%s: %s; again in %lu s", p->id, why, (unsigned long)p->backoff_s);
 }
 
@@ -425,7 +424,6 @@ static void session_close(proxy_t *p)
     }
     lookup_cancel(p);
     p->ad->close(p);
-    radio_mux_set_busy_peer(p->ch, false);
     ESP_LOGI(TAG, "%s: closed (to radio %llu B, to peer %llu B, discarded %lu B, refused %lu, overflows %lu, "
              "radio tx errors %lu)", p->id, (unsigned long long)p->to_radio, (unsigned long long)p->to_peer,
              (unsigned long)p->discarded, (unsigned long)p->refused, (unsigned long)p->overflows,
@@ -442,7 +440,6 @@ void rcp_proxy_peer_up(proxy_t *p, const struct sockaddr *peer, bool new_session
     rcp_proxy_peer_text(peer, p->peer, sizeof(p->peer));
     p->state = PROXY_CONNECTED;
     p->last_error[0] = '\0';
-    radio_mux_set_busy_peer(p->ch, true); // a C6 job is refused while a peer is connected (409 c6_busy)
     p->up_ms = rcp_proxy_now_ms();
     if (p->ring_buf) {
         rcp_proxy_ring_clear(&p->ring); // a new session starts clean
@@ -471,7 +468,6 @@ void rcp_proxy_peer_lost(proxy_t *p, proxy_state_t st)
 {
     p->state = st;
     p->peer[0] = '\0';
-    radio_mux_set_busy_peer(p->ch, false);
     if (p->ring_buf) {
         rcp_proxy_ring_clear(&p->ring);
     }
