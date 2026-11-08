@@ -12,6 +12,8 @@
 #include "esp_netif_net_stack.h"
 #include "freertos/FreeRTOS.h"
 #include "lwip/dhcp.h"
+#include "lwip/ip.h"
+#include "lwip/netif.h"
 #include "lwip/sockets.h"
 #include "mdns.h"
 #include "netcfg_glue.h"
@@ -411,7 +413,7 @@ static bool is_link_local(const uint8_t addr[IP6_BYTES])
 }
 
 // A link-local address is the same on both interfaces (same MAC), the zone tells them apart.
-static bool match_v6(const uint8_t addr[IP6_BYTES], uint32_t scope_id, netcfg_side_t *side)
+static bool match_v6(const uint8_t addr[IP6_BYTES], uint32_t scope_id, netcfg_side_t *side, bool *on_mesh)
 {
     for (size_t i = 0; i < s_net.count; i++) {
         const iface_t *iface = &s_net.iface[i];
@@ -428,7 +430,12 @@ static bool match_v6(const uint8_t addr[IP6_BYTES], uint32_t scope_id, netcfg_si
 
     if (ot && !is_link_local(addr) && has_v6(ot, addr)) { /* OpenThread addresses count as thread_bb */
         *side = NETCFG_SIDE_THREAD;
+        *on_mesh = true;
         return true;
+    }
+    // A link-local address of the OpenThread netif is not a side (HTTP keeps refusing it in split mode) but it is the mesh.
+    if (ot && is_link_local(addr) && (int)scope_id == esp_netif_get_netif_impl_index(ot)) {
+        *on_mesh = true;
     }
     return false;
 }
@@ -444,12 +451,13 @@ static bool match_v4(esp_ip4_addr_t addr, netcfg_side_t *side)
     return false;
 }
 
-bool netcfg_ifaces_request_side(httpd_req_t *req, netcfg_side_t *side)
+bool netcfg_ifaces_socket_side(int fd, netcfg_side_t *side, bool *on_mesh)
 {
     struct sockaddr_storage local;
     socklen_t len = sizeof(local);
 
-    if (getsockname(httpd_req_to_sockfd(req), (struct sockaddr *)&local, &len) != 0) {
+    *on_mesh = false;
+    if (getsockname(fd, (struct sockaddr *)&local, &len) != 0) {
         return false;
     }
     if (local.ss_family == AF_INET) {
@@ -469,5 +477,69 @@ bool netcfg_ifaces_request_side(httpd_req_t *req, netcfg_side_t *side)
     if (netcfg_v4_from_mapped(v6->sin6_addr.s6_addr, &mapped)) {
         return match_v4(mapped, side);
     }
-    return match_v6(v6->sin6_addr.s6_addr, v6->sin6_scope_id, side);
+    return match_v6(v6->sin6_addr.s6_addr, v6->sin6_scope_id, side, on_mesh);
+}
+
+typedef struct {
+    ip_addr_t dst;
+    int index; /* lwIP netif index of the route, 0 = none */
+} route_query_t;
+
+static esp_err_t route_lookup(void *ctx)
+{
+    route_query_t *q = ctx;
+    struct netif *n = IP_IS_V6(&q->dst) ? ip6_route(IP6_ADDR_ANY6, ip_2_ip6(&q->dst)) : ip4_route(ip_2_ip4(&q->dst));
+
+    q->index = n ? netif_get_index(n) : 0;
+    return ESP_OK;
+}
+
+bool netcfg_ifaces_peer_side(const struct sockaddr *peer, netcfg_side_t *side, bool *on_mesh)
+{
+    route_query_t q = {.index = 0};
+    esp_ip4_addr_t mapped;
+
+    *on_mesh = false;
+    if (peer->sa_family == AF_INET) {
+        ip_addr_set_ip4_u32_val(q.dst, ((const struct sockaddr_in *)peer)->sin_addr.s_addr);
+    } else if (peer->sa_family == AF_INET6) {
+        const struct sockaddr_in6 *v6 = (const struct sockaddr_in6 *)peer;
+
+        if (netcfg_v4_from_mapped(v6->sin6_addr.s6_addr, &mapped)) { /* an IPv4 source on a dual-stack socket */
+            ip_addr_set_ip4_u32_val(q.dst, mapped.addr);
+        } else {
+            IP_SET_TYPE_VAL(q.dst, IPADDR_TYPE_V6);
+            memcpy(ip_2_ip6(&q.dst)->addr, v6->sin6_addr.s6_addr, IP6_BYTES);
+            ip6_addr_clear_zone(ip_2_ip6(&q.dst));
+            if (is_link_local(v6->sin6_addr.s6_addr)) {
+                ip6_addr_set_zone(ip_2_ip6(&q.dst), (u8_t)v6->sin6_scope_id);
+            }
+        }
+    } else {
+        return false;
+    }
+    if (esp_netif_tcpip_exec(route_lookup, &q) != ESP_OK || q.index == 0) {
+        return false;
+    }
+    for (size_t i = 0; i < s_net.count; i++) {
+        if (esp_netif_get_netif_impl_index(s_net.iface[i].netif) == q.index) {
+            *side = s_net.iface[i].side;
+            return true;
+        }
+    }
+    esp_netif_t *ot = esp_netif_get_handle_from_ifkey(OT_IFKEY);
+
+    if (ot && esp_netif_get_netif_impl_index(ot) == q.index) { /* the mesh counts as thread_bb, as for sockets */
+        *side = NETCFG_SIDE_THREAD;
+        *on_mesh = true;
+        return true;
+    }
+    return false;
+}
+
+bool netcfg_ifaces_request_side(httpd_req_t *req, netcfg_side_t *side)
+{
+    bool on_mesh; /* not needed here: an HTTP request on the mesh address is treated as thread_bb, as before */
+
+    return netcfg_ifaces_socket_side(httpd_req_to_sockfd(req), side, &on_mesh);
 }

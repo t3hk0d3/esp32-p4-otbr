@@ -49,6 +49,7 @@ TEST_CASE("On the status codes device_api sends: the status line has the code an
     TEST_ASSERT_EQUAL_STRING("500 Internal Server Error", device_api_status_line(500));
     TEST_ASSERT_EQUAL_STRING("502 Bad Gateway", device_api_status_line(502));
     TEST_ASSERT_EQUAL_STRING("503 Service Unavailable", device_api_status_line(503));
+    TEST_ASSERT_EQUAL_STRING("504 Gateway Timeout", device_api_status_line(504));
 }
 
 TEST_CASE("On an OTA that is refused as running or committed: 409", "[device_api]")
@@ -201,7 +202,7 @@ TEST_CASE("On a recovery that worked and the restart found no RCP firmware: 200 
     char buf[384];
     int status = 0;
 
-    TEST_ASSERT_GREATER_THAN(0, device_api_recover_reply(ESP_OK, "", BR_MODE_RADIO_FAULT, "no rcp firmware", true, "", buf, sizeof(buf), &status));
+    TEST_ASSERT_GREATER_THAN(0, device_api_recover_reply(ESP_OK, "", BR_MODE_RADIO_FAULT, true, "no rcp firmware", true, "", buf, sizeof(buf), &status));
     TEST_ASSERT_EQUAL(200, status);
     TEST_ASSERT_NOT_NULL(strstr(buf, "\"recovered\":true"));
     TEST_ASSERT_NOT_NULL(strstr(buf, "\"rcp\":\"no rcp firmware\""));
@@ -213,7 +214,7 @@ TEST_CASE("On a recovery that worked and the RCP in its slot runs: 200 recovered
     char buf[384];
     int status = 0;
 
-    TEST_ASSERT_GREATER_THAN(0, device_api_recover_reply(ESP_OK, "", BR_MODE_BR_RUNNING, "", true, "20261101T1-abc1234", buf, sizeof(buf), &status));
+    TEST_ASSERT_GREATER_THAN(0, device_api_recover_reply(ESP_OK, "", BR_MODE_BR_RUNNING, true, "", true, "20261101T1-abc1234", buf, sizeof(buf), &status));
     TEST_ASSERT_EQUAL(200, status);
     TEST_ASSERT_NOT_NULL(strstr(buf, "\"rcp\":\"20261101T1-abc1234\""));
     TEST_ASSERT_NOT_NULL(strstr(buf, "\"mode\":\"BR_RUNNING\""));
@@ -224,7 +225,7 @@ TEST_CASE("On a recovery that worked and the RCP version is unreadable: 200 reco
     char buf[384];
     int status = 0;
 
-    TEST_ASSERT_GREATER_THAN(0, device_api_recover_reply(ESP_OK, "", BR_MODE_RADIO_FAULT, "", false, "", buf, sizeof(buf), &status));
+    TEST_ASSERT_GREATER_THAN(0, device_api_recover_reply(ESP_OK, "", BR_MODE_RADIO_FAULT, true, "", false, "", buf, sizeof(buf), &status));
     TEST_ASSERT_EQUAL(200, status);
     TEST_ASSERT_NOT_NULL(strstr(buf, "\"rcp\":\"unknown\""));
 }
@@ -234,7 +235,7 @@ TEST_CASE("On a recovery that failed: 502 with the recovery_failed body and the 
     char buf[384];
     int status = 0;
 
-    device_api_recover_reply(ESP_FAIL, "ROM recovery of the C6 base image failed", BR_MODE_RADIO_FAULT, "", true, "", buf, sizeof(buf), &status);
+    device_api_recover_reply(ESP_FAIL, "ROM recovery of the C6 base image failed", BR_MODE_RADIO_FAULT, true, "", true, "", buf, sizeof(buf), &status);
     TEST_ASSERT_EQUAL(502, status);
     TEST_ASSERT_EQUAL_STRING("{\"error\":\"recovery_failed\",\"detail\":\"ROM recovery of the C6 base image failed\"}", buf);
 }
@@ -244,10 +245,10 @@ TEST_CASE("On a recovery refused (no jumper, busy): the mapped status and code",
     char buf[384];
     int status = 0;
 
-    device_api_recover_reply(ESP_ERR_NOT_SUPPORTED, "", BR_MODE_BR_RUNNING, "", true, "", buf, sizeof(buf), &status);
+    device_api_recover_reply(ESP_ERR_NOT_SUPPORTED, "", BR_MODE_BR_RUNNING, true, "", true, "", buf, sizeof(buf), &status);
     TEST_ASSERT_EQUAL(412, status);
     TEST_ASSERT_NOT_NULL(strstr(buf, "\"error\":\"no_jumper\""));
-    device_api_recover_reply(ESP_ERR_INVALID_STATE, "", BR_MODE_BR_RUNNING, "", true, "", buf, sizeof(buf), &status);
+    device_api_recover_reply(ESP_ERR_INVALID_STATE, "", BR_MODE_BR_RUNNING, true, "", true, "", buf, sizeof(buf), &status);
     TEST_ASSERT_EQUAL(409, status);
 }
 
@@ -256,7 +257,7 @@ TEST_CASE("On a reply buffer too small: returns -1", "[device_api]")
     char buf[20];
     int status = 0;
 
-    TEST_ASSERT_EQUAL(-1, device_api_recover_reply(ESP_OK, "", BR_MODE_RADIO_FAULT, "", true, "", buf, sizeof(buf), &status));
+    TEST_ASSERT_EQUAL(-1, device_api_recover_reply(ESP_OK, "", BR_MODE_RADIO_FAULT, true, "", true, "", buf, sizeof(buf), &status));
 }
 
 TEST_CASE("On a recovery that worked with an RCP version known but RADIO_FAULT: detail names the fault, not a running RCP", "[device_api]")
@@ -264,11 +265,63 @@ TEST_CASE("On a recovery that worked with an RCP version known but RADIO_FAULT: 
     char buf[384];
     int status = 0;
 
-    device_api_recover_reply(ESP_OK, "", BR_MODE_RADIO_FAULT, "rcp incompatible", true, "v1", buf, sizeof(buf), &status);
+    device_api_recover_reply(ESP_OK, "", BR_MODE_RADIO_FAULT, true, "rcp incompatible", true, "v1", buf, sizeof(buf), &status);
     TEST_ASSERT_EQUAL(200, status);
     TEST_ASSERT_NOT_NULL(strstr(buf, "\"rcp\":\"v1\""));
     TEST_ASSERT_NOT_NULL(strstr(buf, "rcp incompatible"));
     TEST_ASSERT_NULL(strstr(buf, "is running"));
+}
+
+TEST_CASE("On a recovery that worked while Thread runs on a dongle: detail describes the C6, not the dongle's mode", "[device_api]")
+{
+    char buf[384];
+    int status = 0;
+
+    TEST_ASSERT_GREATER_THAN(0, device_api_recover_reply(ESP_OK, "", BR_MODE_BR_RUNNING, false, "", true, "v1", buf,
+                                                         sizeof(buf), &status));
+    TEST_ASSERT_EQUAL(200, status);
+    TEST_ASSERT_NOT_NULL(strstr(buf, "\"rcp\":\"v1\""));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "\"mode\":\"BR_RUNNING\""));
+    TEST_ASSERT_NULL(strstr(buf, "is running"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "another radio"));
+}
+
+TEST_CASE("On a recovery that worked while a dongle's OpenThread is in fault: detail leaves the dongle's fault out", "[device_api]")
+{
+    char buf[384];
+    int status = 0;
+
+    device_api_recover_reply(ESP_OK, "", BR_MODE_RADIO_FAULT, false, "rcp incompatible", true, "v1", buf, sizeof(buf),
+                             &status);
+    TEST_ASSERT_EQUAL(200, status);
+    TEST_ASSERT_NULL(strstr(buf, "rcp incompatible"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "another radio"));
+}
+
+TEST_CASE("On a recovery that worked without RCP firmware while Thread runs on a dongle: detail tells to upload it", "[device_api]")
+{
+    char buf[384];
+    int status = 0;
+
+    device_api_recover_reply(ESP_OK, "", BR_MODE_BR_RUNNING, false, "", true, "", buf, sizeof(buf), &status);
+    TEST_ASSERT_NOT_NULL(strstr(buf, "upload c6_rcp.bin"));
+    TEST_ASSERT_NOT_NULL(strstr(buf, "\"rcp\":\"no rcp firmware\""));
+}
+
+TEST_CASE("On a C6 job with Thread on the C6: refused in SNIFFER and STARTING, allowed otherwise", "[device_api]")
+{
+    TEST_ASSERT_EQUAL_STRING("a capture is running", device_api_radio_job_busy(BR_MODE_SNIFFER, true));
+    TEST_ASSERT_EQUAL_STRING("the border router is starting", device_api_radio_job_busy(BR_MODE_STARTING, true));
+    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_BR_RUNNING, true));
+    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_RADIO_FAULT, true));
+    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_NO_RADIO, true));
+}
+
+TEST_CASE("On a C6 job with Thread on a dongle or nowhere: the board mode never refuses it", "[device_api]")
+{
+    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_SNIFFER, false));
+    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_STARTING, false));
+    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_NO_RADIO, false));
 }
 
 TEST_CASE("On a recovery that worked without RCP firmware: detail tells to upload it", "[device_api]")
@@ -276,7 +329,7 @@ TEST_CASE("On a recovery that worked without RCP firmware: detail tells to uploa
     char buf[384];
     int status = 0;
 
-    device_api_recover_reply(ESP_OK, "", BR_MODE_RADIO_FAULT, "no rcp firmware", true, "", buf, sizeof(buf), &status);
+    device_api_recover_reply(ESP_OK, "", BR_MODE_RADIO_FAULT, true, "no rcp firmware", true, "", buf, sizeof(buf), &status);
     TEST_ASSERT_NOT_NULL(strstr(buf, "upload c6_rcp.bin"));
 }
 

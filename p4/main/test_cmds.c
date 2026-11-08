@@ -31,6 +31,9 @@
 #include "driver/gpio.h"
 #include "ot_console.h"
 #include "rcp_sync.h"
+#include "radio_mux.h"
+#include "esp_ipc.h"
+#include "esp_rom_sys.h"
 #include "storage.h"
 
 static const char *TAG = "test_cmds";
@@ -185,7 +188,7 @@ static int cmd_c6_jumper_ignore(int argc, char **argv)
 // br_status: br_core mode, installed RCP version, dataset and DHCPv6-PD state.
 static int cmd_br_status(int argc, char **argv)
 {
-    static const char *const modes[] = {"STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT"};
+    static const char *const modes[] = {"STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT", "NO_RADIO"};
     br_core_status_t status;
     br_core_get_status(&status);
     printf("br_status: mode=%s installed=%s known=%d compatible=%d dataset=%d channel=%u pd=%d prefix=%s fault=%s\n",
@@ -573,6 +576,111 @@ static int cmd_busy(int argc, char **argv)
     return 0;
 }
 
+/* ---- CH340 experiments (2026-11-07, uncommitted PoC) ---- */
+
+static void ch34x_print(const char *what, esp_err_t err, const uint8_t *d, int n)
+{
+    printf("ch34x %s: %s", what, esp_err_to_name(err));
+    for (int i = 0; err == ESP_OK && i < n; i++) {
+        printf(" %02x", d[i]);
+    }
+    printf("\n");
+}
+
+static esp_err_t ch34x_in(const char *what, uint8_t req, uint16_t val)
+{
+    uint8_t d[2] = {0};
+    const esp_err_t err = radio_mux_test_usb_ctrl(0xC0, req, val, 0, 2, d);
+
+    ch34x_print(what, err, d, 2);
+    return err;
+}
+
+static esp_err_t ch34x_out(const char *what, uint8_t bm, uint8_t req, uint16_t val, uint16_t idx)
+{
+    const esp_err_t err = radio_mux_test_usb_ctrl(bm, req, val, idx, 0, NULL);
+
+    ch34x_print(what, err, NULL, 0);
+    return err;
+}
+
+// ch34x diag|init|clear|ctrl <bm> <req> <val> <idx> [len]: len 0..8 (the data stage's buffer); others are refused
+static int cmd_ch34x(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("usage: ch34x diag|init|clear|ctrl <bm> <req> <val> <idx> [len 0..8]\n");
+        return 1;
+    }
+    if (strcmp(argv[1], "diag") == 0) {
+        ch34x_in("version 5f", 0x5F, 0);
+        ch34x_in("status 0706", 0x95, 0x0706);
+        ch34x_in("lcr 2518", 0x95, 0x2518);
+    } else if (strcmp(argv[1], "init") == 0) { // the WCH/Linux/FreeBSD open sequence (research 1a..1h), 460800 8N1
+        ch34x_in("version 5f", 0x5F, 0);
+        ch34x_out("serial init a1", 0x40, 0xA1, 0, 0);
+        ch34x_out("baud 1312", 0x40, 0x9A, 0x1312, 0xF383);
+        ch34x_out("0f2c", 0x40, 0x9A, 0x0F2C, 0x0007);
+        ch34x_out("lcr 2518", 0x40, 0x9A, 0x2518, 0x00C3);
+        ch34x_in("status 0706", 0x95, 0x0706);
+        ch34x_out("flow 2727", 0x40, 0x9A, 0x2727, 0);
+        ch34x_out("modem a4", 0x40, 0xA4, 0x009F, 0);
+    } else if (strcmp(argv[1], "clear") == 0) { // CLEAR_FEATURE(ENDPOINT_HALT) on the device's bulk endpoints
+        ch34x_out("clear halt 82", 0x02, 0x01, 0, 0x0082);
+        ch34x_out("clear halt 02", 0x02, 0x01, 0, 0x0002);
+    } else if (strcmp(argv[1], "ctrl") == 0 && argc >= 6) {
+        uint8_t d[8] = {0};
+        char *end = NULL;
+        const long len = argc >= 7 ? strtol(argv[6], &end, 0) : 0;
+
+        if (argc >= 7 && (end == argv[6] || *end != '\0' || len < 0 || len > (long)sizeof(d))) {
+            printf("ch34x ctrl: len must be 0..%u\n", (unsigned)sizeof(d)); // the data stage lands in d
+            return 1;
+        }
+        const esp_err_t err = radio_mux_test_usb_ctrl((uint8_t)strtoul(argv[2], NULL, 0), (uint8_t)strtoul(argv[3], NULL, 0),
+                                                      (uint16_t)strtoul(argv[4], NULL, 0), (uint16_t)strtoul(argv[5], NULL, 0),
+                                                      (uint16_t)len, len ? d : NULL);
+        ch34x_print("ctrl", err, d, (int)len);
+    } else {
+        printf("ch34x: unknown step\n");
+        return 1;
+    }
+    return 0;
+}
+
+static int cmd_usb_reopen(int argc, char **argv)
+{
+    const esp_err_t err = radio_mux_test_usb_reopen();
+
+    printf("usb_reopen: %s\n", esp_err_to_name(err));
+    return err == ESP_OK ? 0 : 1;
+}
+
+static portMUX_TYPE s_stall_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static void stall_core(void *arg)
+{
+    const uint32_t ms = *(const uint32_t *)arg;
+
+    portENTER_CRITICAL(&s_stall_lock);
+    esp_rom_delay_us(ms * 1000);
+    portEXIT_CRITICAL(&s_stall_lock);
+}
+
+// usb_stall <ms> [core]: mask interrupts on a core (default 0, where the USB host runs) for <ms>: forces an overrun.
+static int cmd_usb_stall(int argc, char **argv)
+{
+    uint32_t ms = argc > 1 ? (uint32_t)atoi(argv[1]) : 5;
+    const int core = argc > 2 ? atoi(argv[2]) : 0;
+
+    if (ms > 50) {
+        ms = 50;
+    }
+    const esp_err_t err = esp_ipc_call_blocking(core, stall_core, &ms);
+
+    printf("usb_stall: %lu ms on core %d: %s\n", (unsigned long)ms, core, esp_err_to_name(err));
+    return 0;
+}
+
 static esp_err_t register_command(const char *name, const char *help, esp_console_cmd_func_t func)
 {
     const esp_console_cmd_t command = {.command = name, .help = help, .func = func};
@@ -617,6 +725,9 @@ esp_err_t test_cmds_register(void)
     ESP_RETURN_ON_ERROR(register_command("c6_stock_restore", "c6_stock_restore <url>: write a build's flash_args images to the C6 over the jumper",
                                          cmd_c6_stock_restore), TAG, "c6_stock_restore");
     ESP_RETURN_ON_ERROR(register_command("c6_erase", "c6_erase <bootloader|ptable|otadata|test|ota0|ota1>: erase a C6 flash region over the jumper", cmd_c6_erase), TAG, "c6_erase");
+    ESP_RETURN_ON_ERROR(register_command("ch34x", "ch34x diag|init|clear|ctrl: CH340 experiments", cmd_ch34x), TAG, "ch34x");
+    ESP_RETURN_ON_ERROR(register_command("usb_reopen", "close and reopen the USB dongle (the mux's reset path)", cmd_usb_reopen), TAG, "usb_reopen");
+    ESP_RETURN_ON_ERROR(register_command("usb_stall", "usb_stall <ms> [core]: mask a core's interrupts (forces an overrun)", cmd_usb_stall), TAG, "usb_stall");
     return ot_console_usb_command_register();
 }
 

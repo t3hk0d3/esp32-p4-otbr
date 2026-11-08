@@ -1,5 +1,6 @@
 #include "mode_fsm.h"
 
+#include <stdio.h>
 #include <string.h>
 #include "esp_log.h"
 
@@ -16,6 +17,8 @@ static const char *mode_name(br_core_mode_t mode)
         return "SNIFFER";
     case BR_MODE_RADIO_FAULT:
         return "RADIO_FAULT";
+    case BR_MODE_NO_RADIO:
+        return "NO_RADIO";
     }
     return "?";
 }
@@ -267,13 +270,26 @@ static void finish_sniffer_recovery(void *ctx)
     }
 }
 
+esp_err_t mode_fsm_reset_rcp(mode_fsm_t *fsm)
+{
+    const mode_fsm_ops_t *ops = fsm->ops;
+    const esp_err_t err = ops->reset_rcp();
+
+    if (err != ESP_ERR_TIMEOUT && err != ESP_ERR_NO_MEM) {
+        return err;
+    }
+    ESP_LOGW(TAG, "the RCP reset was not taken (%s): trying once more", esp_err_to_name(err));
+    ops->sleep_ms(MODE_FSM_RESET_RETRY_MS);
+    return ops->reset_rcp();
+}
+
 void mode_fsm_on_rcp_failure(mode_fsm_t *fsm)
 {
     const mode_fsm_ops_t *ops = fsm->ops;
     const br_core_mode_t mode = mode_fsm_get_mode(fsm);
 
     if (mode == BR_MODE_STARTING) {
-        ops->reset_rcp();
+        mode_fsm_reset_rcp(fsm);
         return;
     }
     if (mode == BR_MODE_SNIFFER) {
@@ -293,7 +309,7 @@ void mode_fsm_on_rcp_failure(mode_fsm_t *fsm)
     }
     fsm->recovery_us[fsm->recovery_count++] = now;
 
-    if (ops->reset_rcp() != ESP_OK) {
+    if (mode_fsm_reset_rcp(fsm) != ESP_OK) {
         ESP_LOGE(TAG, "resetting the RCP failed, staying in the radio fault");
         return;
     }
@@ -335,4 +351,177 @@ esp_err_t mode_fsm_radio_job_result(bool base_only, esp_err_t job_err, esp_err_t
         return job_err;
     }
     return restart_err == ESP_OK ? ESP_OK : RCP_SYNC_ERR_RESTART;
+}
+
+bool mode_fsm_boot(mode_fsm_t *fsm, const char *otbr_id)
+{
+    if (otbr_id && strcmp(otbr_id, MODE_FSM_C6_ID) == 0) {
+        return true; // the C6 boots as it always did
+    }
+    set_mode(fsm, BR_MODE_NO_RADIO);
+    return false;
+}
+
+bool mode_fsm_c6_usable_after_steps(esp_err_t steps)
+{
+    return steps == ESP_OK;
+}
+
+static bool is_c6(const char *id)
+{
+    return id && strcmp(id, MODE_FSM_C6_ID) == 0;
+}
+
+bool mode_fsm_probe_fault_incompatible(const char *id, esp_err_t probe_err)
+{
+    return is_c6(id) && probe_err != ESP_OK && probe_err != ESP_ERR_INVALID_STATE;
+}
+
+bool mode_fsm_c6_job_alone(const char *otbr_id)
+{
+    return !is_c6(otbr_id);
+}
+
+bool mode_fsm_job_holds_openthread(bool job_running, const char *ot_chan_id, const char *otbr_id)
+{
+    return job_running && (is_c6(ot_chan_id) || is_c6(otbr_id));
+}
+
+bool mode_fsm_start_failed(br_core_mode_t mode, bool ot_running)
+{
+    return mode == BR_MODE_RADIO_FAULT && !ot_running;
+}
+
+// STARTING, then OpenThread on `id`. The border router start sets BR_RUNNING (mode_fsm_set_started).
+static esp_err_t start_on(mode_fsm_t *fsm, const char *id)
+{
+    set_mode(fsm, BR_MODE_STARTING);
+    const esp_err_t err = fsm->ops->ot_start(id);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "starting OpenThread on %s failed: %s", id, esp_err_to_name(err));
+    }
+    return err;
+}
+
+// 5. of a move: back on the source, which keeps its stored mode; NO_RADIO when there is none to go back to (absent:
+// the mode before was NO_RADIO; a start: no source). MODE_FSM_ERR_START_FAILED, or ..._START_ABANDONED.
+static esp_err_t start_back(mode_fsm_t *fsm, br_core_mode_t prev, const char *from, const char *to, char *err,
+                            size_t cap)
+{
+    if (prev == BR_MODE_NO_RADIO || from[0] == '\0') {
+        set_mode(fsm, BR_MODE_NO_RADIO);
+        return MODE_FSM_ERR_START_FAILED;
+    }
+    const esp_err_t back_err = start_on(fsm, from);
+
+    if (back_err == MODE_FSM_ERR_START_ABANDONED) {
+        // As on the target: nothing starts OpenThread again in this boot; a reboot brings it back on `from`.
+        snprintf(err, cap, "OpenThread did not start on %s, nor again on %s: rebooting", to[0] ? to : "(none)", from);
+        return MODE_FSM_ERR_START_ABANDONED;
+    }
+    if (back_err != ESP_OK) {
+        snprintf(err, cap, "OpenThread did not start on %s, nor again on %s", to[0] ? to : "(none)", from);
+        mode_fsm_set_fault(fsm);
+    }
+    return MODE_FSM_ERR_START_FAILED;
+}
+
+esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, char *err, size_t cap)
+{
+    const mode_fsm_ops_t *ops = fsm->ops;
+    const br_core_mode_t prev = mode_fsm_get_mode(fsm);
+
+    if (cap > 0) {
+        err[0] = '\0';
+    }
+    if (fsm->radio_job || prev == BR_MODE_STARTING || prev == BR_MODE_SNIFFER) {
+        snprintf(err, cap, "OpenThread is busy (%s), try again", fsm->radio_job ? "radio job" : mode_name(prev));
+        return ESP_ERR_INVALID_STATE;
+    }
+    // 1. The probe, while OpenThread still runs on the source (a stop has no target: the op only accepts it).
+    if (ops->probe_channel(to, err, cap) != ESP_OK) {
+        ESP_LOGW(TAG, "moving OpenThread to %s: the probe failed: %s", to, err);
+        return MODE_FSM_ERR_PROBE_FAILED;
+    }
+    // 2. Stop on the source (nothing runs there when it is absent, NO_RADIO, or for a start).
+    set_mode(fsm, BR_MODE_STARTING);
+    if (ops->ot_stop() != ESP_OK) {
+        set_mode(fsm, prev);
+        snprintf(err, cap, "%s", MODE_FSM_DRAIN_TIMEOUT);
+        ESP_LOGW(TAG, "%s %s: the sessions did not end, nothing changed", to[0] ? "moving OpenThread to" :
+                 "stopping OpenThread on", to[0] ? to : from);
+        return MODE_FSM_ERR_DRAIN_TIMEOUT;
+    }
+    if (to[0] == '\0') {
+        // A stop: the source's new mode is stored only now that OpenThread stopped.
+        if (ops->store_otbr(from, "") == ESP_OK) {
+            set_mode(fsm, BR_MODE_NO_RADIO);
+            return ESP_OK;
+        }
+        snprintf(err, cap, "storing the mode failed: OpenThread starts again on %s", from);
+        return start_back(fsm, prev, from, to, err, cap);
+    }
+    // 3. Start on the target; 4. store both modes only once it runs.
+    const esp_err_t start_err = start_on(fsm, to);
+
+    if (start_err == MODE_FSM_ERR_START_ABANDONED) {
+        // Nothing starts OpenThread again in this boot: the board reboots, on the source's stored mode.
+        snprintf(err, cap, "OpenThread could not start on %s: rebooting, Thread comes back on %s", to,
+                 from[0] ? from : "no radio");
+        return MODE_FSM_ERR_START_ABANDONED;
+    }
+    if (start_err == ESP_OK) {
+        if (ops->store_otbr(from, to) == ESP_OK) {
+            return ESP_OK;
+        }
+        snprintf(err, cap, "storing the modes failed: OpenThread goes back to %s", from[0] ? from : "no radio");
+        if (ops->ot_stop() != ESP_OK) {
+            mode_fsm_set_fault(fsm); // still on the target, which the stored modes do not name
+            return MODE_FSM_ERR_START_FAILED;
+        }
+    } else {
+        snprintf(err, cap, "OpenThread did not start on %s", to);
+    }
+    return start_back(fsm, prev, from, to, err, cap);
+}
+
+void mode_fsm_on_channel_gone(mode_fsm_t *fsm)
+{
+    if (fsm->radio_job) {
+        return; // the job took the radio: it starts OpenThread again itself
+    }
+    // NO_RADIO before the teardown: the guards refuse new Thread sessions (503) at once while the open ones drain.
+    const br_core_mode_t before = atomic_exchange(&fsm->mode, BR_MODE_NO_RADIO);
+
+    ESP_LOGI(TAG, "mode %s (the OTBR channel is gone)", mode_name(BR_MODE_NO_RADIO));
+    if (before == BR_MODE_SNIFFER) {
+        fsm->thread_stopped_by_capture = false; // OpenThread goes away: nothing to restore
+        notify_sniffer_end(fsm);
+    }
+    if (fsm->ops->ot_stop() != ESP_OK) {
+        ESP_LOGE(TAG, "tearing OpenThread down after the OTBR channel went failed");
+        mode_fsm_set_fault(fsm);
+    } else if (!fsm->radio_job) {
+        // OpenThread is gone: NO_RADIO again, also when its task parked itself into RADIO_FAULT during the drain.
+        set_mode(fsm, BR_MODE_NO_RADIO);
+    }
+}
+
+void mode_fsm_on_channel_back(mode_fsm_t *fsm, const char *id)
+{
+    char err[64];
+
+    if (fsm->radio_job) {
+        return;
+    }
+    set_mode(fsm, BR_MODE_STARTING);
+    if (fsm->ops->probe_channel(id, err, sizeof(err)) != ESP_OK) {
+        ESP_LOGE(TAG, "%s: the RCP probe failed: %s", id, err);
+        mode_fsm_set_fault(fsm);
+        return;
+    }
+    if (start_on(fsm, id) != ESP_OK) {
+        mode_fsm_set_fault(fsm);
+    }
 }

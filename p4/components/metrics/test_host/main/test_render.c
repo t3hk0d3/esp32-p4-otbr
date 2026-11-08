@@ -116,12 +116,34 @@ TEST_CASE("Device family: br_info carries version, slot, rcp_version and rcp_com
     free(out);
 }
 
+TEST_CASE("Device family: br_info's rcp_compatible is \"false\" for a rejected RCP", "[metrics]")
+{
+    with_sample();
+    s_in.device.rcp_compatible = false;
+    char *out = render();
+
+    TEST_ASSERT_NOT_NULL(strstr(out, "rcp_compatible=\"false\"} 1"));
+    free(out);
+}
+
+TEST_CASE("Device family: br_info's rcp_compatible is \"unknown\" while the RCP is not judged", "[metrics]")
+{
+    with_sample();
+    s_in.device.rcp_compatible_known = false;
+    s_in.device.rcp_compatible = false;
+    char *out = render();
+
+    TEST_ASSERT_NOT_NULL(strstr(out, "rcp_compatible=\"unknown\"} 1"));
+    TEST_ASSERT_NULL(strstr(out, "rcp_compatible=\"false\""));
+    free(out);
+}
+
 TEST_CASE("Device family: br_mode has exactly one series at 1", "[metrics]")
 {
     with_sample();
     char *out = render();
 
-    TEST_ASSERT_EQUAL(4, count_prefix(out, "br_mode{"));
+    TEST_ASSERT_EQUAL(5, count_prefix(out, "br_mode{"));
     TEST_ASSERT_EQUAL(1, ones(out, "br_mode"));
     TEST_ASSERT_TRUE(has_line(out, "br_mode{mode=\"BR_RUNNING\"} 1"));
     free(out);

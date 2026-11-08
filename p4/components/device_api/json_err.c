@@ -29,6 +29,8 @@ const char *device_api_status_line(int http_status)
         return "200 OK";
     case 202:
         return "202 Accepted";
+    case 204:
+        return "204 No Content";
     case 400:
         return "400 Bad Request";
     case 403:
@@ -47,6 +49,8 @@ const char *device_api_status_line(int http_status)
         return "502 Bad Gateway";
     case 503:
         return "503 Service Unavailable";
+    case 504:
+        return "504 Gateway Timeout";
     default:
         return "500 Internal Server Error";
     }
@@ -107,8 +111,14 @@ device_api_error_t device_api_pcap_default_channel_error(bool ot_state_valid, bo
     };
 }
 
+// A C6 job refused by the radio mux: rcp-proxy on the C6 has a peer.
+static const device_api_error_t C6_BUSY = {409, "c6_busy", "rcp-proxy on the C6 has a connected peer"};
+
 device_api_error_t device_api_map_push_error(esp_err_t err)
 {
+    if (err == RCP_SYNC_ERR_C6_BUSY) {
+        return C6_BUSY;
+    }
     if (err == ESP_ERR_INVALID_STATE) {
         return (device_api_error_t) {
             409, "busy", NULL
@@ -156,6 +166,9 @@ device_api_error_t device_api_map_recover_error(esp_err_t err)
             412, "no_jumper", "the maintenance jumper is not detected"
         };
     }
+    if (err == RCP_SYNC_ERR_C6_BUSY) {
+        return C6_BUSY;
+    }
     if (err == ESP_ERR_INVALID_STATE) {
         return (device_api_error_t) {
             409, "busy", NULL
@@ -171,8 +184,19 @@ device_api_error_t device_api_map_recover_error(esp_err_t err)
     };
 }
 
-int device_api_recover_reply(esp_err_t err, const char *err_detail, int mode, const char *fault_reason, bool rcp_known,
-                             const char *rcp_installed, char *buf, size_t cap, int *http_status)
+const char *device_api_radio_job_busy(int mode, bool thread_on_c6)
+{
+    if (!thread_on_c6) {
+        return NULL;
+    }
+    if (mode == BR_MODE_SNIFFER) {
+        return "a capture is running";
+    }
+    return mode == BR_MODE_STARTING ? "the border router is starting" : NULL;
+}
+
+int device_api_recover_reply(esp_err_t err, const char *err_detail, int mode, bool thread_on_c6, const char *fault_reason,
+                             bool rcp_known, const char *rcp_installed, char *buf, size_t cap, int *http_status)
 {
     if (err != ESP_OK) {
         const device_api_error_t error = device_api_map_recover_error(err);
@@ -186,10 +210,13 @@ int device_api_recover_reply(esp_err_t err, const char *err_detail, int mode, co
     char detail[160];
     json_out_t w;
 
-    if (mode == BR_MODE_BR_RUNNING) {
+    if (thread_on_c6 && mode == BR_MODE_BR_RUNNING) {
         snprintf(detail, sizeof(detail), "C6 base image rewritten; the RCP firmware in its slot is running");
     } else if (!has_rcp) {
         snprintf(detail, sizeof(detail), "C6 base image rewritten; no RCP firmware: upload c6_rcp.bin");
+    } else if (!thread_on_c6) { // the board mode and its fault are another channel's
+        snprintf(detail, sizeof(detail), "C6 base image rewritten; the RCP firmware in its slot is kept (OpenThread "
+                 "runs on another radio)");
     } else {
         snprintf(detail, sizeof(detail), "C6 base image rewritten; the border router is not running (%s)",
                  fault_reason && fault_reason[0] ? fault_reason : "see /device/status");

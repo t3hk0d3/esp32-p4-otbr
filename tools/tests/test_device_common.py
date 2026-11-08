@@ -41,6 +41,53 @@ class TestCommonLogic:
         assert word in msg.lower()
         assert "d" in msg
 
+    @pytest.mark.parametrize(
+        ("status", "chip"),
+        [
+            (
+                "{mode: 'BR_RUNNING', otbr_channel: 'c6'}",
+                {"text": "Thread runs on: C6", "tone": "chip-ok"},
+            ),
+            (
+                "{mode: 'SNIFFER', otbr_channel: 'c6'}",
+                {"text": "Thread runs on: C6", "tone": "chip-ok"},
+            ),
+            (
+                "{mode: 'NO_RADIO', otbr_channel: 'c6', fault_reason: 'radio unplugged (c6)'}",
+                {"text": "Thread on C6: radio unplugged (c6)", "tone": "chip-warn"},
+            ),
+            (
+                "{mode: 'NO_RADIO', otbr_channel: 'c6', fault_reason: null}",
+                {"text": "Thread on C6: not available", "tone": "chip-warn"},
+            ),
+            (
+                "{mode: 'RADIO_FAULT', otbr_channel: 'c6', fault_reason: 'rcp incompatible'}",
+                {"text": "Thread on C6: fault: rcp incompatible", "tone": "chip-warn"},
+            ),
+            (
+                "{mode: 'STARTING', otbr_channel: 'c6'}",
+                {"text": "Thread on C6: starting", "tone": "chip-warn"},
+            ),
+            (
+                "{mode: 'NO_RADIO', otbr_channel: null}",
+                {"text": "No radio in Thread mode", "tone": "chip-warn"},
+            ),
+        ],
+    )
+    def test_thread_chip_says_runs_on_only_while_thread_runs(self, status, chip):
+        # On BR_RUNNING or SNIFFER: "Thread runs on" (ok); otherwise a warning with the state or reason; with no
+        # channel in otbr: "No radio in Thread mode".
+        assert common(f"L.threadChip({status}, 'C6')") == chip
+
+    def test_thread_chip_without_a_label_names_the_id_and_hides_for_an_older_board(
+        self,
+    ):
+        # On no label: the channel id; on a status without otbr_channel (or none): hidden (null).
+        assert common(
+            "[L.threadChip({mode: 'BR_RUNNING', otbr_channel: 'usb-1'}, ''), L.threadChip({mode: 'BR_RUNNING'}, 'x'),"
+            " L.threadChip(null, 'x')]"
+        ) == [{"text": "Thread runs on: usb-1", "tone": "chip-ok"}, None, None]
+
     def test_error_message_without_json_body_still_names_the_status(self):
         # On a non-JSON body: the HTTP status is named.
         assert "500" in common("L.errorMessage(500, null)")

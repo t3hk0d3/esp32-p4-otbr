@@ -388,8 +388,14 @@ function refreshPd() {
 function refresh() {
   return kit.request('GET', '/device/routing', {timeoutMs : 5000}).then(function(r) {
     if (r.status !== 200 || !r.body) {
-      stale('The routing state could not be read: ' + kit.failure(r));
-      return false;
+      // While no radio runs Thread the board answers 503: the notice says why, the raw error would only repeat it.
+      var failed = 'The routing state could not be read: ' + kit.failure(r);
+      if (r.status !== 503)
+        return stale(failed), false;
+      return kit.threadStatus().then(function(n) {
+        stale(n ? '' : failed);
+        return false;
+      });
     }
     adopt(r.body);
     return refreshPd().then(function() {
@@ -478,6 +484,7 @@ function init() {
   $('discardBtn').addEventListener('click', discard);
   $('saveBtn').addEventListener('click', save);
   kit.start();
+  kit.watchThread();
   kit.poller(refresh, 5000, 'routingSection');
 }
 

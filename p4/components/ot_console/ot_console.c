@@ -72,6 +72,8 @@ static const char *mode_name(br_core_mode_t mode)
         return "SNIFFER";
     case BR_MODE_RADIO_FAULT:
         return "RADIO_FAULT";
+    case BR_MODE_NO_RADIO:
+        return "NO_RADIO";
     }
     return "UNKNOWN";
 }

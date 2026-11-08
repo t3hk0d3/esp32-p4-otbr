@@ -94,7 +94,7 @@ httpd_handle_t esp_br_web_get_server(void)
 #define REST_PATH_COUNT     4 /* esp_otbr_thread_rest_register: paths x methods, asserted there */
 #define REST_METHOD_COUNT   7
 #define REST_ROUTE_SLOTS    (REST_PATH_COUNT * REST_METHOD_COUNT)
-#define EXTRA_HANDLER_SLOTS 30      /* device_api (27 routes) and the catch-all, plus headroom (patches 19, 24, 26) */
+#define EXTRA_HANDLER_SLOTS 34      /* device_api (31 routes) and the catch-all, plus headroom (patches 19, 24, 26, 28, 29) */
 /* Patch 12: per-interface policy (spec 5.13). netcfg_request_allowed sends the 403 itself; failing the handler makes the
  * server close the connection. Single mode (the default) allows everything. */
 #define NETCFG_GATE(req, svc)                       \
@@ -482,13 +482,14 @@ static esp_err_t esp_otbr_thread_rest_handler(httpd_req_t *req)
      * again while holding the lock. Patch 22: the br_core session keeps a radio push from deleting the lock and the
      * instance while the request uses them; without one OpenThread counts as not ready. */
     const bool session = br_core_ot_session_begin();
-    const int refused = esp_br_guard_status(ESP_BR_GUARD_REST_CLASS(req->method), br_core_get_mode(),
+    const br_core_mode_t mode = br_core_get_mode();
+    const int refused = esp_br_guard_status(ESP_BR_GUARD_REST_CLASS(req->method), mode,
                                             session && esp_br_web_openthread_ready());
     if (!strcmp(uri, "/.well-known/thread/br-rest")) {
         response.json = thread_rest_discovery();
     } else if (refused) {
         response.status = refused;
-        response.detail = esp_br_guard_detail(refused);
+        response.detail = esp_br_guard_detail(refused, mode);
     } else if (esp_br_thread_rest_init() != ESP_OK) {
         response.status = 503;
         response.detail = "radio not available";
@@ -782,14 +783,15 @@ static esp_err_t guard_refuse_gui(httpd_req_t *req, int status)
     return guard_send_status(req, status,
                              pack_response(cJSON_CreateNumber((double)OT_ERROR_INVALID_STATE),
                                            cJSON_CreateString("failed"),
-                                           cJSON_CreateString(esp_br_guard_detail(status))));
+                                           cJSON_CreateString(esp_br_guard_detail(status, br_core_get_mode()))));
 }
 
 /* Refusal in the resource format {"ErrorCode", "ErrorMessage"} (as NOT_FOUND_handler). */
 static esp_err_t guard_refuse_resource(httpd_req_t *req, int status)
 {
     return guard_send_status(req, status,
-                             resource_status(status == 409 ? "409" : "503", status == 409 ? "sniffer active" : "radio not available"));
+                             resource_status(status == 409 ? "409" : "503",
+                                             (char *)esp_br_guard_detail(status, br_core_get_mode())));
 }
 
 /* Refuse early, before the request body is read. */

@@ -14,6 +14,7 @@ Running it:
 - [HTTP API and web UI](api.md): the `/device/*` API, the Thread REST API, the web pages, creating a network.
 - [Network modes, VLANs and prefix delegation](networking.md): single and split mode, confirm-or-revert, DHCPv6-PD.
 - [Sniffer](sniffer.md): 802.15.4 captures into Wireshark.
+- [Radios](radios.md): the C6 and USB dongles as channels, their modes (Thread border router, proxy), detection, moving Thread.
 - [Maintenance jumper](maintenance-jumper.md): C6 recovery and console capture.
 - [Diagnostics](diagnostics.md): CPU, memory, tasks and OpenThread lock statistics.
 - [Prometheus metrics](metrics.md): `GET /metrics`, scrape config, the metric list and example alerts.

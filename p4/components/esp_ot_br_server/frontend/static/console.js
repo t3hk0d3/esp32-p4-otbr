@@ -91,6 +91,8 @@ var retryTimer = null;
 var checking = false; // a reconnect is asking the board whether the console is free
 var settle = null; // the load's second look at a session (a timer id, then true while its GET runs)
 var openedAt = null; // when the last socket opened (env.now)
+var sockOpened = false; // the current socket got past the handshake
+var NO_RADIO_RETRY_MS = 5000;
 var waiting = null; // the line sent last, until its Done or Error
 var before = null; // what waited before it, back in place if the board refuses the line
 var partial = ''; // output after the last newline
@@ -173,7 +175,42 @@ function onMessage(ev) {
   }
 }
 
+/*
+ * Asks the board whether Thread runs: with no radio in OTBR mode it shows the notice (the console WebSocket answers
+ * 503 then) and resolves true.
+ */
+function threadDown() {
+  return get('/device/status').then(function(s) { return !!C.showThreadNotice(env.document, C.threadNotice(s, null)); },
+                                    function() { return false; });
+}
+
+/*
+ * No radio runs Thread: the notice says so and the page looks again every NO_RADIO_RETRY_MS. The wait counts as a retry
+ * (the timer, then `checking` while it asks), so the toggle reads "Disconnect" and its click ends the wait, as during a
+ * reconnect.
+ */
+function waitForRadio() {
+  pill('not-running');
+  retryTimer = env.setTimeout(function() {
+    retryTimer = null;
+    checking = true;
+    threadDown().then(function(down) {
+      if (!checking)
+        return; // disconnected meanwhile
+      checking = false;
+      if (down) {
+        waitForRadio();
+        return;
+      }
+      setOnline(false); // the wait is over: the toggle reads Connect until the console connects
+      loadConsole();
+    });
+  }, NO_RADIO_RETRY_MS);
+  setOnline(false);
+}
+
 function onClose(ev) {
+  var wasOpen = sockOpened;
   ws = null;
   if (partial) {
     print(partial, 'line');
@@ -195,7 +232,19 @@ function onClose(ev) {
     setOnline(false);
     return;
   }
-  retry();
+  if (wasOpen) {
+    retry();
+    return;
+  }
+  // The handshake failed (the console answers 503 while no radio runs Thread): say why instead of retrying blindly.
+  threadDown().then(function(down) {
+    if (userClosed || ws)
+      return; // the user acted meanwhile
+    if (down)
+      waitForRadio();
+    else
+      retry();
+  });
 }
 
 function retry() {
@@ -256,8 +305,10 @@ function connect() {
   // Events of a socket this page already let go of (a close that arrives late) change nothing.
   var sock = new env.WebSocket('ws://' + env.location.host + '/device/console/ws');
   ws = sock;
+  sockOpened = false;
   sock.onopen = function() {
     if (sock === ws) {
+      sockOpened = true;
       openedAt = env.now();
       setOnline(true);
     }
@@ -313,6 +364,16 @@ function run(raw) {
 }
 
 function load() {
+  return threadDown().then(function(down) {
+    if (down) {
+      waitForRadio();
+      return;
+    }
+    return loadConsole();
+  }, loadConsole);
+}
+
+function loadConsole() {
   get('/node').then(function(n) { network = n && typeof n.networkName === 'string' ? n.networkName : null; },
                     function() {});
   return get('/device/console').then(function(c) {

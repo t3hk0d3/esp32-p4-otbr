@@ -1623,7 +1623,16 @@ function load() {
       follow(r.body, true);
     } else {
       scanning = false;
-      renderStart(L.conflictText(r.status, r.body));
+      if (r.status !== 503) {
+        renderStart(L.conflictText(r.status, r.body));
+        return;
+      }
+      // No radio in OTBR mode: the notice says why, the raw error would only repeat it.
+      renderStart('');
+      kit.threadStatus().then(function(n) {
+        if (!n)
+          renderStart(L.conflictText(r.status, r.body));
+      });
     }
   }, function(e) {
     scanning = false;
@@ -2596,6 +2605,7 @@ function wire() {
 
 function init() {
   kit.start();
+  kit.watchThread();
   storage = env.localStorage || null;
   storageOk = probeStorage(storage);
   names = L.loadNames(storage);

@@ -109,6 +109,18 @@ class TestFirmwareLogic:
         text = fw("L.faultHint('esp-hosted firmware')")["text"]
         assert text.index("c6_installer.bin") < text.index("c6_rcp.bin")
 
+    @pytest.mark.parametrize(
+        "reason", ["'no rcp firmware'", "'rcp incompatible'", "'esp-hosted firmware'"]
+    )
+    def test_fault_of_a_usb_radio_running_thread_gives_no_hint(self, reason):
+        # On a fault while Thread runs on a USB radio: no highlight, no text (c6_rcp.bin would not help).
+        hint = fw(f"L.faultHint({reason}, 'usb-10c4-ea60-1')")
+        assert hint == {"highlight": False, "text": ""}
+
+    def test_fault_with_thread_on_the_c6_still_highlights(self):
+        # On "rcp incompatible" with otbr_channel "c6": the C6 card is highlighted, as without a channel.
+        assert fw("L.faultHint('rcp incompatible', 'c6')")["highlight"] is True
+
     @pytest.mark.parametrize("reason", ["null", "'other'"])
     def test_other_fault_reasons_do_not_highlight(self, reason):
         # On no or another fault reason: no highlight.

@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include "esp_err.h"
 #include "esp_netif.h"
+#include "sdkconfig.h"
 #include "openthread/link_raw.h"
 #include "br_core_leader.h"
 #include "br_core_mode.h"
@@ -15,19 +16,33 @@
 extern "C" {
 #endif
 
+// Eventfds OpenThread uses: one each for the netif, the task queue and the border router, and one for TREL reception.
+// Its radio is a mux channel, whose eventfd is the mux's (RADIO_MUX_EVENTFD_COUNT); ESP-IDF's SPI spinel interface and
+// its eventfd are no longer used. app_main registers the eventfd VFS with these plus the mux's.
+#if CONFIG_OPENTHREAD_RADIO_TREL
+#define BR_CORE_EVENTFD_COUNT 4
+#else
+#define BR_CORE_EVENTFD_COUNT 3
+#endif
+
+// Room for a radio channel id (RADIO_MUX_ID_MAX).
+#define BR_CORE_CHANNEL_ID_MAX 48
+
 typedef struct {
     br_core_mode_t mode;
     bool storage_degraded;        /**< NVS did not initialise: OpenThread does not start (RADIO_FAULT "storage unavailable"), everything else runs */
     char rcp_installed[32];       /**< version of the RCP firmware installed in the C6; "" = none (or unknown) */
     bool rcp_installed_known;     /**< false when the boot-time probe could not read the version */
-    bool rcp_compatible;          /**< OpenThread accepted the RCP at the last start */
+    bool rcp_compatible;          /**< OpenThread accepted the C6's RCP at its last start on the C6 (a dongle never sets it) */
+    bool rcp_compatible_known;    /**< OpenThread judged the C6's RCP this boot; false: not checked (Thread never ran there) */
     bool rom_recovery_failed;     /**< a ROM recovery failed and none worked since (the boot went on with the installed RCP, or RADIO_FAULT) */
     uint8_t channel;     /**< channel of the active dataset; 0 without one */
     bool ot_state_valid; /**< channel, has_dataset and pd_* were read from OpenThread; false when it is not up or its lock was not free within 100 ms (then they are unknown, not "none") */
     bool has_dataset;    /**< an active dataset is stored; only meaningful with ot_state_valid */
     int pd_state;        /**< otBorderRoutingDhcp6PdState; -1 while the border router is not initialised */
     char pd_prefix[48];  /**< delegated OMR prefix, "" without one */
-    char fault_reason[64]; /**< why the mode is BR_MODE_RADIO_FAULT, "" otherwise */
+    char fault_reason[64]; /**< why the mode is BR_MODE_RADIO_FAULT or BR_MODE_NO_RADIO ("radio unplugged (<id>)", "no channel in otbr", ...), "" otherwise */
+    char otbr_channel[BR_CORE_CHANNEL_ID_MAX]; /**< the channel stored in mode otbr (present or not); "" for none (null) */
 } br_core_status_t;
 
 /**
@@ -38,6 +53,57 @@ typedef struct {
 void br_core_note_storage_init(esp_err_t storage_init_err);
 
 /**
+ * Register OpenThread as the radio mux's otbr consumer (one channel, spinel firmware, frames) and br_core_move_otbr as
+ * its mover. Call it once before radio_mux_start. OpenThread then runs on whichever channel is stored in otbr and
+ * present: it starts when that channel attaches and is torn down (NO_RADIO) when it goes.
+ */
+esp_err_t br_core_register_otbr(void);
+
+/**
+ * Move OpenThread from channel `from` (may be "" or absent: NO_RADIO) to `to` (radio_mux_set calls it for a PUT of mode
+ * otbr while another channel has it, or while none has it: a start, `from` ""). The target's RCP is probed first,
+ * through the mux, while OpenThread still runs on `from`; this call waits for that probe (up to 10 s). `to` "" is a stop
+ * of OpenThread on `from` (a PUT of another mode on the otbr channel): nothing is probed, the call returns once the
+ * stop is accepted, and br_core's radio task drains and stops OpenThread, then stores the requested mode
+ * (radio_mux_commit_otbr); a drain timeout leaves everything as it was (br_core_otbr_refusal says so). Returns:
+ * - ESP_OK: accepted (202). The rest runs on br_core's radio task: stop, start on `to`, store both modes once it runs.
+ *   A drain timeout ("drain_timeout"), a failed start or a failed store (OpenThread started on `from` again; RADIO_FAULT
+ *   only when that fails too) shows as `to`'s state fault with that reason, stored modes unchanged. A start on `to` that
+ *   abandons OpenThread's init (nothing starts OpenThread again in this boot) shows the same way, and the board reboots
+ *   1.5 s later onto the unchanged stored modes (Thread back on `from`, same network); fault_reason says so meanwhile.
+ * - ESP_ERR_INVALID_RESPONSE: the probe failed (409 probe_failed); `reason` says why; nothing changed.
+ * - ESP_ERR_INVALID_STATE: busy (another move, a C6 push or recovery, OpenThread starting or sniffing, or br_core's
+ *   radio task stopping or starting OpenThread on its channel, e.g. after an unplug: refused at once); `reason`.
+ * - ESP_ERR_TIMEOUT: the probe did not finish in time; the move is dropped after it.
+ * `reason` (may be NULL) gets "" on ESP_OK.
+ */
+esp_err_t br_core_move_otbr(const char *from, const char *to, char *reason, size_t cap);
+
+/** True from an accepted br_core_move_otbr until the move ended (device_api's long-operation state). */
+bool br_core_move_running(void);
+
+/**
+ * The last refused stop of OpenThread (its sessions did not end within the drain): `id` gets the channel, which still
+ * runs otbr, and `reason` why ("drain_timeout"); true then. False (both "") once a later move, start or stop was
+ * accepted or a channel operation ran, or when none was refused. Any task.
+ */
+bool br_core_otbr_refusal(char *id, size_t id_cap, char *reason, size_t reason_cap);
+
+/**
+ * `done` (NULL: none) is called on br_core's radio task each time a move that br_core_move_otbr accepted (ESP_OK) has
+ * ended, whatever its outcome, just before br_core_move_running turns false: device_api releases its long-operation
+ * slot there. A move refused or given up before ESP_OK is not reported (the caller already knows). Must not block.
+ */
+void br_core_set_move_done_cb(void (*done)(void));
+
+/**
+ * Retry OpenThread's start on the attached OTBR channel after it failed (RADIO_FAULT from that start; otherwise it
+ * waits for the channel's next attach). A PUT of mode otbr on that channel calls it. Does not wait; a no-op when the
+ * last start did not fail, OpenThread runs, or no channel is attached.
+ */
+void br_core_retry_otbr(void);
+
+/**
  * Start mDNS with `hostname` and the default service instance name `instance` (the names come from netnames). Idempotent;
  * the names are kept for the retry br_core_start makes when this failed. Needs esp_netif_init() and the default event
  * loop. app_main calls it before anything slow so that the HTTP server can start right after.
@@ -46,13 +112,17 @@ esp_err_t br_core_mdns_start(const char *hostname, const char *instance);
 
 /**
  * Boot the radio side (spec 5.3 steps 3 to 5): start mDNS (a retry, with the names
- * br_core_mdns_start was given), probe the installed RCP version (best effort, nothing is ever pushed at boot), reset the C6 into
- * its RCP, start OpenThread with RADIO_MODE_SPI_RCP on core 0 and
- * arrange for the border router to start once `backbone` has an IPv6 address. The border router start
+ * br_core_mdns_start was given). With no channel stored in otbr, or a dongle there, the mode is NO_RADIO (no fault) and
+ * OpenThread starts when that dongle attaches. With the C6 (the default), inside a C6 job of the radio mux: probe the
+ * installed RCP version (best effort, nothing is ever pushed at boot) and reset the C6 into its RCP; at the job's end the
+ * mux attaches the C6, and OpenThread starts on it through the mux (the RCP probed through the channel first) on core 0;
+ * the border router starts once `backbone` has an IPv6 address. The C6's boot steps (the probe, the jumper's detection,
+ * the automatic ROM recovery) run at every boot: with another channel in otbr, or none, they only update the C6's status
+ * and listing, and OpenThread starts on its own channel meanwhile. The border router start
  * enables DHCPv6-PD and starts Thread when an active dataset is stored; otherwise Thread stays idle.
  *
- * Blocks until OpenThread is initialised or the radio fault mode was entered, and returns ESP_OK in both
- * cases (a radio fault is reported through br_core_get_mode: fault_reason "no rcp firmware" for an empty C6 boot
+ * Blocks until OpenThread is initialised, the radio fault mode was entered or the mode is NO_RADIO, and returns ESP_OK in
+ * all cases (a radio fault is reported through br_core_get_mode: fault_reason "no rcp firmware" for an empty C6 boot
  * slot, "rcp incompatible" when OpenThread rejects the RCP). The border router start itself may come later.
  * Call it from a task pinned to core 0 after esp_netif_init(), the default event loop and the storage mounts.
  *
@@ -109,8 +179,12 @@ void br_core_trel_read_locked(otInstance *instance, br_core_trel_state_t *out, b
  * long waits for OpenThread callbacks. Returns false while OpenThread is not running or a push is about to stop it:
  * then nothing is open and the caller must not touch OpenThread. Does not take the OpenThread lock. Sessions nest.
  * Every task other than the OpenThread task opens one around its OpenThread access. Close it with
- * br_core_ot_session_end; a push waits up to 45 s for the open sessions to close and is refused if they do not. A holder
- * that waits for an OpenThread callback should give up once the Thread REST flag (esp_br_web_openthread_ready) is off.
+ * br_core_ot_session_end. A push, a move or a deliberate stop (the OTBR channel's mode changed) waits up to 45 s for the
+ * open sessions to close and is refused (nothing stopped) if they do not. When the OTBR channel is lost (unplugged,
+ * failed) the mode is NO_RADIO at once and the teardown waits for every open session however long it takes (logged
+ * every 20 s): OpenThread's lock is never deleted under a session. Its radio calls are answered at once meanwhile (as a
+ * refusal or a no-op), so it ends quickly. A holder that waits for an OpenThread callback should give up once the Thread
+ * REST flag (esp_br_web_openthread_ready) is off.
  */
 bool br_core_ot_session_begin(void);
 
@@ -175,13 +249,25 @@ void br_core_sniffer_keepalive(void);
  * while the boot of the radio is still running, while another push runs, or when OpenThread sessions
  * (br_core_ot_session_begin) stay open for 45 s ("OpenThread is busy, try again");
  * ESP_ERR_INVALID_ARG for a NULL source or read. `err_detail` (may be NULL) gets a short reason on failure.
+ * RCP_SYNC_ERR_C6_BUSY (nothing touched; OpenThread keeps running) while rcp-proxy on the C6 has a connected peer.
  * Refused with ESP_ERR_INVALID_STATE as well when called from the OpenThread task, before anything is touched.
  * Refusal in STARTING also covers a border router start that failed (the mode stays STARTING): reboot instead.
  * After an abandoned OpenThread start ("rcp incompatible": OpenThread's SPI driver stays registered and cannot be
  * released) the push runs without stopping OpenThread and a successful push ends in a reboot ~1.5 s later (the
  * return value is ESP_OK, the mode stays RADIO_FAULT until then); a failed push leaves everything as it was.
+ * When the C6 is not the channel stored in otbr (br_core_c6_job_touches_openthread false) the push leaves OpenThread
+ * and the board mode alone, and the mode's refusals (SNIFFER, STARTING, the booting OpenThread task) do not apply;
+ * the C6's boot steps still running at boot refuse it ("the radio is still booting").
  */
 esp_err_t br_core_push_radio_firmware(const rcp_fw_source_t *source, char *err_detail, size_t err_cap);
+
+/**
+ * Whether a C6 job (br_core_push_radio_firmware, br_core_rom_recover) stops and restarts OpenThread: the C6 is the
+ * channel stored in otbr. Otherwise the job leaves OpenThread and the board mode alone, and the mode's refusals
+ * (SNIFFER, STARTING, a booting OpenThread task) do not apply to it: the mode is another channel's. A snapshot; the
+ * job decides again once it holds the C6 job slot.
+ */
+bool br_core_c6_job_touches_openthread(void);
 
 /**
  * ROM recovery of the C6 base image on request (spec 5.10, replaces the former resync-with-recovery): the same
@@ -191,7 +277,7 @@ esp_err_t br_core_push_radio_firmware(const rcp_fw_source_t *source, char *err_d
  * updater (no RCP firmware), the probe reads the result and OpenThread restarts: with the RCP that survived in its
  * slot the BR runs again, otherwise the mode is RADIO_FAULT "no rcp firmware" until firmware is uploaded.
  * ESP_ERR_NOT_SUPPORTED without the jumper (nothing is touched), ESP_ERR_INVALID_STATE in SNIFFER and STARTING or
- * while another C6 job runs. A failed recovery restarts OpenThread (the boot probe decides the mode) and returns the error.
+ * while another C6 job runs, RCP_SYNC_ERR_C6_BUSY while rcp-proxy on the C6 has a peer. A failed recovery restarts OpenThread (the boot probe decides the mode) and returns the error.
  * `err_detail` (may be NULL) gets a short reason on failure. Blocks for tens of seconds.
  */
 esp_err_t br_core_rom_recover(char *err_detail, size_t err_cap);

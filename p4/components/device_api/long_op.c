@@ -1,8 +1,9 @@
 #include <stdatomic.h>
 #include "device_api_priv.h"
 
-// OTA, the firmware push, ROM recovery and the update check share one slot (they must not overlap; the check and the
-// downloads also share the one HTTP client the socket budget has room for); a pcap stream has its own.
+// OTA, the firmware push, ROM recovery, the update check and a move of OpenThread share one slot (they must not
+// overlap; the check and the downloads also share the one HTTP client the socket budget has room for); a pcap stream
+// has its own.
 static _Atomic int s_long_op = -1; // device_api_op_t holding the shared slot, -1 = free
 static atomic_bool s_pcap;
 
@@ -38,6 +39,8 @@ const char *device_api_op_busy_detail(device_api_op_t op)
         return "a radio firmware push is running";
     case DEVICE_API_OP_ROM_RECOVER:
         return "a ROM recovery is running";
+    case DEVICE_API_OP_RADIO_MOVE:
+        return "OpenThread is being moved to another radio";
     case DEVICE_API_OP_UPDATE_CHECK:
         return "an update check is running";
     default:
@@ -55,4 +58,9 @@ bool device_api_op_long_running(void)
 bool device_api_op_pcap_running(void)
 {
     return atomic_load(&s_pcap);
+}
+
+bool device_api_op_holds(device_api_op_t op)
+{
+    return op != DEVICE_API_OP_PCAP && atomic_load(&s_long_op) == (int)op;
 }

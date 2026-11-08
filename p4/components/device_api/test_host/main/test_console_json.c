@@ -1,6 +1,7 @@
 #include <string.h>
 #include "unity.h"
 #include "unity_test_runner.h"
+#include "br_core_mode.h"
 #include "console_json.h"
 
 /* ---- device_api_console_json ---- */
@@ -48,4 +49,21 @@ TEST_CASE("Console PUT, enabled missing or not a boolean: invalid", "[device_api
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, device_api_console_parse("{}", &on));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, device_api_console_parse("{\"enabled\":", &on));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, device_api_console_parse("[true]", &on));
+}
+
+/* ---- device_api_console_ws_refusal ---- */
+
+TEST_CASE("Console WebSocket in NO_RADIO: refused with 503, detail no radio in OTBR mode", "[device_api]")
+{
+    TEST_ASSERT_EQUAL(503, device_api_console_ws_refusal(BR_MODE_NO_RADIO));
+    TEST_ASSERT_EQUAL_STRING("no radio in OTBR mode", DEVICE_API_NO_RADIO_DETAIL);
+}
+
+TEST_CASE("Console WebSocket in any other mode: opens (the console says when Thread is not running)", "[device_api]")
+{
+    static const int modes[] = {BR_MODE_STARTING, BR_MODE_BR_RUNNING, BR_MODE_SNIFFER, BR_MODE_RADIO_FAULT};
+
+    for (size_t i = 0; i < sizeof(modes) / sizeof(modes[0]); i++) {
+        TEST_ASSERT_EQUAL(0, device_api_console_ws_refusal(modes[i]));
+    }
 }

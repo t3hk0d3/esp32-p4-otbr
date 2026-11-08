@@ -218,6 +218,103 @@ bool netcfg_request_allowed(httpd_req_t *req, netcfg_service_t svc)
     return false;
 }
 
+#define SOCKET_LOCK_WAIT_MS 100 /* the interface lookup is short; a longer wait means a trial is being applied */
+
+#define WHY_LOCK "the interface lookup did not get the lock"
+#define WHY_MESH "on a mesh address"
+#define WHY_UNKNOWN "its interface is unknown"
+#define WHY_SERVICE "service not available on this interface"
+
+// The verdict of netcfg_policy_conn_allowed for `what`. A refusal is logged, or with `why` set (not NULL) only its
+// reason (a string literal) is put there.
+static bool conn_verdict(const char *what, netcfg_mode_t mode, bool found, netcfg_side_t side, bool on_mesh,
+                         netcfg_service_t svc, const char **why)
+{
+    if (netcfg_policy_conn_allowed(mode, found, side, on_mesh, svc)) {
+        return true;
+    }
+    const char *reason = on_mesh ? WHY_MESH : !found ? WHY_UNKNOWN : WHY_SERVICE;
+
+    if (why) {
+        *why = reason;
+    } else if (on_mesh) {
+        ESP_LOGW(TAG, "refused %s " WHY_MESH, what);
+    } else {
+        ESP_LOGW(TAG, "refused %s: %s", what, reason);
+    }
+    return false;
+}
+
+// The interface lookup of netcfg_socket_allowed (socket_side: by a socket's local address) or netcfg_peer_allowed
+// (peer_side: by the route to a peer address).
+typedef bool (*side_lookup_fn)(const void *what, netcfg_side_t *side, bool *on_mesh);
+
+// The lookup under the netcfg lock (at most SOCKET_LOCK_WAIT_MS; refused when it cannot get it), then the verdict;
+// `noun` names the refused thing in the log ("a connection", "a source"). With `why` (not NULL) nothing is logged: the
+// refusal's reason goes there.
+static bool lookup_allowed(side_lookup_fn side_of, const void *what, const char *noun, netcfg_service_t svc,
+                           const char **why)
+{
+    netcfg_side_t side = NETCFG_SIDE_MGMT;
+    bool on_mesh = false;
+    bool found;
+    netcfg_mode_t mode;
+
+    if (s.ready) {
+        if (xSemaphoreTake(s.lock, pdMS_TO_TICKS(SOCKET_LOCK_WAIT_MS)) != pdTRUE) {
+            if (why) {
+                *why = WHY_LOCK;
+            } else {
+                ESP_LOGW(TAG, "refused %s: " WHY_LOCK " in %d ms", noun, SOCKET_LOCK_WAIT_MS);
+            }
+            return false;
+        }
+        mode = netcfg_ifaces_mode();
+        found = side_of(what, &side, &on_mesh);
+        xSemaphoreGive(s.lock);
+    } else { /* netcfg not started: no lock, no split mode, only the mesh rule applies */
+        mode = NETCFG_MODE_SINGLE;
+        found = side_of(what, &side, &on_mesh);
+    }
+    return conn_verdict(noun, mode, found, side, on_mesh, svc, why);
+}
+
+static bool socket_side(const void *what, netcfg_side_t *side, bool *on_mesh)
+{
+    return netcfg_ifaces_socket_side(*(const int *)what, side, on_mesh);
+}
+
+static bool peer_side(const void *what, netcfg_side_t *side, bool *on_mesh)
+{
+    return netcfg_ifaces_peer_side(what, side, on_mesh);
+}
+
+bool netcfg_socket_allowed(int fd, netcfg_service_t svc)
+{
+    return lookup_allowed(socket_side, &fd, "a connection", svc, NULL);
+}
+
+bool netcfg_peer_allowed_as(const struct sockaddr *peer, netcfg_service_t svc, const char *noun)
+{
+    return lookup_allowed(peer_side, peer, noun, svc, NULL);
+}
+
+bool netcfg_peer_check(const struct sockaddr *peer, netcfg_service_t svc, const char **why)
+{
+    const char *reason = "";
+    const bool allowed = lookup_allowed(peer_side, peer, "a source", svc, &reason);
+
+    if (why) {
+        *why = allowed ? NULL : reason;
+    }
+    return allowed;
+}
+
+bool netcfg_peer_allowed(const struct sockaddr *peer, netcfg_service_t svc)
+{
+    return netcfg_peer_allowed_as(peer, svc, "a source");
+}
+
 esp_err_t netcfg_set_trial(const netcfg_config_t *cfg)
 {
     ESP_RETURN_ON_FALSE(s.ready, ESP_ERR_INVALID_STATE, TAG, "not started");

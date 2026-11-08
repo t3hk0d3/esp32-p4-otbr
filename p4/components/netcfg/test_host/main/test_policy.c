@@ -49,3 +49,63 @@ TEST_CASE("On an IPv4-mapped IPv6 local address: the IPv4 address is extracted",
     }), (const uint8_t *)&out.addr, 4);
     TEST_ASSERT_FALSE(netcfg_v4_from_mapped(native, &out));
 }
+
+TEST_CASE("On an RCP proxy connection arriving on mgmt in split mode: it is allowed", "[netcfg]")
+{
+    TEST_ASSERT_TRUE(netcfg_policy_allows(NETCFG_MODE_SPLIT, NETCFG_SIDE_MGMT, NETCFG_SVC_RCP_PROXY));
+}
+
+TEST_CASE("On an RCP proxy connection arriving on thread_bb in split mode: it is allowed", "[netcfg]")
+{
+    TEST_ASSERT_TRUE(netcfg_policy_allows(NETCFG_MODE_SPLIT, NETCFG_SIDE_THREAD, NETCFG_SVC_RCP_PROXY));
+}
+
+TEST_CASE("On an RCP proxy connection in single mode: it is allowed on either side", "[netcfg]")
+{
+    TEST_ASSERT_TRUE(netcfg_policy_allows(NETCFG_MODE_SINGLE, NETCFG_SIDE_MGMT, NETCFG_SVC_RCP_PROXY));
+    TEST_ASSERT_TRUE(netcfg_policy_allows(NETCFG_MODE_SINGLE, NETCFG_SIDE_THREAD, NETCFG_SVC_RCP_PROXY));
+}
+
+/* ---- netcfg_policy_conn_allowed: the decision of netcfg_peer_allowed (UDP sources) and netcfg_socket_allowed ---- */
+
+TEST_CASE("On a source on the Thread mesh: returns false, in either mode and whether its side is known", "[netcfg]")
+{
+    TEST_ASSERT_FALSE(netcfg_policy_conn_allowed(NETCFG_MODE_SINGLE, true, NETCFG_SIDE_THREAD, true, NETCFG_SVC_RCP_PROXY));
+    TEST_ASSERT_FALSE(netcfg_policy_conn_allowed(NETCFG_MODE_SINGLE, false, NETCFG_SIDE_MGMT, true, NETCFG_SVC_RCP_PROXY));
+    TEST_ASSERT_FALSE(netcfg_policy_conn_allowed(NETCFG_MODE_SPLIT, true, NETCFG_SIDE_THREAD, true, NETCFG_SVC_RCP_PROXY));
+    TEST_ASSERT_FALSE(netcfg_policy_conn_allowed(NETCFG_MODE_SPLIT, false, NETCFG_SIDE_MGMT, true, NETCFG_SVC_RCP_PROXY));
+}
+
+TEST_CASE("On split mode and a source on a side where the service is not allowed: returns false", "[netcfg]")
+{
+    // NETCFG_SVC_RCP_PROXY is allowed on both sides today; the rule is the policy table's, whatever the service.
+    TEST_ASSERT_FALSE(netcfg_policy_conn_allowed(NETCFG_MODE_SPLIT, true, NETCFG_SIDE_MGMT, false, NETCFG_SVC_REST_WRITE));
+    TEST_ASSERT_FALSE(netcfg_policy_conn_allowed(NETCFG_MODE_SPLIT, true, NETCFG_SIDE_THREAD, false, NETCFG_SVC_GUI));
+}
+
+TEST_CASE("On split mode and an RCP proxy source on either side: returns true", "[netcfg]")
+{
+    TEST_ASSERT_TRUE(netcfg_policy_conn_allowed(NETCFG_MODE_SPLIT, true, NETCFG_SIDE_MGMT, false, NETCFG_SVC_RCP_PROXY));
+    TEST_ASSERT_TRUE(netcfg_policy_conn_allowed(NETCFG_MODE_SPLIT, true, NETCFG_SIDE_THREAD, false, NETCFG_SVC_RCP_PROXY));
+}
+
+TEST_CASE("On split mode and a source on no known interface: returns false", "[netcfg]")
+{
+    TEST_ASSERT_FALSE(netcfg_policy_conn_allowed(NETCFG_MODE_SPLIT, false, NETCFG_SIDE_MGMT, false, NETCFG_SVC_RCP_PROXY));
+}
+
+TEST_CASE("On single mode and a source off the mesh: returns true, also on no known interface", "[netcfg]")
+{
+    TEST_ASSERT_TRUE(netcfg_policy_conn_allowed(NETCFG_MODE_SINGLE, true, NETCFG_SIDE_MGMT, false, NETCFG_SVC_RCP_PROXY));
+    TEST_ASSERT_TRUE(netcfg_policy_conn_allowed(NETCFG_MODE_SINGLE, false, NETCFG_SIDE_MGMT, false, NETCFG_SVC_RCP_PROXY));
+}
+
+TEST_CASE("On a local address on the OpenThread netif: the connection is refused", "[netcfg]")
+{
+    TEST_ASSERT_TRUE(netcfg_mesh_refused(true));
+}
+
+TEST_CASE("On a local address on an Ethernet interface: the connection is not refused", "[netcfg]")
+{
+    TEST_ASSERT_FALSE(netcfg_mesh_refused(false));
+}

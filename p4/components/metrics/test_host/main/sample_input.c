@@ -29,7 +29,8 @@ void sample_input(sample_input_t *s)
 {
     memset(s, 0, sizeof(*s));
     s->device = (metrics_device_t) {
-        .mode = 1, .version = "v0.2.0", .slot = 1, .rcp_version = "rcp-1.2", .rcp_compatible = true, .storage_ok = true,
+        .mode = 1, .version = "v0.2.0", .slot = 1, .rcp_version = "rcp-1.2", .rcp_compatible = true,
+        .rcp_compatible_known = true, .storage_ok = true,
         .sniffer_active = false, .sniffer_frames = 7, .sniffer_drops = 2, .eth_up = true, .trial_pending = false,
     };
     s->diag.uptime_s = 3600;

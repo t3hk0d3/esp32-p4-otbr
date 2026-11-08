@@ -8,7 +8,8 @@ see `.pre-commit-config.yaml`).
 - **C:** ESP-IDF's astyle rules (`tools/astyle-rules.yml`, copied from ESP-IDF v6.1
   `tools/ci/astyle-rules.yml`), run through `pre-commit` (`astyle_py`).
 - **Python (tools, pytest):** `ruff` lint and `ruff format`.
-- **Vendored code** (`p4/components/esp_ot_br_server/`, `p4/components/esp_br_http_ota/`) keeps
+- **Vendored code** (`p4/components/esp_ot_br_server/`, `p4/components/esp_br_http_ota/`,
+  `p4/components/usb_host_cdc_acm/`) keeps
   upstream formatting and is excluded from formatting. Every change to it is listed in
   `p4/components/PATCHES.md`.
 
@@ -16,7 +17,7 @@ see `.pre-commit-config.yaml`).
 
 - `snake_case` everywhere.
 - Public symbols are prefixed with their component name: `br_core_`, `rcp_sync_`, `sniffer_`,
-  `device_api_`, `self_update_`, `diag_`, `netcfg_`, `netnames_`, `metrics_`, `rcp_sync_proto_`; `c6_hosted` uses `c6_hosted_`.
+  `device_api_`, `self_update_`, `diag_`, `netcfg_`, `netnames_`, `metrics_`, `rcp_sync_proto_`, `radio_mux_`, `rcp_proxy_`; `c6_hosted` uses `c6_hosted_`.
 - One `static const char *TAG` per file, named after the component.
 
 ## Errors
@@ -44,7 +45,8 @@ see `.pre-commit-config.yaml`).
 ## Build mechanisms
 
 - Every project's top-level `CMakeLists.txt` includes, in this order: ESP-IDF's `project.cmake`,
-  `tools/version.cmake`, `tools/test_build.cmake`, then calls `project()`.
+  `tools/version.cmake`, `tools/test_build.cmake`, then calls `project()`. `p4` also includes
+  `tools/ot_radio_port.cmake` (the generated openthread component) after `tools/test_build.cmake`.
 - `tools/version.cmake` sets `PROJECT_VER`. The stamp is taken at CMake configure time, not at
   every build; the git HEAD files are configure dependencies, so a new commit reconfigures by itself. `-dirty` is as of
   the last configure (`make reconfigure` refreshes it).
