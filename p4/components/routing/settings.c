@@ -694,6 +694,7 @@ static cJSON *status_to_cjson(const routing_settings_t *s, const routing_status_
 {
     cJSON *status = cJSON_CreateObject();
     bool ok = status && add_prefix(status, "omr_prefix", st->omr_prefix_known, &st->omr_prefix) &&
+              add_prefix(status, "own_omr_prefix", st->own_omr_prefix_known, &st->own_omr_prefix) &&
               add_prefix(status, "ula_prefix", st->ula_prefix_known, &st->ula_prefix);
     cJSON *announced = ok ? cJSON_AddArrayToObject(status, "announced") : NULL;
 

@@ -89,6 +89,8 @@ typedef struct {
     bool ula_in_netdata;
     bool pd_known;
     routing_prefix64_t pd_prefix; /**< the delegated OMR prefix (otBorderRoutingGetPdOmrPrefix) */
+    bool favored_known;
+    routing_prefix64_t favored_prefix; /**< the OMR prefix the mesh uses (otBorderRoutingGetFavoredOmrPrefix) */
     uint32_t backbone_ipv4;       /**< host order, 0 when the backbone has none */
     bool have_link_local;
     routing_bgp_nexthop_t nexthop; /**< the backbone global (if any) and link-local addresses */
@@ -189,7 +191,8 @@ void routing_engine_ripng_rx(routing_engine_t *e, const uint8_t src[16], uint16_
 const routing_settings_t *routing_engine_settings(const routing_engine_t *e);
 
 /**
- * The status: OMR prefix in use (custom; else the delegated prefix; else the ULA), ULA, announcement set, router ID in
+ * The status: OMR prefix in use (the favored one, maybe another border router's), this router's own OMR prefix
+ * (custom; else the delegated prefix; else the ULA), ULA, announcement set, router ID in
  * use and blocked reason (method bgp only), peers[i] for settings peer i (with its address, peer_count of them), RIPng
  * counters.
  */

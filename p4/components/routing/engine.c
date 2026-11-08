@@ -923,15 +923,19 @@ void routing_engine_status(const routing_engine_t *e, uint32_t now_ms, routing_s
     const routing_settings_t *s = &e->settings;
 
     memset(out, 0, sizeof(*out));
+    out->omr_prefix_known = e->have_state && e->state.favored_known;
+    if (out->omr_prefix_known) {
+        out->omr_prefix = e->state.favored_prefix;
+    }
     if (s->omr_mode == ROUTING_OMR_CUSTOM) {
-        out->omr_prefix_known = true;
-        out->omr_prefix = s->omr_prefix;
+        out->own_omr_prefix_known = true;
+        out->own_omr_prefix = s->omr_prefix;
     } else if (e->have_state && e->state.pd_known) {
-        out->omr_prefix_known = true;
-        out->omr_prefix = e->state.pd_prefix;
+        out->own_omr_prefix_known = true;
+        out->own_omr_prefix = e->state.pd_prefix;
     } else if (e->have_state && e->state.ula_known) {
-        out->omr_prefix_known = true;
-        out->omr_prefix = e->state.ula;
+        out->own_omr_prefix_known = true;
+        out->own_omr_prefix = e->state.ula;
     }
     out->ula_prefix_known = e->have_state && e->state.ula_known;
     if (out->ula_prefix_known) {

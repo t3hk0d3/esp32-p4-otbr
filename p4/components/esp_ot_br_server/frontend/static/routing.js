@@ -135,6 +135,17 @@ function countText(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); 
 
 function stateName(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
+/**
+ * Text for the "This router's prefix" row of `status`, or null when there is nothing to add: the own OMR prefix is
+ * unknown or is the one in use.
+ */
+function ownPrefixNote(status) {
+  var own = status.own_omr_prefix, inUse = status.omr_prefix;
+  if (!own || (inUse && same(own, inUse)))
+    return null;
+  return inUse ? own + ' (not in use: another border router\'s prefix is preferred)' : own;
+}
+
 /** {text, cls} of a BGP session state chip. */
 function stateChip(s) {
   return {text : stateName(String(s)), cls : s === 'established' ? 'chip-ok' : s === 'idle' ? 'chip-bad' : 'chip-warn'};
@@ -153,6 +164,7 @@ return {
   fieldError : fieldError,
   countText : countText,
   stateChip : stateChip,
+  ownPrefixNote : ownPrefixNote,
   durationText : C.durationText
 };
 })();
@@ -307,6 +319,10 @@ function renderStatus() {
   var st = state.status || {};
   setText('methodHint', L.methodHint(state, pd));
   setText('omrInUse', st.omr_prefix || 'unknown');
+  var own = L.ownPrefixNote(st);
+  setText('omrOwn', own || '-');
+  show('omrOwnLabel', own !== null);
+  show('omrOwn', own !== null);
   setText('ulaPrefix', st.ula_prefix || 'unknown');
   setText('ulaInline', st.ula_prefix || 'not known yet');
   var announces = state.method === 'ripng' || state.method === 'bgp';

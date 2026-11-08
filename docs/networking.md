@@ -283,8 +283,9 @@ protocol rip ng thread_br {
 
 ### Status
 
-- `GET /device/routing`, `status`: the OMR prefix in use, the ULA, what is announced, and per BGP session the state,
-  uptime, last error and routes dropped, or the RIPng counters.
+- `GET /device/routing`, `status`: the OMR prefix in use (maybe another border router's), the board's own OMR
+  prefix, the ULA, what is announced, and per BGP session the state, uptime, last error and routes dropped, or the
+  RIPng counters.
 - `/device/status`, `routing`: method, OMR mode, number of announced prefixes, BGP sessions up and configured.
 - `/metrics`: the `br_routing_*`, `br_bgp_*` and `br_ripng_*` series ([metrics](metrics.md#routing-metrics)).
 - The Routing page shows the same and refreshes every 5 s.

@@ -1493,7 +1493,7 @@ TEST_CASE("Border router down with RIPng: no regular updates while it stays down
 
 /* --- status --- */
 
-TEST_CASE("OMR custom: omr_prefix is the custom prefix", "[routing]")
+TEST_CASE("OMR custom: own_omr_prefix is the custom prefix", "[routing]")
 {
     routing_settings_t s = base_settings(ROUTING_METHOD_PD);
     routing_engine_state_t st = up_state();
@@ -1505,11 +1505,29 @@ TEST_CASE("OMR custom: omr_prefix is the custom prefix", "[routing]")
     begin(&s);
     routing_engine_poll(&s_e, &st, T0);
     routing_status_t status = status_at(T0);
-    TEST_ASSERT_TRUE(status.omr_prefix_known);
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(CUSTOM.b, status.omr_prefix.b, 8);
+    TEST_ASSERT_TRUE(status.own_omr_prefix_known);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(CUSTOM.b, status.own_omr_prefix.b, 8);
 }
 
-TEST_CASE("OMR auto with a delegated prefix: omr_prefix is the delegated prefix", "[routing]")
+TEST_CASE("OMR custom and favored: omr_prefix and own_omr_prefix are the custom prefix", "[routing]")
+{
+    routing_settings_t s = base_settings(ROUTING_METHOD_PD);
+    routing_engine_state_t st = up_state();
+
+    s.omr_mode = ROUTING_OMR_CUSTOM;
+    s.omr_prefix = CUSTOM;
+    st.favored_known = true;
+    st.favored_prefix = CUSTOM;
+    begin(&s);
+    routing_engine_poll(&s_e, &st, T0);
+    routing_status_t status = status_at(T0);
+    TEST_ASSERT_TRUE(status.omr_prefix_known);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(CUSTOM.b, status.omr_prefix.b, 8);
+    TEST_ASSERT_TRUE(status.own_omr_prefix_known);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(CUSTOM.b, status.own_omr_prefix.b, 8);
+}
+
+TEST_CASE("OMR auto with a delegated prefix: own_omr_prefix is the delegated prefix", "[routing]")
 {
     routing_settings_t s = base_settings(ROUTING_METHOD_PD);
     routing_engine_state_t st = up_state();
@@ -1518,29 +1536,72 @@ TEST_CASE("OMR auto with a delegated prefix: omr_prefix is the delegated prefix"
     st.pd_prefix = PD;
     begin(&s);
     routing_engine_poll(&s_e, &st, T0);
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(PD.b, status_at(T0).omr_prefix.b, 8);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(PD.b, status_at(T0).own_omr_prefix.b, 8);
 }
 
-TEST_CASE("OMR auto without delegation: omr_prefix and ula_prefix are the ULA", "[routing]")
+TEST_CASE("OMR auto without delegation: own_omr_prefix and ula_prefix are the ULA", "[routing]")
 {
     routing_settings_t s = base_settings(ROUTING_METHOD_PD);
 
     begin(&s);
     poll_up(T0);
     routing_status_t status = status_at(T0);
-    TEST_ASSERT_TRUE(status.omr_prefix_known);
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(ULA.b, status.omr_prefix.b, 8);
+    TEST_ASSERT_TRUE(status.own_omr_prefix_known);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(ULA.b, status.own_omr_prefix.b, 8);
     TEST_ASSERT_TRUE(status.ula_prefix_known);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(ULA.b, status.ula_prefix.b, 8);
 }
 
-TEST_CASE("Before the first poll: omr_prefix and ula_prefix are unknown", "[routing]")
+TEST_CASE("Favored prefix known: omr_prefix is the favored prefix", "[routing]")
+{
+    routing_settings_t s = base_settings(ROUTING_METHOD_PD);
+    routing_engine_state_t st = up_state();
+
+    st.favored_known = true;
+    st.favored_prefix = ULA;
+    begin(&s);
+    routing_engine_poll(&s_e, &st, T0);
+    routing_status_t status = status_at(T0);
+    TEST_ASSERT_TRUE(status.omr_prefix_known);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(ULA.b, status.omr_prefix.b, 8);
+}
+
+TEST_CASE("Another border router's prefix favored: omr_prefix is that prefix, own_omr_prefix is ours", "[routing]")
+{
+    routing_settings_t s = base_settings(ROUTING_METHOD_PD);
+    routing_engine_state_t st = up_state();
+
+    st.favored_known = true;
+    st.favored_prefix = OTHER;
+    begin(&s);
+    routing_engine_poll(&s_e, &st, T0);
+    routing_status_t status = status_at(T0);
+    TEST_ASSERT_TRUE(status.omr_prefix_known);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(OTHER.b, status.omr_prefix.b, 8);
+    TEST_ASSERT_TRUE(status.own_omr_prefix_known);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(ULA.b, status.own_omr_prefix.b, 8);
+}
+
+TEST_CASE("Favored prefix unknown: omr_prefix is unknown, own_omr_prefix still reported", "[routing]")
+{
+    routing_settings_t s = base_settings(ROUTING_METHOD_PD);
+
+    begin(&s);
+    poll_up(T0);
+    routing_status_t status = status_at(T0);
+    TEST_ASSERT_FALSE(status.omr_prefix_known);
+    TEST_ASSERT_TRUE(status.own_omr_prefix_known);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(ULA.b, status.own_omr_prefix.b, 8);
+}
+
+TEST_CASE("Before the first poll: omr_prefix, own_omr_prefix and ula_prefix are unknown", "[routing]")
 {
     routing_settings_t s = base_settings(ROUTING_METHOD_PD);
 
     begin(&s);
     routing_status_t status = status_at(T0);
     TEST_ASSERT_FALSE(status.omr_prefix_known);
+    TEST_ASSERT_FALSE(status.own_omr_prefix_known);
     TEST_ASSERT_FALSE(status.ula_prefix_known);
 }
 

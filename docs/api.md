@@ -149,6 +149,7 @@ and answers 200 with the new GET shape:
   },
   "status": {
     "omr_prefix": "2001:db8:42:100::/64",
+    "own_omr_prefix": "2001:db8:42:100::/64",
     "ula_prefix": "fd98:2656:4740:1::/64",
     "announced": ["2001:db8:42:100::/64", "fd98:2656:4740:1::/64"],
     "bgp": {
@@ -191,8 +192,9 @@ field is one of `body` (not a JSON object), `method`, `omr`, `omr.mode`, `omr.pr
 
 Status:
 
-- `omr_prefix`: the local OMR prefix in use (custom, delegated or ULA); `ula_prefix`: the self-generated ULA. Each is
-  `null` while unknown.
+- `omr_prefix`: the OMR prefix the mesh uses, which OpenThread picks among all border routers (it can be another
+  border router's); `own_omr_prefix`: this board's OMR prefix (custom, delegated or ULA), withdrawn while another one
+  is preferred; `ula_prefix`: the self-generated ULA. Each is `null` while unknown.
 - `announced`: what RIPng or BGP announces now; empty with `pd` and `off` and while the border router is not running.
 - `bgp`: `null` unless the method is `bgp`. `router_id` is the one in use (`null`: none). `blocked` is `null` or why
   sessions do not run: `"no router id"`, `"no link-local address"`. One entry in `peers` per configured peer: `state`
