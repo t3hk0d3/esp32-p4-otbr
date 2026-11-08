@@ -116,9 +116,10 @@ datagram of at most 1024 bytes; loss and reordering corrupt the stream, so use i
 
 **Behaviour.** A peer that does not read until the buffer overflows is disconnected. On a USB channel (raw bytes), a
 write to the dongle that fails part-way (a USB write timeout) ends the peer session: a TCP peer is disconnected, so
-the dongle never sees the rest of its stream spliced onto a cut frame; a UDP lock is only let go (the same source can
-lock again with its next datagram, so over UDP raw the splice is not prevented: another reason it is for testing); while the dongle is not attached at all the peer's bytes are dropped
-and the peer stays. On the C6 a frame that fails is lost as a whole and the peer stays. Unplugging the dongle drops the
+the dongle never sees the rest of its stream spliced onto a cut frame; a UDP peer is let go and its datagrams are
+refused for 2 s (counted as refused), so the rest of its cut stream does not follow; after that it, or another source,
+locks again (a UDP host gets no signal: its next frames start on a dongle that saw a cut one, another reason UDP raw is
+for testing). While the dongle is not attached at all the peer's bytes are dropped and the peer stays. On the C6 a frame that fails is lost as a whole and the peer stays. Unplugging the dongle drops the
 peer; the channel serves again when the radio returns. Changing a proxy setting re-opens the listener or connection.
 The channel's counters and the peer's address are in `GET /device/channels` (`rcp_proxy.state`: `listening`,
 `connecting`, `backoff`, `connected`). When a listener cannot be opened (the port is used by another service) or a

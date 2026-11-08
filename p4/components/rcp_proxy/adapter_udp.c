@@ -1,6 +1,6 @@
 // UDP adapter: one HDLC frame (framing hdlc) or up to 1024 bytes (framing raw) per datagram; proxy.c cuts and encodes.
 // Listen: the first allowed source becomes the peer until 30 s of silence or a kick (rcp_proxy_udp_lock); the netcfg
-// access rules are checked for a source before it can lock. Connect: datagrams go to host:port (a target the netcfg
+// access rules are checked for a source before it can lock. A peer whose raw stream a radio write cut is barred 2 s. Connect: datagrams go to host:port (a target the netcfg
 // rules allow), and only datagrams from that address are taken; the state is connected from its first datagram until
 // 30 s of silence. The reset replay runs for a new peer session only (rcp_proxy_peer_new): once per socket session in
 // connect, and in listen when the locked source differs from the previous peer.
@@ -224,11 +224,20 @@ static esp_err_t udp_send(proxy_t *p, const uint8_t *d, size_t n)
     return ESP_OK;
 }
 
-static void udp_drop(proxy_t *p)
+// A kick lets the peer go (it, or another source, can lock again with its next datagram). A cut radio write lets it
+// go barred for RCP_PROXY_UDP_BAR_MS: its datagrams still on the way would continue the cut stream on the radio.
+static void udp_drop(proxy_t *p, bool cut)
 {
-    if (p->lock.locked) {
-        let_go(p, "kicked");
+    if (!p->lock.locked) {
+        return;
     }
+    if (cut) {
+        ESP_LOGW(TAG, "%s: peer %s barred for %d ms: its stream was cut", p->id, p->peer, RCP_PROXY_UDP_BAR_MS);
+        rcp_proxy_udp_lock_bar(&p->lock, rcp_proxy_now_ms());
+        rcp_proxy_peer_lost(p, waiting_state(p));
+        return;
+    }
+    let_go(p, "kicked");
 }
 
 const rcp_proxy_adapter_t rcp_proxy_adapter_udp = {

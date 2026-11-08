@@ -214,6 +214,85 @@ TEST_CASE("On a kick: unlocks; the next source locks", "[rcp_proxy]")
     TEST_ASSERT_TRUE(rcp_proxy_addr_eq(&b, &lock.peer));
 }
 
+TEST_CASE("On a kick: the same source locks again with its next datagram", "[rcp_proxy]")
+{
+    rcp_proxy_udp_lock_t lock;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+
+    rcp_proxy_udp_lock_init(&lock);
+    rcp_proxy_udp_lock_offer(&lock, &a, 1000);
+    rcp_proxy_udp_lock_kick(&lock);
+    TEST_ASSERT_TRUE(rcp_proxy_udp_lock_offer(&lock, &a, 1001));
+}
+
+TEST_CASE("On a cut radio write: unlocks, and the peer's datagrams are refused for RCP_PROXY_UDP_BAR_MS",
+          "[rcp_proxy]")
+{
+    rcp_proxy_udp_lock_t lock;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+
+    rcp_proxy_udp_lock_init(&lock);
+    rcp_proxy_udp_lock_offer(&lock, &a, 1000);
+    rcp_proxy_udp_lock_bar(&lock, 1500);
+    TEST_ASSERT_FALSE(lock.locked);
+    TEST_ASSERT_EQUAL_INT64(-1, rcp_proxy_udp_lock_deadline(&lock));
+    TEST_ASSERT_FALSE(rcp_proxy_udp_lock_offer(&lock, &a, 1500));
+    TEST_ASSERT_FALSE(rcp_proxy_udp_lock_offer(&lock, &a, 1500 + RCP_PROXY_UDP_BAR_MS - 1));
+    TEST_ASSERT_EQUAL_UINT32(2, lock.refused);
+    TEST_ASSERT_FALSE(lock.locked);
+}
+
+TEST_CASE("On RCP_PROXY_UDP_BAR_MS after a cut radio write: the peer locks again", "[rcp_proxy]")
+{
+    rcp_proxy_udp_lock_t lock;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+
+    rcp_proxy_udp_lock_init(&lock);
+    rcp_proxy_udp_lock_offer(&lock, &a, 1000);
+    rcp_proxy_udp_lock_bar(&lock, 1500);
+    TEST_ASSERT_TRUE(rcp_proxy_udp_lock_offer(&lock, &a, 1500 + RCP_PROXY_UDP_BAR_MS));
+    TEST_ASSERT_TRUE(lock.locked);
+    TEST_ASSERT_FALSE(lock.barred);
+}
+
+TEST_CASE("On a cut radio write: another source (or the same host on another port) locks at once", "[rcp_proxy]")
+{
+    rcp_proxy_udp_lock_t lock;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+    const rcp_proxy_addr_t other_port = addr(10, 5001);
+    const rcp_proxy_addr_t b = addr(20, 6000);
+
+    rcp_proxy_udp_lock_init(&lock);
+    rcp_proxy_udp_lock_offer(&lock, &a, 1000);
+    rcp_proxy_udp_lock_bar(&lock, 1500);
+    TEST_ASSERT_TRUE(rcp_proxy_udp_lock_offer(&lock, &other_port, 1600));
+    rcp_proxy_udp_lock_kick(&lock);
+    TEST_ASSERT_TRUE(rcp_proxy_udp_lock_offer(&lock, &b, 1700));
+    TEST_ASSERT_TRUE(rcp_proxy_addr_eq(&b, &lock.peer));
+}
+
+TEST_CASE("On a clock that went back after a cut radio write: the bar ends", "[rcp_proxy]")
+{
+    rcp_proxy_udp_lock_t lock;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+
+    rcp_proxy_udp_lock_init(&lock);
+    rcp_proxy_udp_lock_offer(&lock, &a, 1000);
+    rcp_proxy_udp_lock_bar(&lock, 1500);
+    TEST_ASSERT_TRUE(rcp_proxy_udp_lock_offer(&lock, &a, 1400));
+}
+
+TEST_CASE("On a cut radio write while unlocked: nothing is barred", "[rcp_proxy]")
+{
+    rcp_proxy_udp_lock_t lock;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+
+    rcp_proxy_udp_lock_init(&lock);
+    rcp_proxy_udp_lock_bar(&lock, 1500);
+    TEST_ASSERT_FALSE(lock.barred);
+    TEST_ASSERT_TRUE(rcp_proxy_udp_lock_offer(&lock, &a, 1500));
+}
+
 TEST_CASE("On link-local sources in different zones: they are different sources", "[rcp_proxy]")
 {
     rcp_proxy_udp_lock_t lock;

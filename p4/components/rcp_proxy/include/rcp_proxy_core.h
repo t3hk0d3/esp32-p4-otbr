@@ -40,18 +40,30 @@ typedef struct {
 bool rcp_proxy_addr_eq(const rcp_proxy_addr_t *a, const rcp_proxy_addr_t *b);
 
 // UDP listen: the first source becomes the peer until it has been silent for RCP_PROXY_UDP_SILENCE_MS or is kicked.
+// (Connect locks to the configured target the same way.) A peer whose datagram a radio write cut part-way
+// (RCP_PROXY_TX_END: raw bytes on a dongle) is let go and barred for RCP_PROXY_UDP_BAR_MS: its next datagrams would
+// continue the cut stream, spliced onto the partial write.
+#define RCP_PROXY_UDP_BAR_MS 2000
+
 typedef struct {
     bool locked;
     rcp_proxy_addr_t peer;
     int64_t last_ms;  // when the peer last sent
-    uint32_t refused; // datagrams refused from other sources
+    uint32_t refused; // datagrams refused from other sources (and from the barred one)
+    bool barred;      // `bar` is refused from bar_ms for RCP_PROXY_UDP_BAR_MS
+    rcp_proxy_addr_t bar;
+    int64_t bar_ms;
 } rcp_proxy_udp_lock_t;
 
 void rcp_proxy_udp_lock_init(rcp_proxy_udp_lock_t *lock);
 // A datagram from src at now_ms: true when it is taken (it locked an unlocked or expired lock, or came from the
-// peer); false and refused + 1 when another source holds the lock.
+// peer); false and refused + 1 when another source holds the lock, or src is barred (less than RCP_PROXY_UDP_BAR_MS
+// after its bar; a clock that went back ends the bar).
 bool rcp_proxy_udp_lock_offer(rcp_proxy_udp_lock_t *lock, const rcp_proxy_addr_t *src, int64_t now_ms);
 void rcp_proxy_udp_lock_kick(rcp_proxy_udp_lock_t *lock);
+// A radio write cut the peer's datagram part-way at now_ms: unlocked, and the peer barred (rcp_proxy_udp_lock_offer).
+// Nothing when unlocked.
+void rcp_proxy_udp_lock_bar(rcp_proxy_udp_lock_t *lock, int64_t now_ms);
 // Unlocks after the silence; true when this call unlocked it.
 bool rcp_proxy_udp_lock_expire(rcp_proxy_udp_lock_t *lock, int64_t now_ms);
 // When the lock expires; -1 when unlocked.

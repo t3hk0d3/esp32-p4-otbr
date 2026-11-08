@@ -499,7 +499,7 @@ void rcp_proxy_from_peer(proxy_t *p, const uint8_t *d, size_t n)
         if (rcp_proxy_raw_tx_failed(err) == RCP_PROXY_TX_END) { // part may be written: a spliced stream otherwise
             ESP_LOGW(TAG, "%s: radio write failed (%s): peer %s dropped (radio tx errors %lu)", p->id,
                      esp_err_to_name(err), p->peer, (unsigned long)p->tx_errors);
-            p->ad->drop(p);
+            p->ad->drop(p, true);
         }
         return;
     }
@@ -726,7 +726,7 @@ static void reconcile(void)
             }
         } else if (w.kick && p->ch && p->state != PROXY_BACKOFF) {
             ESP_LOGI(TAG, "%s: kicked", p->id);
-            p->ad->drop(p);
+            p->ad->drop(p, false);
         }
     }
 }

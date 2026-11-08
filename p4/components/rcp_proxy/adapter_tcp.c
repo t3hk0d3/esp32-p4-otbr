@@ -387,10 +387,10 @@ static esp_err_t tcp_send(proxy_t *p, const uint8_t *d, size_t n)
     return ESP_OK;
 }
 
-static void tcp_drop(proxy_t *p)
+static void tcp_drop(proxy_t *p, bool cut)
 {
     if (p->fd >= 0 && (p->state == PROXY_CONNECTED || p->sniffing)) {
-        lose_peer(p, "kicked");
+        lose_peer(p, cut ? "dropped: a radio write was cut" : "kicked"); // a new client starts a new stream
     }
 }
 

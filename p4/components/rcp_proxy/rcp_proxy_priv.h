@@ -45,8 +45,9 @@ typedef struct {
     void (*ready)(proxy_t *p, fd_set *rd, fd_set *wr);
     // Towards the peer: bytes (stream) or one datagram. ESP_ERR_INVALID_STATE when there is no peer to send to.
     esp_err_t (*send)(proxy_t *p, const uint8_t *d, size_t n);
-    // Drops the current peer (a kick).
-    void (*drop)(proxy_t *p);
+    // Drops the current peer: a kick, or (`cut`) a radio write that cut the peer's bytes part-way (RCP_PROXY_TX_END),
+    // after which its stream must not go on (TCP: disconnected anyway; UDP: its source barred RCP_PROXY_UDP_BAR_MS).
+    void (*drop)(proxy_t *p, bool cut);
 } rcp_proxy_adapter_t;
 
 extern const rcp_proxy_adapter_t rcp_proxy_adapter_tcp;

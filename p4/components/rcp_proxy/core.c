@@ -101,7 +101,11 @@ bool rcp_proxy_udp_lock_expire(rcp_proxy_udp_lock_t *lock, int64_t now_ms)
 bool rcp_proxy_udp_lock_offer(rcp_proxy_udp_lock_t *lock, const rcp_proxy_addr_t *src, int64_t now_ms)
 {
     rcp_proxy_udp_lock_expire(lock, now_ms);
-    if (lock->locked && !rcp_proxy_addr_eq(&lock->peer, src)) {
+    if (lock->barred && (now_ms < lock->bar_ms || now_ms - lock->bar_ms >= RCP_PROXY_UDP_BAR_MS)) {
+        lock->barred = false;
+    }
+    if ((lock->locked && !rcp_proxy_addr_eq(&lock->peer, src)) ||
+            (lock->barred && rcp_proxy_addr_eq(&lock->bar, src))) {
         lock->refused++;
         return false;
     }
@@ -114,6 +118,17 @@ bool rcp_proxy_udp_lock_offer(rcp_proxy_udp_lock_t *lock, const rcp_proxy_addr_t
 void rcp_proxy_udp_lock_kick(rcp_proxy_udp_lock_t *lock)
 {
     lock->locked = false;
+}
+
+void rcp_proxy_udp_lock_bar(rcp_proxy_udp_lock_t *lock, int64_t now_ms)
+{
+    if (!lock->locked) {
+        return;
+    }
+    lock->locked = false;
+    lock->barred = true;
+    lock->bar = lock->peer;
+    lock->bar_ms = now_ms;
 }
 
 int64_t rcp_proxy_udp_lock_deadline(const rcp_proxy_udp_lock_t *lock)
