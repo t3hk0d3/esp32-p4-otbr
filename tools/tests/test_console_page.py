@@ -91,13 +91,18 @@ class TestConsoleLogic:
         assert r == [-1, "", ""]
 
 
-def routes(enabled=True, session="null", network=NET):
+def routes(enabled=True, session="null", network=NET, status="null"):
+    # `status`: a JS expression for GET /device/status's body (null: 404, as before the Thread notice).
     return (
         "(u, o) => u === '/device/console' ? (o.method === 'PUT' ? {status: 200, body: {enabled: JSON.parse(o.body).enabled, session: null}}"
         f" : {{status: 200, body: {{enabled: {json.dumps(enabled)}, session: {session}}}}})"
         f" : u === '/node' ? {{status: 200, body: {{state: 'router', networkName: {json.dumps(network)}}}}}"
+        f" : u === '/device/status' && ({status}) ? {{status: 200, body: ({status})}}"
         " : {status: 404, body: {}}"
     )
+
+
+NO_RADIO = "globalThis.st || {mode: 'NO_RADIO', otbr_channel: 'usb-10c4-ea60-1', fault_reason: 'radio unplugged'}"
 
 
 START = "t.page.init(); await t.advance(100);"
@@ -248,6 +253,39 @@ class TestConsolePage:
             " await t.advance(1100); return t.sockets.length;"
         )
         assert r == 2
+
+    def test_waiting_for_the_radio_reads_disconnect_and_its_click_ends_the_wait(self):
+        # On NO_RADIO while the page waits for the radio: the toggle reads Disconnect (the wait is a retry); its click
+        # ends the wait (no socket, no further status checks), the toggle then reads Connect.
+        r = scenario(
+            page("console", routes(status=NO_RADIO))
+            + START
+            + "const before = [t.el('con-pill').textContent, t.el('con-toggle').textContent];"
+            " t.el('con-toggle').click(); await t.advance(10);"
+            " const n = t.calls.length; await t.advance(20000);"
+            " return before.concat([t.el('con-pill').textContent, t.el('con-toggle').textContent, t.sockets.length,"
+            " t.calls.length - n]);"
+        )
+        assert r == [
+            "Thread not running",
+            "Disconnect",
+            "Disconnected",
+            "Connect",
+            0,
+            0,
+        ]
+
+    def test_waiting_for_the_radio_connects_once_thread_runs_again(self):
+        # On NO_RADIO, then Thread back: the wait asks again, the toggle reads Disconnect throughout, and the page
+        # connects by itself.
+        r = scenario(
+            page("console", routes(status=NO_RADIO))
+            + START
+            + "await t.advance(5500); const during = t.el('con-toggle').textContent;"
+            " globalThis.st = {mode: 'BR_RUNNING', otbr_channel: 'c6'}; await t.advance(5500);"
+            " return [during, t.sockets.length, t.el('con-toggle').textContent];"
+        )
+        assert r == ["Disconnect", 1, "Disconnect"]
 
     def test_disconnect_while_connecting_closes_that_socket(self):
         r = scenario(

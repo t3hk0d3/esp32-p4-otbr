@@ -553,14 +553,23 @@ bool usb_transport_dev_attached(uint8_t addr)
 }
 
 #ifdef OTBR_TEST_BUILD
+// Under the port's tx_lock, as a sender: the owner's close takes it before it clears s_hdl and frees the device, so
+// the handle stays valid for the whole control transfer (a close or unplug meanwhile waits for it, up to the driver's
+// control timeout).
 esp_err_t radio_mux_test_usb_ctrl(uint8_t bm_request_type, uint8_t b_request, uint16_t w_value, uint16_t w_index,
                                   uint16_t w_length, uint8_t *data)
 {
-    const cdc_acm_dev_hdl_t hdl = s_hdl;
+    mux_port_t *p = &g_mux.usb;
+    esp_err_t err = ESP_ERR_INVALID_STATE;
 
-    if (!hdl) {
-        return ESP_ERR_INVALID_STATE;
+    if (!atomic_load(&g_mux.started)) {
+        return err; // no port locks yet
     }
-    return cdc_acm_host_send_custom_request(hdl, bm_request_type, b_request, w_value, w_index, w_length, data);
+    xSemaphoreTake(p->tx_lock, portMAX_DELAY);
+    if (s_hdl) {
+        err = cdc_acm_host_send_custom_request(s_hdl, bm_request_type, b_request, w_value, w_index, w_length, data);
+    }
+    xSemaphoreGive(p->tx_lock);
+    return err;
 }
 #endif

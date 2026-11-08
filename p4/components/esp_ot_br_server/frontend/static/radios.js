@@ -256,6 +256,29 @@ function errorText(status, body) {
   return C.errorMessage(status, body);
 }
 
+/*
+ * What the dialog says when Save's PUTs stopped at a refusal: `requests` as plan() made them, `replies` the answers in
+ * order (the last one refused, or {status: 0, message} for a lost connection). What the PUTs before it already did comes
+ * first: settings stored, and the radio switched off on its way to Thread (its proxy stopped, its peer dropped).
+ */
+function saveFailureText(requests, replies) {
+  var last = replies[replies.length - 1];
+  var why = last.status === 0 ? last.message : errorText(last.status, last.body);
+  var settings = false, off = false;
+  for (var i = 0; i < replies.length - 1; i++) {
+    if (requests[i].mode === 'off')
+      off = true;
+    else if (requests[i].mode === undefined)
+      settings = true;
+  }
+  if (off)
+    return (settings ? 'The settings were saved and the radio was switched off' : 'The radio was switched off') +
+           ' (its proxy stopped), but Thread did not start on it. ' + why;
+  if (settings)
+    return 'The settings were saved, but the mode change failed: ' + why;
+  return why;
+}
+
 return {
   MODES : MODES,
   BAUDS : BAUDS,
@@ -272,7 +295,8 @@ return {
   subtitle : subtitle,
   proxyOf : proxyOf,
   plan : plan,
-  errorText : errorText
+  errorText : errorText,
+  saveFailureText : saveFailureText
 };
 })();
 
@@ -345,21 +369,18 @@ function renderRow(ch) {
   return tr;
 }
 
+/* Where Thread runs: DeviceCommon.threadChip ("Thread runs on" only while it runs, else a warning with the state). */
 function renderChip() {
   var chip = $('radios-chip');
   var id = status ? status.otbr_channel : undefined;
-  if (id === undefined && !status) {
+  var c = status ? C.threadChip(status, id ? L.labelOf(snap, id) : '') : null;
+  if (!c) {
     chip.classList.add('hidden');
     return;
   }
   chip.classList.remove('hidden');
-  if (id === null || id === undefined) {
-    chip.textContent = 'Thread runs on: no radio';
-    chip.className = 'chip chip-warn';
-  } else {
-    chip.textContent = 'Thread runs on: ' + L.labelOf(snap, id);
-    chip.className = 'chip chip-ok';
-  }
+  chip.textContent = c.text;
+  chip.className = 'chip ' + c.tone;
 }
 
 function anyStarting() {
@@ -606,8 +627,6 @@ function putAll(id, bodies) {
   return chain.then(function() { return replies; });
 }
 
-function failedText(r) { return r.status === 0 ? r.message : L.errorText(r.status, r.body); }
-
 function save() {
   var ch = current();
   if (!ch || kit.isBusy())
@@ -629,10 +648,8 @@ function save() {
       var failed = last.status !== 200 && last.status !== 202;
       var rebooting = replies.some(function(r) { return r.body && r.body.reboot; });
       if (failed) {
-        // The first request of two went through: its settings are stored, only the mode change did not happen.
-        note('mMsg', replies.length > 1 ? 'The settings were saved, but the mode change failed: ' + failedText(last)
-                                        : failedText(last),
-             true);
+        // What went through before the refusal is said first (settings stored, the radio switched off).
+        note('mMsg', L.saveFailureText(p.requests, replies), true);
       } else {
         closeDialog();
         if (last.status === 202) {

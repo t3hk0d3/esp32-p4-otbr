@@ -1417,6 +1417,28 @@ TEST_CASE("On the C6's boot steps finding a fault (no rcp firmware, c6_hold): th
     TEST_ASSERT_FALSE(mode_fsm_c6_usable_after_steps(ESP_ERR_INVALID_STATE));
 }
 
+TEST_CASE("On the C6's RCP probe failing before a start (no answer, not an RCP, missing caps): rcp incompatible",
+          "[mode_fsm]")
+{
+    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_ERR_TIMEOUT));
+    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_ERR_NOT_SUPPORTED));
+    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_ERR_INVALID_RESPONSE));
+    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_FAIL));
+}
+
+TEST_CASE("On the C6's channel going away during the probe: not an RCP verdict (the probe's text stays)",
+          "[mode_fsm]")
+{
+    TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_ERR_INVALID_STATE));
+}
+
+TEST_CASE("On a dongle's probe failing, or a probe that passed: not rcp incompatible", "[mode_fsm]")
+{
+    TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(DST, ESP_ERR_TIMEOUT));
+    TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(NULL, ESP_ERR_TIMEOUT));
+    TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_OK));
+}
+
 TEST_CASE("On a C6 job with the C6 in otbr: it touches OpenThread (not alone)", "[mode_fsm]")
 {
     TEST_ASSERT_FALSE(mode_fsm_c6_job_alone(MODE_FSM_C6_ID));

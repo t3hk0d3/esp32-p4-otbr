@@ -214,6 +214,85 @@ TEST_CASE("On a kick: unlocks; the next source locks", "[rcp_proxy]")
     TEST_ASSERT_TRUE(rcp_proxy_addr_eq(&b, &lock.peer));
 }
 
+TEST_CASE("On a kick: the same source locks again with its next datagram", "[rcp_proxy]")
+{
+    rcp_proxy_udp_lock_t lock;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+
+    rcp_proxy_udp_lock_init(&lock);
+    rcp_proxy_udp_lock_offer(&lock, &a, 1000);
+    rcp_proxy_udp_lock_kick(&lock);
+    TEST_ASSERT_TRUE(rcp_proxy_udp_lock_offer(&lock, &a, 1001));
+}
+
+TEST_CASE("On a cut radio write: unlocks, and the peer's datagrams are refused for RCP_PROXY_UDP_BAR_MS",
+          "[rcp_proxy]")
+{
+    rcp_proxy_udp_lock_t lock;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+
+    rcp_proxy_udp_lock_init(&lock);
+    rcp_proxy_udp_lock_offer(&lock, &a, 1000);
+    rcp_proxy_udp_lock_bar(&lock, 1500);
+    TEST_ASSERT_FALSE(lock.locked);
+    TEST_ASSERT_EQUAL_INT64(-1, rcp_proxy_udp_lock_deadline(&lock));
+    TEST_ASSERT_FALSE(rcp_proxy_udp_lock_offer(&lock, &a, 1500));
+    TEST_ASSERT_FALSE(rcp_proxy_udp_lock_offer(&lock, &a, 1500 + RCP_PROXY_UDP_BAR_MS - 1));
+    TEST_ASSERT_EQUAL_UINT32(2, lock.refused);
+    TEST_ASSERT_FALSE(lock.locked);
+}
+
+TEST_CASE("On RCP_PROXY_UDP_BAR_MS after a cut radio write: the peer locks again", "[rcp_proxy]")
+{
+    rcp_proxy_udp_lock_t lock;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+
+    rcp_proxy_udp_lock_init(&lock);
+    rcp_proxy_udp_lock_offer(&lock, &a, 1000);
+    rcp_proxy_udp_lock_bar(&lock, 1500);
+    TEST_ASSERT_TRUE(rcp_proxy_udp_lock_offer(&lock, &a, 1500 + RCP_PROXY_UDP_BAR_MS));
+    TEST_ASSERT_TRUE(lock.locked);
+    TEST_ASSERT_FALSE(lock.barred);
+}
+
+TEST_CASE("On a cut radio write: another source (or the same host on another port) locks at once", "[rcp_proxy]")
+{
+    rcp_proxy_udp_lock_t lock;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+    const rcp_proxy_addr_t other_port = addr(10, 5001);
+    const rcp_proxy_addr_t b = addr(20, 6000);
+
+    rcp_proxy_udp_lock_init(&lock);
+    rcp_proxy_udp_lock_offer(&lock, &a, 1000);
+    rcp_proxy_udp_lock_bar(&lock, 1500);
+    TEST_ASSERT_TRUE(rcp_proxy_udp_lock_offer(&lock, &other_port, 1600));
+    rcp_proxy_udp_lock_kick(&lock);
+    TEST_ASSERT_TRUE(rcp_proxy_udp_lock_offer(&lock, &b, 1700));
+    TEST_ASSERT_TRUE(rcp_proxy_addr_eq(&b, &lock.peer));
+}
+
+TEST_CASE("On a clock that went back after a cut radio write: the bar ends", "[rcp_proxy]")
+{
+    rcp_proxy_udp_lock_t lock;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+
+    rcp_proxy_udp_lock_init(&lock);
+    rcp_proxy_udp_lock_offer(&lock, &a, 1000);
+    rcp_proxy_udp_lock_bar(&lock, 1500);
+    TEST_ASSERT_TRUE(rcp_proxy_udp_lock_offer(&lock, &a, 1400));
+}
+
+TEST_CASE("On a cut radio write while unlocked: nothing is barred", "[rcp_proxy]")
+{
+    rcp_proxy_udp_lock_t lock;
+    const rcp_proxy_addr_t a = addr(10, 5000);
+
+    rcp_proxy_udp_lock_init(&lock);
+    rcp_proxy_udp_lock_bar(&lock, 1500);
+    TEST_ASSERT_FALSE(lock.barred);
+    TEST_ASSERT_TRUE(rcp_proxy_udp_lock_offer(&lock, &a, 1500));
+}
+
 TEST_CASE("On link-local sources in different zones: they are different sources", "[rcp_proxy]")
 {
     rcp_proxy_udp_lock_t lock;
@@ -291,6 +370,59 @@ TEST_CASE("On TCP accept or connect (init before each): every peer session repla
     }
 }
 
+/* ---- rcp_proxy_replay (the peer's frames wait out the replayed reset) ---- */
+
+TEST_CASE("On a replayed reset: the peer's frames are dropped until the radio reports the reset", "[rcp_proxy]")
+{
+    rcp_proxy_replay_t r;
+
+    rcp_proxy_replay_init(&r);
+    rcp_proxy_replay_start(&r, 1000);
+    TEST_ASSERT_TRUE(rcp_proxy_replay_blocks(&r, 1000));
+    TEST_ASSERT_TRUE(rcp_proxy_replay_blocks(&r, 1000 + RCP_PROXY_REPLAY_MAX_MS - 1));
+    rcp_proxy_replay_done(&r);
+    TEST_ASSERT_FALSE(rcp_proxy_replay_blocks(&r, 1001));
+}
+
+TEST_CASE("On no reset report within RCP_PROXY_REPLAY_MAX_MS: the peer's frames pass", "[rcp_proxy]")
+{
+    rcp_proxy_replay_t r;
+
+    rcp_proxy_replay_init(&r);
+    rcp_proxy_replay_start(&r, 1000);
+    TEST_ASSERT_FALSE(rcp_proxy_replay_blocks(&r, 1000 + RCP_PROXY_REPLAY_MAX_MS));
+    TEST_ASSERT_FALSE(rcp_proxy_replay_blocks(&r, 1001)); // over for good, not only past the deadline
+}
+
+TEST_CASE("On no replay (none started, or a reset report without one): nothing is dropped", "[rcp_proxy]")
+{
+    rcp_proxy_replay_t r;
+
+    rcp_proxy_replay_init(&r);
+    TEST_ASSERT_FALSE(rcp_proxy_replay_blocks(&r, 1000));
+    rcp_proxy_replay_done(&r);
+    TEST_ASSERT_FALSE(rcp_proxy_replay_blocks(&r, 1000));
+}
+
+TEST_CASE("On a clock gone back since the replay started: nothing is dropped", "[rcp_proxy]")
+{
+    rcp_proxy_replay_t r;
+
+    rcp_proxy_replay_init(&r);
+    rcp_proxy_replay_start(&r, 1000);
+    TEST_ASSERT_FALSE(rcp_proxy_replay_blocks(&r, 999));
+}
+
+TEST_CASE("On a new session (init): a replay of the previous session no longer drops", "[rcp_proxy]")
+{
+    rcp_proxy_replay_t r;
+
+    rcp_proxy_replay_init(&r);
+    rcp_proxy_replay_start(&r, 1000);
+    rcp_proxy_replay_init(&r);
+    TEST_ASSERT_FALSE(rcp_proxy_replay_blocks(&r, 1000));
+}
+
 /* ---- rcp_proxy_lookup (connect target, resolved off the proxy task) ---- */
 
 TEST_CASE("On the answer to the pending ask: it is taken once and the session no longer waits", "[rcp_proxy]")
@@ -357,24 +489,38 @@ TEST_CASE("On the counter wrapping: an ask is never 0, and answer 0 is never tak
 
 TEST_CASE("On a connection with no peer that both access rules allow: returns RCP_PROXY_TAKE", "[rcp_proxy]")
 {
-    TEST_ASSERT_EQUAL(RCP_PROXY_TAKE, rcp_proxy_accept(false, true, true));
+    TEST_ASSERT_EQUAL(RCP_PROXY_TAKE, rcp_proxy_accept(false, false, true, true));
 }
 
-TEST_CASE("On a connection while a peer is connected: returns RCP_PROXY_REFUSE (first client wins)", "[rcp_proxy]")
+TEST_CASE("On a connection while a peer is connected, or a held client sent bytes: returns RCP_PROXY_REFUSE (first "
+          "client wins)", "[rcp_proxy]")
 {
-    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(true, true, true));
+    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(true, false, true, true));
+}
+
+TEST_CASE("On a connection while the held client has sent nothing (an idle preconnect): returns RCP_PROXY_REPLACE",
+          "[rcp_proxy]")
+{
+    TEST_ASSERT_EQUAL(RCP_PROXY_REPLACE, rcp_proxy_accept(true, true, true, true));
+}
+
+TEST_CASE("On a connection the access rules refuse while the held client is silent: returns RCP_PROXY_REFUSE (the "
+          "held client stays)", "[rcp_proxy]")
+{
+    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(true, true, false, true));
+    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(true, true, true, false));
 }
 
 TEST_CASE("On a connection whose local address the access rules refuse: returns RCP_PROXY_REFUSE", "[rcp_proxy]")
 {
-    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(false, false, true));
+    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(false, false, false, true));
 }
 
 TEST_CASE("On a client routed over the Thread mesh to an infrastructure address: returns RCP_PROXY_REFUSE",
           "[rcp_proxy]")
 {
     // The local address (mgmt or thread_bb) passes netcfg_socket_allowed; netcfg_peer_allowed refuses the mesh route.
-    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(false, true, false));
+    TEST_ASSERT_EQUAL(RCP_PROXY_REFUSE, rcp_proxy_accept(false, false, true, false));
 }
 
 /* ---- rcp_proxy_ring ---- */
@@ -658,11 +804,11 @@ TEST_CASE("Hold: on a radio client's first byte: passes at once, the byte held f
     rcp_proxy_hold_t h;
     const uint8_t spinel[] = {0x7E, 0x81};
 
-    rcp_proxy_hold_start(&h, 1000);
+    rcp_proxy_hold_start(&h);
     TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_PASS, rcp_proxy_hold_add(&h, spinel, sizeof(spinel), 1010));
     TEST_ASSERT_EQUAL(2, h.len);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(spinel, h.buf, 2);
-    TEST_ASSERT_FALSE(h.up);
+    TEST_ASSERT_FALSE(rcp_proxy_hold_silent(&h));
     TEST_ASSERT_EQUAL(-1, h.deadline_ms);
 }
 
@@ -670,62 +816,61 @@ TEST_CASE("Hold: on a request line within the window: refuses", "[rcp_proxy]")
 {
     rcp_proxy_hold_t h;
 
-    rcp_proxy_hold_start(&h, 1000);
+    rcp_proxy_hold_start(&h);
     TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_REFUSE, hold_text(&h, "POST / H", 1005));
-    TEST_ASSERT_FALSE(h.up);
 }
 
-TEST_CASE("Hold: on silence until the deadline: the client becomes the peer once, no timer after", "[rcp_proxy]")
+TEST_CASE("Hold: on silence after the accept: no timer, the client is never promoted (it stays held, silent)",
+          "[rcp_proxy]")
 {
     rcp_proxy_hold_t h;
 
-    rcp_proxy_hold_start(&h, 1000);
-    TEST_ASSERT_EQUAL(1000 + RCP_PROXY_SNIFF_MS, h.deadline_ms);
-    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, rcp_proxy_hold_tick(&h, 1000 + RCP_PROXY_SNIFF_MS - 1));
-    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_UP, rcp_proxy_hold_tick(&h, 1000 + RCP_PROXY_SNIFF_MS));
-    TEST_ASSERT_TRUE(h.up);
+    rcp_proxy_hold_start(&h);
     TEST_ASSERT_EQUAL(-1, h.deadline_ms);
-    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, rcp_proxy_hold_tick(&h, 900000)); // no second UP, no judgement
+    TEST_ASSERT_TRUE(rcp_proxy_hold_silent(&h));
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, rcp_proxy_hold_tick(&h, 1000 + RCP_PROXY_SNIFF_MS));
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, rcp_proxy_hold_tick(&h, 900000));
+    TEST_ASSERT_TRUE(rcp_proxy_hold_silent(&h));
 }
 
-TEST_CASE("Hold: on a request line long after a silent start (preconnect): refuses", "[rcp_proxy]")
+TEST_CASE("Hold: on a request line long after the accept (preconnect): refuses", "[rcp_proxy]")
 {
     rcp_proxy_hold_t h;
 
-    rcp_proxy_hold_start(&h, 1000);
-    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_UP, rcp_proxy_hold_tick(&h, 1060));
+    rcp_proxy_hold_start(&h);
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, rcp_proxy_hold_tick(&h, 1060));
     TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, hold_text(&h, "PO", 5000)); // a split first segment
+    TEST_ASSERT_FALSE(rcp_proxy_hold_silent(&h)); // from its first byte, a new connection no longer replaces it
     TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_REFUSE, hold_text(&h, "ST / HTT", 5020));
 }
 
-TEST_CASE("Hold: on a radio client's first byte after a silent start: passes", "[rcp_proxy]")
+TEST_CASE("Hold: on a radio client's first byte long after the accept: passes (it becomes the peer only now)",
+          "[rcp_proxy]")
 {
     rcp_proxy_hold_t h;
     const uint8_t spinel[] = {0x7E};
 
-    rcp_proxy_hold_start(&h, 1000);
-    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_UP, rcp_proxy_hold_tick(&h, 1050));
+    rcp_proxy_hold_start(&h);
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, rcp_proxy_hold_tick(&h, 1050));
     TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_PASS, rcp_proxy_hold_add(&h, spinel, 1, 3000));
-    TEST_ASSERT_TRUE(h.up);
 }
 
 TEST_CASE("Hold: on a method's prefix: the timeout counts from the first byte, not the accept", "[rcp_proxy]")
 {
     rcp_proxy_hold_t h;
 
-    rcp_proxy_hold_start(&h, 1000);
+    rcp_proxy_hold_start(&h);
     TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, hold_text(&h, "GET", 1040));
     TEST_ASSERT_EQUAL(1040 + RCP_PROXY_SNIFF_MS, h.deadline_ms);
-    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, rcp_proxy_hold_tick(&h, 1000 + RCP_PROXY_SNIFF_MS)); // the accept's
+    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, rcp_proxy_hold_tick(&h, 1040 + RCP_PROXY_SNIFF_MS - 1));
     TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_PASS, rcp_proxy_hold_tick(&h, 1040 + RCP_PROXY_SNIFF_MS));
 }
 
-TEST_CASE("Hold: on a method's prefix after a silent start, then its space in time: refuses", "[rcp_proxy]")
+TEST_CASE("Hold: on a method's prefix long after the accept, then its space in time: refuses", "[rcp_proxy]")
 {
     rcp_proxy_hold_t h;
 
-    rcp_proxy_hold_start(&h, 1000);
-    TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_UP, rcp_proxy_hold_tick(&h, 1050));
+    rcp_proxy_hold_start(&h);
     TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, hold_text(&h, "GET", 2000));
     TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, rcp_proxy_hold_tick(&h, 2000 + RCP_PROXY_SNIFF_MS - 1));
     TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_REFUSE, hold_text(&h, " /", 2000 + RCP_PROXY_SNIFF_MS - 1));
@@ -735,7 +880,7 @@ TEST_CASE("Hold: reads at most RCP_PROXY_SNIFF_LEN bytes", "[rcp_proxy]")
 {
     rcp_proxy_hold_t h;
 
-    rcp_proxy_hold_start(&h, 0);
+    rcp_proxy_hold_start(&h);
     TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_LEN, rcp_proxy_hold_room(&h));
     TEST_ASSERT_EQUAL(RCP_PROXY_HOLD_WAIT, hold_text(&h, "OPT", 1));
     TEST_ASSERT_EQUAL(RCP_PROXY_SNIFF_LEN - 3, rcp_proxy_hold_room(&h));

@@ -105,9 +105,10 @@ the P4 retries the whole transfer up to three times.
 non-empty string, `""` when the C6 has no valid RCP firmware, `null` if the probe failed) and `rcp.compatible`. The
 version is only informative: nothing is compared or ordered. Compatibility is decided by OpenThread itself when it
 starts: it rejects an RCP that does not match the OpenThread build of the P4 (spinel/RCP API version), and the board goes
-to `RADIO_FAULT` with the reason `rcp incompatible` (`rcp.compatible` false). The cure is the same as for a missing
-firmware: upload a matching `c6_rcp.bin` (from the same release as the P4 bundle, or one the release notes say is
-compatible). A C6 without any RCP firmware gives `RADIO_FAULT` with `no rcp firmware`.
+to `RADIO_FAULT` with the reason `rcp incompatible` (`rcp.compatible` false). An installed RCP on the C6 that does not
+answer the probe before that start (no spinel reset notice, no version, not an RCP) is reported the same way. The cure
+is the same as for a missing firmware: upload a matching `c6_rcp.bin` (from the same release as the P4 bundle, or one
+the release notes say is compatible). A C6 without any RCP firmware gives `RADIO_FAULT` with `no rcp firmware`.
 
 A P4 update runs the automatic ROM recovery only when the content-addressed base image version changed (see
 [Maintenance jumper](maintenance-jumper.md)); the RCP firmware survives it.

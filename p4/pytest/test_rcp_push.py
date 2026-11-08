@@ -5,6 +5,7 @@ endpoint fails them.
 """
 
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -82,23 +83,37 @@ class TestPush:
 
 
 class TestPushFromIncompatibleRcp:
-    """br_core.br_core_push_radio_firmware, fault "rcp incompatible" (abandoned OpenThread start)"""
+    """br_core.br_core_push_radio_firmware, fault "rcp incompatible" found by the C6's boot steps"""
 
-    def test_push_recovers_the_board_to_br_running_after_a_reboot(
+    def test_push_recovers_the_board_to_br_running_without_a_reboot(
         self, dut, send, reboot, good_image
     ):
-        # On RADIO_FAULT "rcp incompatible": the push runs on a clean SPI host and ends in a reboot into BR_RUNNING.
+        # On RADIO_FAULT "rcp incompatible" from the boot steps (c6_hold: the C6 stays in reset, as an RCP that never
+        # answers; the C6 is listed unavailable): the push lists the C6 again and starts OpenThread on it in place:
+        # BR_RUNNING, rcp compatible, no reboot.
+        # The push after an abandoned OpenThread start (a reboot follows it) is not reachable from a test hook since the
+        # RCP probe runs before OpenThread's init: c6_hold faults in the boot steps, before any init. It needs an RCP
+        # that answers the probe and then fails esp_openthread_init (another OpenThread build's RCP).
         send("c6_hold 1", rb"c6_hold: ok")
         reboot()
         address = dut.expect(GOT_IP, timeout=BOOT_TIMEOUT_S).group(1).decode()
         wait_reachable(address)
         base_url = f"http://{address}"
-        assert br_status(dut)["fault"] == "rcp incompatible"
-        send(
-            "c6_hold 0", rb"c6_hold: ok"
-        )  # takes effect from the next boot: the one the push ends with
+        deadline = time.monotonic() + BOOT_TIMEOUT_S
+        while (status := br_status(dut))["mode"] != "RADIO_FAULT":
+            assert time.monotonic() < deadline, f"no RADIO_FAULT: {status}"
+            time.sleep(1)
+        assert status["fault"] == "rcp incompatible"
+        assert not status["compatible"]
+        uptime = requests.get(f"{base_url}/device/diag", timeout=10).json()["uptime_s"]
+        send("c6_hold 0", rb"c6_hold: ok")  # read by the push's own boot steps
         response = post_image(base_url, good_image)
         assert response.status_code == requests.codes.ok, response.text
-        dut.expect(rb"ESP-ROM:esp32p4", timeout=PUSH_TIMEOUT_S)
-        dut.expect(rb"mode_fsm: mode BR_RUNNING", timeout=BOOT_TIMEOUT_S)
-        assert br_status(dut)["compatible"]
+        dut.expect(rb"mode_fsm: mode BR_RUNNING", timeout=PUSH_TIMEOUT_S)
+        status = br_status(dut)
+        assert status["mode"] == "BR_RUNNING"
+        assert status["compatible"]
+        assert (
+            requests.get(f"{base_url}/device/diag", timeout=10).json()["uptime_s"]
+            > uptime
+        ), "the board rebooted"

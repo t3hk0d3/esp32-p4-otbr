@@ -23,7 +23,8 @@ Without a dongle the board behaves as before: the C6 channel in `otbr` mode.
   10 s with the packet's bytes. Rising `uart_errors` with `rx_errors` points at the bridge losing bytes, not the RCP.
   The decoding of the packet follows the ch34x driver's own defines (`CH34X_UART_STATE_TRANSIENT_MASK`, byte 0) and is
   not confirmed against a datasheet; confirm it on a board.
-- A channel's `state` is `idle` (mode `off`), `starting`, `running`, `fault` (with a reason) or `busy` (a C6 job runs).
+- A channel's `state` is `idle` (mode `off`), `starting`, `running`, `fault` (with a reason) or `busy` (a C6 job runs,
+  or the C6's boot steps).
 - `DELETE /device/channels/{id}` (the page's "Forget this radio") removes an unplugged dongle and its settings. The C6
   and attached radios cannot be forgotten (409 `in_use`).
 
@@ -76,7 +77,10 @@ again with source `passive`. There is no detection endpoint: unplug and replug, 
 The C6 is not probed this way; the boot probe reports its firmware. It runs at every boot, whatever channel is in
 `otbr` (with Thread elsewhere it only updates the C6's status and listing), together with the maintenance jumper's
 detection and the automatic ROM recovery. A fault it finds with the C6 in `otbr` ("no rcp firmware", "rcp
-incompatible") stays: the C6 is listed unavailable and Thread does not start on it until a push.
+incompatible") stays: the C6 is listed unavailable and Thread does not start on it until a push. Until those steps
+end, the C6 is listed `busy` ("the C6's boot steps run") and nothing runs on it: its stored mode (`otbr`, `rcp-proxy`)
+starts once, after the steps, so a proxy peer never sees the RCP reset by the boot. Should the boot steps never begin
+(the network did not come up, so the border router never started), the stored mode starts after 30 s without them.
 
 ## RCP proxy
 
@@ -103,8 +107,9 @@ channel in `rcp-proxy` listen where another one (also an unplugged one) is store
 
 **Framing.** A USB channel passes bytes as they are. On the C6 the proxy turns spinel frames into HDLC bytes and back,
 so a Linux `otbr-agent` (`spinel+hdlc+uart` through `socat`) can drive the C6; when a TCP client becomes the peer (its
-first bytes passed the check in the security notes below, or it stayed silent 50 ms after the connect) or a UDP peer
-first sends, the board resets the handshake so the host sees the RCP's reset. For UDP, `framing` is `hdlc` (default: the stream
+first bytes passed the check in the security notes below) or a UDP peer first sends, the board resets the RCP so the
+host sees its reset. Frames the host sends before that reset is done (at most 1 s) are dropped, so the host's own
+RESET is answered by the reset's notification. For UDP, `framing` is `hdlc` (default: the stream
 is cut at HDLC frame boundaries, one frame per datagram, which suits spinel) or `raw` (each received chunk becomes a
 datagram of at most 1024 bytes; loss and reordering corrupt the stream, so use it for testing only).
 
@@ -112,9 +117,10 @@ datagram of at most 1024 bytes; loss and reordering corrupt the stream, so use i
 
 **Behaviour.** A peer that does not read until the buffer overflows is disconnected. On a USB channel (raw bytes), a
 write to the dongle that fails part-way (a USB write timeout) ends the peer session: a TCP peer is disconnected, so
-the dongle never sees the rest of its stream spliced onto a cut frame; a UDP lock is only let go (the same source can
-lock again with its next datagram, so over UDP raw the splice is not prevented: another reason it is for testing); while the dongle is not attached at all the peer's bytes are dropped
-and the peer stays. On the C6 a frame that fails is lost as a whole and the peer stays. Unplugging the dongle drops the
+the dongle never sees the rest of its stream spliced onto a cut frame; a UDP peer is let go and its datagrams are
+refused for 2 s (counted as refused), so the rest of its cut stream does not follow; after that it, or another source,
+locks again (a UDP host gets no signal: its next frames start on a dongle that saw a cut one, another reason UDP raw is
+for testing). While the dongle is not attached at all the peer's bytes are dropped and the peer stays. On the C6 a frame that fails is lost as a whole and the peer stays. Unplugging the dongle drops the
 peer; the channel serves again when the radio returns. Changing a proxy setting re-opens the listener or connection.
 The channel's counters and the peer's address are in `GET /device/channels` (`rcp_proxy.state`: `listening`,
 `connecting`, `backoff`, `connected`). When a listener cannot be opened (the port is used by another service) or a
@@ -129,9 +135,10 @@ browser can open a connection to `http://<board>:6638/` (the port is not on the 
 HTTP request; in TCP listen the proxy therefore holds the first bytes a new client sends, whenever they come (up to
 8, at most 50 ms after the first of them), and refuses the client, counted as refused and logged at most every 10 s,
 when they start with an uppercase HTTP method and a space (`GET `, `POST `, `PUT `, `DELETE `, `HEAD `, `OPTIONS `,
-`PATCH `, `CONNECT `, `TRACE `). A client that sends nothing in the first 50 ms (a host that waits for the radio's
-reset, or a browser's idle preconnected connection) becomes the peer and gets the radio's bytes, but its own first
-bytes are still held and judged when they come. Nothing of such a request reaches the radio. Radio clients start with
+`PATCH `, `CONNECT `, `TRACE `). A client that has sent nothing is not the peer: it gets none of the radio's bytes,
+the C6 is not reset for it and a firmware push is not refused for it (`c6_busy`), and a new connection replaces it (the
+silent one is closed), so a browser's idle preconnected connection cannot lock out the real host. A host therefore
+sends first, as spinel, ZNP and ASH hosts do. Nothing of such a request reaches the radio. Radio clients start with
 a frame byte (`0x7E` spinel, `0xFE` ZNP, ASH (EZSP) with `0x1A` cancel or the `0xC0` reset; `0x7E` ends an ASH frame),
 never with a letter, and pass at their first byte. UDP and `connect` are not checked: a browser can send UDP only
 inside STUN/DTLS (WebRTC), not bytes it chooses, and `connect` dials a host you chose.
@@ -269,7 +276,9 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
   request after the last reopen may be lost, a cut outgoing frame). Checked 2026-11-07. The CH340 never stayed silent
   after a reopen on the bench, also after forced overruns (`usb_stall <ms>` masks a core's interrupts) and with spinel
   resets in between (about 400 reopens); `ch34x diag|init|clear` (test build) read the chip's registers and send the
-  open-time init that ESP-IDF's ch34x driver skips, if it ever does.
+  open-time init that ESP-IDF's ch34x driver skips, if it ever does. `usb_reopen` runs the reset path of a consumer's
+  reset (only on an attached or leased dongle; a failed reopen detaches it, and three in a row with nothing received
+  give up with "no answer after 3 resets"), so the test sends a burst the dongle answers between two reopens.
 - **C6 jobs**: a firmware push with OpenThread on the dongle leaves OpenThread alone, also while the dongle captures or
   starts (the board mode is the dongle's); unplugging the dongle during it gives `NO_RADIO` at once; with a proxy peer on
   the C6 it gives 409 `c6_busy`.
@@ -308,7 +317,8 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
 - **HTTP refusal in TCP listen** (port 6638): `curl -X POST http://<board>:6638/ -d x` is refused (`refused` + 1, an RST
   or FIN for curl) with `to_radio` unchanged; `otbr-agent` through `socat` on the C6 still comes up (the reset replay
   once its first bytes pass); a kick during the hold (a client connected with `nc` that has not sent yet) drops it and
-  the next client is served; the preconnect case: a client that connects, stays silent over 50 ms (it becomes the
-  peer: `connected`), then sends `POST / HTTP/1.1` is dropped (`refused` + 1) with `to_radio` unchanged.
+  the next client is served; the preconnect case: a client that connects and stays silent stays `listening` (no peer,
+  no C6 reset), a second connection replaces it (the first is closed) and becomes the peer with its first spinel
+  bytes, and a silent client that then sends `POST / HTTP/1.1` is dropped (`refused` + 1) with `to_radio` unchanged.
 - **Stop with an open session**: hold a REST session longer than 45 s while setting the OTBR channel `off`: the PUT
   answers 202, the channel stays `otbr` running with `error` `drain_timeout`, Thread keeps running.

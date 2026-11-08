@@ -184,13 +184,29 @@ function threadDown() {
                                     function() { return false; });
 }
 
+/*
+ * No radio runs Thread: the notice says so and the page looks again every NO_RADIO_RETRY_MS. The wait counts as a retry
+ * (the timer, then `checking` while it asks), so the toggle reads "Disconnect" and its click ends the wait, as during a
+ * reconnect.
+ */
 function waitForRadio() {
   pill('not-running');
-  setOnline(false);
   retryTimer = env.setTimeout(function() {
     retryTimer = null;
-    load();
+    checking = true;
+    threadDown().then(function(down) {
+      if (!checking)
+        return; // disconnected meanwhile
+      checking = false;
+      if (down) {
+        waitForRadio();
+        return;
+      }
+      setOnline(false); // the wait is over: the toggle reads Connect until the console connects
+      loadConsole();
+    });
   }, NO_RADIO_RETRY_MS);
+  setOnline(false);
 }
 
 function onClose(ev) {

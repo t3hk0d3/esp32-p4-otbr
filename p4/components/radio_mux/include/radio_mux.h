@@ -99,8 +99,11 @@ typedef struct {
 esp_err_t radio_mux_register_consumer(const radio_mux_consumer_t *c);
 
 // Loads the channels from NVS, lists c6, creates the eventfds (the eventfd VFS must be registered), starts the owner
-// task, which installs the USB host (its interrupt on MGMT_CORE) and attaches registered consumers to present channels.
-// Once.
+// task (MGMT_CORE), which installs the USB host from NET_CORE (its interrupt and the CDC driver's task run there, off
+// the management core's interrupt-masking code) and attaches registered consumers to present channels. Once.
+// The C6 is held for its boot steps first (radio_mux_c6_hold_t): listed busy, nothing attached, SPI2 not opened, until
+// the boot job (the first radio_mux_c6_job_begin, which runs in that hold) ends; its stored mode's consumer attaches
+// once, after the steps. Without a job within RADIO_MUX_C6_BOOT_HOLD_MS the mux lets go and attaches it (logged).
 esp_err_t radio_mux_start(void);
 
 /* ---- consumer side (between attach and detach) ---- */
@@ -290,25 +293,31 @@ esp_err_t radio_mux_commit_otbr(const char *from, const char *to);
 
 // Takes the C6 from the mux before a job: ESP_ERR_INVALID_STATE (409 c6_busy) while rcp-proxy on c6 has a peer or
 // another job holds it; otherwise c6's consumer gets GONE and is detached, SPI2, the INT pin and the reset GPIO are
-// released (the C6 left running) for rcp_sync, and c6 is listed busy. Waits for the owner task (up to 5 s,
-// ESP_ERR_TIMEOUT). ESP_OK before radio_mux_start (nothing holds the C6 then). Not from the owner task.
+// released (the C6 left running) for rcp_sync, and c6 is listed busy. While the boot hold waits for its job (from the
+// start), the job runs in that hold: nothing is attached or opened, so nothing is detached (the boot steps). Waits for
+// the owner task (up to 5 s, ESP_ERR_TIMEOUT). ESP_OK before radio_mux_start (nothing holds the C6 then). Not from the
+// owner task.
 // Every job_begin that returned ESP_OK must be followed by radio_mux_c6_job_end, also when the job failed: until then
 // c6 stays busy. ESP_ERR_TIMEOUT means nothing ran (the owner skips the abandoned begin): do not run the job, and do
 // not call job_end for it.
 esp_err_t radio_mux_c6_job_begin(void);
 // Gives the C6 back after the job: c6 is listed again from rcp_sync_get_last_probe (unavailable with the reason when
 // no RCP, the factory ESP-Hosted firmware or a failed ROM recovery), unavailable as well when !c6_ok, and its stored
-// mode's consumer attached again (SPI2 opened). Without a job it refreshes the listing of a c6 nothing is attached to.
+// mode's consumer attached again (SPI2 opened). It ends the boot hold as well. Without a job it refreshes the listing
+// of a c6 nothing is attached to.
 // Never dropped: it waits as long as it takes to post (and to allocate its record); the answer is waited for up to
 // 5 s (later: logged). No-op before radio_mux_start.
 void radio_mux_c6_job_end(bool c6_ok);
 
 #ifdef OTBR_TEST_BUILD
 /* ---- test build only: CH340 experiments (2026-11-07) ---- */
-// A control request on the open USB dongle (vendor or standard). ESP_ERR_INVALID_STATE when no dongle is open.
+// A control request on the open USB dongle (vendor or standard), under the port's tx_lock like a sender: a close or
+// unplug meanwhile waits for it. ESP_ERR_INVALID_STATE when no dongle is open.
 esp_err_t radio_mux_test_usb_ctrl(uint8_t bm_request_type, uint8_t b_request, uint16_t w_value, uint16_t w_index,
                                   uint16_t w_length, uint8_t *data);
-// The owner's USB reset path (close, open, RESET event) on the dongle, whatever is attached. Waits for nothing.
+// The owner's USB reset path (handle_reset's: close, open, RESET to the holder; a failed reopen detaches the consumer
+// with GONE or ends the lease; counted by the dead-reset rule) on the dongle, when a consumer is attached or it is
+// leased; ignored (logged) otherwise. Waits for nothing: ESP_OK means posted.
 esp_err_t radio_mux_test_usb_reopen(void);
 #endif
 

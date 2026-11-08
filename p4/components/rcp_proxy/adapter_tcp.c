@@ -2,9 +2,9 @@
 // connect (non-blocking dial to a target the netcfg rules allow, back-off on failure). A listen client's first bytes,
 // whenever they come, are held until rcp_proxy_sniff decides (rcp_proxy_hold_t: at most RCP_PROXY_SNIFF_LEN bytes or
 // RCP_PROXY_SNIFF_MS from the first byte): an HTTP request line is refused before anything reaches the radio. A client
-// silent RCP_PROXY_SNIFF_MS after the accept becomes the peer meanwhile (the radio's bytes reach it), its own bytes
-// still held. Clients get TCP_NODELAY and keepalive 10/2/3; every accepted (passed or silent) client and every connect
-// is a new peer session (reset replay on a frame channel). Bytes towards the peer wait in the session's ring while the
+// that has sent nothing is not the peer (no radio bytes, no reset replay, no busy flag), and a new connection replaces
+// it, so an idle preconnect never locks out the real host. Clients get TCP_NODELAY and keepalive 10/2/3; every client
+// whose first bytes pass and every connect is a new peer session (reset replay on a frame channel). Bytes towards the peer wait in the session's ring while the
 // socket has no room; a ring that would overflow disconnects the peer.
 #include <errno.h>
 #include <stdio.h>
@@ -240,20 +240,15 @@ static void connect_done(proxy_t *p)
     rcp_proxy_peer_up(p, (struct sockaddr *)&p->dst, true); // every connect is a new peer session
 }
 
-// Acts on the hold's decision (rcp_proxy_hold_t). UP: a silent client becomes the peer (the C6 reset replay), its bytes
-// still held. PASS: a radio client becomes the peer (if it is not yet) and its held bytes go to the radio. REFUSE: an
-// HTTP request is closed (refused + 1) without a byte to the radio; a client that was already the peer is lost.
+// Acts on the hold's decision (rcp_proxy_hold_t). PASS: a radio client becomes the peer and its held bytes go to the
+// radio. REFUSE: an HTTP request is closed (refused + 1) without a byte to the radio; it was never the peer.
 static void hold_act(proxy_t *p, rcp_proxy_hold_act_t a)
 {
     switch (a) {
     case RCP_PROXY_HOLD_WAIT:
         return;
-    case RCP_PROXY_HOLD_UP:
-        rcp_proxy_peer_up(p, (struct sockaddr *)&p->sniff_from, true); // every accept is a new peer session
-        return;
     case RCP_PROXY_HOLD_REFUSE: {
         const int64_t now = rcp_proxy_now_ms();
-        const bool was_peer = p->state == PROXY_CONNECTED;
 
         p->sniffing = false;
         refuse(p->fd);
@@ -264,19 +259,13 @@ static void hold_act(proxy_t *p, rcp_proxy_hold_act_t a)
             ESP_LOGW(TAG, "%s: an HTTP request (a web page?) refused (%lu refused so far)", p->id,
                      (unsigned long)p->refused);
         }
-        if (was_peer) {
-            rcp_proxy_peer_lost(p, PROXY_LISTENING);
-        }
         return;
     }
     case RCP_PROXY_HOLD_PASS:
         p->sniffing = false;
-        if (p->state != PROXY_CONNECTED) {
-            // The replayed reset is only posted to the radio's owner task, and the held bytes follow at once, so on
-            // the C6 a spinel host's first frame can meet the radio while it resets and be lost. Harmless: the host
-            // retries its RESET and gets the replayed reset notification.
-            rcp_proxy_peer_up(p, (struct sockaddr *)&p->sniff_from, true); // every accept is a new peer session
-        }
+        // On the C6 the held bytes' frames wait out the replayed reset (dropped, rcp_proxy_replay_t): a spinel host's
+        // RESET is answered by the reset's own notification, never by the RCP before the reset.
+        rcp_proxy_peer_up(p, (struct sockaddr *)&p->sniff_from, true); // every passed client is a new peer session
         rcp_proxy_from_peer(p, p->hold.buf, p->hold.len); // may drop the peer (a raw write that failed)
         return;
     }
@@ -326,22 +315,29 @@ static void accept_one(proxy_t *p)
         return;
     }
     // Both access rules: the local address the client came in on, and the route back to it (a Thread mesh node that
-    // dials an infrastructure address passes the first and is refused by the second).
-    const bool busy = p->fd >= 0;
-    const bool local_ok = !busy && netcfg_socket_allowed(fd, NETCFG_SVC_RCP_PROXY);
+    // dials an infrastructure address passes the first and is refused by the second). A held client that has sent
+    // nothing gives way to the new connection (a browser's idle preconnect must not lock out the real host).
+    const bool taken = p->fd >= 0;
+    const bool silent = taken && p->sniffing && rcp_proxy_hold_silent(&p->hold);
+    const bool local_ok = (!taken || silent) && netcfg_socket_allowed(fd, NETCFG_SVC_RCP_PROXY);
     const bool peer_ok = local_ok &&
                          netcfg_peer_allowed_as((const struct sockaddr *)&sa, NETCFG_SVC_RCP_PROXY, "a client");
+    const rcp_proxy_accept_t verdict = rcp_proxy_accept(taken, silent, local_ok, peer_ok);
 
-    if (rcp_proxy_accept(busy, local_ok, peer_ok) == RCP_PROXY_REFUSE) {
+    if (verdict == RCP_PROXY_REFUSE) {
         refuse(fd);
         p->refused++;
         ESP_LOGI(TAG, "%s: connection refused (%lu so far)", p->id, (unsigned long)p->refused);
         return;
     }
+    if (verdict == RCP_PROXY_REPLACE) {
+        ESP_LOGI(TAG, "%s: a client that sent nothing gives way to a new connection", p->id);
+        lose_peer(p, "replaced while silent"); // not the peer: closed, the radio and the status never saw it
+    }
     peer_setup(fd);
     p->fd = fd;
-    p->sniffing = true; // the peer once its first bytes pass, or once it was silent long enough (hold_act)
-    rcp_proxy_hold_start(&p->hold, rcp_proxy_now_ms());
+    p->sniffing = true; // the peer once its first bytes pass (hold_act)
+    rcp_proxy_hold_start(&p->hold);
     p->sniff_from = sa;
 }
 
@@ -387,10 +383,10 @@ static esp_err_t tcp_send(proxy_t *p, const uint8_t *d, size_t n)
     return ESP_OK;
 }
 
-static void tcp_drop(proxy_t *p)
+static void tcp_drop(proxy_t *p, bool cut)
 {
     if (p->fd >= 0 && (p->state == PROXY_CONNECTED || p->sniffing)) {
-        lose_peer(p, "kicked");
+        lose_peer(p, cut ? "dropped: a radio write was cut" : "kicked"); // a new client starts a new stream
     }
 }
 

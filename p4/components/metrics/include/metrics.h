@@ -27,11 +27,12 @@ typedef struct {
 
 /** Figures that need no OpenThread lock, gathered by the caller. */
 typedef struct {
-    int mode;                /**< br_core_mode_t: STARTING, BR_RUNNING, SNIFFER, RADIO_FAULT */
+    int mode;                /**< br_core_mode_t: STARTING, BR_RUNNING, SNIFFER, RADIO_FAULT, NO_RADIO */
     const char *version;
     int slot;                /**< running OTA slot, -1 unknown */
     const char *rcp_version; /**< "" unknown or none */
     bool rcp_compatible;
+    bool rcp_compatible_known; /**< false: the C6's RCP is not judged (label "unknown"; rcp_compatible ignored) */
     bool storage_ok;
     bool sniffer_active;
     uint32_t sniffer_frames;

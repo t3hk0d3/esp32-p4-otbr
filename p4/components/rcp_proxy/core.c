@@ -101,7 +101,11 @@ bool rcp_proxy_udp_lock_expire(rcp_proxy_udp_lock_t *lock, int64_t now_ms)
 bool rcp_proxy_udp_lock_offer(rcp_proxy_udp_lock_t *lock, const rcp_proxy_addr_t *src, int64_t now_ms)
 {
     rcp_proxy_udp_lock_expire(lock, now_ms);
-    if (lock->locked && !rcp_proxy_addr_eq(&lock->peer, src)) {
+    if (lock->barred && (now_ms < lock->bar_ms || now_ms - lock->bar_ms >= RCP_PROXY_UDP_BAR_MS)) {
+        lock->barred = false;
+    }
+    if ((lock->locked && !rcp_proxy_addr_eq(&lock->peer, src)) ||
+            (lock->barred && rcp_proxy_addr_eq(&lock->bar, src))) {
         lock->refused++;
         return false;
     }
@@ -114,6 +118,17 @@ bool rcp_proxy_udp_lock_offer(rcp_proxy_udp_lock_t *lock, const rcp_proxy_addr_t
 void rcp_proxy_udp_lock_kick(rcp_proxy_udp_lock_t *lock)
 {
     lock->locked = false;
+}
+
+void rcp_proxy_udp_lock_bar(rcp_proxy_udp_lock_t *lock, int64_t now_ms)
+{
+    if (!lock->locked) {
+        return;
+    }
+    lock->locked = false;
+    lock->barred = true;
+    lock->bar = lock->peer;
+    lock->bar_ms = now_ms;
 }
 
 int64_t rcp_proxy_udp_lock_deadline(const rcp_proxy_udp_lock_t *lock)
@@ -135,6 +150,31 @@ bool rcp_proxy_peer_new(rcp_proxy_peer_memo_t *m, const rcp_proxy_addr_t *peer)
     m->had = true;
     m->last = *peer;
     return fresh;
+}
+
+void rcp_proxy_replay_init(rcp_proxy_replay_t *r)
+{
+    r->active = false;
+    r->start_ms = 0;
+}
+
+void rcp_proxy_replay_start(rcp_proxy_replay_t *r, int64_t now_ms)
+{
+    r->active = true;
+    r->start_ms = now_ms;
+}
+
+void rcp_proxy_replay_done(rcp_proxy_replay_t *r)
+{
+    r->active = false;
+}
+
+bool rcp_proxy_replay_blocks(rcp_proxy_replay_t *r, int64_t now_ms)
+{
+    if (r->active && (now_ms < r->start_ms || now_ms - r->start_ms >= RCP_PROXY_REPLAY_MAX_MS)) {
+        r->active = false;
+    }
+    return r->active;
 }
 
 /* ---- connect target lookup ---- */
@@ -169,9 +209,12 @@ bool rcp_proxy_lookup_answer(rcp_proxy_lookup_t *l, uint32_t seq)
 
 /* ---- TCP accept rule ---- */
 
-rcp_proxy_accept_t rcp_proxy_accept(bool peer_connected, bool local_allowed, bool peer_allowed)
+rcp_proxy_accept_t rcp_proxy_accept(bool slot_taken, bool held_silent, bool local_allowed, bool peer_allowed)
 {
-    return peer_connected || !local_allowed || !peer_allowed ? RCP_PROXY_REFUSE : RCP_PROXY_TAKE;
+    if (!local_allowed || !peer_allowed || (slot_taken && !held_silent)) {
+        return RCP_PROXY_REFUSE;
+    }
+    return slot_taken ? RCP_PROXY_REPLACE : RCP_PROXY_TAKE;
 }
 
 /* ---- first bytes of a TCP client ---- */
@@ -220,11 +263,15 @@ static rcp_proxy_hold_act_t hold_judge(rcp_proxy_hold_t *h, bool timed_out)
     }
 }
 
-void rcp_proxy_hold_start(rcp_proxy_hold_t *h, int64_t now_ms)
+void rcp_proxy_hold_start(rcp_proxy_hold_t *h)
 {
     h->len = 0;
-    h->up = false;
-    h->deadline_ms = now_ms + RCP_PROXY_SNIFF_MS;
+    h->deadline_ms = -1; // no timer until the first byte: a silent client is never promoted
+}
+
+bool rcp_proxy_hold_silent(const rcp_proxy_hold_t *h)
+{
+    return h->len == 0;
 }
 
 size_t rcp_proxy_hold_room(const rcp_proxy_hold_t *h)
@@ -254,11 +301,6 @@ rcp_proxy_hold_act_t rcp_proxy_hold_tick(rcp_proxy_hold_t *h, int64_t now_ms)
 {
     if (h->deadline_ms < 0 || now_ms < h->deadline_ms) {
         return RCP_PROXY_HOLD_WAIT;
-    }
-    if (h->len == 0) {
-        h->up = true;
-        h->deadline_ms = -1; // until the first byte
-        return RCP_PROXY_HOLD_UP;
     }
     return hold_judge(h, true);
 }

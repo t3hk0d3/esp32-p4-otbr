@@ -45,8 +45,9 @@ typedef struct {
     void (*ready)(proxy_t *p, fd_set *rd, fd_set *wr);
     // Towards the peer: bytes (stream) or one datagram. ESP_ERR_INVALID_STATE when there is no peer to send to.
     esp_err_t (*send)(proxy_t *p, const uint8_t *d, size_t n);
-    // Drops the current peer (a kick).
-    void (*drop)(proxy_t *p);
+    // Drops the current peer: a kick, or (`cut`) a radio write that cut the peer's bytes part-way (RCP_PROXY_TX_END),
+    // after which its stream must not go on (TCP: disconnected anyway; UDP: its source barred RCP_PROXY_UDP_BAR_MS).
+    void (*drop)(proxy_t *p, bool cut);
 } rcp_proxy_adapter_t;
 
 extern const rcp_proxy_adapter_t rcp_proxy_adapter_tcp;
@@ -73,7 +74,7 @@ struct proxy {
     socklen_t dst_len;
     int64_t conn_deadline_ms; // TCP connect in progress: give up at
     // TCP listen: a client accepted whose first bytes are not judged yet (rcp_proxy_hold_t). Not the peer until they
-    // pass, or until it was silent RCP_PROXY_SNIFF_MS (hold.up: then the peer, state CONNECTED, its bytes still held).
+    // pass; while it has sent nothing, a new connection replaces it (rcp_proxy_accept).
     bool sniffing;
     rcp_proxy_hold_t hold;
     struct sockaddr_storage sniff_from;
@@ -82,6 +83,8 @@ struct proxy {
     rcp_proxy_udp_lock_t lock;
     rcp_proxy_refusal_t refusal; // UDP listen: the last source the access rules refused, and the refusals' log
     rcp_proxy_peer_memo_t memo; // the previous peer of this socket session (UDP: reset replay only for a new one)
+    rcp_proxy_replay_t replay;  // frame channel: the new session's replayed reset the peer's frames wait out
+    uint32_t replay_dropped;    // the peer's frames dropped while it ran (logged with the reset)
 
     // Buffers of the session (allocated when it opens).
     uint8_t *ring_buf; // TCP: radio -> peer bytes the socket has not taken yet

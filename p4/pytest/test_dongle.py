@@ -467,13 +467,27 @@ def test_unplug_during_rest_load(dut, base_url, dongle):
 
 
 def test_proxy_listen_tcp_latency(base_url, board_ip, dongle):
-    # rcp-proxy listening on TCP, On the dongle: a spinel PROP_VALUE_GET round trip through the proxy takes under 15 ms
-    # at the median, and the second client is refused while the first stays.
+    # rcp-proxy listening on TCP, On the dongle: a client that has sent nothing is not the peer and gives way to a new
+    # connection; a spinel PROP_VALUE_GET round trip through the proxy takes under 15 ms at the median, and the second
+    # client is refused while the first (which has sent) stays.
     assert put_channel(base_url, {"mode": "rcp-proxy"}, dongle).status_code == 200
     wait_proxy_state(base_url, dongle, "listening", PROXY_PEER_WAIT_S)
     port = proxy_state(base_url, dongle)["port"]
-    sock = connect(board_ip, port)
+    idle = connect(board_ip, port)  # an idle preconnect: held, never the peer
     try:
+        time.sleep(1)
+        assert proxy_state(base_url, dongle)["state"] == "listening"
+        sock = connect(board_ip, port)  # replaces the silent one
+        idle.settimeout(5)
+        try:
+            assert idle.recv(1) == b""
+        except ConnectionResetError:
+            pass
+    finally:
+        idle.close()
+    try:
+        sock.sendall(hdlc_frame(spinel_get(SPINEL_PROP_PROTOCOL_VERSION)))
+        read_frame(sock, header=SPINEL_HEADER_FLAG | 1)
         wait_proxy_state(base_url, dongle, "connected", PROXY_PEER_WAIT_S)
         second = connect(board_ip, port)
         second.settimeout(5)
@@ -672,7 +686,9 @@ def test_proxy_connect_refused_soak(base_url, board_ip, dongle):
     )
     wait_proxy_state(base_url, dongle, "listening", PROXY_PEER_WAIT_S)
     port = proxy_state(base_url, dongle)["port"]
-    with connect(board_ip, port):
+    with connect(board_ip, port) as sock:
+        # A client that has sent nothing is never the peer.
+        sock.sendall(hdlc_frame(spinel_get(SPINEL_PROP_PROTOCOL_VERSION)))
         wait_proxy_state(base_url, dongle, "connected", PROXY_PEER_WAIT_S)
 
 
@@ -754,8 +770,12 @@ def agent_container():
                 if ":" in AGENT_BOARD
                 else f"tcp:{AGENT_BOARD}:{port}"
             )
+        # socat dials first (retried: a new macvlan container's address is not usable at once, "No route to host") and
+        # makes the pty only once connected; the agent starts when the pty exists, so its spinel init never runs into
+        # an unconnected pty.
         script = (
-            f"socat pty,link={AGENT_TTY},raw,echo=0 {target} & sleep 2; "
+            f"socat {target},retry=20,interval=0.5 pty,link={AGENT_TTY},raw,echo=0 & "
+            f"i=0; while [ ! -e {AGENT_TTY} ] && [ $i -lt 100 ]; do sleep 0.2; i=$((i+1)); done; "
             f"exec otbr-agent --vendor-name=Test --model-name=Proxy -I wpan0 -B {backbone} "
             f"'spinel+hdlc+uart://{AGENT_TTY}?uart-baudrate=460800' 'trel://{backbone}'"
         )

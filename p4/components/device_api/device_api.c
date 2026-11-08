@@ -458,6 +458,7 @@ static esp_err_t metrics_get_handler(httpd_req_t *req)
         .slot = running_slot(),
         .rcp_version = bs.rcp_installed_known ? bs.rcp_installed : "",
         .rcp_compatible = bs.rcp_compatible,
+        .rcp_compatible_known = bs.rcp_compatible_known,
         .storage_ok = !bs.storage_degraded,
         .sniffer_active = ss.active,
         .sniffer_frames = ss.frames,

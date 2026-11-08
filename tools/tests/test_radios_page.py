@@ -346,9 +346,23 @@ class TestTable:
         assert r == "Thread runs on: ESP32-C6 (built-in)"
 
     def test_head_says_when_no_radio_runs_thread(self):
-        # On otbr_channel null: the chip reads "Thread runs on: no radio".
+        # On otbr_channel null: the chip reads "No radio in Thread mode".
         r = scenario(setup(SNAP, NO_RADIO) + "return t.el('radios-chip').textContent;")
-        assert r == "Thread runs on: no radio"
+        assert r == "No radio in Thread mode"
+
+    def test_head_warns_when_the_otbr_radio_is_unplugged(self):
+        # On NO_RADIO with Thread stored on the unplugged OllyZig: a warning "Thread on <label>: <reason>", never
+        # "Thread runs on".
+        status = {
+            "mode": "NO_RADIO",
+            "otbr_channel": OLLY["id"],
+            "fault_reason": "radio unplugged",
+        }
+        r = scenario(
+            setup(SNAP, status)
+            + "return [t.el('radios-chip').textContent, t.el('radios-chip').className];"
+        )
+        assert r == ["Thread on OllyZig CC2652P: radio unplugged", "chip chip-warn"]
 
     def test_unanswered_list_shows_the_stale_line(self):
         # On a failing GET: the stale line says so and the rows stay as they were.
@@ -1162,6 +1176,25 @@ class TestMoveSource:
 
 
 @needs_node
+class TestSaveFailureText:
+    """RadiosLogic.saveFailureText"""
+
+    def test_a_single_refused_put_gives_its_reason_alone(self):
+        # On the only PUT refused: the refusal's text, nothing about earlier steps.
+        r = logic_of(
+            "L.saveFailureText([{mode: 'off'}], [{status: 409, body: {error: 'mode_taken'}}])"
+        )
+        assert r == "Another radio already runs this mode."
+
+    def test_a_lost_connection_after_off_names_the_switch_off(self):
+        # On off accepted and the otbr PUT's connection lost: the radio was switched off, then the message.
+        r = logic_of(
+            "L.saveFailureText([{mode: 'off'}, {mode: 'otbr'}], [{status: 200, body: {}}, {status: 0, message: 'timeout'}])"
+        )
+        assert r.startswith("The radio was switched off") and r.endswith("timeout")
+
+
+@needs_node
 class TestTwoStepSave:
     """Both PUTs of a save: their replies, a refused second one, a lost connection"""
 
@@ -1188,6 +1221,33 @@ class TestTwoStepSave:
         assert r[0] is True
         assert "settings were saved" in r[1] and "mode change failed" in r[1]
         assert "another radio" in r[1].lower()
+
+    def test_otbr_refused_after_the_radio_was_switched_off_says_so(self):
+        # On a refused otbr PUT after the PUT off of a proxy radio went through: the dialog says the radio was switched
+        # off and why Thread did not start (the refusal's detail), never that settings were saved.
+        r = scenario(
+            setup()
+            + "t.put = (u, b) => b.mode === 'otbr' ? {status: 409, body: {error: 'probe_failed', detail: 'no spinel answer'}} : {status: 200, body: {}};"
+            + open_row(1)
+            + f"{card('otbr')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10);"
+            + "return [t.el('dlg').open, t.el('mMsg').textContent];"
+        )
+        assert r[0] is True
+        assert "switched off" in r[1] and "Thread did not start" in r[1]
+        assert "no spinel answer" in r[1]
+        assert "settings were saved" not in r[1]
+
+    def test_otbr_refused_after_settings_and_off_says_both(self):
+        # On settings and the PUT off saved, then otbr refused: the text says both happened and why Thread did not start.
+        r = scenario(
+            setup()
+            + "t.put = (u, b) => b.mode === 'otbr' ? {status: 409, body: {error: 'busy', detail: 'a move runs'}} : {status: 200, body: {}};"
+            + open_row(1)
+            + f"t.el('baudSel').value = '230400'; {card('otbr')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10);"
+            + "return t.el('mMsg').textContent;"
+        )
+        assert "settings were saved and the radio was switched off" in r
+        assert "a move runs" in r
 
     def test_list_is_read_again_after_a_refused_put(self):
         # On a refused PUT: the list is read again (the settings may have gone through).

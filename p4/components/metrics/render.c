@@ -131,7 +131,7 @@ static void render_info(metrics_writer_t *w, const metrics_device_t *d)
     }
     label_close(&s);
     label(&s, "rcp_version", d->rcp_version ? d->rcp_version : "");
-    label(&s, "rcp_compatible", d->rcp_compatible ? "true" : "false");
+    label(&s, "rcp_compatible", !d->rcp_compatible_known ? "unknown" : d->rcp_compatible ? "true" : "false");
     end_u64(&s, 1);
 }
 
