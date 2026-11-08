@@ -35,6 +35,8 @@ typedef struct {
 // A change of the layout above (or of a type in it) is a new blob version: the old blobs would be read wrongly.
 _Static_assert(sizeof(chan_blob_t) == 336, "chan_blob_t changed: bump BLOB_VERSION (and read the old one) first");
 
+#define C6_LABEL "ESP32-C6 (built-in)"
+
 static void blob_from_chan(const struct radio_mux_chan *ch, chan_blob_t *b)
 {
     memset(b, 0, sizeof(*b));
@@ -178,7 +180,7 @@ void mux_load_chans(void)
     chan_blob_t b;
 
     mux_chan_defaults(&g_mux.chans[0], RADIO_MUX_C6_ID, RADIO_MUX_KIND_C6); // listed by the owner task (c6_init)
-    snprintf(g_mux.chans[0].label, sizeof(g_mux.chans[0].label), "ESP32-C6 (built-in)");
+    snprintf(g_mux.chans[0].label, sizeof(g_mux.chans[0].label), "%s", C6_LABEL);
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
 
     if (err != ESP_OK) {
@@ -211,6 +213,9 @@ void mux_load_chans(void)
             mux_chan_defaults(ch, ids[i], RADIO_MUX_KIND_USB);
         }
         chan_from_blob(ch, &b);
+        if (c6) { // the C6's label is the firmware's: one stored by an older build never replaces it
+            snprintf(ch->label, sizeof(ch->label), "%s", C6_LABEL);
+        }
         ch->remembered = true;
     }
     nvs_close(nvs);
