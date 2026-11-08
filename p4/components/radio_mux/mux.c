@@ -28,6 +28,8 @@ static const char *TAG = "radio_mux";
 #define QUEUE_LEN 12
 #define DETECT_POLL_MS 10
 #define IDLE_POLL_MS 1000
+#define USB_DUE_POLL_MS 100 // while a USB close is retried or a transfer error waits for its reopen
+#define FULL_LOG_US (60LL * 1000 * 1000) // "channel list full" at most once a minute
 #define PRESENCE_POLL_US 1000000 // how often a device that is not open is checked for still being there
 #define DETECT_CHUNK 256
 #define EVQ_LEN (RADIO_MUX_POOL_SLOTS + 4) // frames hold a slot each, so control events always fit
@@ -205,6 +207,9 @@ static void refresh(mux_port_t *p)
         snprintf(ch->reason, sizeof(ch->reason), "not detected");
         break;
     }
+    if (ch->det_failed && ch->reason[0] == '\0' && ch->state != RADIO_MUX_STATE_STARTING) {
+        snprintf(ch->reason, sizeof(ch->reason), "%s", RADIO_MUX_DETECT_FAILED_REASON);
+    }
     mux_unlock();
 }
 
@@ -347,28 +352,44 @@ static void close_device(mux_port_t *p)
     ESP_LOGI(TAG, "%s: unplugged", ch->id);
 }
 
-static struct radio_mux_chan *evict_slot(void)
+// A free channel slot for a new USB device (radio_mux_evict_pick): an unused one, or the oldest unplugged channel in
+// mode off, which is forgotten. NULL (logged at most once a minute) when none can be had: the device is not listed.
+static struct radio_mux_chan *evict_slot(const char *id, bool for_unsupported)
 {
-    struct radio_mux_chan *oldest = NULL;
+    static int64_t full_log_us;
+    radio_mux_slot_view_t views[RADIO_MUX_CHANNELS_MAX - 1];
 
-    for (size_t i = 1; i < RADIO_MUX_CHANNELS_MAX; i++) {
-        struct radio_mux_chan *ch = &g_mux.chans[i];
+    for (size_t i = 1; i < RADIO_MUX_CHANNELS_MAX; i++) { // slot 0 is the C6
+        const struct radio_mux_chan *ch = &g_mux.chans[i];
 
-        if (!ch->used) {
-            return ch;
-        }
-        if (!ch->present && ch->port->chan != ch && (!oldest || ch->last_seen < oldest->last_seen)) {
-            oldest = ch;
-        }
+        views[i - 1] = (radio_mux_slot_view_t) {
+            .used = ch->used, .present = ch->present, .on_port = ch->used && ch->port && ch->port->chan == ch,
+            .remembered = ch->remembered,
+            .mode = ch->mode, .last_seen = ch->last_seen,
+        };
     }
-    if (oldest) {
-        ESP_LOGW(TAG, "%s forgotten: room for a new channel", oldest->id);
-        mux_erase_chan(oldest);
+    const size_t n = RADIO_MUX_CHANNELS_MAX - 1;
+    const size_t pick = radio_mux_evict_pick(views, n, for_unsupported);
+
+    if (pick == n) {
+        const int64_t now = esp_timer_get_time();
+
+        if (full_log_us == 0 || now - full_log_us >= FULL_LOG_US) {
+            full_log_us = now;
+            ESP_LOGW(TAG, "%s not listed: the channel list is full (forget an unplugged channel to make room)", id);
+        }
+        return NULL;
+    }
+    struct radio_mux_chan *ch = &g_mux.chans[pick + 1];
+
+    if (ch->used) {
+        ESP_LOGW(TAG, "%s forgotten: room for a new channel", ch->id);
+        mux_erase_chan(ch);
         mux_lock();
-        oldest->used = false;
+        ch->used = false;
         mux_unlock();
     }
-    return oldest;
+    return ch;
 }
 
 // The channel record of a device: found by id, or a new one (defaults, mode off).
@@ -382,7 +403,7 @@ static struct radio_mux_chan *chan_for_dev(const mux_usb_dev_t *dev)
     if (ch) {
         return ch;
     }
-    ch = evict_slot();
+    ch = evict_slot(id, false);
     if (!ch) {
         return NULL;
     }
@@ -413,8 +434,7 @@ static void start_probe(mux_port_t *p)
     size_t tx_n;
     radio_mux_fw_record_t unused;
 
-    if (!ch) {
-        ESP_LOGE(TAG, "%04x:%04x: no room in the channel list", p->pending.vid, p->pending.pid);
+    if (!ch) { // the channel list is full (evict_slot logged it)
         feed(p, RADIO_MUX_AEV_UNPLUG); // back to ABSENT through CLOSING; nothing is open
         return;
     }
@@ -423,6 +443,7 @@ static void start_probe(mux_port_t *p)
     p->warn[0] = '\0';
     mux_lock();
     p->chan = ch;
+    ch->det_failed = false;
     fill_usb(ch, &p->dev);
     ch->present = true;
     ch->supported = true;
@@ -448,7 +469,17 @@ static void detect_done(mux_port_t *p, const radio_mux_fw_record_t *rec)
 {
     struct radio_mux_chan *ch = p->chan;
 
+    if (radio_mux_detect_keeps_record(ch->fw.rec.type, rec->type)) {
+        mux_lock();
+        ch->det_failed = true;
+        mux_unlock();
+        ESP_LOGW(TAG, "%s: the firmware detection found nothing: keeping the earlier record (%s %s)", ch->id,
+                 radio_mux_fw_name(ch->fw.rec.type), ch->fw.rec.version);
+        feed(p, RADIO_MUX_AEV_DETECT_DONE);
+        return;
+    }
     mux_lock();
+    ch->det_failed = false;
     ch->fw.rec = *rec;
     ch->fw.source = RADIO_MUX_FW_SRC_PROBE;
     ch->fw.at = mux_now_epoch();
@@ -839,10 +870,8 @@ static void handle_commit_otbr(mux_call_t *call)
         from->mode = RADIO_MUX_MODE_OFF;
     }
     mux_unlock();
-    call->err = mux_store_chan(to);
-    if (call->err == ESP_OK && from && from != to) {
-        call->err = mux_store_chan(from);
-    }
+    // Both in one NVS handle and commit; should a reset still cut them apart, the load keeps the first otbr channel.
+    call->err = mux_store_chans(to, from);
     if (call->err != ESP_OK) {
         mux_lock();
         to->mode = to_old;
@@ -850,7 +879,7 @@ static void handle_commit_otbr(mux_call_t *call)
             from->mode = from_old;
         }
         mux_unlock();
-        mux_store_chan(to); // best effort: back to what was stored
+        mux_store_chans(to, from); // best effort: back to what was stored
         return;
     }
     if (from && from != to) {
@@ -892,7 +921,7 @@ static void list_unsupported(const mux_usb_dev_t *dev)
     struct radio_mux_chan *ch = find_chan(id);
 
     if (!ch) {
-        ch = evict_slot();
+        ch = evict_slot(id, true);
         if (!ch) {
             return;
         }
@@ -1154,28 +1183,25 @@ static void handle_forget(mux_call_t *call)
     }
 }
 
-// A reset: a dongle is closed and reopened over USB, then RESET; GONE (detach) when it does not reopen, or when this is
-// the RADIO_MUX_USB_DEAD_RESETS-th reset in a row with nothing received in between (closed, fault "no answer after 3
-// resets"; an unplug or a PUT of the mode opens it again). The C6 gets its reset GPIO pulse.
-static void handle_reset(radio_mux_chan_t *h)
+// A leased channel whose device did not come back from a reopen: the lease ends as an unplug ends it (GONE to the
+// lease holder, which then fails its start and gives the lease back); the channel shows p->fault.
+static void lease_lost(mux_port_t *p)
 {
-    mux_port_t *p;
-    uint32_t gen;
-    struct radio_mux_chan *ch = mux_handle_chan(h, &p, &gen);
+    p->leased = false;
+    atomic_store(&p->tx_ok, false);
+    mux_set_rx(p, MUX_RX_DISCARD);
+    mux_post_ctl(p, RADIO_MUX_EV_GONE);
+    refresh(p);
+}
 
-    if (!ch || p->chan != ch || p->att.state != RADIO_MUX_AS_ATTACHED ||
-            !radio_mux_handle_current(gen, atomic_load(&p->att_gen))) {
-        return; // a channel that is not attached has nobody to tell; an earlier attach's reset is not the current one's
-    }
-    if (p->kind == RADIO_MUX_KIND_C6) { // the reset GPIO pulse; the C6 task posts RESET when the RCP answers
-        if (c6_transport_reset() == ESP_OK) {
-            taskENTER_CRITICAL(&p->lock);
-            p->ctr.resets++;
-            taskEXIT_CRITICAL(&p->lock);
-            ESP_LOGI(TAG, "%s: reset", ch->id);
-        }
-        return;
-    }
+// The USB part of a reset (a consumer's or a lease holder's request, or a transfer error that stopped the device's
+// polling): close, reopen, RESET to whoever holds the channel. GONE (detach, or the end of a lease) when it does not
+// reopen, or when this is the RADIO_MUX_USB_DEAD_RESETS-th reset in a row with nothing received in between (closed,
+// fault "no answer after 3 resets"; an unplug or a PUT of the mode opens it again).
+static void usb_reset(mux_port_t *p, const char *what)
+{
+    struct radio_mux_chan *ch = p->chan;
+
     xSemaphoreTake(p->rx_lock, portMAX_DELAY);
     const bool give_up = radio_mux_reset_count_request(&p->reset_count);
     xSemaphoreGive(p->rx_lock);
@@ -1186,11 +1212,13 @@ static void handle_reset(radio_mux_chan_t *h)
     if (give_up) {
         snprintf(p->fault, sizeof(p->fault), "%s", RADIO_MUX_USB_DEAD_REASON);
         ESP_LOGW(TAG, "%s: %s: closed (unplug it or PUT its mode to open it again)", ch->id, p->fault);
-        feed(p, RADIO_MUX_AEV_MODE_SET); // not open: the machine detaches the consumer (GONE), the channel shows fault
-        return;
     }
-    if (!open_dev(p, mux_eff_baud(ch))) {
-        feed(p, RADIO_MUX_AEV_MODE_SET); // not open: the machine detaches the consumer (GONE)
+    if (give_up || !open_dev(p, mux_eff_baud(ch))) {
+        if (p->leased) {
+            lease_lost(p);
+        } else {
+            feed(p, RADIO_MUX_AEV_MODE_SET); // not open: the machine detaches the consumer (GONE), shows the fault
+        }
         return;
     }
     taskENTER_CRITICAL(&p->lock);
@@ -1198,8 +1226,84 @@ static void handle_reset(radio_mux_chan_t *h)
     taskEXIT_CRITICAL(&p->lock);
     mux_set_rx(p, p->tx_frames ? MUX_RX_FRAMES : MUX_RX_RAW);
     atomic_store(&p->tx_ok, true);
-    mux_post_ctl(p, RADIO_MUX_EV_RESET);
-    ESP_LOGI(TAG, "%s: reopened (reset)", ch->id);
+    mux_post_ctl(p, RADIO_MUX_EV_RESET); // to the consumer's queue, or the lease's (where its frames go)
+    ESP_LOGI(TAG, "%s: reopened (%s)", ch->id, what);
+}
+
+// A reset through a consumer's or a lease holder's handle (radio_mux_reset_applies): a dongle is closed and reopened
+// over USB (usb_reset), the C6 gets its reset GPIO pulse.
+static void handle_reset(radio_mux_chan_t *h)
+{
+    mux_port_t *p;
+    uint32_t gen;
+    struct radio_mux_chan *ch = mux_handle_chan(h, &p, &gen);
+
+    if (!ch || !radio_mux_reset_applies(p->att.state, p->leased, p->chan == ch,
+                                        radio_mux_handle_current(gen, atomic_load(&p->att_gen)))) {
+        return; // a channel that is not attached or leased has nobody to tell; an earlier attach's reset is not ours
+    }
+    if (p->kind == RADIO_MUX_KIND_C6) { // the reset GPIO pulse; the C6 task posts RESET when the RCP answers
+        if (c6_transport_reset() == ESP_OK) {
+            taskENTER_CRITICAL(&p->lock);
+            p->ctr.resets++;
+            taskEXIT_CRITICAL(&p->lock);
+            ESP_LOGI(TAG, "%s: reset", ch->id);
+        }
+        return;
+    }
+    usb_reset(p, "reset");
+}
+
+// Owner loop: a CDC_ACM_HOST_ERROR flagged on the open device (its polling stopped) reopens it, at most once per
+// RADIO_MUX_USB_ERROR_REOPEN_US (a later flag waits for the loop's next pass). Attached or leased: as a reset (RESET
+// to its holder, counted by the dead-reset rule, which a frame received afterwards clears). Open with nobody on it:
+// closed and reopened. During the detection and its reopen: nothing (that reopen follows anyway).
+static void usb_error_check(mux_port_t *p)
+{
+    const int64_t now = esp_timer_get_time();
+
+    if (!radio_mux_usb_error_due(atomic_load(&p->usb_error), p->usb_error_us, now)) {
+        return;
+    }
+    atomic_store(&p->usb_error, false);
+    if (!usb_transport_is_open() || !p->chan || p->att.state == RADIO_MUX_AS_PROBING ||
+            p->att.state == RADIO_MUX_AS_REOPENING) {
+        return;
+    }
+    p->usb_error_us = now;
+    ESP_LOGW(TAG, "%s: a USB transfer error stopped the device's polling: reopening", p->chan->id);
+    if (p->att.state == RADIO_MUX_AS_ATTACHED || p->leased) {
+        usb_reset(p, "USB transfer error");
+        return;
+    }
+    mux_set_rx(p, MUX_RX_DISCARD);
+    usb_transport_close(p);
+    open_dev(p, mux_eff_baud(p->chan));
+    refresh(p);
+}
+
+// Owner loop: a USB close that failed is retried; once it closes, a channel that could not open because of it opens
+// (as a PUT of its mode would); when the retries are spent, its channel shows the fault.
+static void usb_close_check(mux_port_t *p)
+{
+    const radio_mux_close_act_t act = usb_transport_close_retry();
+
+    if (act == RADIO_MUX_CLOSE_GAVE_UP && p->chan && !usb_transport_is_open()) {
+        snprintf(p->fault, sizeof(p->fault), "%s", RADIO_MUX_USB_CLOSE_FAILED_REASON);
+        if (p->att.state == RADIO_MUX_AS_ATTACHED) {
+            feed(p, RADIO_MUX_AEV_MODE_SET); // not open: detached (GONE)
+        }
+        refresh(p);
+        return;
+    }
+    if (act != RADIO_MUX_CLOSE_DONE || !p->chan || usb_transport_is_open() || p->att.state != RADIO_MUX_AS_IDLE ||
+            p->leased || strcmp(p->fault, RADIO_MUX_USB_CLOSE_PENDING_REASON) != 0) {
+        return;
+    }
+    if (open_dev(p, mux_eff_baud(p->chan))) {
+        feed(p, RADIO_MUX_AEV_MODE_SET); // open again: the stored mode's consumer attaches
+    }
+    refresh(p);
 }
 
 static void handle_note_fw(radio_mux_chan_t *h, const radio_mux_fw_record_t *fw)
@@ -1241,6 +1345,9 @@ static void handle(const mux_msg_t *m)
         break;
     case MUX_MSG_GONE:
         on_gone(m->hdl);
+        break;
+    case MUX_MSG_USB_ERROR: // a wakeup: the flag says what happened
+        usb_error_check(&g_mux.usb);
         break;
     case MUX_MSG_SET:
         handle_set(m->call);
@@ -1337,8 +1444,10 @@ static void owner_task(void *arg)
     c6_init();
     for (;;) {
         const bool probing = g_mux.usb.att.state == RADIO_MUX_AS_PROBING;
+        const bool usb_due = usb_transport_close_pending() || atomic_load(&g_mux.usb.usb_error);
+        const int wait_ms = probing ? DETECT_POLL_MS : usb_due ? USB_DUE_POLL_MS : IDLE_POLL_MS;
 
-        if (xQueueReceive(g_mux.queue, &m, WAIT_TICKS(probing ? DETECT_POLL_MS : IDLE_POLL_MS)) == pdTRUE) {
+        if (xQueueReceive(g_mux.queue, &m, WAIT_TICKS(wait_ms)) == pdTRUE) {
             handle(&m);
             while (xQueueReceive(g_mux.queue, &m, 0) == pdTRUE) {
                 handle(&m);
@@ -1348,6 +1457,8 @@ static void owner_task(void *arg)
             detect_step(&g_mux.usb);
         }
         check_presence(&g_mux.usb);
+        usb_error_check(&g_mux.usb);
+        usb_close_check(&g_mux.usb);
     }
 }
 

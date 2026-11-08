@@ -53,6 +53,10 @@ static bool s_host_up;          // owner only
 static cdc_acm_dev_hdl_t s_hdl; // written by the owner only (under the port's tx_lock), read by senders under it
 static radio_mux_driver_t s_driver;
 static uint32_t s_baud; // the line speed set on the open device (sizes the TX timeout)
+// Owner only: a device whose cdc_acm_host_close failed (the driver keeps it listed, half closed). Its handle is kept
+// and closed again (usb_transport_close_retry); while it is, nothing else is opened.
+static cdc_acm_dev_hdl_t s_close_hdl;
+static radio_mux_close_retry_t s_close_retry;
 
 /* ---- callbacks (USB host / CDC driver task context) ---- */
 
@@ -172,9 +176,17 @@ static void event_cb(const cdc_acm_host_dev_event_data_t *event, void *ctx)
         }
         break;
     }
-    case CDC_ACM_HOST_ERROR:
+    case CDC_ACM_HOST_ERROR: {
+        // A bulk IN or notification transfer failed: the driver does not resubmit it, so the device's polling has
+        // stopped. The owner reopens the device (radio_mux's USB error check); one message per flagged error.
+        const mux_msg_t m = {.type = MUX_MSG_USB_ERROR};
+
         ESP_LOGW(TAG, "CDC error %d", event->data.error);
+        if (!atomic_exchange(&p->usb_error, true) && !mux_post(&m)) {
+            ESP_LOGW(TAG, "USB error message lost: queue full (the owner's poll finds the flag)");
+        }
         break;
+    }
     case CDC_ACM_HOST_VENDOR_NOTIFICATION: // other drivers: ignored
         if (p->dev.driver == RADIO_MUX_DRV_CH34X) {
             ch34x_status(p, event->data.vendor_notification.data, event->data.vendor_notification.len);
@@ -355,6 +367,16 @@ esp_err_t usb_transport_open(mux_port_t *p, const mux_usb_dev_t *dev, uint32_t b
         snprintf(err, cap, "%s", s_host_up ? "a device is already open" : "USB host not running");
         return ESP_ERR_INVALID_STATE;
     }
+    if (s_close_hdl && s_close_retry.gave_up && cdc_acm_host_close(s_close_hdl) == ESP_OK) {
+        ESP_LOGI(TAG, "the device whose close failed is closed now");
+        s_close_hdl = NULL;
+        s_close_retry.gave_up = false;
+    }
+    if (s_close_hdl) {
+        snprintf(err, cap, "%s", s_close_retry.gave_up ? RADIO_MUX_USB_CLOSE_FAILED_REASON :
+                 RADIO_MUX_USB_CLOSE_PENDING_REASON);
+        return ESP_ERR_INVALID_STATE;
+    }
     if (alloc_bufs(p) != ESP_OK) {
         snprintf(err, cap, "out of memory for the USB radio buffers");
         return ESP_ERR_NO_MEM;
@@ -371,6 +393,7 @@ esp_err_t usb_transport_open(mux_port_t *p, const mux_usb_dev_t *dev, uint32_t b
     esp_err_t ret;
 
     atomic_store(&p->dev_gone, false);
+    atomic_store(&p->usb_error, false); // an error of an earlier device is not this one's
     switch (dev->driver) {
     case RADIO_MUX_DRV_CP210X:
         ret = cp210x_vcp_open(dev->pid, DATA_INTERFACE, &cfg, &hdl);
@@ -411,7 +434,10 @@ esp_err_t usb_transport_open(mux_port_t *p, const mux_usb_dev_t *dev, uint32_t b
     if (addr != dev->addr) {
         snprintf(err, cap, "an identical device at address %u answered the open (one at a time)", addr);
         ESP_LOGW(TAG, "%04x:%04x at %u: %s", dev->vid, dev->pid, dev->addr, err);
-        cdc_acm_host_close(hdl);
+        if (cdc_acm_host_close(hdl) != ESP_OK) {
+            s_close_hdl = hdl; // closed again by usb_transport_close_retry
+            radio_mux_close_retry_start(&s_close_retry, esp_timer_get_time() / 1000);
+        }
         return ESP_ERR_INVALID_STATE;
     }
     xSemaphoreTake(p->tx_lock, portMAX_DELAY);
@@ -454,9 +480,42 @@ void usb_transport_close(mux_port_t *p)
     xSemaphoreGive(p->tx_lock);
     const esp_err_t err = cdc_acm_host_close(hdl);
 
+    atomic_store(&p->usb_error, false); // nothing is open to reopen
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "cdc_acm_host_close: %s", esp_err_to_name(err));
+        // The driver kept the device (a transfer still in flight): the handle is kept and closed again in the
+        // background; the port opens nothing until then.
+        ESP_LOGW(TAG, "cdc_acm_host_close: %s: closing again in the background", esp_err_to_name(err));
+        s_close_hdl = hdl;
+        radio_mux_close_retry_start(&s_close_retry, esp_timer_get_time() / 1000);
     }
+}
+
+bool usb_transport_close_pending(void)
+{
+    return s_close_hdl != NULL && s_close_retry.pending;
+}
+
+radio_mux_close_act_t usb_transport_close_retry(void)
+{
+    const int64_t now = esp_timer_get_time() / 1000;
+    const radio_mux_close_act_t due = s_close_hdl ? radio_mux_close_retry_due(&s_close_retry, now) :
+                                      RADIO_MUX_CLOSE_IDLE;
+
+    if (due != RADIO_MUX_CLOSE_TRY) {
+        return due;
+    }
+    const esp_err_t err = cdc_acm_host_close(s_close_hdl);
+    const radio_mux_close_act_t act = radio_mux_close_retry_result(&s_close_retry, esp_timer_get_time() / 1000,
+                                                                   err == ESP_OK);
+
+    if (act == RADIO_MUX_CLOSE_DONE) {
+        s_close_hdl = NULL;
+        ESP_LOGI(TAG, "the device whose close failed is closed now");
+    } else if (act == RADIO_MUX_CLOSE_GAVE_UP) {
+        ESP_LOGE(TAG, "closing the USB device failed %d times (%s): given up, the port opens nothing until it closes",
+                 RADIO_MUX_CLOSE_RETRIES, esp_err_to_name(err));
+    }
+    return act;
 }
 
 bool usb_transport_is_open(void)

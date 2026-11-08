@@ -825,3 +825,94 @@ bool radio_mux_handle_current(uint32_t gen, uint32_t current)
 {
     return current != 0 && gen == current;
 }
+
+void radio_mux_close_retry_start(radio_mux_close_retry_t *r, int64_t now_ms)
+{
+    r->pending = true;
+    r->gave_up = false;
+    r->failures = 0;
+    r->next_ms = now_ms + RADIO_MUX_CLOSE_RETRY_MS;
+}
+
+radio_mux_close_act_t radio_mux_close_retry_due(const radio_mux_close_retry_t *r, int64_t now_ms)
+{
+    if (!r->pending) {
+        return RADIO_MUX_CLOSE_IDLE;
+    }
+    return now_ms >= r->next_ms ? RADIO_MUX_CLOSE_TRY : RADIO_MUX_CLOSE_WAIT;
+}
+
+radio_mux_close_act_t radio_mux_close_retry_result(radio_mux_close_retry_t *r, int64_t now_ms, bool closed)
+{
+    if (closed) {
+        r->pending = false;
+        r->gave_up = false;
+        r->failures = 0;
+        return RADIO_MUX_CLOSE_DONE;
+    }
+    if (++r->failures >= RADIO_MUX_CLOSE_RETRIES) {
+        r->pending = false;
+        r->gave_up = true;
+        return RADIO_MUX_CLOSE_GAVE_UP;
+    }
+    r->next_ms = now_ms + RADIO_MUX_CLOSE_RETRY_MS;
+    return RADIO_MUX_CLOSE_WAIT;
+}
+
+bool radio_mux_usb_error_due(bool flagged, int64_t last_us, int64_t now_us)
+{
+    if (!flagged) {
+        return false;
+    }
+    return last_us == 0 || now_us < last_us || now_us - last_us >= RADIO_MUX_USB_ERROR_REOPEN_US;
+}
+
+bool radio_mux_reset_applies(radio_mux_attach_state_t state, bool leased, bool on_port, bool current)
+{
+    return on_port && current && (state == RADIO_MUX_AS_ATTACHED || leased);
+}
+
+size_t radio_mux_evict_pick(const radio_mux_slot_view_t *slots, size_t n, bool for_unsupported)
+{
+    size_t pick = n;
+
+    for (size_t i = 0; i < n; i++) {
+        const radio_mux_slot_view_t *s = &slots[i];
+
+        if (!s->used) {
+            return i;
+        }
+        if (s->present || s->on_port || s->mode != RADIO_MUX_MODE_OFF || (for_unsupported && s->remembered)) {
+            continue;
+        }
+        if (pick == n || s->last_seen < slots[pick].last_seen) {
+            pick = i;
+        }
+    }
+    return pick;
+}
+
+size_t radio_mux_otbr_dedupe(radio_mux_mode_t *modes, bool *changed, size_t n)
+{
+    bool seen = false;
+    size_t count = 0;
+
+    for (size_t i = 0; i < n; i++) {
+        changed[i] = false;
+        if (modes[i] != RADIO_MUX_MODE_OTBR) {
+            continue;
+        }
+        if (seen) {
+            modes[i] = RADIO_MUX_MODE_OFF;
+            changed[i] = true;
+            count++;
+        }
+        seen = true;
+    }
+    return count;
+}
+
+bool radio_mux_detect_keeps_record(radio_mux_fw_t stored, radio_mux_fw_t detected)
+{
+    return detected == RADIO_MUX_FW_UNKNOWN && stored != RADIO_MUX_FW_UNKNOWN;
+}

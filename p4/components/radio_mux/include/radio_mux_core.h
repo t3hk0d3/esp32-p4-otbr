@@ -301,6 +301,77 @@ bool radio_mux_reset_count_request(radio_mux_reset_count_t *c);
 // Something was received from the device, or a new attach starts: the count starts again from 0.
 void radio_mux_reset_count_clear(radio_mux_reset_count_t *c);
 
+// A USB close that failed (the CDC driver could not release the device: a transfer still in flight) leaves the device
+// half closed; its handle is kept and closed again every RADIO_MUX_CLOSE_RETRY_MS, at most RADIO_MUX_CLOSE_RETRIES
+// times (about 3 s), before the mux gives up and shows the channel in fault with RADIO_MUX_USB_CLOSE_FAILED_REASON.
+// While such a close is pending, the port opens nothing.
+#define RADIO_MUX_CLOSE_RETRY_MS 300
+#define RADIO_MUX_CLOSE_RETRIES 10
+#define RADIO_MUX_USB_CLOSE_PENDING_REASON "the previous USB close is still pending"
+#define RADIO_MUX_USB_CLOSE_FAILED_REASON "USB close failed"
+
+typedef enum {
+    RADIO_MUX_CLOSE_IDLE,    // no close pending
+    RADIO_MUX_CLOSE_WAIT,    // pending: the next try is not due yet
+    RADIO_MUX_CLOSE_TRY,     // pending: close again now, then report the result
+    RADIO_MUX_CLOSE_DONE,    // the close succeeded: nothing pending any more
+    RADIO_MUX_CLOSE_GAVE_UP, // the last try failed: no more tries (reported once)
+} radio_mux_close_act_t;
+
+typedef struct {
+    bool pending;
+    bool gave_up;     // the retries are spent; the handle stays (it cannot be freed)
+    uint8_t failures; // failed retries so far
+    int64_t next_ms;  // when the next try is due
+} radio_mux_close_retry_t;
+
+// A close failed at now_ms: the first retry is due RADIO_MUX_CLOSE_RETRY_MS later.
+void radio_mux_close_retry_start(radio_mux_close_retry_t *r, int64_t now_ms);
+// What to do at now_ms: IDLE (nothing pending, or given up), WAIT or TRY.
+radio_mux_close_act_t radio_mux_close_retry_due(const radio_mux_close_retry_t *r, int64_t now_ms);
+// The result of a TRY: DONE (nothing pending), WAIT (the next try RADIO_MUX_CLOSE_RETRY_MS later) or, after the
+// RADIO_MUX_CLOSE_RETRIES-th failure, GAVE_UP (once; later calls of _due say IDLE).
+radio_mux_close_act_t radio_mux_close_retry_result(radio_mux_close_retry_t *r, int64_t now_ms, bool closed);
+
+// A CDC_ACM_HOST_ERROR on the open device (a bulk IN or notification transfer failed: the driver stopped polling it)
+// is answered by a reopen, at most one per RADIO_MUX_USB_ERROR_REOPEN_US per port. Whether a flagged error is handled
+// now: flagged, and no reopen for an error yet (last_us 0) or the last one at least the period ago (a clock that went
+// backwards counts as due).
+#define RADIO_MUX_USB_ERROR_REOPEN_US 1000000
+bool radio_mux_usb_error_due(bool flagged, int64_t last_us, int64_t now_us);
+
+// Whether a reset through a handle is carried out: the handle's channel is on its transport (on_port), the handle is
+// the transport's current attach or lease (current), and the channel is attached to a consumer or leased for OTBR (a
+// move's or start's target: its RESET goes to the lease holder's queue, where its frames go).
+bool radio_mux_reset_applies(radio_mux_attach_state_t state, bool leased, bool on_port, bool current);
+
+// A USB channel slot as the eviction sees it (radio_mux_evict_pick).
+typedef struct {
+    bool used;
+    bool present;
+    bool on_port;    // the transport's current channel (open, probing or closing)
+    bool remembered; // stored in NVS
+    radio_mux_mode_t mode; // the stored mode
+    int64_t last_seen;
+} radio_mux_slot_view_t;
+
+// Which of n USB channel slots a new device takes: the first unused one; else the unplugged one seen longest ago (not
+// present, not on the transport) whose stored mode is off (a channel stored in otbr, rcp-proxy or ziggurat is never
+// forgotten); for an unsupported device (for_unsupported: it is never stored), only a slot that is not remembered
+// either. n when no slot can be had: the new device is not listed.
+size_t radio_mux_evict_pick(const radio_mux_slot_view_t *slots, size_t n, bool for_unsupported);
+
+// OTBR runs on one channel: of stored modes in slot order (the C6 first), the first otbr stays and every later otbr
+// becomes off (changed[i] set for it, cleared for the others). Returns how many changed. Repairs a move whose two
+// stores were cut apart (a reset between them).
+size_t radio_mux_otbr_dedupe(radio_mux_mode_t *modes, bool *changed, size_t n);
+
+// Whether a detection that found `detected` keeps the channel's record of `stored` instead: a detection that found
+// nothing (unknown) never overwrites a known firmware (the RCP may only have been slow to boot); any known result
+// replaces the record.
+bool radio_mux_detect_keeps_record(radio_mux_fw_t stored, radio_mux_fw_t detected);
+#define RADIO_MUX_DETECT_FAILED_REASON "the last firmware detection found nothing: the earlier record is kept"
+
 // "idle", "starting", "running", "fault", "busy"; NULL for anything else.
 const char *radio_mux_state_name(radio_mux_state_t state);
 // "probe", "passive"; NULL for NONE.
