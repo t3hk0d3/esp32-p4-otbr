@@ -1407,6 +1407,9 @@ static void handle(const mux_msg_t *m)
         mux_port_t *p = &g_mux.usb;
 
         if (p->chan && usb_transport_is_open() && radio_mux_reset_applies(p->att.state, p->leased, true, true)) {
+            // A deliberate reopen from the console is not an unanswered reset: it must not trip the dead-reset rule
+            // (tests reopen back to back under traffic).
+            radio_mux_reset_count_clear(&p->reset_count);
             usb_reset(p, "test usb_reopen"); // a failed reopen detaches (GONE) or ends the lease, as a reset's does
         } else {
             ESP_LOGW(TAG, "test: usb_reopen ignored: no dongle attached or leased");
