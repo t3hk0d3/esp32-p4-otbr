@@ -1,9 +1,9 @@
 # Channel/mode orchestrator: channels, mode instances and one orchestrator: design
 
-Status: approved by the user and reviewed by the Zigbee session, 2026-11-08. The model was agreed with the user in a brainstorm on 2026-11-08, after PR #39
-(radio channel mux) and PR #40 (Zigbee mode); both are merged (master dd5da30). Order: the user reviews this design,
-then the Zigbee session (it asked to, for section 4.7 and Zigbee's reinit answer), then the plan is written. Branch
-`feat/channel-orchestrator`, one PR. It replaces parts of
+Status: approved by the user and reviewed by the Zigbee session, 2026-11-08. The model was agreed with the user in a
+brainstorm on 2026-11-08, after PR #39 (radio channel mux) and PR #40 (Zigbee mode); both are merged (master dd5da30).
+Order: the user reviews this design, then the Zigbee session (it asked to, for section 4.7 and Zigbee's reinit answer),
+then the plan is written. Branch `feat/channel-orchestrator`, one PR. It replaces parts of
 `2026-11-06-radio-channel-mux-design.md` (section 3: "Modes and rules", "OTBR mode", "Board mode, faults and status")
 and changes how `2026-11-06-zigbee-mode-design.md`'s consumer is driven. Everything else in those designs stands.
 
