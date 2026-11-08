@@ -169,16 +169,6 @@ void mode_fsm_on_rcp_failure(mode_fsm_t *fsm);
 esp_err_t mode_fsm_reset_rcp(mode_fsm_t *fsm);
 
 /**
- * Result of a maintenance of the C6 (br_core's run_maintenance, after the work ran): `job_err` is the push or the ROM
- * recovery, `restart_err` the OpenThread start on the C6 that follows. A firmware push reports its own error first; a
- * push that worked followed by a failed restart is RCP_SYNC_ERR_RESTART (the image is installed, so a retry of the push
- * cannot help). A ROM recovery reports only its own result: the restart after it fails when the C6 has no RCP firmware
- * (the normal outcome of a recovery), and that state is in the status (RADIO_FAULT "no rcp firmware"), not an error of the recovery. A push of
- * c6_installer.bin through ESP-Hosted leaves the same state and counts as base-only too (`base_only` true for both).
- */
-esp_err_t mode_fsm_radio_job_result(bool base_only, esp_err_t job_err, esp_err_t restart_err);
-
-/**
  * The board mode at boot from the channel stored in otbr (NULL: none). The C6: true, the mode stays STARTING while
  * its boot steps run (the orchestrator then binds Thread to it, or tells it why it cannot). No channel or a dongle:
  * NO_RADIO (no fault) and false; a dongle starts when it is bound (mode_fsm_on_channel_back).
@@ -264,6 +254,13 @@ br_core_mode_t mode_fsm_mode_for(const mode_fsm_view_t *v, char *reason, size_t 
 esp_err_t mode_fsm_reinit_verdict(br_core_mode_t mode);
 
 /**
+ * Why Thread refuses a reinit request, as today's texts: "OpenThread is being moved to another radio" while a move
+ * runs (`moving`), "a capture is running" in SNIFFER, "the border router is starting" in STARTING; NULL when it does
+ * not refuse. Pure.
+ */
+const char *mode_fsm_reinit_refusal(br_core_mode_t mode, bool moving);
+
+/**
  * REINIT (maintenance wants Thread's channel): refused with ESP_ERR_INVALID_STATE in SNIFFER and STARTING (nothing
  * touched, mode_fsm_reinit_verdict). Otherwise STARTING, then OpenThread stopped after its sessions drained (ot_stop):
  * a drain timeout puts the mode back and returns MODE_FSM_ERR_DRAIN_TIMEOUT (nothing stopped). ESP_OK: OpenThread is
@@ -299,8 +296,6 @@ bool mode_fsm_inbox_take_bind(mode_fsm_inbox_t *box, radio_mux_input_t *out);
 void mode_fsm_inbox_let_go(mode_fsm_inbox_t *box, uint32_t req_seq);
 /** The binding input was acted on elsewhere (a move's commit): it is taken. The request is left as it is. */
 void mode_fsm_inbox_handled(mode_fsm_inbox_t *box);
-/** Whether either slot holds an input not taken yet. */
-bool mode_fsm_inbox_pending(const mode_fsm_inbox_t *box);
 
 #ifdef __cplusplus
 }

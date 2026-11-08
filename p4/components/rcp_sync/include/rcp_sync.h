@@ -124,7 +124,7 @@ bool rcp_sync_jumper_present(void);
  * is erased, the embedded updater is written to `test`, each region verified (MD5) with one retry. No RCP firmware is
  * written, ota_0 and ota_1 stay as they are. The C6 is reset into its normal boot afterwards. JUMPER_BOOT is left
  * high-impedance on every path, errors included. Blocks for tens of seconds; pauses the C6 log capture meanwhile.
- * ESP_ERR_INVALID_STATE if a recovery already runs. It does not stop OpenThread: use br_core_rom_recover.
+ * ESP_ERR_INVALID_STATE if a recovery already runs. It does not stop OpenThread: use builtin_rcp_rom_recover.
  */
 esp_err_t rcp_sync_rom_recover(void);
 

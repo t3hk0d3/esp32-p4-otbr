@@ -61,7 +61,8 @@ runs Zigbee it says so in one line and links the Radios page, and nothing is pol
   `no_radio` with a reason. A firmware push or ROM recovery of the C6 pauses it the same way, with the reason "radio
   reinit: firmware push" ("radio reinit: ROM recovery"; before the first start, "radio reinit: boot steps"). The board does not reboot, the stack keeps running and the client stays
   connected; transmits fail meanwhile. When the radio returns, the board replays the radio configuration and the
-  state is `running` again.
+  state is `running` again. The push answers only then: 502 `restart_failed` "the image is installed, but Zigbee did
+  not start on it: <reason>" when Zigbee does not run on the new firmware.
 - **Firmware that does not fit.** A radio whose firmware cannot run the stack shows `incompatible` with the reason.
 
 ## Limits

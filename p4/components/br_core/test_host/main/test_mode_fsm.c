@@ -732,39 +732,6 @@ void app_main(void)
 
 /* ---- result of a C6 job ---- */
 
-TEST_CASE("On a ROM recovery that worked and a failed restart: the job result is ESP_OK", "[mode_fsm]")
-{
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_radio_job_result(true, ESP_OK, ESP_FAIL));
-}
-
-TEST_CASE("On a c6_installer push that worked (base only) and a failed restart: the job result is ESP_OK", "[mode_fsm]")
-{
-    /* br_core passes base_only for an installer push as for a recovery: both leave the C6 without RCP firmware. */
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_radio_job_result(true, ESP_OK, ESP_ERR_TIMEOUT));
-}
-
-TEST_CASE("On a ROM recovery that failed: the job result is its error, whatever the restart did", "[mode_fsm]")
-{
-    TEST_ASSERT_EQUAL(ESP_FAIL, mode_fsm_radio_job_result(true, ESP_FAIL, ESP_OK));
-    TEST_ASSERT_EQUAL(ESP_FAIL, mode_fsm_radio_job_result(true, ESP_FAIL, ESP_ERR_TIMEOUT));
-}
-
-TEST_CASE("On a firmware push that worked and a failed restart: the job result is RCP_SYNC_ERR_RESTART", "[mode_fsm]")
-{
-    TEST_ASSERT_EQUAL(RCP_SYNC_ERR_RESTART, mode_fsm_radio_job_result(false, ESP_OK, ESP_ERR_TIMEOUT));
-    TEST_ASSERT_EQUAL(RCP_SYNC_ERR_RESTART, mode_fsm_radio_job_result(false, ESP_OK, ESP_FAIL));
-}
-
-TEST_CASE("On a firmware push that worked and a restart that worked: the job result is ESP_OK", "[mode_fsm]")
-{
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_radio_job_result(false, ESP_OK, ESP_OK));
-}
-
-TEST_CASE("On a firmware push that failed: the job result is the push error", "[mode_fsm]")
-{
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_CRC, mode_fsm_radio_job_result(false, ESP_ERR_INVALID_CRC, ESP_FAIL));
-}
-
 /* ---- moving OpenThread to another channel ---- */
 
 #define SRC "builtin-c6"
@@ -1388,6 +1355,33 @@ TEST_CASE("On a reinit request in STARTING: refuses with ESP_ERR_INVALID_STATE",
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_reinit_verdict(BR_MODE_STARTING));
 }
 
+/* ---- mode_fsm_reinit_refusal: Thread's text when it refuses a reinit ---- */
+
+TEST_CASE("On a reinit while a move runs: refused with today's move text, whatever the mode", "[mode_fsm]")
+{
+    TEST_ASSERT_EQUAL_STRING("OpenThread is being moved to another radio",
+                             mode_fsm_reinit_refusal(BR_MODE_BR_RUNNING, true));
+    TEST_ASSERT_EQUAL_STRING("OpenThread is being moved to another radio",
+                             mode_fsm_reinit_refusal(BR_MODE_STARTING, true));
+}
+
+TEST_CASE("On a reinit in SNIFFER: refused with \"a capture is running\"", "[mode_fsm]")
+{
+    TEST_ASSERT_EQUAL_STRING("a capture is running", mode_fsm_reinit_refusal(BR_MODE_SNIFFER, false));
+}
+
+TEST_CASE("On a reinit in STARTING: refused with \"the border router is starting\"", "[mode_fsm]")
+{
+    TEST_ASSERT_EQUAL_STRING("the border router is starting", mode_fsm_reinit_refusal(BR_MODE_STARTING, false));
+}
+
+TEST_CASE("On a reinit in BR_RUNNING, RADIO_FAULT or NO_RADIO with no move: no refusal", "[mode_fsm]")
+{
+    TEST_ASSERT_NULL(mode_fsm_reinit_refusal(BR_MODE_BR_RUNNING, false));
+    TEST_ASSERT_NULL(mode_fsm_reinit_refusal(BR_MODE_RADIO_FAULT, false));
+    TEST_ASSERT_NULL(mode_fsm_reinit_refusal(BR_MODE_NO_RADIO, false));
+}
+
 /* ---- inputs: mode_fsm_input_newer ---- */
 
 TEST_CASE("On an input newer than the last one handled: acted on", "[mode_fsm]")
@@ -1495,22 +1489,6 @@ TEST_CASE("On letting go for a request older than the binding input taken: that 
     TEST_ASSERT_FALSE(mode_fsm_inbox_take_bind(&box, &in));
     put(&box, RADIO_MUX_IN_BACK, 4);
     TEST_ASSERT_TRUE(mode_fsm_inbox_take_bind(&box, &in));
-}
-
-TEST_CASE("On an input not taken in either slot: pending until taken", "[mode_fsm]")
-{
-    mode_fsm_inbox_t box = {0};
-    radio_mux_input_t in;
-
-    TEST_ASSERT_FALSE(mode_fsm_inbox_pending(&box));
-    put(&box, RADIO_MUX_IN_BIND, 1);
-    TEST_ASSERT_TRUE(mode_fsm_inbox_pending(&box));
-    mode_fsm_inbox_take_bind(&box, &in);
-    TEST_ASSERT_FALSE(mode_fsm_inbox_pending(&box));
-    put(&box, RADIO_MUX_IN_REINIT, 2);
-    TEST_ASSERT_TRUE(mode_fsm_inbox_pending(&box));
-    mode_fsm_inbox_take_req(&box, &in);
-    TEST_ASSERT_FALSE(mode_fsm_inbox_pending(&box));
 }
 
 TEST_CASE("On a binding input acted on elsewhere (a move's commit): it is taken, the request still fresh",

@@ -64,8 +64,6 @@ void core_enter_fault(const char *reason);
 void core_teardown_openthread(void);
 // After ot_ready was cleared: false when sessions stay open longer than `wait_ms`.
 bool core_wait_sessions_closed(uint32_t wait_ms);
-// Reboots in 1.5 s (the caller reports first).
-void core_schedule_reboot(void);
 bool core_ot_ready_now(void);
 esp_err_t core_start_ot_task(void);
 bool core_backbone_has_ip6(void);
@@ -87,8 +85,6 @@ void core_radio_mode_changed(br_core_mode_t mode);
 void core_radio_boot(void);
 // OpenThread stopped (no session drain) and its channel forgotten.
 void core_radio_stop_openthread(void);
-// Whether br_radio has an input of the orchestrator it has not acted on yet (a maintenance waits for Thread's start).
-bool core_radio_input_pending(void);
 #ifdef OTBR_TEST_BUILD
 // ot_start_abandon: whether the start on channel `id` is to end as an abandoned one (the setting is used up then).
 bool core_test_take_start_abandon(const char *id);

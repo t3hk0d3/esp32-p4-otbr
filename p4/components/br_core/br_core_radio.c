@@ -762,8 +762,9 @@ static void enter_firmware_fault(const char *reason)
     core_enter_fault(reason);
 }
 
-// REINIT (maintenance wants Thread's channel): Thread lets go once its sessions drained, or refuses (the sniffer, a
-// start, a drain timeout); the answer goes back through the input's handle and is returned (ESP_OK: Thread let go).
+// REINIT (maintenance wants Thread's channel): Thread lets go once its sessions drained, or refuses with today's text
+// (a move, the sniffer, a start, a drain timeout); the answer goes back through the input's handle and is returned
+// (ESP_OK: Thread let go).
 static esp_err_t reinit(const radio_mux_input_t *in)
 {
     const char *why = NULL;
@@ -774,10 +775,14 @@ static esp_err_t reinit(const radio_mux_input_t *in)
     if (g_core.ot_task && !g_core.loop_running) { // after a boot timeout OpenThread may still be initialising
         verdict = ESP_ERR_INVALID_STATE;
         why = "the radio is still booting";
+    } else if ((why = mode_fsm_reinit_refusal(br_core_get_mode(), br_core_move_running())) != NULL) {
+        verdict = ESP_ERR_INVALID_STATE; // nothing touched: a move, a capture or a start keeps the radio
     } else {
         radio_mux_report(atomic_load(&s_report_ch), "releasing", in->reason);
         verdict = mode_fsm_on_reinit(&g_fsm);
-        if (verdict == MODE_FSM_ERR_DRAIN_TIMEOUT) {
+        if (verdict == ESP_ERR_INVALID_STATE) { // the mode changed since the check above
+            why = mode_fsm_reinit_refusal(br_core_get_mode(), false);
+        } else if (verdict == MODE_FSM_ERR_DRAIN_TIMEOUT) {
             verdict = ESP_ERR_INVALID_STATE;
             why = "OpenThread is busy, try again";
         } else if (verdict == ESP_OK) {
@@ -1078,14 +1083,6 @@ void br_core_retry_otbr(void)
 {
     atomic_store(&s_retry, true);
     core_radio_notify();
-}
-
-bool core_radio_input_pending(void)
-{
-    taskENTER_CRITICAL(&s_in_lock);
-    const bool pending = mode_fsm_inbox_pending(&s_inbox);
-    taskEXIT_CRITICAL(&s_in_lock);
-    return pending;
 }
 
 radio_mux_chan_t *core_radio_chan(void)

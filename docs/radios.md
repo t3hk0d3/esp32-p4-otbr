@@ -201,8 +201,9 @@ Before a push or a recovery of the C6, the mode on it is asked to let go of the 
 did:
 
 - **Thread** lets go once its open sessions ended (up to 45 s; the board is `STARTING` meanwhile), then OpenThread
-  stops. It refuses while it captures (`SNIFFER`) or starts (`STARTING`), and after the 45 s ("OpenThread is busy, try
-  again"): 409 `busy`.
+  stops. It refuses while it captures ("a capture is running"), starts ("the border router is starting") or is being
+  moved ("OpenThread is being moved to another radio"), and after the 45 s ("OpenThread is busy, try again"): 409
+  `busy`.
 - **Zigbee** always lets go: it shows `no_radio` "radio reinit: firmware push" (or "ROM recovery") and its client stays
   connected; transmits fail meanwhile.
 - **The RCP proxy** refuses while a peer is connected (409 `c6_busy`); otherwise its session and listener close.
@@ -210,7 +211,16 @@ did:
 
 When the work and the C6's boot steps end, the C6 is `ready` and its mode starts again (Thread on the new firmware,
 Zigbee replays its radio configuration, the proxy listens again), or the C6 is in `fault` (no RCP firmware, a failed
-recovery) and its mode shows why. A refused maintenance changes nothing. A reset a mode asks for, and the recovery of a
+recovery) and its mode shows why. A refused maintenance changes nothing.
+
+The push and the recovery answer once the mode on the C6 runs again or says it does not, at most 180 s after the work
+(`mode_state` shows `starting` until then). A push that installed the image but whose mode did not come back answers
+502 `restart_failed` with the mode and its reason, for Thread, Zigbee and the proxy alike; Thread is not forced into a
+fault by the wait, it goes on starting. A ROM recovery, and a push of `c6_installer.bin` through ESP-Hosted, answer
+with their own result: the mode is `fault` ("no rcp firmware") afterwards by design. After an abandoned OpenThread
+start (see [Moving Thread](#moving-thread)) a push does not reboot the board: it answers `restart_failed` with
+"an earlier OpenThread start was abandoned: reboot". A push of the C6 while Thread runs on a USB radio leaves that
+radio's `rcp_compatible` alone. A reset a mode asks for, and the recovery of a
 dongle after a USB error, are not maintenance: the mode gets its usual `RESET`.
 
 ## Unplugging the Thread radio

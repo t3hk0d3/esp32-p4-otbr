@@ -260,14 +260,6 @@ void mode_fsm_on_rcp_failure(mode_fsm_t *fsm)
     set_mode(fsm, BR_MODE_BR_RUNNING);
 }
 
-esp_err_t mode_fsm_radio_job_result(bool base_only, esp_err_t job_err, esp_err_t restart_err)
-{
-    if (base_only || job_err != ESP_OK) {
-        return job_err;
-    }
-    return restart_err == ESP_OK ? ESP_OK : RCP_SYNC_ERR_RESTART;
-}
-
 bool mode_fsm_boot(mode_fsm_t *fsm, const char *otbr_id)
 {
     if (otbr_id && strcmp(otbr_id, MODE_FSM_BUILTIN_ID) == 0) {
@@ -462,6 +454,17 @@ esp_err_t mode_fsm_reinit_verdict(br_core_mode_t mode)
     return mode == BR_MODE_SNIFFER || mode == BR_MODE_STARTING ? ESP_ERR_INVALID_STATE : ESP_OK;
 }
 
+const char *mode_fsm_reinit_refusal(br_core_mode_t mode, bool moving)
+{
+    if (moving) {
+        return "OpenThread is being moved to another radio";
+    }
+    if (mode == BR_MODE_SNIFFER) {
+        return "a capture is running";
+    }
+    return mode == BR_MODE_STARTING ? "the border router is starting" : NULL;
+}
+
 bool mode_fsm_input_newer(uint32_t seen_seq, uint32_t input_seq)
 {
     return (int32_t)(input_seq - seen_seq) > 0;
@@ -505,11 +508,6 @@ void mode_fsm_inbox_let_go(mode_fsm_inbox_t *box, uint32_t req_seq)
 void mode_fsm_inbox_handled(mode_fsm_inbox_t *box)
 {
     box->bind_seen = box->bind.seq;
-}
-
-bool mode_fsm_inbox_pending(const mode_fsm_inbox_t *box)
-{
-    return mode_fsm_input_newer(box->bind_seen, box->bind.seq) || mode_fsm_input_newer(box->req_seen, box->req.seq);
 }
 
 esp_err_t mode_fsm_on_reinit(mode_fsm_t *fsm)
