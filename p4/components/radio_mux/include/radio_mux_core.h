@@ -71,7 +71,7 @@ typedef enum {
     RADIO_MUX_REFUSE_INCOMPATIBLE,
     RADIO_MUX_REFUSE_MODE_TAKEN,
     RADIO_MUX_REFUSE_HYBRID,
-    // radio_mux_set only, never from radio_mux_check_set_mode:
+    // radio_mux_set only, never from radio_mux_orch_check_bind (BUSY: only for a channel in reinit):
     RADIO_MUX_REFUSE_UNKNOWN_CHANNEL, // no channel with that id (404)
     RADIO_MUX_REFUSE_FAILED,          // the mux could not store or apply the change (not started, NVS, timeout: 500)
     RADIO_MUX_REFUSE_PROBE_FAILED,    // a move of otbr: the target's RCP probe failed, nothing changed (409 probe_failed)
@@ -213,14 +213,9 @@ uint32_t radio_mux_reboot_modes(const radio_mux_rules_t *rules);
 // uses the type its registration declares; any other mode fits nothing.
 bool radio_mux_fits(const radio_mux_rules_t *rules, radio_mux_mode_t mode, radio_mux_fw_t fw);
 
-// Decision for setting channel `target` (index into chans[0..n)) to `want`. RADIO_MUX_MOVE is every change of where
-// OpenThread runs, each run by br_core as a long operation: otbr while another channel has it (a move; *move_from is
-// that channel's index), otbr while no channel has it (a start; *move_from is n), and the otbr channel leaving otbr
-// for another mode without a reboot (a stop; *move_from is target). move_from may be NULL. Checks run in the order of
-// the verdicts: bad value, unavailable channel, mode not registered, firmware fit, hybrid (otbr next to a stored
-// ziggurat only while a ziggurat consumer is registered), move or limit, start, reboot, stop.
-radio_mux_verdict_t radio_mux_check_set_mode(const radio_mux_rules_t *rules, const radio_mux_chan_view_t *chans,
-                                             size_t n, size_t target, radio_mux_mode_t want, size_t *move_from);
+// The rule of a mode that has one: otbr (built in), or a registered consumer's. NULL for off, rcp-proxy and
+// unregistered modes.
+const radio_mux_rule_t *radio_mux_rule_of(const radio_mux_rules_t *rules, radio_mux_mode_t mode);
 
 // The mode a channel takes once its firmware is detected: the stored mode when it fits, else OFF with the reason in
 // `reason` (empty when the stored mode is kept). reason may be NULL.
@@ -364,11 +359,6 @@ typedef struct {
 // forgotten); for an unsupported device (for_unsupported: it is never stored), only a slot that is not remembered
 // either. n when no slot can be had: the new device is not listed.
 size_t radio_mux_evict_pick(const radio_mux_slot_view_t *slots, size_t n, bool for_unsupported);
-
-// OTBR runs on one channel: of stored modes in slot order (the C6 first), the first otbr stays and every later otbr
-// becomes off (changed[i] set for it, cleared for the others). Returns how many changed. Repairs a move whose two
-// stores were cut apart (a reset between them).
-size_t radio_mux_otbr_dedupe(radio_mux_mode_t *modes, bool *changed, size_t n);
 
 // Whether a detection that found `detected` keeps the channel's record of `stored` instead: a detection that found
 // nothing (unknown) never overwrites a known firmware (the RCP may only have been slow to boot); any known result

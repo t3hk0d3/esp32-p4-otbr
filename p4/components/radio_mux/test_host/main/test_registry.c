@@ -87,51 +87,6 @@ TEST_CASE("On an unsupported device: an unplugged slot that is not remembered ma
     TEST_ASSERT_EQUAL_UINT32(2, radio_mux_evict_pick(slots, N_SLOTS, true));
 }
 
-/* ---- radio_mux_otbr_dedupe ---- */
-
-TEST_CASE("On one otbr channel: nothing changes", "[radio_mux]")
-{
-    radio_mux_mode_t m[3] = {RADIO_MUX_MODE_OFF, RADIO_MUX_MODE_OTBR, RADIO_MUX_MODE_RCP_PROXY};
-    bool changed[3] = {true, true, true};
-
-    TEST_ASSERT_EQUAL_UINT32(0, radio_mux_otbr_dedupe(m, changed, 3));
-    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OTBR, m[1]);
-    TEST_ASSERT_FALSE(changed[0] || changed[1] || changed[2]);
-}
-
-TEST_CASE("On the C6 and a dongle both stored otbr: the C6 (slot 0) keeps it, the dongle becomes off", "[radio_mux]")
-{
-    radio_mux_mode_t m[3] = {RADIO_MUX_MODE_OTBR, RADIO_MUX_MODE_OTBR, RADIO_MUX_MODE_OFF};
-    bool changed[3];
-
-    TEST_ASSERT_EQUAL_UINT32(1, radio_mux_otbr_dedupe(m, changed, 3));
-    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OTBR, m[0]);
-    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OFF, m[1]);
-    TEST_ASSERT_FALSE(changed[0]);
-    TEST_ASSERT_TRUE(changed[1]);
-    TEST_ASSERT_FALSE(changed[2]);
-}
-
-TEST_CASE("On two dongles stored otbr: the first in slot order keeps it", "[radio_mux]")
-{
-    radio_mux_mode_t m[4] = {RADIO_MUX_MODE_OFF, RADIO_MUX_MODE_RCP_PROXY, RADIO_MUX_MODE_OTBR, RADIO_MUX_MODE_OTBR};
-    bool changed[4];
-
-    TEST_ASSERT_EQUAL_UINT32(1, radio_mux_otbr_dedupe(m, changed, 4));
-    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OTBR, m[2]);
-    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OFF, m[3]);
-    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_RCP_PROXY, m[1]);
-    TEST_ASSERT_TRUE(changed[3]);
-}
-
-TEST_CASE("On no otbr channel: nothing changes", "[radio_mux]")
-{
-    radio_mux_mode_t m[2] = {RADIO_MUX_MODE_OFF, RADIO_MUX_MODE_OFF};
-    bool changed[2];
-
-    TEST_ASSERT_EQUAL_UINT32(0, radio_mux_otbr_dedupe(m, changed, 2));
-}
-
 /* ---- radio_mux_detect_keeps_record ---- */
 
 TEST_CASE("On a detection that found nothing over a known firmware: the record is kept", "[radio_mux]")

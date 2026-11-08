@@ -1,0 +1,117 @@
+// Decisions of the channel/mode orchestrator. Pure: no ESP-IDF calls.
+//
+// The orchestrator binds mode instances (Thread, Zigbee, one RCP proxy per channel) to channels. A channel has its own
+// lifecycle (channel_state); maintenance of its radio is the `reinit` state, entered only once the bound instance let
+// go (the reinit run below).
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "radio_mux_core.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// A channel's lifecycle state (design section 4.1).
+typedef enum {
+    RADIO_MUX_CS_ABSENT, // no device: an unplugged dongle (the built-in RCP never is)
+    RADIO_MUX_CS_REINIT, // maintenance runs on it: no mode may use it (with the work as its reason)
+    RADIO_MUX_CS_READY,  // open and usable: a mode may be bound and run on it
+    RADIO_MUX_CS_FAULT,  // unusable, with a reason and a fault kind
+} radio_mux_chan_state_t;
+
+// "absent", "reinit", "ready", "fault"; NULL for anything else.
+const char *radio_mux_chan_state_name(radio_mux_chan_state_t s);
+
+// What a channel fault is: firmware (what the built-in RCP's maintenance found: no RCP firmware, the factory
+// ESP-Hosted image, a failed ROM recovery) or link (the connection failed: USB close failed, fruitless resets, no
+// driver). The board shows them differently (design section 6).
+typedef enum {
+    RADIO_MUX_FAULT_NONE,
+    RADIO_MUX_FAULT_FIRMWARE,
+    RADIO_MUX_FAULT_LINK,
+} radio_mux_fault_kind_t;
+
+// The maintenance a channel in reinit runs.
+typedef enum {
+    RADIO_MUX_WORK_NONE,
+    RADIO_MUX_WORK_BOOT_STEPS,   // the built-in RCP's boot steps
+    RADIO_MUX_WORK_DETECT,       // a dongle's firmware detection after plug-in
+    RADIO_MUX_WORK_PUSH,         // a firmware push to the built-in RCP
+    RADIO_MUX_WORK_ROM_RECOVERY, // the built-in RCP's ROM recovery
+} radio_mux_work_t;
+
+// The reinit reason: "boot steps", "detecting firmware", "firmware push", "ROM recovery"; "" for NONE or anything
+// else.
+const char *radio_mux_work_reason(radio_mux_work_t w);
+
+// The channel's busy text as the API showed it before the orchestrator: "the C6's boot steps run" for BOOT_STEPS, "a
+// C6 job holds the radio" for PUSH and ROM_RECOVERY; "" otherwise.
+const char *radio_mux_busy_reason(radio_mux_work_t w);
+
+// Decision for setting channel `target` (index into chans[0..n)) to `want`: the former radio_mux_check_set_mode, plus
+// a channel in reinit (in_reinit) refusing every change with RADIO_MUX_REFUSE_BUSY. Checks run in this order: bad
+// value, reinit, unavailable channel, mode not registered, firmware fit, hybrid (otbr next to a stored ziggurat only
+// while a ziggurat consumer is registered), move or limit, start, reboot, stop.
+//
+// RADIO_MUX_MOVE is every change of where OpenThread runs, each run by br_core as a long operation: otbr while another
+// channel has it (a move; *move_from is that channel's index), otbr while no channel has it (a start; *move_from is
+// n), and the otbr channel leaving otbr for another mode without a reboot (a stop; *move_from is target). move_from may
+// be NULL. RADIO_MUX_APPLY_REBOOT: entering or leaving a mode whose rule has reboot_on_change.
+radio_mux_verdict_t radio_mux_orch_check_bind(const radio_mux_rules_t *rules, const radio_mux_chan_view_t *chans,
+                                              size_t n, size_t target, radio_mux_mode_t want, bool in_reinit,
+                                              size_t *move_from);
+
+// Whether the orchestrator binds a channel's configured instance now: the channel is ready, its firmware fits the
+// instance's mode, and the instance is not bound to it yet.
+bool radio_mux_orch_should_bind(radio_mux_chan_state_t cs, bool fits, bool bound);
+
+// The singletons (otbr, ziggurat) run on one channel each: of stored modes in slot order (the built-in RCP first), the
+// first of each stays and every later one becomes off (changed[i] set for it, cleared for the others). Returns how
+// many changed. Repairs a move whose two stores were cut apart (a reset between them).
+size_t radio_mux_singleton_dedupe(radio_mux_mode_t *modes, bool *changed, size_t n);
+
+/* ---- the reinit run: the bound instance is asked to let go before maintenance runs ---- */
+
+// How long the orchestrator waits for the bound instance's answer: Thread's 45 s session drain plus margin. No answer
+// by then is a refusal.
+#define RADIO_MUX_REINIT_REPLY_MS 50000
+
+typedef enum {
+    RADIO_MUX_RP_IDLE,    // no maintenance
+    RADIO_MUX_RP_ASKED,   // the bound instance was asked to let go; waiting for its answer
+    RADIO_MUX_RP_RUNNING, // the instance let go (or none was bound): the work runs, the channel is in reinit
+} radio_mux_reinit_phase_t;
+
+typedef enum {
+    RADIO_MUX_RA_WAIT,   // keep waiting for the answer
+    RADIO_MUX_RA_RUN,    // run the work now
+    RADIO_MUX_RA_REFUSE, // refused: the instance's refusal, a timeout, or another run in progress; nothing runs
+    RADIO_MUX_RA_IGNORE, // nothing to do (a stale or late answer, a tick with nothing asked)
+} radio_mux_reinit_act_t;
+
+typedef struct {
+    radio_mux_reinit_phase_t phase;
+    uint32_t seq;        // the seq of the REINIT input the instance was sent
+    int64_t deadline_ms; // ASKED: when no answer counts as a refusal
+} radio_mux_reinit_run_t;
+
+// Maintenance asks for the channel at now_ms. With no instance bound: RUN at once. With one bound (sent the REINIT
+// input `seq`): WAIT, until RADIO_MUX_REINIT_REPLY_MS later. While another run is asked or running: REFUSE, the run
+// unchanged.
+radio_mux_reinit_act_t radio_mux_reinit_ask(radio_mux_reinit_run_t *r, uint32_t seq, bool bound, int64_t now_ms);
+// The instance's answer to the REINIT input `seq`: accept → RUN, refuse → REFUSE (back to idle). IGNORE for an answer
+// to another seq or while nothing is asked.
+radio_mux_reinit_act_t radio_mux_reinit_answer(radio_mux_reinit_run_t *r, uint32_t seq, bool accept);
+// Time passes: REFUSE (back to idle) once an asked run reaches its deadline, WAIT before it, IGNORE when nothing is
+// asked.
+radio_mux_reinit_act_t radio_mux_reinit_tick(radio_mux_reinit_run_t *r, int64_t now_ms);
+// The work ended: back to idle.
+void radio_mux_reinit_done(radio_mux_reinit_run_t *r);
+
+#ifdef __cplusplus
+}
+#endif

@@ -14,6 +14,7 @@
 #include "radio_mux.h"
 #include "radio_mux_detect.h"
 #include "radio_mux_hdlc.h"
+#include "radio_mux_orch_core.h"
 #include "radio_mux_pool.h"
 
 // Room in front of a frame in its pool slot: the C6's 5-byte SPI header (R12). USB frames start at the same offset.

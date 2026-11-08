@@ -202,9 +202,9 @@ void mux_chan_defaults(struct radio_mux_chan *ch, const char *id, radio_mux_kind
     snprintf(ch->reason, sizeof(ch->reason), "not detected");
 }
 
-// At load: OTBR stored on more than one channel (a move's stores cut apart) keeps the first in slot order (the C6 is
-// slot 0); the others are stored off.
-static void dedupe_otbr(void)
+// At load: a singleton (otbr, ziggurat) stored on more than one channel (a move's stores cut apart) keeps the first in
+// slot order (the C6 is slot 0); the others are stored off.
+static void dedupe_singletons(void)
 {
     radio_mux_mode_t modes[RADIO_MUX_CHANNELS_MAX];
     bool changed[RADIO_MUX_CHANNELS_MAX];
@@ -212,7 +212,7 @@ static void dedupe_otbr(void)
     for (size_t i = 0; i < RADIO_MUX_CHANNELS_MAX; i++) {
         modes[i] = g_mux.chans[i].used ? g_mux.chans[i].mode : RADIO_MUX_MODE_OFF;
     }
-    if (radio_mux_otbr_dedupe(modes, changed, RADIO_MUX_CHANNELS_MAX) == 0) {
+    if (radio_mux_singleton_dedupe(modes, changed, RADIO_MUX_CHANNELS_MAX) == 0) {
         return;
     }
     for (size_t i = 0; i < RADIO_MUX_CHANNELS_MAX; i++) {
@@ -220,7 +220,7 @@ static void dedupe_otbr(void)
 
         if (changed[i]) {
             ch->mode = RADIO_MUX_MODE_OFF;
-            ESP_LOGW(TAG, "%s: stored in otbr next to another otbr channel (an interrupted move): stored off", ch->id);
+            ESP_LOGW(TAG, "%s: stored in a mode another channel has (an interrupted move): stored off", ch->id);
             if (mux_store_chan(ch) != ESP_OK) {
                 ESP_LOGW(TAG, "%s: storing off failed: off until the next boot's repair", ch->id);
             }
@@ -275,5 +275,5 @@ void mux_load_chans(void)
         ch->remembered = true;
     }
     nvs_close(nvs);
-    dedupe_otbr();
+    dedupe_singletons();
 }

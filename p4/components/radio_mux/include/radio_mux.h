@@ -226,7 +226,7 @@ void radio_mux_get_snapshot(radio_mux_snapshot_t *out);
 // Validates, stores in NVS and applies a change (attach, detach, re-attach; line settings reconfigure an open device).
 // Settings for an unavailable channel are stored and apply on its return; a mode on it is refused. A refused change
 // stores nothing. APPLY_REBOOT stores only: the caller reboots. MOVE (every change of where OpenThread runs, see
-// radio_mux_check_set_mode: otbr while another channel has it, otbr while none has it, the otbr channel leaving otbr)
+// radio_mux_orch_check_bind: otbr while another channel has it, otbr while none has it, the otbr channel leaving otbr)
 // calls the mover set by radio_mux_set_otbr_mover from the calling task and stores no mode itself: a move or a start
 // stores the target's otbr (and the source's off) once OpenThread runs on the target, a stop stores the requested mode
 // once OpenThread stopped (radio_mux_commit_otbr). MOVE means the target's probe passed (a stop: it was accepted) and

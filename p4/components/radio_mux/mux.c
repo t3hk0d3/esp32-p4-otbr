@@ -1097,7 +1097,10 @@ static radio_mux_verdict_t check_mode(struct radio_mux_chan *ch, radio_mux_mode_
             views[n++] = view_of(&g_mux.chans[i]);
         }
     }
-    const radio_mux_verdict_t v = radio_mux_check_set_mode(&g_mux.rules, views, n, target, want, &move_from);
+    // The C6 in reinit (its boot hold or a job: p->busy) refuses every mode change until it is ready again.
+    const bool in_reinit = ch->port->kind == RADIO_MUX_KIND_C6 && ch->port->busy;
+    const radio_mux_verdict_t v = radio_mux_orch_check_bind(&g_mux.rules, views, n, target, want, in_reinit,
+                                                            &move_from);
 
     *stop = false;
     if (v == RADIO_MUX_MOVE) {
