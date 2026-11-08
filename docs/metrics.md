@@ -39,10 +39,10 @@ The path is the Prometheus default, so no `metrics_path` is needed.
 
 | Metric | Type | Labels |
 | --- | --- | --- |
-| `br_info` (value 1) | gauge | `version`, `slot`, `rcp_version` (`""` when unknown), `rcp_compatible` |
+| `br_info` (value 1) | gauge | `version`, `slot`, `rcp_version` (`""` when unknown), `rcp_compatible` (`true`, `false`, or `unknown` while OpenThread has not judged the C6's RCP: Thread on a dongle, or after a firmware push) |
 | `br_uptime_seconds` | gauge | |
 | `br_reset_reason` (value 1) | gauge | `reason` |
-| `br_mode` | state set | `mode` = STARTING, BR_RUNNING, SNIFFER, RADIO_FAULT |
+| `br_mode` | state set | `mode` = STARTING, BR_RUNNING, SNIFFER, RADIO_FAULT, NO_RADIO |
 | `br_cpu_seconds_total` | counter | `core` = 0/1, `mode` = busy/idle |
 | `br_task_cpu_seconds_total` | counter | `task` |
 | `br_task_stack_free_min_bytes` | gauge | `task` |
@@ -117,6 +117,9 @@ groups:
       - alert: BorderRouterRadioFault
         expr: br_mode{mode="RADIO_FAULT"} == 1
         for: 2m
+      - alert: BorderRouterNoRadio
+        expr: br_mode{mode="NO_RADIO"} == 1
+        for: 5m
       - alert: BorderRouterNoThreadFigures
         expr: br_mode{mode="BR_RUNNING"} == 1 unless on(instance) br_thread_role
         for: 5m
@@ -129,6 +132,10 @@ groups:
         expr: br_bgp_peer_state{state="established"} == 0
         for: 5m
 ```
+
+`NO_RADIO` means no present radio runs Thread: the dongle Thread is stored on is unplugged, or no channel is in mode
+`otbr` ([Radios](radios.md)). It is never `RADIO_FAULT`, so the radio fault alert alone misses an unplugged Thread
+dongle. Drop the `BorderRouterNoRadio` rule on a board that runs no Thread on purpose.
 
 ## Useful queries
 
