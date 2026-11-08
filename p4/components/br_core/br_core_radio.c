@@ -571,9 +571,16 @@ esp_err_t core_radio_ot_start(const char *id)
         return ESP_ERR_NOT_FOUND;
     }
     if (g_core.init_abandoned) { // an earlier start parked inside esp_openthread_init: nothing of it can be released
-        core_set_reason("an earlier OpenThread start was abandoned: reboot");
+        core_set_reason(MODE_FSM_FAULT_ABANDONED);
         return MODE_FSM_ERR_START_ABANDONED;
     }
+#ifdef OTBR_TEST_BUILD
+    if (core_test_take_start_abandon(id)) { // ot_start_abandon: this start ends as an abandoned one, at once
+        ESP_LOGW(TAG, "test build: OpenThread's start on %s abandoned", id);
+        g_core.init_abandoned = true; // as a real one: nothing starts OpenThread again until a reboot
+        return MODE_FSM_ERR_START_ABANDONED;
+    }
+#endif
     if (!mode_fsm_radio_start_allowed(g_storage_degraded)) {
         ESP_LOGE(TAG, "storage is unavailable (NVS): OpenThread is not started");
         core_set_reason(MODE_FSM_FAULT_STORAGE);
@@ -901,13 +908,14 @@ static void run_move(void)
         ESP_LOGW(TAG, "%s OpenThread %s %s: %s (%s)", stop ? "stopping" : "moving", stop ? "on" : "to",
                  stop ? s_move.from : s_move.to, esp_err_to_name(ret), err);
     }
-    after_channel_op();
     if (ret == MODE_FSM_ERR_START_ABANDONED) {
-        // OpenThread's init was abandoned on the target: only a reboot starts it again, on the source's stored mode.
+        // OpenThread's init was abandoned on the target: RADIO_FAULT, as on every other path. No reboot: the binding
+        // already names the target, so a reboot would come back there (a PUT of mode otbr on another channel, then a
+        // reboot, is the way out).
         ESP_LOGE(TAG, "%s", err);
         core_set_reason(err);
-        core_schedule_reboot();
     }
+    after_channel_op();
     move_finished();
 }
 

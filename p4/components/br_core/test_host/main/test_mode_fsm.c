@@ -793,15 +793,16 @@ TEST_CASE("On a probe failure of the target: no stop, no start, nothing stored, 
     TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
 }
 
-TEST_CASE("On a successful move: probes the target, stops, starts on the target, then stores both modes", "[mode_fsm]")
+TEST_CASE("On a successful move: probes the target, stops, stores both modes (the commit), then starts on the target",
+          "[mode_fsm]")
 {
     char err[64];
 
     setup(BR_MODE_BR_RUNNING);
     TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
     assert_order("probe_channel", "ot_stop");
-    assert_order("ot_stop", "ot_start");
-    assert_order("ot_start", "store_otbr");
+    assert_order("ot_stop", "store_otbr");
+    assert_order("store_otbr", "ot_start");
     TEST_ASSERT_EQUAL_STRING(DST, fake.started_on);
     TEST_ASSERT_EQUAL_STRING(SRC, fake.stored_from);
     TEST_ASSERT_EQUAL_STRING(DST, fake.stored_to);
@@ -829,44 +830,25 @@ TEST_CASE("On a move from an absent source (NO_RADIO): starts on the target, sto
     TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
 }
 
-TEST_CASE("On a start failure on the target: starts on the source again, stores nothing, reports the failure",
-          "[mode_fsm]")
+TEST_CASE("On a start failure on the target: RADIO_FAULT on the target, the binding stays there, no start back on the "
+          "source", "[mode_fsm]")
 {
     char err[64] = "";
 
     setup(BR_MODE_BR_RUNNING);
     fake.start_fail_on[0] = DST;
     TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
-    TEST_ASSERT_EQUAL(2, count_of("ot_start"));
-    TEST_ASSERT_EQUAL_STRING(SRC, fake.started_on);
-    TEST_ASSERT_EQUAL(0, count_of("store_otbr"));
-    TEST_ASSERT_NOT_EQUAL(0, strlen(err));
-}
-
-TEST_CASE("On a start failure on the target: ends in BR_RUNNING on the source", "[mode_fsm]")
-{
-    char err[64];
-
-    setup(BR_MODE_BR_RUNNING);
-    fake.start_fail_on[0] = DST;
-    mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err));
-    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
-}
-
-TEST_CASE("On a start failure on the target and on the source: ends in RADIO_FAULT, nothing stored", "[mode_fsm]")
-{
-    char err[64] = "";
-
-    setup(BR_MODE_BR_RUNNING);
-    fake.start_fail_on[0] = DST;
-    fake.start_fail_on[1] = SRC;
-    TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
+    TEST_ASSERT_EQUAL(1, count_of("ot_start")); /* the target's only: no rollback */
+    TEST_ASSERT_EQUAL_STRING("", fake.started_on);
+    TEST_ASSERT_EQUAL_STRING(DST, fake.stored_to);
+    TEST_ASSERT_EQUAL_STRING(SRC, fake.stored_from);
     TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
-    TEST_ASSERT_EQUAL(0, count_of("store_otbr"));
+    TEST_ASSERT_EQUAL(0, count_of("reboot"));
     TEST_ASSERT_NOT_EQUAL(0, strlen(err));
 }
 
-TEST_CASE("On a start failure on the target from an absent source: no restart there, ends in NO_RADIO", "[mode_fsm]")
+TEST_CASE("On a start failure on the target from an absent source: RADIO_FAULT on the target, the binding there",
+          "[mode_fsm]")
 {
     char err[64];
 
@@ -874,11 +856,12 @@ TEST_CASE("On a start failure on the target from an absent source: no restart th
     fake.start_fail_on[0] = DST;
     TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
     TEST_ASSERT_EQUAL(1, count_of("ot_start"));
-    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_fsm_get_mode(&fsm));
+    TEST_ASSERT_EQUAL_STRING(DST, fake.stored_to);
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
 }
 
-TEST_CASE("On a target start that abandoned OpenThread's init: no start on the source, nothing stored, a reboot asked",
-          "[mode_fsm]")
+TEST_CASE("On a target start that abandoned OpenThread's init: RADIO_FAULT with its text, the binding on the target, no "
+          "start on the source, no reboot", "[mode_fsm]")
 {
     char err[96] = "";
 
@@ -887,36 +870,23 @@ TEST_CASE("On a target start that abandoned OpenThread's init: no start on the s
     fake.start_fail_code = MODE_FSM_ERR_START_ABANDONED;
     TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_ABANDONED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
     TEST_ASSERT_EQUAL(1, count_of("ot_start"));
-    TEST_ASSERT_EQUAL(0, count_of("store_otbr"));
-    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
-    TEST_ASSERT_NOT_NULL(strstr(err, "rebooting"));
+    TEST_ASSERT_EQUAL_STRING(DST, fake.stored_to);
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
+    TEST_ASSERT_EQUAL(0, count_of("reboot"));
+    TEST_ASSERT_EQUAL_STRING(MODE_FSM_FAULT_ABANDONED, err);
+    TEST_ASSERT_EQUAL_STRING("an earlier OpenThread start was abandoned: reboot", MODE_FSM_FAULT_ABANDONED);
 }
 
-TEST_CASE("On a target start failure and a start on the source that abandoned the init: a reboot asked, not a fault",
-          "[mode_fsm]")
-{
-    char err[96] = "";
-
-    setup(BR_MODE_BR_RUNNING);
-    fake.start_fail_on[0] = DST; /* the target fails plainly ... */
-    fake.abandon_on = SRC;       /* ... the start on the source abandons its init */
-    TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_ABANDONED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
-    TEST_ASSERT_EQUAL(2, count_of("ot_start"));
-    TEST_ASSERT_EQUAL(0, count_of("store_otbr"));
-    TEST_ASSERT_NOT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
-    TEST_ASSERT_NOT_NULL(strstr(err, "rebooting"));
-}
-
-TEST_CASE("On a store failure after the target runs: stops it, starts on the source, reports the failure",
-          "[mode_fsm]")
+TEST_CASE("On a store failure (the commit): nothing changed, the target never started, OpenThread starts again on the "
+          "source", "[mode_fsm]")
 {
     char err[96] = "";
 
     setup(BR_MODE_BR_RUNNING);
     fake.fail[OP_STORE] = ESP_ERR_NO_MEM;
     TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
-    TEST_ASSERT_EQUAL(2, count_of("ot_stop"));
-    TEST_ASSERT_EQUAL(2, count_of("ot_start"));
+    TEST_ASSERT_EQUAL(1, count_of("ot_stop"));
+    TEST_ASSERT_EQUAL(1, count_of("ot_start"));
     TEST_ASSERT_EQUAL_STRING(SRC, fake.started_on);
     TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
     TEST_ASSERT_NOT_EQUAL(0, strlen(err));
@@ -1036,20 +1006,32 @@ TEST_CASE("On a start (no source): probes the target, starts on it, stores it, e
     TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
 }
 
-TEST_CASE("On a start (no source) that fails: nothing stored, ends in NO_RADIO, also after a fault", "[mode_fsm]")
+TEST_CASE("On a start (no source) that fails: the binding on the target, RADIO_FAULT, also after a fault", "[mode_fsm]")
 {
     char err[64];
 
     setup(BR_MODE_NO_RADIO);
     fake.start_fail_on[0] = DST;
     TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, "", DST, err, sizeof(err)));
-    TEST_ASSERT_EQUAL(0, count_of("store_otbr"));
+    TEST_ASSERT_EQUAL(1, count_of("store_otbr"));
+    TEST_ASSERT_EQUAL_STRING(DST, fake.stored_to);
     TEST_ASSERT_EQUAL(1, count_of("ot_start"));
-    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_fsm_get_mode(&fsm));
-    setup(BR_MODE_RADIO_FAULT); /* a failed start earlier: still nothing to go back to */
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
+    setup(BR_MODE_RADIO_FAULT); /* a failed start earlier */
     fake.start_fail_on[0] = DST;
     TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, "", DST, err, sizeof(err)));
     TEST_ASSERT_EQUAL(1, count_of("ot_start"));
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
+}
+
+TEST_CASE("On a start (no source) whose store fails: nothing to go back to, NO_RADIO", "[mode_fsm]")
+{
+    char err[64];
+
+    setup(BR_MODE_NO_RADIO);
+    fake.fail[OP_STORE] = ESP_ERR_NO_MEM;
+    TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, "", DST, err, sizeof(err)));
+    TEST_ASSERT_EQUAL(0, count_of("ot_start"));
     TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_fsm_get_mode(&fsm));
 }
 

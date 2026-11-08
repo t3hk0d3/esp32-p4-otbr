@@ -319,6 +319,13 @@ esp_err_t br_core_become_leader(br_core_leader_refusal_t *refusal, uint8_t *weig
  */
 void validity_start(void);
 
+#ifdef OTBR_TEST_BUILD
+/** Test builds: the next OpenThread start on channel `id` ends as an abandoned one (MODE_FSM_ERR_START_ABANDONED) at
+ *  once, as an init stuck past its wait would, and nothing starts OpenThread again until a reboot. NULL or "" clears
+ *  it. Not persisted. */
+void br_core_test_set_start_abandon(const char *id);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

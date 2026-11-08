@@ -304,24 +304,16 @@ static esp_err_t start_on(mode_fsm_t *fsm, const char *id)
     return err;
 }
 
-// 5. of a move: back on the source, which keeps its stored mode; NO_RADIO when there is none to go back to (absent:
-// the mode before was NO_RADIO; a start: no source). MODE_FSM_ERR_START_FAILED, or ..._START_ABANDONED.
-static esp_err_t start_back(mode_fsm_t *fsm, br_core_mode_t prev, const char *from, const char *to, char *err,
-                            size_t cap)
+// A move whose commit failed changed nothing: OpenThread starts again on the source, still the channel stored in otbr
+// (NO_RADIO with none to go back to: absent, or a start). Never after a failed start on the target: that start's
+// binding stays. MODE_FSM_ERR_START_FAILED.
+static esp_err_t resume_on_source(mode_fsm_t *fsm, br_core_mode_t prev, const char *from)
 {
     if (prev == BR_MODE_NO_RADIO || from[0] == '\0') {
         set_mode(fsm, BR_MODE_NO_RADIO);
         return MODE_FSM_ERR_START_FAILED;
     }
-    const esp_err_t back_err = start_on(fsm, from);
-
-    if (back_err == MODE_FSM_ERR_START_ABANDONED) {
-        // As on the target: nothing starts OpenThread again in this boot; a reboot brings it back on `from`.
-        snprintf(err, cap, "OpenThread did not start on %s, nor again on %s: rebooting", to[0] ? to : "(none)", from);
-        return MODE_FSM_ERR_START_ABANDONED;
-    }
-    if (back_err != ESP_OK) {
-        snprintf(err, cap, "OpenThread did not start on %s, nor again on %s", to[0] ? to : "(none)", from);
+    if (start_on(fsm, from) != ESP_OK) {
         mode_fsm_set_fault(fsm);
     }
     return MODE_FSM_ERR_START_FAILED;
@@ -353,37 +345,34 @@ esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, 
                  "stopping OpenThread on", to[0] ? to : from);
         return MODE_FSM_ERR_DRAIN_TIMEOUT;
     }
-    if (to[0] == '\0') {
-        // A stop: the source's new mode is stored only now that OpenThread stopped.
-        if (ops->store_otbr(from, "") == ESP_OK) {
-            set_mode(fsm, BR_MODE_NO_RADIO);
-            return ESP_OK;
+    // 3. The commit: the binding moves (both stored modes at once). A failure changed nothing.
+    if (ops->store_otbr(from, to) != ESP_OK) {
+        if (to[0] == '\0') {
+            snprintf(err, cap, "storing the mode failed: OpenThread starts again on %s", from);
+        } else {
+            snprintf(err, cap, "storing the modes failed: OpenThread goes back to %s", from[0] ? from : "no radio");
         }
-        snprintf(err, cap, "storing the mode failed: OpenThread starts again on %s", from);
-        return start_back(fsm, prev, from, to, err, cap);
+        return resume_on_source(fsm, prev, from);
     }
-    // 3. Start on the target; 4. store both modes only once it runs.
+    if (to[0] == '\0') { // a stop
+        set_mode(fsm, BR_MODE_NO_RADIO);
+        return ESP_OK;
+    }
+    // 4. Start on the target, now Thread's channel. A failure stays there (RADIO_FAULT): no rollback to the source; a
+    // PUT of mode otbr on the target retries, one on another channel moves it.
     const esp_err_t start_err = start_on(fsm, to);
 
-    if (start_err == MODE_FSM_ERR_START_ABANDONED) {
-        // Nothing starts OpenThread again in this boot: the board reboots, on the source's stored mode.
-        snprintf(err, cap, "OpenThread could not start on %s: rebooting, Thread comes back on %s", to,
-                 from[0] ? from : "no radio");
-        return MODE_FSM_ERR_START_ABANDONED;
-    }
     if (start_err == ESP_OK) {
-        if (ops->store_otbr(from, to) == ESP_OK) {
-            return ESP_OK;
-        }
-        snprintf(err, cap, "storing the modes failed: OpenThread goes back to %s", from[0] ? from : "no radio");
-        if (ops->ot_stop() != ESP_OK) {
-            mode_fsm_set_fault(fsm); // still on the target, which the stored modes do not name
-            return MODE_FSM_ERR_START_FAILED;
-        }
+        return ESP_OK;
+    }
+    if (start_err == MODE_FSM_ERR_START_ABANDONED) {
+        // Nothing starts OpenThread again in this boot: RADIO_FAULT, as on every other path (no reboot).
+        snprintf(err, cap, "%s", MODE_FSM_FAULT_ABANDONED);
     } else {
         snprintf(err, cap, "OpenThread did not start on %s", to);
     }
-    return start_back(fsm, prev, from, to, err, cap);
+    mode_fsm_set_fault(fsm);
+    return start_err == MODE_FSM_ERR_START_ABANDONED ? start_err : MODE_FSM_ERR_START_FAILED;
 }
 
 void mode_fsm_on_channel_gone(mode_fsm_t *fsm)

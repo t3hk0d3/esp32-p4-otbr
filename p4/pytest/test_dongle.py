@@ -44,6 +44,8 @@ STATUS_TIMEOUT_S = 90
 THREAD_TIMEOUT_S = 120
 DETECT_TIMEOUT_S = 15
 MOVE_TIMEOUT_S = 120
+ABANDONED_REASON = "an earlier OpenThread start was abandoned: reboot"
+REBOOT_GRACE_S = 5
 PROXY_PEER_WAIT_S = 15
 LATENCY_ROUNDS = 100
 LATENCY_BUDGET_MS = 15.0
@@ -315,6 +317,37 @@ def test_move_thread_to_dongle_and_back(dut, base_url, dongle):
     # A third trip: the radio capability check passes every time (no RADIO_FAULT from it).
     move_thread(base_url, dongle)
     assert get_status(base_url)["mode"] == "BR_RUNNING"
+
+
+def test_move_abandoned_start_no_reboot(dut, send, reboot, base_url, dongle):
+    # PUT otbr on the dongle, On a start there that abandons OpenThread's init (test build: ot_start_abandon): the move
+    # committed (the dongle is stored otbr, the C6 off), RADIO_FAULT "an earlier OpenThread start was abandoned: reboot",
+    # no reboot by itself, no rollback to the C6. The way out: otbr back on the C6 (stored), then a reboot.
+    uptime = requests.get(f"{base_url}/device/diag", timeout=10).json()["uptime_s"]
+    send(f"ot_start_abandon {dongle}", rb"ot_start_abandon: ok")
+    reply = put_channel(base_url, {"mode": "otbr"}, dongle)
+    assert reply.status_code == 202, reply.text
+    status = wait_mode(base_url, "RADIO_FAULT", MOVE_TIMEOUT_S)
+    assert status["fault_reason"] == ABANDONED_REASON, status
+    assert status["otbr_channel"] == dongle
+    assert get_channel(base_url, dongle)["stored_mode"] == "otbr"
+    assert get_channel(base_url, "c6")["stored_mode"] == "off"
+    time.sleep(
+        REBOOT_GRACE_S
+    )  # the move's old behaviour rebooted ~1.5 s after the fault
+    later = requests.get(f"{base_url}/device/diag", timeout=10).json()["uptime_s"]
+    assert later > uptime, "the board rebooted"
+    assert get_status(base_url)["mode"] == "RADIO_FAULT"
+    # The way out: Thread back on the C6 (its probe and commit work, its start is refused the same way), then a reboot.
+    back = put_channel(base_url, {"mode": "otbr"}, "c6")
+    assert back.status_code == 202, back.text
+    deadline = time.monotonic() + MOVE_TIMEOUT_S
+    while get_status(base_url)["otbr_channel"] != "c6":
+        assert time.monotonic() < deadline, "the move back was never committed"
+        time.sleep(1)
+    reboot()
+    wait_mode(base_url, "BR_RUNNING", THREAD_TIMEOUT_S)
+    assert get_status(base_url)["otbr_channel"] == "c6"
 
 
 def test_move_refusals(dut, base_url, dongle):

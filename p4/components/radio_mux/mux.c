@@ -976,8 +976,8 @@ static void handle_lease_end(mux_call_t *call)
     ESP_LOGI(TAG, "%s: lease ended%s%s", ch->id, call->reason[0] ? ": " : "", call->reason);
 }
 
-// The end of a move: `to` (leased, OpenThread runs on it) is stored in otbr and `from` in off, in that order of
-// effect: `from`'s consumer is detached (GONE), then the lease becomes the otbr consumer's attach (no GONE, no reopen).
+// The commit of a move: `to` (leased, OpenThread starts on it next) is stored in otbr and `from` in off, in that order
+// of effect: Thread is unbound from `from` (GONE), then the lease becomes its binding on `to` (no GONE, no reopen).
 // The end of a stop: `from` leaves otbr for the mode its PUT asked for (leave_mode), once OpenThread stopped on it;
 // its otbr consumer is detached (GONE) and that mode's attached.
 static void commit_stop(mux_call_t *call, struct radio_mux_chan *from)

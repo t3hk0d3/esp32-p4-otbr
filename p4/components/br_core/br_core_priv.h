@@ -89,6 +89,10 @@ void core_radio_boot(void);
 void core_radio_stop_openthread(void);
 // Whether br_radio has an input of the orchestrator it has not acted on yet (a maintenance waits for Thread's start).
 bool core_radio_input_pending(void);
+#ifdef OTBR_TEST_BUILD
+// ot_start_abandon: whether the start on channel `id` is to end as an abandoned one (the setting is used up then).
+bool core_test_take_start_abandon(const char *id);
+#endif
 // The mode_fsm channel operations.
 esp_err_t core_radio_probe_channel(const char *id, char *err, size_t cap);
 esp_err_t core_radio_ot_start(const char *id);

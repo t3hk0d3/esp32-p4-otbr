@@ -34,6 +34,8 @@ extern "C" {
 #define MODE_FSM_ERR_START_ABANDONED ESP_ERR_NOT_FINISHED
 /** The reason of a drain timeout (the API's error code). */
 #define MODE_FSM_DRAIN_TIMEOUT "drain_timeout"
+/** The fault reason once OpenThread's init was abandoned: no start can run again until a reboot. */
+#define MODE_FSM_FAULT_ABANDONED "an earlier OpenThread start was abandoned: reboot"
 
 /** Everything the FSM does to the outside world; br_core.c provides the real ones, host tests fakes. */
 typedef struct {
@@ -80,7 +82,7 @@ typedef struct {
      * drain: nothing was stopped. ESP_OK when nothing runs.
      */
     esp_err_t (*ot_stop)(void);
-    /** Store channel `to` in mode otbr and `from` in mode off (both stored modes, after `to` runs). */
+    /** The commit of a move: channel `to` in mode otbr and `from` in mode off (both stored modes), before `to` starts. */
     esp_err_t (*store_otbr)(const char *from, const char *to);
     /** The mode changed (to `mode`); Thread's state goes to the orchestrator's read API. Never blocks. May be NULL. */
     void (*mode_changed)(br_core_mode_t mode);
@@ -201,22 +203,16 @@ bool mode_fsm_start_failed(br_core_mode_t mode, bool ot_running);
 
 /**
  * Move OpenThread from channel `from` ("" for a start: no channel runs it) to `to` ("" for a stop of OpenThread on
- * `from`, which leaves otbr): the spec's plain stop and start "work the same way". A stop: the probe op is called with
- * "" (it only accepts), then STARTING, ot_stop (MODE_FSM_ERR_DRAIN_TIMEOUT: the mode before back, nothing stored, never
- * RADIO_FAULT), store_otbr(from, "") and NO_RADIO; a failed store starts OpenThread on `from` again as below.
- * A move or start: in order: probe `to` (refused with
- * MODE_FSM_ERR_PROBE_FAILED, the reason in `err`, nothing changed); STARTING; stop OpenThread (MODE_FSM_ERR_DRAIN_TIMEOUT,
- * `err` MODE_FSM_DRAIN_TIMEOUT, the mode before the move back, nothing changed); start on `to`; store both modes only
- * then. A failed start on `to`, or a failed store after it (OpenThread stopped on `to` again), starts OpenThread on
- * `from` again and returns MODE_FSM_ERR_START_FAILED with nothing stored; when that start fails too the mode is
- * RADIO_FAULT. From NO_RADIO (`from` is absent) or for a start the stop does nothing and a failed start leaves NO_RADIO.
- * A start on
- * `to` that abandoned OpenThread's init (MODE_FSM_ERR_START_ABANDONED) cannot be followed by another start: the move
- * returns it, nothing stored, the mode stays STARTING, and the caller reboots the board (it boots on `from`). The same
- * when the start on `from` again abandons the init.
- * ESP_ERR_INVALID_STATE (nothing touched) in STARTING and SNIFFER (a maintenance of the C6 keeps it STARTING). A
- * successful start ends in
- * BR_RUNNING through mode_fsm_set_started (the border router start). Blocks for the whole move.
+ * `from`, which leaves otbr): a move is a rebind (design section 4.5). In order: probe `to` (refused with
+ * MODE_FSM_ERR_PROBE_FAILED, the reason in `err`, nothing changed; a stop's probe only accepts); STARTING; stop
+ * OpenThread on the source (MODE_FSM_ERR_DRAIN_TIMEOUT, `err` MODE_FSM_DRAIN_TIMEOUT, the mode before back, nothing
+ * changed, never RADIO_FAULT); the commit, store_otbr(from, to) (a stop: NO_RADIO and done; a failure changed nothing:
+ * OpenThread starts again on `from`, NO_RADIO without one, MODE_FSM_ERR_START_FAILED); then the start on `to`. A
+ * failed start stays on `to`: RADIO_FAULT, MODE_FSM_ERR_START_FAILED, no start back on `from` (a PUT of mode otbr on
+ * `to` retries, one on another channel moves it). A start that abandoned OpenThread's init: RADIO_FAULT, `err`
+ * MODE_FSM_FAULT_ABANDONED, MODE_FSM_ERR_START_ABANDONED, no reboot. ESP_ERR_INVALID_STATE (nothing touched) in
+ * STARTING and SNIFFER (a maintenance of the C6 keeps it STARTING). A successful start ends in BR_RUNNING through
+ * mode_fsm_set_started (the border router start). Blocks for the whole move.
  */
 esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, char *err, size_t cap);
 
