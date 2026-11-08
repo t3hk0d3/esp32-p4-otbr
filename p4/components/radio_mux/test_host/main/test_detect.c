@@ -190,6 +190,17 @@ static size_t ash_rstack(uint8_t version, uint8_t code, int crc_flip, uint8_t *o
     return at;
 }
 
+// Silence through the current step's repeated requests until the next step starts (or the detection ends).
+static out_t next_step(const out_t *o)
+{
+    out_t n = timeout_of(o);
+
+    while (n.act == RADIO_MUX_PROBE_SEND && !n.new_step) {
+        n = timeout_of(&n);
+    }
+    return n;
+}
+
 // Walks the sequence with silence up to the given step (0 = spinel 460800 ... 4 = EZSP 460800); returns that step's
 // first output.
 static out_t at_step(int step)
@@ -197,9 +208,20 @@ static out_t at_step(int step)
     out_t o = begin();
 
     for (int i = 0; i < step; i++) {
-        o = timeout_of(&o);
+        o = next_step(&o);
     }
     return o;
+}
+
+// The spinel step at 460800 asks three times (RADIO_MUX_DETECT_SPINEL_TRIES), 350 ms apart: 1050 ms in all.
+#define STEP0_MS (RADIO_MUX_DETECT_SPINEL_TRIES * RADIO_MUX_DETECT_SPINEL_MS)
+
+// A spinel RESET notice: TID 0, PROP_VALUE_IS LAST_STATUS RESET_POWER_ON (112).
+static size_t reset_notice(uint8_t hdr, uint8_t status, uint8_t *out, size_t cap)
+{
+    const uint8_t prop[] = {0x00}, val[] = {status};
+
+    return spinel_is_hdr(hdr, prop, 1, val, 1, out, cap);
 }
 
 TEST_CASE("At the start: asks for spinel NCP_VERSION at 460800", "[radio_mux]")
@@ -236,7 +258,7 @@ TEST_CASE("On no answer within the step's share of the budget: moves to spinel a
     TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_SEND, o.act);
     TEST_ASSERT_EQUAL_UINT32(115200, o.baud);
     assert_spinel_get(&o, PROP_NCP_VERSION, sizeof(PROP_NCP_VERSION));
-    TEST_ASSERT_EQUAL_INT64(T0 + 700, o.until);
+    TEST_ASSERT_EQUAL_INT64(T0 + STEP0_MS + 350, o.until);
 }
 
 TEST_CASE("On no answer within the step's share of the budget: moves to ZNP SYS_PING at 115200 for 400 ms",
@@ -249,7 +271,7 @@ TEST_CASE("On no answer within the step's share of the budget: moves to ZNP SYS_
     TEST_ASSERT_EQUAL_UINT32(115200, o.baud);
     TEST_ASSERT_EQUAL_UINT32(sizeof(ping), o.tx_n);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(ping, o.tx, sizeof(ping));
-    TEST_ASSERT_EQUAL_INT64(T0 + 1100, o.until);
+    TEST_ASSERT_EQUAL_INT64(T0 + STEP0_MS + 750, o.until);
 }
 
 TEST_CASE("On no answer within the step's share of the budget: moves to EZSP RST at 115200 for 800 ms", "[radio_mux]")
@@ -261,10 +283,11 @@ TEST_CASE("On no answer within the step's share of the budget: moves to EZSP RST
     TEST_ASSERT_EQUAL_UINT32(115200, o.baud);
     TEST_ASSERT_EQUAL_UINT32(sizeof(rst), o.tx_n);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(rst, o.tx, sizeof(rst));
-    TEST_ASSERT_EQUAL_INT64(T0 + 1900, o.until);
+    TEST_ASSERT_EQUAL_INT64(T0 + STEP0_MS + 1550, o.until);
 }
 
-TEST_CASE("On no answer within the step's share of the budget: moves to EZSP RST at 460800 for 800 ms", "[radio_mux]")
+TEST_CASE("On no answer within the step's share of the budget: moves to EZSP RST at 460800 until the 3000 ms cap",
+          "[radio_mux]")
 {
     const uint8_t rst[] = {0x1A, 0xC0, 0x38, 0xBC, 0x7E};
     out_t o = at_step(4);
@@ -273,7 +296,7 @@ TEST_CASE("On no answer within the step's share of the budget: moves to EZSP RST
     TEST_ASSERT_EQUAL_UINT32(460800, o.baud);
     TEST_ASSERT_EQUAL_UINT32(sizeof(rst), o.tx_n);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(rst, o.tx, sizeof(rst));
-    TEST_ASSERT_EQUAL_INT64(T0 + 2700, o.until);
+    TEST_ASSERT_EQUAL_INT64(T0 + 3000, o.until);
 }
 
 TEST_CASE("On no answer within the step's share of the budget: finishes with unknown after the last step",
@@ -407,7 +430,8 @@ TEST_CASE("On a spinel answer: a corrupt frame is ignored and the step goes on",
     o = call(T0 + 40, rx, n);
     TEST_ASSERT_EQUAL_UINT32(0, o.tx_n);
     o = call(T0 + 350, NULL, 0);
-    TEST_ASSERT_EQUAL_UINT32(115200, o.baud);
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_SEND, o.act); // no result: the version is asked again
+    assert_spinel_get(&o, PROP_NCP_VERSION, sizeof(PROP_NCP_VERSION));
 }
 
 TEST_CASE("On a ZNP SYS_PING reply: sends SYS_VERSION within the same step", "[radio_mux]")
@@ -702,7 +726,7 @@ TEST_CASE("On each probe step: new_step is true on the SEND that starts it", "[r
 
     TEST_ASSERT_TRUE(o.new_step);
     for (int i = 1; i < 5; i++) {
-        o = timeout_of(&o);
+        o = next_step(&o);
         TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_SEND, o.act);
         TEST_ASSERT_TRUE(o.new_step);
     }
@@ -780,6 +804,161 @@ TEST_CASE("On an unsolicited spinel frame (TID 0) before the version answer: ign
     o = call(T0 + 40, rx, n);
     TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_SEND, o.act);
     TEST_ASSERT_EQUAL_UINT32(0, o.tx_n);
+}
+
+TEST_CASE("On no answer at 460800: asks for NCP_VERSION again 350 ms later, at the same baud, as a follow-up",
+          "[radio_mux]")
+{
+    out_t o = begin();
+
+    o = timeout_of(&o);
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_SEND, o.act);
+    TEST_ASSERT_EQUAL_UINT32(460800, o.baud);
+    assert_spinel_get(&o, PROP_NCP_VERSION, sizeof(PROP_NCP_VERSION));
+    TEST_ASSERT_FALSE(o.new_step);
+    TEST_ASSERT_EQUAL_INT64(T0 + 700, o.until);
+}
+
+TEST_CASE("On no answer at 460800: asks three times in all before moving to 115200", "[radio_mux]")
+{
+    out_t o = begin();
+    int asks = 1;
+
+    for (;;) {
+        o = timeout_of(&o);
+        if (o.baud != 460800) {
+            break;
+        }
+        TEST_ASSERT_TRUE(o.tx_n > 0);
+        asks++;
+    }
+    TEST_ASSERT_EQUAL_INT(RADIO_MUX_DETECT_SPINEL_TRIES, asks);
+    TEST_ASSERT_EQUAL_UINT32(115200, o.baud);
+    TEST_ASSERT_TRUE(o.new_step);
+}
+
+TEST_CASE("On an answer to the third request at 460800: spinel at 460800", "[radio_mux]")
+{
+    uint8_t rx[160], rs[40];
+    size_t n = ncp_version_answer(KOENKK, rx, sizeof(rx));
+    size_t ns = last_status_answer(rs, sizeof(rs));
+    out_t o = begin();
+
+    o = timeout_of(&o);
+    o = timeout_of(&o);
+    o = call(T0 + 800, rx, n);
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_SEND, o.act);
+    o = call(T0 + 850, rs, ns);
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_DONE, o.act);
+    TEST_ASSERT_EQUAL(RADIO_MUX_FW_SPINEL, o.rec.type);
+    TEST_ASSERT_EQUAL_UINT32(460800, o.rec.baud);
+}
+
+TEST_CASE("On no answer at 115200: asks once, as before", "[radio_mux]")
+{
+    out_t o = at_step(1);
+
+    o = timeout_of(&o);
+    TEST_ASSERT_TRUE(o.new_step);
+    TEST_ASSERT_EQUAL_UINT32(115200, o.baud);
+    TEST_ASSERT_EQUAL_UINT32(5, o.tx_n); // ZNP SYS_PING
+}
+
+TEST_CASE("On a spinel RESET notice in the spinel step: asks for the version again at once", "[radio_mux]")
+{
+    uint8_t rn[40];
+    size_t nn = reset_notice(0x80, 0x70, rn, sizeof(rn));
+    out_t o;
+
+    begin();
+    o = call(T0 + 200, rn, nn);
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_SEND, o.act);
+    assert_spinel_get(&o, PROP_NCP_VERSION, sizeof(PROP_NCP_VERSION));
+    TEST_ASSERT_FALSE(o.new_step);
+    TEST_ASSERT_EQUAL_INT64(T0 + 200 + 350, o.until);
+}
+
+TEST_CASE("On a spinel RESET notice and no version answer by the deadline: spinel at that baud, no version",
+          "[radio_mux]")
+{
+    uint8_t rn[40];
+    size_t nn = reset_notice(0x80, 0x72, rn, sizeof(rn));
+    out_t o;
+
+    begin();
+    o = call(T0 + 200, rn, nn);
+    o = timeout_of(&o);
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_DONE, o.act);
+    TEST_ASSERT_EQUAL(RADIO_MUX_FW_SPINEL, o.rec.type);
+    TEST_ASSERT_EQUAL_UINT32(460800, o.rec.baud);
+    TEST_ASSERT_EQUAL_STRING("", o.rec.version);
+}
+
+TEST_CASE("On a spinel RESET notice followed by the version answer: the normal spinel path", "[radio_mux]")
+{
+    uint8_t rn[40], rx[160], rz[40];
+    size_t nn = reset_notice(0x80, 0x70, rn, sizeof(rn));
+    size_t n = ncp_version_answer(KOENKK, rx, sizeof(rx));
+    size_t nz = spinel_is(PROP_ZIGGURAT, sizeof(PROP_ZIGGURAT), NULL, 0, rz, sizeof(rz));
+    out_t o;
+
+    begin();
+    call(T0 + 200, rn, nn);
+    o = call(T0 + 250, rx, n);
+    assert_spinel_get(&o, PROP_ZIGGURAT, sizeof(PROP_ZIGGURAT));
+    o = call(T0 + 260, rz, nz);
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_DONE, o.act);
+    TEST_ASSERT_EQUAL(RADIO_MUX_FW_ZIGGURAT, o.rec.type);
+}
+
+TEST_CASE("On a spinel RESET notice with an IID in its header: counts too", "[radio_mux]")
+{
+    uint8_t rn[40];
+    size_t nn = reset_notice(0x90, 0x70, rn, sizeof(rn)); // IID 1, TID 0
+    out_t o;
+
+    begin();
+    o = call(T0 + 200, rn, nn);
+    TEST_ASSERT_TRUE(o.tx_n > 0);
+}
+
+TEST_CASE("On a TID 0 LAST_STATUS that is not a reset: ignored", "[radio_mux]")
+{
+    uint8_t rn[40];
+    size_t nn = reset_notice(0x80, 0x00, rn, sizeof(rn)); // STATUS_OK
+    out_t o;
+
+    begin();
+    o = call(T0 + 200, rn, nn);
+    TEST_ASSERT_EQUAL_UINT32(0, o.tx_n);
+    o = timeout_of(&o);
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_SEND, o.act); // the second request, not a result
+}
+
+TEST_CASE("On a spinel RESET notice in a ZNP or ASH step: ignored", "[radio_mux]")
+{
+    uint8_t rn[40];
+    size_t nn = reset_notice(0x80, 0x70, rn, sizeof(rn));
+    out_t step = at_step(2);
+    out_t o = call(step.until - 100, rn, nn);
+
+    TEST_ASSERT_EQUAL_UINT32(0, o.tx_n);
+    o = timeout_of(&o);
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_SEND, o.act);
+    TEST_ASSERT_TRUE(o.new_step); // on to EZSP: the notice did not count
+}
+
+TEST_CASE("On the 3000 ms cap after a spinel RESET notice: spinel", "[radio_mux]")
+{
+    uint8_t rn[40];
+    size_t nn = reset_notice(0x80, 0x70, rn, sizeof(rn));
+    out_t o;
+
+    begin();
+    call(T0 + 200, rn, nn);
+    o = call(T0 + 3000, NULL, 0);
+    TEST_ASSERT_EQUAL(RADIO_MUX_PROBE_DONE, o.act);
+    TEST_ASSERT_EQUAL(RADIO_MUX_FW_SPINEL, o.rec.type);
 }
 
 TEST_CASE("On \"OPENTHREAD/1.4.0-Koenkk-2025.3.1; CC13XX_CC26XX; Mar 13 2025\": returns version and chip",

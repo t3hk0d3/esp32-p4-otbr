@@ -15,8 +15,13 @@ extern "C" {
 
 // The whole detection takes at most this long from radio_mux_detect_start.
 #define RADIO_MUX_DETECT_CAP_MS 3000
-// Per-step budgets: spinel 460800, spinel 115200, ZNP 115200, EZSP ASH 115200, EZSP ASH 460800.
+// Per-step budgets: spinel 460800, spinel 115200, ZNP 115200, EZSP ASH 115200, EZSP ASH 460800. The spinel step at
+// 460800 (the RCP default) asks RADIO_MUX_DETECT_SPINEL_TRIES times, RADIO_MUX_DETECT_SPINEL_MS apart, so an RCP that
+// is still booting when the device opens is asked again (the cap then leaves the last EZSP step 400 ms). A spinel
+// RESET notice (TID 0 LAST_STATUS RESET_*) at a spinel step's baud counts as spinel: the version is asked once more
+// and, without an answer by the step's deadline, the result is spinel with no version.
 #define RADIO_MUX_DETECT_SPINEL_MS 350
+#define RADIO_MUX_DETECT_SPINEL_TRIES 3
 #define RADIO_MUX_DETECT_ZNP_MS 400
 #define RADIO_MUX_DETECT_EZSP_MS 800
 // After a spinel answer: the wait for the answer to the Ziggurat property request.
@@ -46,6 +51,8 @@ typedef enum {
 
 typedef struct {
     uint8_t stage, step;
+    uint8_t attempt; // the requests sent in this step (spinel steps send again: RADIO_MUX_DETECT_SPINEL_TRIES)
+    bool reset_seen; // a spinel RESET notice came at this step's baud
     int64_t start_ms, deadline_ms;
     radio_mux_fw_record_t rec;
     radio_mux_hdlc_dec_t dec;
@@ -56,8 +63,9 @@ typedef struct {
     size_t acc_n;
     bool ash_esc;
     // Set by every radio_mux_detect_next call: true on the SEND that starts a probe step, false on the follow-ups
-    // (the Ziggurat GET, SYS_VERSION), on waits and on DONE. The board code drops any rx it has buffered before it
-    // writes tx of a new step, and reopens the device only when *baud changed; a follow-up must not flush.
+    // (the Ziggurat GET, SYS_VERSION, a repeated NCP_VERSION GET), on waits and on DONE. The board code drops any rx
+    // it has buffered before it writes tx of a new step, and reopens the device only when *baud changed; a follow-up
+    // must not flush.
     bool new_step;
 } radio_mux_detect_t;
 
