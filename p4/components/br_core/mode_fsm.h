@@ -17,6 +17,9 @@ extern "C" {
 #define MODE_FSM_MAX_CHANNEL 26
 #define MODE_FSM_MAX_RECOVERIES 3
 #define MODE_FSM_RECOVERY_WINDOW_US (10LL * 60 * 1000 * 1000)
+/** A reset the radio mux could not post (ESP_ERR_TIMEOUT, ESP_ERR_NO_MEM: its queue full) is tried once more after
+ * this long before it counts as failed. */
+#define MODE_FSM_RESET_RETRY_MS 100
 /** The on-board C6's channel id (RADIO_MUX_C6_ID; mode_fsm stays free of the mux). */
 #define MODE_FSM_C6_ID "c6"
 /** mode_fsm_move_otbr results besides ESP_OK and ESP_ERR_INVALID_STATE (busy). */
@@ -51,8 +54,13 @@ typedef struct {
     esp_err_t (*restore_channel)(void);
     esp_err_t (*netif_up)(void);
     esp_err_t (*thread_start)(void);
-    /** Hardware reset of the RCP (GPIO54). */
+    /**
+     * Hardware reset of the OTBR channel's RCP through the radio mux. ESP_ERR_TIMEOUT or ESP_ERR_NO_MEM: the request
+     * could not be posted (the mux's queue stayed full); mode_fsm tries once more after MODE_FSM_RESET_RETRY_MS.
+     */
     esp_err_t (*reset_rcp)(void);
+    /** Block the calling task for `ms` milliseconds (the reset's retry delay). */
+    void (*sleep_ms)(uint32_t ms);
     /**
      * Stop OpenThread, push the firmware, hardware-reset the C6, start OpenThread again. Returns the push error
      * (or the restart error when the push worked). *restarted tells whether OpenThread runs again, whatever the
@@ -187,6 +195,13 @@ esp_err_t mode_fsm_rom_recover(mode_fsm_t *fsm, char *err_detail, size_t err_cap
  * usable again once the hook has returned): quiet the radio, restore Thread, BR_RUNNING (a failure reboots).
  */
 void mode_fsm_on_rcp_failure(mode_fsm_t *fsm);
+
+/**
+ * The RCP reset of a failure round (`reset_rcp`): when it returns ESP_ERR_TIMEOUT or ESP_ERR_NO_MEM (the radio mux
+ * could not take the request), it is tried once more after MODE_FSM_RESET_RETRY_MS (`sleep_ms`). Returns the last
+ * result.
+ */
+esp_err_t mode_fsm_reset_rcp(mode_fsm_t *fsm);
 
 /**
  * What a failed ROM recovery in the boot probe means: RADIO_FAULT "rom recovery failed" only when the updater was

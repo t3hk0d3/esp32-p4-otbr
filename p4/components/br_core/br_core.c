@@ -254,7 +254,7 @@ static void on_rcp_failure(void)
     }
     // While a push waits for the OpenThread sessions to end (the mode is STARTING) the C6 is only reset, below.
     if (!g_core.ot_ready || br_core_get_mode() == BR_MODE_STARTING) {
-        op_reset_rcp();
+        mode_fsm_reset_rcp(&g_fsm); // a request the mux could not take is tried once more
         return;
     }
     esp_br_web_set_openthread_ready(false);
@@ -1321,6 +1321,11 @@ static int64_t op_now_us(void)
     return esp_timer_get_time();
 }
 
+static void op_sleep_ms(uint32_t ms)
+{
+    vTaskDelay(pdMS_TO_TICKS(ms) > 0 ? pdMS_TO_TICKS(ms) : 1);
+}
+
 static const mode_fsm_ops_t s_ops = {
     .thread_stop = op_thread_stop,
     .netif_down = op_netif_down,
@@ -1337,6 +1342,7 @@ static const mode_fsm_ops_t s_ops = {
     .rom_recover = op_rom_recover,
     .reboot = op_reboot,
     .now_us = op_now_us,
+    .sleep_ms = op_sleep_ms,
     .probe_channel = core_radio_probe_channel,
     .ot_start = core_radio_ot_start,
     .ot_stop = core_radio_ot_stop,

@@ -270,13 +270,26 @@ static void finish_sniffer_recovery(void *ctx)
     }
 }
 
+esp_err_t mode_fsm_reset_rcp(mode_fsm_t *fsm)
+{
+    const mode_fsm_ops_t *ops = fsm->ops;
+    const esp_err_t err = ops->reset_rcp();
+
+    if (err != ESP_ERR_TIMEOUT && err != ESP_ERR_NO_MEM) {
+        return err;
+    }
+    ESP_LOGW(TAG, "the RCP reset was not taken (%s): trying once more", esp_err_to_name(err));
+    ops->sleep_ms(MODE_FSM_RESET_RETRY_MS);
+    return ops->reset_rcp();
+}
+
 void mode_fsm_on_rcp_failure(mode_fsm_t *fsm)
 {
     const mode_fsm_ops_t *ops = fsm->ops;
     const br_core_mode_t mode = mode_fsm_get_mode(fsm);
 
     if (mode == BR_MODE_STARTING) {
-        ops->reset_rcp();
+        mode_fsm_reset_rcp(fsm);
         return;
     }
     if (mode == BR_MODE_SNIFFER) {
@@ -296,7 +309,7 @@ void mode_fsm_on_rcp_failure(mode_fsm_t *fsm)
     }
     fsm->recovery_us[fsm->recovery_count++] = now;
 
-    if (ops->reset_rcp() != ESP_OK) {
+    if (mode_fsm_reset_rcp(fsm) != ESP_OK) {
         ESP_LOGE(TAG, "resetting the RCP failed, staying in the radio fault");
         return;
     }

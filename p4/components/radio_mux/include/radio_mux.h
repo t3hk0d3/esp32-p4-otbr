@@ -133,7 +133,8 @@ esp_err_t radio_mux_tx(radio_mux_chan_t *ch, const uint8_t *data, size_t n);
 // DTR/RTS pulses, never VBUS), RESET when it is back,
 // GONE when it did not reopen. The C6 gets a 20 ms pulse of its reset GPIO; the next SPI transaction carries the reset
 // bit, and RESET is posted on the RCP's first header with its own reset bit (before its first frame), or after 2 s
-// without one (the consumer's own timeouts then see a dead RCP). Does not wait.
+// without one (the consumer's own timeouts then see a dead RCP). Does not wait for the reset; waits up to 1 s for room
+// in the owner task's queue (ESP_ERR_TIMEOUT when there was none: nothing was asked). Not from the owner task.
 esp_err_t radio_mux_reset(radio_mux_chan_t *ch);
 // Raw channels: takes up to cap received bytes without waiting; 0 when there are none.
 size_t radio_mux_read_raw(radio_mux_chan_t *ch, uint8_t *out, size_t cap);
