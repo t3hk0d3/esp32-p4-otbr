@@ -9,7 +9,7 @@ The Dashboard shows the fault in red, with what to do and a link to the page tha
 the whole board (`storage unavailable`, `esp-hosted firmware`, `no rcp firmware`) shows on the Device and network
 line; the others show in the Thread section, as here with the C6 held in reset:
 
-<img src="images/dashboard-radio-fault.png" width="640" alt="Dashboard in RADIO_FAULT with fault_reason rcp incompatible: Device and network still says Board OK and the Radios card lists the C6 as Unavailable; the Thread section shows Radio fault in red, the radio firmware does not match this build, install the c6_rcp.bin of the same release, with a link to the Firmware page; the Thread cards are empty">
+<img src="images/dashboard-radio-fault.png" width="640" alt="Dashboard in RADIO_FAULT with fault_reason rcp incompatible: Device and network still says Board OK and the Radios card lists the ESP32-C6 (built-in) as Unavailable; the Thread section shows Radio fault in red, the radio firmware does not match this build, install the c6_rcp.bin of the same release, with a link to the Firmware page; the Thread cards are empty">
 
 | `fault_reason` | Meaning and fix |
 | --- | --- |
