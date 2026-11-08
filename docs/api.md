@@ -255,7 +255,7 @@ longer accepted) and a USB dongle (`usb-<vid>-<pid>`, plus `-<serial>` when the 
 reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /device/channels` answers
 
 ```
-{"available_modes": ["off", "otbr", "rcp-proxy"],
+{"available_modes": ["off", "otbr", "rcp-proxy", "ziggurat"],
  "channels": [
   {"id": "builtin-c6", "kind": "builtin", "label": "ESP32-C6 (built-in)", "mode": "otbr", "stored_mode": "otbr",
    "state": "running", "error": null, "line": {"baud": 460800, "flow_control": false}, "usb": null,
@@ -284,9 +284,10 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
  ]}
 ```
 
-- `available_modes` are the modes the build offers; `ziggurat` is reserved and not listed.
+- `available_modes` are the modes the build offers (those with a registered instance: `off`, `otbr`, `rcp-proxy` and
+  `ziggurat`).
 - `mode` is what the channel does now: `unavailable` (reported only: not detected, unplugged, no driver), `off`,
-  `otbr`, `ziggurat` (reserved) or `rcp-proxy`. `stored_mode` is the mode it returns to, also while unavailable or when
+  `otbr`, `ziggurat` or `rcp-proxy`. `stored_mode` is the mode it returns to, also while unavailable or when
   the firmware does not fit.
 - `state` is `idle`, `starting`, `running`, `fault` (with `error`) or `busy` (the C6's maintenance: its boot steps,
   `error` "the C6's boot steps run", or a firmware push or ROM recovery, "a C6 job holds the radio"). A failed start of

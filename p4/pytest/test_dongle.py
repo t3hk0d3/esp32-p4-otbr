@@ -341,8 +341,10 @@ def test_move_abandoned_start_no_reboot(dut, send, reboot, base_url, dongle):
     # The way out: Thread back on the C6 (its probe and commit work, its start is refused the same way), then a reboot.
     back = put_channel(base_url, {"mode": "otbr"}, "builtin-c6")
     assert back.status_code == 202, back.text
+    # Committed once the C6 is stored otbr (/device/status's otbr_channel names the C6 already while it is leased for
+    # the probe, before the commit).
     deadline = time.monotonic() + MOVE_TIMEOUT_S
-    while get_status(base_url)["otbr_channel"] != "builtin-c6":
+    while get_channel(base_url, "builtin-c6")["stored_mode"] != "otbr":
         assert time.monotonic() < deadline, "the move back was never committed"
         time.sleep(1)
     reboot()

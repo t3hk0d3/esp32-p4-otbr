@@ -59,7 +59,12 @@ PROXY_DEFAULTS = {
     "host": "",
     "framing": "hdlc",
 }
-OFFERED_MODES = {"off", "otbr", "rcp-proxy"}
+OFFERED_MODES = {
+    "off",
+    "otbr",
+    "rcp-proxy",
+    "ziggurat",
+}  # ziggurat: registered since the Zigbee merge
 NO_RADIO_DETAIL = "no radio in OTBR mode"
 # spinel PROP_VALUE_GET PROTOCOL_VERSION (TID 1), HDLC framed with its FCS: a first frame a proxy client sends.
 SPINEL_GET_PROTOCOL_VERSION_HDLC = bytes.fromhex("7e810201c5b27e")
@@ -228,9 +233,10 @@ def test_old_c6_id_is_unknown(base_url):
 
 
 def test_available_modes(base_url):
-    # GET /device/channels: available_modes comes first, offers off, otbr and rcp-proxy, and never ziggurat or unavailable.
+    # GET /device/channels: available_modes comes first (then the channels and the modes list) and offers the registered
+    # modes: off, otbr, rcp-proxy and ziggurat, never unavailable.
     body = get_channels(base_url)
-    assert list(body) == ["available_modes", "channels"]
+    assert list(body) == ["available_modes", "channels", "modes"]
     assert set(body["available_modes"]) == OFFERED_MODES
     assert len(body["available_modes"]) == len(OFFERED_MODES)
     for channel in body["channels"]:
@@ -257,7 +263,9 @@ def without_counters(channel):
 def test_put_validation_not_an_object(base_url):
     # PUT with a body that is no JSON object: 400 bad_value.
     for raw in (b"[1]", b'"otbr"', b"42", b"not json"):
-        reply = requests.put(f"{base_url}/device/channels/c6", data=raw, timeout=10)
+        reply = requests.put(
+            f"{base_url}/device/channels/builtin-c6", data=raw, timeout=10
+        )
         assert reply.status_code == 400, (raw, reply.text)
 
 
@@ -281,18 +289,15 @@ def test_put_validation_unknown_channel(base_url):
 
 
 def test_put_validation_409(base_url):
-    # PUT/DELETE refusals reachable with the C6 alone: not_available (ziggurat), in_use (forget the C6).
+    # DELETE refusal reachable with the C6 alone: in_use (forget the C6). ziggurat is a registered mode since the Zigbee
+    # merge (test_zigbee.py covers it).
     before = get_channel(base_url)
-    reply = put_channel(base_url, {"mode": "ziggurat"})
-    assert reply.status_code == 409, reply.text
-    assert reply.json()["error"] == "not_available"
-    forget = requests.delete(f"{base_url}/device/channels/c6", timeout=10)
+    forget = requests.delete(f"{base_url}/device/channels/builtin-c6", timeout=10)
     assert forget.status_code == 409, forget.text
     assert forget.json()["error"] == "in_use"
-    assert get_channel(base_url) == before
+    assert without_counters(get_channel(base_url)) == without_counters(before)
     # The refusals that need a second radio (unavailable, incompatible, probe_failed, busy, and a move carrying line
-    # settings) are in test_dongle.py::test_move_refusals. mode_taken and hybrid_not_supported need a registered
-    # ziggurat consumer and belong to the Zigbee work.
+    # settings) are in test_dongle.py::test_move_refusals.
 
 
 def test_put_validation_c6_busy(base_url, c6_in_otbr):
@@ -369,17 +374,6 @@ def test_c6_off_and_back(dut, base_url, c6_in_otbr):
     assert get_channel(base_url)["mode_state"] == "running"
     wait_ot_state(dut, {"leader", "router", "child"}, THREAD_TIMEOUT_S)
     assert ot(dut, "dataset active -x")[-1] == dataset
-
-
-def test_ziggurat_not_available(base_url):
-    # PUT mode ziggurat, On a build without a Zigbee consumer: 409 not_available, mode unchanged, not offered.
-    before = get_channel(base_url)
-    reply = put_channel(base_url, {"mode": "ziggurat"})
-    assert reply.status_code == 409, reply.text
-    assert reply.json()["error"] == "not_available"
-    assert "ziggurat" not in get_channels(base_url)["available_modes"]
-    assert get_channel(base_url)["mode"] == before["mode"]
-    assert get_channel(base_url)["stored_mode"] == before["stored_mode"]
 
 
 def test_rest_503_in_no_radio(base_url, c6_in_otbr):

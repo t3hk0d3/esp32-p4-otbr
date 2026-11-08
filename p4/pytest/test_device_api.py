@@ -35,6 +35,8 @@ STATUS_KEYS = {
     "fault_reason",
     "storage_ok",
     "trel",
+    "otbr_channel",
+    "zigbee_channel",
 }
 CHANNEL = 15
 RCP_OFFSET_MID = 100_000
@@ -426,7 +428,9 @@ class TestOtaEdgeCases:
             assert response.status_code == requests.codes.bad_request, body
             assert_error_body(response)
 
-    def test_ota_url_with_an_https_url_without_a_host_returns_400_invalid_request(self, base_url):
+    def test_ota_url_with_an_https_url_without_a_host_returns_400_invalid_request(
+        self, base_url
+    ):
         response = requests.post(
             f"{base_url}/device/ota/url",
             json={"url": "https:///a.bin"},
@@ -603,7 +607,9 @@ class TestRadioFirmwareEndpoint:
         assert "payload_too_large" in body
         assert status(base_url)["mode"] == "BR_RUNNING"
 
-    def test_from_url_with_an_https_url_without_a_host_returns_400_invalid_request(self, base_url):
+    def test_from_url_with_an_https_url_without_a_host_returns_400_invalid_request(
+        self, base_url
+    ):
         response = requests.post(
             f"{base_url}/device/radio/firmware",
             params={"from_url": "https:///a.bin"},
