@@ -37,7 +37,7 @@ static radio_mux_chan_view_t chan(const char *id, radio_mux_mode_t mode, radio_m
 // Channels: [0] c6 (otbr, spinel), [1] a spinel dongle (off), [2] a ZNP dongle (off).
 static void three_channels(radio_mux_chan_view_t c[N_CHANS])
 {
-    c[0] = chan("c6", RADIO_MUX_MODE_OTBR, RADIO_MUX_FW_SPINEL);
+    c[0] = chan("builtin-c6", RADIO_MUX_MODE_OTBR, RADIO_MUX_FW_SPINEL);
     c[1] = chan("usb-303a-1001", RADIO_MUX_MODE_OFF, RADIO_MUX_FW_SPINEL);
     c[2] = chan("usb-10c4-ea60", RADIO_MUX_MODE_OFF, RADIO_MUX_FW_ZNP);
 }

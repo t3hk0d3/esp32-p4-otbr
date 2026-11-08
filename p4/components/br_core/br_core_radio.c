@@ -1017,8 +1017,8 @@ esp_err_t br_core_move_otbr(const char *from, const char *to, char *reason, size
     }
     // A maintenance of the C6 checks s_move.running before it asks: one of them refuses. The C6's boot steps keep a
     // move to the C6 out by its lease (the channel is in reinit).
-    if (radio_mux_maintenance_running() && ((from && strcmp(from, RADIO_MUX_C6_ID) == 0) ||
-                                            strcmp(to, RADIO_MUX_C6_ID) == 0)) {
+    if (radio_mux_maintenance_running() && ((from && strcmp(from, RADIO_MUX_BUILTIN_ID) == 0) ||
+                                            strcmp(to, RADIO_MUX_BUILTIN_ID) == 0)) {
         atomic_store(&s_move.running, false);
         snprintf(reason, cap, "a C6 firmware push or recovery runs");
         return ESP_ERR_INVALID_STATE;

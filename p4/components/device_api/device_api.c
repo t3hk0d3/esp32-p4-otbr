@@ -1178,7 +1178,7 @@ static void recover_task(void *arg)
     br_core_get_status(&bs); // the state after the restart: BR_RUNNING with the RCP, or RADIO_FAULT "no rcp firmware"
     builtin_rcp_get_status(&rs);
     // With Thread on another channel the mode and its fault are that channel's: the reply describes the C6 alone.
-    const bool thread_on_c6 = strcmp(bs.otbr_channel, RADIO_MUX_C6_ID) == 0;
+    const bool thread_on_c6 = strcmp(bs.otbr_channel, RADIO_MUX_BUILTIN_ID) == 0;
 
     if (device_api_recover_reply(err, detail[0] ? detail : esp_err_to_name(err), bs.mode, thread_on_c6, bs.fault_reason,
                                  rs.installed_known, rs.installed, body, sizeof(body), &http_status) < 0) {

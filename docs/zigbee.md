@@ -14,7 +14,7 @@ the P4. Nothing else changes: Ethernet, the web UI, updates and the diagnostics 
 ## Choosing it
 
 On the **Radios** page set the mode of the radio to **Zigbee** (`ziggurat`), or `PUT /device/channels/<id>` with
-`{"mode": "ziggurat"}` (the C6 is `c6`, a USB dongle `usb-<vid>-<pid>[-<serial>]`). Changing into or out of Zigbee
+`{"mode": "ziggurat"}` (the C6 is `builtin-c6`, a USB dongle `usb-<vid>-<pid>[-<serial>]`). Changing into or out of Zigbee
 mode reboots the board, and the answer says `"reboot": true`. When the board is back, `GET /device/zigbee` shows
 `running` and the **Zigbee** page appears in the menu.
 

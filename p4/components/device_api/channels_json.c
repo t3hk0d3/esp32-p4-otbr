@@ -138,7 +138,7 @@ static void channel_fields(json_out_t *w, const radio_mux_chan_info_t *c)
     json_out_raw(w, "{\"id\":");
     json_out_str(w, c->id);
     json_out_raw(w, ",\"kind\":");
-    json_out_str(w, c->kind == RADIO_MUX_KIND_C6 ? "c6" : "usb");
+    json_out_str(w, c->kind == RADIO_MUX_KIND_BUILTIN ? "builtin" : "usb");
     json_out_raw(w, ",\"label\":");
     json_out_str(w, c->label);
     json_out_raw(w, ",\"mode\":");

@@ -114,14 +114,14 @@ def get_channels(base_url):
     return reply.json()
 
 
-def get_channel(base_url, channel_id="c6"):
+def get_channel(base_url, channel_id="builtin-c6"):
     for channel in get_channels(base_url)["channels"]:
         if channel["id"] == channel_id:
             return channel
     pytest.fail(f"no channel {channel_id!r} in the list")
 
 
-def put_channel(base_url, body, channel_id="c6"):
+def put_channel(base_url, body, channel_id="builtin-c6"):
     return requests.put(
         f"{base_url}/device/channels/{channel_id}", json=body, timeout=30
     )
@@ -148,7 +148,7 @@ def wait_mode(base_url, mode, timeout=STATUS_TIMEOUT_S):
     pytest.fail(f"board mode is {status.get('mode')!r}, expected {mode!r}")
 
 
-def set_mode(base_url, mode, channel_id="c6", timeout=SETTLE_TIMEOUT_S):
+def set_mode(base_url, mode, channel_id="builtin-c6", timeout=SETTLE_TIMEOUT_S):
     """PUT `mode` on the channel and wait until it settled; return the reply. A 200 applies at once. A 202 (a move,
     start or stop of Thread, a long operation) is waited for: until the channel stores the mode, and for otbr until
     Thread runs on it. Before otbr, a radio that runs rcp-proxy is set off first (the API refuses otbr while the proxy
@@ -184,9 +184,9 @@ def c6_in_otbr(base_url):
 def test_c6_listed_in_otbr(base_url, board_ip):
     # GET /device/channels on a board without a dongle: the C6 is listed in OTBR mode, running, with its caps.
     body = get_channels(base_url)
-    channel = next(c for c in body["channels"] if c["id"] == "c6")
+    channel = next(c for c in body["channels"] if c["id"] == "builtin-c6")
     assert list(channel) == CHANNEL_KEYS
-    assert channel["kind"] == "c6"
+    assert channel["kind"] == "builtin"
     assert channel["mode"] == "otbr"
     assert channel["stored_mode"] == "otbr"
     assert channel["state"] == "running"
@@ -210,12 +210,21 @@ def test_c6_listed_in_otbr(base_url, board_ip):
     thread = [m for m in body["modes"] if m["mode"] == "otbr"]
     assert len(thread) == 1, body["modes"]
     assert list(thread[0]) == MODE_KEYS
-    assert thread[0]["channel"] == "c6"
+    assert thread[0]["channel"] == "builtin-c6"
     assert thread[0]["state"] == "running"
     assert thread[0]["reboot_on_change"] is False
     status = get_status(base_url)
     assert status["mode"] == "BR_RUNNING"
-    assert status["otbr_channel"] == "c6"
+    assert status["otbr_channel"] == "builtin-c6"
+
+
+def test_old_c6_id_is_unknown(base_url):
+    # PUT /device/channels/c6, On the id the built-in channel had before it was builtin-c6: 404 unknown_channel (no
+    # alias); nothing changes.
+    reply = put_channel(base_url, {"mode": "otbr"}, "c6")
+    assert reply.status_code == 404, reply.text
+    assert reply.json()["error"] == "unknown_channel"
+    assert get_channels(base_url)["channels"][0]["id"] == "builtin-c6"
 
 
 def test_available_modes(base_url):
@@ -337,7 +346,7 @@ def test_c6_off_and_back(dut, base_url, c6_in_otbr):
         base_url, "off"
     )  # a stop of Thread: 202, the mode stored once OpenThread stopped
     assert off.status_code == 202, off.text
-    assert off.json() == {"moving": True, "moved_from": "c6"}
+    assert off.json() == {"moving": True, "moved_from": "builtin-c6"}
     status = wait_mode(base_url, "NO_RADIO")
     assert status["otbr_channel"] is None
     channel = get_channel(base_url)
@@ -355,7 +364,7 @@ def test_c6_off_and_back(dut, base_url, c6_in_otbr):
     assert on.status_code == 202, on.text
     assert on.json() == {"moving": True, "moved_from": None}
     status = wait_mode(base_url, "BR_RUNNING")
-    assert status["otbr_channel"] == "c6"
+    assert status["otbr_channel"] == "builtin-c6"
     assert get_channel(base_url)["state"] == "running"
     assert get_channel(base_url)["mode_state"] == "running"
     wait_ot_state(dut, {"leader", "router", "child"}, THREAD_TIMEOUT_S)

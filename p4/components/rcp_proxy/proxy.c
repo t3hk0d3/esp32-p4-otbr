@@ -913,7 +913,7 @@ static void proxy_task(void *arg)
 
 static int slot_of(const radio_mux_chan_t *ch)
 {
-    return strcmp(radio_mux_chan_id(ch), RADIO_MUX_C6_ID) == 0 ? SLOT_C6 : SLOT_USB;
+    return strcmp(radio_mux_chan_id(ch), RADIO_MUX_BUILTIN_ID) == 0 ? SLOT_C6 : SLOT_USB;
 }
 
 // Owner task: the orchestrator's input is noted as the slot's latest and the proxy task woken; nothing waits. A bind

@@ -196,7 +196,7 @@ static void set_compatible(bool compatible)
 {
     radio_mux_chan_t *ch = core_radio_chan();
 
-    if (!ch || strcmp(radio_mux_chan_id(ch), RADIO_MUX_C6_ID) != 0) {
+    if (!ch || strcmp(radio_mux_chan_id(ch), RADIO_MUX_BUILTIN_ID) != 0) {
         return;
     }
     core_set_c6_compatible(compatible);
@@ -230,7 +230,7 @@ static esp_err_t reset_rcp(void)
         return ESP_ERR_INVALID_STATE;
     }
 #ifdef OTBR_TEST_BUILD
-    if (strcmp(radio_mux_chan_id(ch), RADIO_MUX_C6_ID) == 0 && builtin_rcp_test_c6_hold()) {
+    if (strcmp(radio_mux_chan_id(ch), RADIO_MUX_BUILTIN_ID) == 0 && builtin_rcp_test_c6_hold()) {
         ESP_LOGW(TAG, "test build: holding the C6 in reset");
         gpio_set_level(P4_PIN_C6_RESET, 0);
         return ESP_OK;
@@ -287,7 +287,7 @@ static uint32_t channel_bus_speed(const char *id)
 {
     uint32_t speed = P4_RCP_SPI_HZ;
 
-    if (strcmp(id, RADIO_MUX_C6_ID) == 0) {
+    if (strcmp(id, RADIO_MUX_BUILTIN_ID) == 0) {
         return speed;
     }
     radio_mux_snapshot_t *snap = malloc(sizeof(*snap));
@@ -1262,7 +1262,7 @@ bool br_core_c6_job_touches_openthread(void)
     char otbr[RADIO_MUX_ID_MAX];
     const bool stored = radio_mux_otbr_channel(otbr, sizeof(otbr));
 
-    return stored && strcmp(otbr, RADIO_MUX_C6_ID) == 0;
+    return stored && strcmp(otbr, RADIO_MUX_BUILTIN_ID) == 0;
 }
 
 // One maintenance of the C6 (a push: `source` set; a ROM recovery: NULL), run by the orchestrator as the C6 channel's

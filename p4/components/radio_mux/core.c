@@ -359,12 +359,22 @@ radio_mux_post_t radio_mux_post_rx(bool queue_full, size_t len, radio_mux_counte
 #define FNV_OFFSET 0x811C9DC5u
 #define FNV_PRIME 0x01000193u
 
+bool radio_mux_is_builtin_id(const char *id)
+{
+    return strcmp(id, RADIO_MUX_BUILTIN_ID) == 0 || strcmp(id, RADIO_MUX_BUILTIN_NVS_ID) == 0;
+}
+
+const char *radio_mux_nvs_id(const char *id)
+{
+    return radio_mux_is_builtin_id(id) ? RADIO_MUX_BUILTIN_NVS_ID : id;
+}
+
 void radio_mux_nvs_key(const char *id, char out[16])
 {
     uint32_t h = FNV_OFFSET;
 
-    if (strcmp(id, RADIO_MUX_C6_ID) == 0) {
-        snprintf(out, 16, "%s", RADIO_MUX_C6_ID);
+    if (radio_mux_is_builtin_id(id)) {
+        snprintf(out, 16, "%s", RADIO_MUX_BUILTIN_NVS_ID);
         return;
     }
     for (size_t i = 0; id[i] != '\0'; i++) {

@@ -767,7 +767,7 @@ TEST_CASE("On a firmware push that failed: the job result is the push error", "[
 
 /* ---- moving OpenThread to another channel ---- */
 
-#define SRC "c6"
+#define SRC "builtin-c6"
 #define DST "usb-1a86-55d4"
 
 TEST_CASE("On a probe failure of the target: refuses with probe_failed and the probe's reason", "[mode_fsm]")
@@ -1126,10 +1126,16 @@ TEST_CASE("On boot with a dongle in otbr: NO_RADIO until it attaches, nothing st
     TEST_ASSERT_EQUAL(0, fake.count);
 }
 
+TEST_CASE("On the built-in channel's id: builtin-c6 (the stored c6 is mapped by the radio mux)", "[mode_fsm]")
+{
+    TEST_ASSERT_EQUAL_STRING("builtin-c6", MODE_FSM_BUILTIN_ID);
+    TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible("c6", ESP_FAIL)); /* no channel has that id any more */
+}
+
 TEST_CASE("On boot with the C6 in otbr (default): the C6 boot goes on as today, mode STARTING", "[mode_fsm]")
 {
     setup(BR_MODE_STARTING);
-    TEST_ASSERT_TRUE(mode_fsm_boot(&fsm, MODE_FSM_C6_ID));
+    TEST_ASSERT_TRUE(mode_fsm_boot(&fsm, MODE_FSM_BUILTIN_ID));
     TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
     TEST_ASSERT_EQUAL(0, fake.count);
 }
@@ -1146,23 +1152,23 @@ TEST_CASE("On NO_RADIO: Thread operations are refused", "[mode_fsm]")
 TEST_CASE("On the C6's RCP probe failing before a start (no answer, not an RCP, missing caps): rcp incompatible",
           "[mode_fsm]")
 {
-    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_ERR_TIMEOUT));
-    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_ERR_NOT_SUPPORTED));
-    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_ERR_INVALID_RESPONSE));
-    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_FAIL));
+    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_BUILTIN_ID, ESP_ERR_TIMEOUT));
+    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_BUILTIN_ID, ESP_ERR_NOT_SUPPORTED));
+    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_BUILTIN_ID, ESP_ERR_INVALID_RESPONSE));
+    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_BUILTIN_ID, ESP_FAIL));
 }
 
 TEST_CASE("On the C6's channel going away during the probe: not an RCP verdict (the probe's text stays)",
           "[mode_fsm]")
 {
-    TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_ERR_INVALID_STATE));
+    TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(MODE_FSM_BUILTIN_ID, ESP_ERR_INVALID_STATE));
 }
 
 TEST_CASE("On a dongle's probe failing, or a probe that passed: not rcp incompatible", "[mode_fsm]")
 {
     TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(DST, ESP_ERR_TIMEOUT));
     TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(NULL, ESP_ERR_TIMEOUT));
-    TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_OK));
+    TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(MODE_FSM_BUILTIN_ID, ESP_OK));
 }
 
 /* ---- the retry of a failed start (V8) ---- */
@@ -1258,7 +1264,7 @@ TEST_CASE("On Thread bound and waiting for the C6's boot steps, push or ROM reco
     mode_fsm_view_t v = view();
     char reason[96];
 
-    v.chan_id = "c6";
+    v.chan_id = "builtin-c6";
     v.chan_state = RADIO_MUX_CS_REINIT;
     for (size_t i = 0; i < sizeof(works) / sizeof(works[0]); i++) {
         v.work = works[i];
@@ -1316,7 +1322,7 @@ TEST_CASE("On Thread's channel in a firmware fault: RADIO_FAULT with the channel
     mode_fsm_view_t v = view();
     char reason[96];
 
-    v.chan_id = "c6";
+    v.chan_id = "builtin-c6";
     v.chan_state = RADIO_MUX_CS_FAULT;
     v.kind = RADIO_MUX_FAULT_FIRMWARE;
     v.chan_reason = "no rcp firmware";
@@ -1332,7 +1338,7 @@ TEST_CASE("On Thread in fault on a ready channel: RADIO_FAULT with the start's r
     mode_fsm_view_t v = view();
     char reason[96];
 
-    v.chan_id = "c6";
+    v.chan_id = "builtin-c6";
     v.thread = BR_MODE_RADIO_FAULT;
     v.thread_reason = MODE_FSM_FAULT_INCOMPATIBLE;
     TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_for(&v, reason));

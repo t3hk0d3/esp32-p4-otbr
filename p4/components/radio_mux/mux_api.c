@@ -135,7 +135,7 @@ esp_err_t radio_mux_tx(radio_mux_chan_t *ch, const uint8_t *data, size_t n)
     xSemaphoreTake(p->tx_lock, portMAX_DELAY);
     if (!atomic_load(&p->tx_ok) || !is_current(p, ch)) {
         err = ESP_ERR_INVALID_STATE;
-    } else if (p->kind == RADIO_MUX_KIND_C6) {
+    } else if (p->kind == RADIO_MUX_KIND_BUILTIN) {
         err = radio_mux_tx_transport_err(c6_transport_tx(data, n)); // one SPI transaction (frames only, R23)
     } else if (p->tx_frames) {
         const size_t len = radio_mux_hdlc_encode(data, n, p->tx_buf, p->tx_cap);
@@ -193,7 +193,7 @@ bool radio_mux_chan_frames(const radio_mux_chan_t *ch)
 {
     mux_port_t *p = current_port(ch, NULL);
 
-    return p && (p->kind == RADIO_MUX_KIND_C6 || p->tx_frames);
+    return p && (p->kind == RADIO_MUX_KIND_BUILTIN || p->tx_frames);
 }
 
 const char *radio_mux_chan_id(const radio_mux_chan_t *ch)

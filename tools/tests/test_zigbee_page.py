@@ -56,7 +56,7 @@ def z(expression):
     return logic("zigbee", expression)
 
 
-DASH_STATUS = "Object.assign(H.fixture(H.STATUS), {zigbee_channel: t.zc === undefined ? 'c6' : t.zc})"
+DASH_STATUS = "Object.assign(H.fixture(H.STATUS), {zigbee_channel: t.zc === undefined ? 'builtin-c6' : t.zc})"
 
 
 def routes(b, status=200):
@@ -131,8 +131,8 @@ class TestZigbeeLogic:
         assert z("L.zhaPath('board.lan')") == "ws://board.lan/zigbee"
 
     def test_radio_ids_read_as_names(self):
-        # On "c6": ESP32-C6 (built-in); on a USB id: that id.
-        assert z("[L.radioName('c6'), L.radioName('usb-303a-1001')]") == [
+        # On "builtin-c6": ESP32-C6 (built-in); on a USB id: that id.
+        assert z("[L.radioName('builtin-c6'), L.radioName('usb-303a-1001')]") == [
             "ESP32-C6 (built-in)",
             "USB radio usb-303a-1001",
         ]
@@ -409,7 +409,11 @@ class TestZigbeeNav:
 
     @pytest.mark.parametrize(
         "status",
-        [{"otbr_channel": None, "zigbee_channel": "c6"}, {"zigbee_channel": None}, {}],
+        [
+            {"otbr_channel": None, "zigbee_channel": "builtin-c6"},
+            {"zigbee_channel": None},
+            {},
+        ],
     )
     def test_slot_stays_hidden_and_empty_for_any_status(self, status):
         # On any status, Zigbee running or not: the slot stays hidden and empty.
@@ -424,11 +428,13 @@ class TestZigbeeNav:
 
     def test_no_slot_in_the_page_is_not_an_error(self):
         # On a nav without the slot element: nothing throws.
-        assert nav_scenario({"zigbee_channel": "c6"}, slot=False)["slot"] is None
+        assert (
+            nav_scenario({"zigbee_channel": "builtin-c6"}, slot=False)["slot"] is None
+        )
 
     def test_static_menu_has_the_empty_hidden_slot_and_no_link(self):
         # On the static nav: the slot is an empty hidden <li>; no Zigbee link.
-        html = nav_scenario({"zigbee_channel": "c6"})["html"]
+        html = nav_scenario({"zigbee_channel": "builtin-c6"})["html"]
         assert '<li id="nav-slot-zigbee" hidden></li>' in html
         assert "zigbee.html" not in html
 

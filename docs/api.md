@@ -250,13 +250,14 @@ websocat ws://<board>/device/console/ws
 
 ### Radio channels
 
-Every radio is a channel: the ESP32-C6 (built-in) (`c6`) and a USB dongle (`usb-<vid>-<pid>`, plus `-<serial>` when the device
+Every radio is a channel: the ESP32-C6 (built-in) (`builtin-c6`, kind `builtin`; its id was `c6` before, which is no
+longer accepted) and a USB dongle (`usb-<vid>-<pid>`, plus `-<serial>` when the device
 reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /device/channels` answers
 
 ```
 {"available_modes": ["off", "otbr", "rcp-proxy"],
  "channels": [
-  {"id": "c6", "kind": "c6", "label": "ESP32-C6 (built-in)", "mode": "otbr", "stored_mode": "otbr",
+  {"id": "builtin-c6", "kind": "builtin", "label": "ESP32-C6 (built-in)", "mode": "otbr", "stored_mode": "otbr",
    "state": "running", "error": null, "line": {"baud": 460800, "flow_control": false}, "usb": null,
    "caps": {"firmware_update": true, "hw_reset": true, "flow_control": false},
    "rcp_proxy": {"direction": "listen", "adapter": "tcp", "port": 6638, "host": "", "framing": "hdlc",
@@ -277,7 +278,7 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
    "channel_state": "ready", "channel_reason": null, "mode_state": "connected", "mode_reason": null}
  ],
  "modes": [
-  {"mode": "otbr", "channel": "c6", "state": "running", "reason": null, "reboot_on_change": false},
+  {"mode": "otbr", "channel": "builtin-c6", "state": "running", "reason": null, "reboot_on_change": false},
   {"mode": "rcp-proxy", "channel": "usb-10c4-ea60-abc123", "state": "connected", "reason": null,
    "reboot_on_change": false}
  ]}
@@ -347,7 +348,7 @@ client, a second one takes over; 403 on an interface that does not serve the dev
 [Zigbee coordinator](zigbee.md). `GET /device/zigbee` answers:
 
 ```
-{"channel": "c6", "firmware": "spinel 1.2 efr32", "state": "running", "reason": "",
+{"channel": "builtin-c6", "firmware": "spinel 1.2 efr32", "state": "running", "reason": "",
  "client": {"address": "192.168.1.20:51234", "since": 1790000000}, "last_client": null,
  "radio": {"channel": 15, "pan_id": 6754, "short_address": 0, "extended_address": "00124b00abcdef01", "tx_power_dbm": 8},
  "counters": {"rx": 10, "rx_dropped": 1, "tx": 9, "tx_no_ack": 2, "tx_cca": 3, "tx_failed": 4, "energy_scans": 5,

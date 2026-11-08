@@ -29,10 +29,11 @@ function checkUpdateUrl(url) {
 
 /**
  * Hint for the radio card (the C6) from status.fault_reason. A fault while Thread runs on a USB radio
- * (status.otbr_channel other than 'c6') is that radio's: nothing to install here, no hint.
+ * (status.otbr_channel other than the built-in one, "builtin-<chip>") is that radio's: nothing to install here, no
+ * hint.
  */
 function faultHint(reason, otbrChannel) {
-  if (!!otbrChannel && otbrChannel !== 'c6')
+  if (!!otbrChannel && otbrChannel.indexOf('builtin-') !== 0)
     return {highlight : false, text : ''};
   if (reason === 'no rcp firmware')
     return {highlight : true, text : 'The radio co-processor has no valid firmware. Install c6_rcp.bin below.'};

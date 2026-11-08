@@ -1,7 +1,7 @@
 """Zigbee mode: ziggurat on a radio channel, driven by zigpy-ziggurat (the library ZHA uses) over ws://<board>/zigbee.
 Hardware-gated: written for the batched on-board pass, never run where it was written.
 
-Rig: the board on the LAN, the C6 as the radio (`c6`); with `-m usb_dongle` also a CC2652P/EFR32 dongle on the USB-A
+Rig: the board on the LAN, the C6 as the radio (`builtin-c6`); with `-m usb_dongle` also a CC2652P/EFR32 dongle on the USB-A
 port. The tests with the marker `zigbee_device` need the aux C6 running tools/zigbee_test_device
 (`make zigbee-test-device`; env ZIGBEE_DEVICE_PORT; select with `-m zigbee_device`).
 
@@ -33,7 +33,7 @@ from zigpy_ziggurat.zigbee.application import (
     ControllerApplication,
 )
 
-C6 = "c6"
+C6 = "builtin-c6"
 OTBR_MODE = "otbr"
 RESTING_MODE = {C6: OTBR_MODE}  # a dongle rests in `off`
 HELLO_S = 5  # zigpy waits this long for the hello on connect

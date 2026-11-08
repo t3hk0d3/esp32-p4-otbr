@@ -156,10 +156,10 @@ static void set_chan_state(mux_port_t *p, struct radio_mux_chan *ch)
     radio_mux_work_t work = RADIO_MUX_WORK_NONE;
     const char *why = "";
 
-    if (p->kind == RADIO_MUX_KIND_C6 && p->busy) {
+    if (p->kind == RADIO_MUX_KIND_BUILTIN && p->busy) {
         cs = RADIO_MUX_CS_REINIT;
         work = p->work;
-    } else if (p->kind == RADIO_MUX_KIND_C6 && !ch->present) {
+    } else if (p->kind == RADIO_MUX_KIND_BUILTIN && !ch->present) {
         cs = RADIO_MUX_CS_FAULT;
         kind = RADIO_MUX_FAULT_FIRMWARE;
         why = p->fault;
@@ -202,7 +202,7 @@ static void refresh(mux_port_t *p)
     }
     mux_lock();
     set_chan_state(p, ch);
-    if (p->kind == RADIO_MUX_KIND_C6 && (p->busy || !ch->present)) { // in reinit, or the probe found no RCP
+    if (p->kind == RADIO_MUX_KIND_BUILTIN && (p->busy || !ch->present)) { // in reinit, or the probe found no RCP
         ch->eff_mode = p->busy ? ch->mode : RADIO_MUX_MODE_UNAVAILABLE;
         ch->state = p->busy ? RADIO_MUX_STATE_BUSY : RADIO_MUX_STATE_IDLE;
         snprintf(ch->reason, sizeof(ch->reason), "%s", p->busy ? c6_busy_reason(p) : p->fault);
@@ -331,7 +331,7 @@ static void do_attach(mux_port_t *p)
     radio_mux_reset_count_clear(&p->reset_count); // a new attach starts with no unanswered reset
     xSemaphoreGive(p->rx_lock);
     p->inst = oi;
-    p->tx_frames = radio_mux_port_frames(p->kind == RADIO_MUX_KIND_C6, oi->inst.frames); // the C6 ignores `frames`
+    p->tx_frames = radio_mux_port_frames(p->kind == RADIO_MUX_KIND_BUILTIN, oi->inst.frames); // the C6 ignores `frames`
     mux_set_rx(p, p->tx_frames ? MUX_RX_FRAMES : MUX_RX_RAW);
     atomic_store(&p->tx_ok, true);
     p->fault[0] = '\0';
@@ -913,7 +913,7 @@ static void handle_lease(mux_call_t *call)
     }
     if (p->chan != ch || !ch->present || !ch->supported) {
         why = "not detected";
-    } else if (p->kind == RADIO_MUX_KIND_C6 && c6_maintained(p)) {
+    } else if (p->kind == RADIO_MUX_KIND_BUILTIN && c6_maintained(p)) {
         why = p->busy ? c6_busy_reason(p) : "maintenance waits for its instance to let go";
     } else if (p->leased) {
         why = "OpenThread is already being moved to it";
@@ -929,7 +929,7 @@ static void handle_lease(mux_call_t *call)
         snprintf(call->reason, sizeof(call->reason), "%s", why);
         return;
     }
-    if (p->kind == RADIO_MUX_KIND_C6 && c6_transport_open(msg, sizeof(msg)) != ESP_OK) {
+    if (p->kind == RADIO_MUX_KIND_BUILTIN && c6_transport_open(msg, sizeof(msg)) != ESP_OK) {
         call->err = ESP_FAIL;
         snprintf(call->reason, sizeof(call->reason), "%s", msg);
         return;
@@ -967,7 +967,7 @@ static void handle_lease_end(mux_call_t *call)
     atomic_store(&p->tx_ok, false);
     mux_set_rx(p, MUX_RX_DISCARD);
     mux_drain_evq(p);
-    if (p->kind == RADIO_MUX_KIND_C6) {
+    if (p->kind == RADIO_MUX_KIND_BUILTIN) {
         c6_apply(false);
     }
     snprintf(p->fault, sizeof(p->fault), "%s", call->reason);
@@ -1002,7 +1002,7 @@ static void commit_stop(mux_call_t *call, struct radio_mux_chan *from)
     }
     mux_port_t *p = from->port;
 
-    if (p->kind == RADIO_MUX_KIND_C6) {
+    if (p->kind == RADIO_MUX_KIND_BUILTIN) {
         c6_apply(true); // otbr detached (GONE); the new mode's consumer attached, or off: held in reset
     } else if (p->chan == from) {
         feed(p, RADIO_MUX_AEV_MODE_SET);
@@ -1049,7 +1049,7 @@ static void handle_commit_otbr(mux_call_t *call)
     if (from && from != to) {
         mux_port_t *fp = from->port;
 
-        if (fp->kind == RADIO_MUX_KIND_C6) {
+        if (fp->kind == RADIO_MUX_KIND_BUILTIN) {
             c6_apply(false); // otbr detached (GONE), the C6 held in reset (off)
         } else if (fp->chan == from) {
             feed(fp, RADIO_MUX_AEV_MODE_SET);
@@ -1189,7 +1189,7 @@ static radio_mux_verdict_t check_req(const struct radio_mux_chan *ch, const radi
             RADIO_MUX_PROXY_CHECK_OK) {
         return RADIO_MUX_REFUSE_BAD_VALUE;
     }
-    if (ch->kind == RADIO_MUX_KIND_C6 && (req->has_baud || req->has_flow)) {
+    if (ch->kind == RADIO_MUX_KIND_BUILTIN && (req->has_baud || req->has_flow)) {
         return RADIO_MUX_REFUSE_BAD_VALUE; // SPI: the C6 has no line settings
     }
     if (req->has_baud && !radio_mux_baud_ok(req->baud)) {
@@ -1214,7 +1214,7 @@ static radio_mux_verdict_t check_mode(struct radio_mux_chan *ch, radio_mux_mode_
         }
     }
     // The C6 in reinit (or asked to enter it) refuses every mode change until it is ready again.
-    const bool in_reinit = ch->port->kind == RADIO_MUX_KIND_C6 && c6_maintained(ch->port);
+    const bool in_reinit = ch->port->kind == RADIO_MUX_KIND_BUILTIN && c6_maintained(ch->port);
     const radio_mux_verdict_t v = radio_mux_orch_check_bind(&g_mux.rules, views, n, target, want, in_reinit,
                                                             &move_from);
 
@@ -1289,7 +1289,7 @@ static void handle_set(mux_call_t *call)
     if (v == RADIO_MUX_APPLY_REBOOT) {
         return; // stored: applies after the reboot
     }
-    if (p->kind == RADIO_MUX_KIND_C6) {
+    if (p->kind == RADIO_MUX_KIND_BUILTIN) {
         // As on USB: a new mode or new rcp_proxy settings (in rcp-proxy) re-attach, a PUT of the mode retries a fault.
         // While the C6 is unavailable the change is stored and applies once it is listed again (in reinit a mode change
         // is refused: check_mode).
@@ -1330,7 +1330,7 @@ static void handle_forget(mux_call_t *call)
         call->err = ESP_ERR_NOT_FOUND;
         return;
     }
-    if (ch->kind == RADIO_MUX_KIND_C6 || ch->present || ch->port->chan == ch) {
+    if (ch->kind == RADIO_MUX_KIND_BUILTIN || ch->present || ch->port->chan == ch) {
         call->err = ESP_ERR_INVALID_STATE;
         return;
     }
@@ -1404,7 +1404,7 @@ static void handle_reset(radio_mux_chan_t *h)
                                         radio_mux_handle_current(gen, atomic_load(&p->att_gen)))) {
         return; // a channel that is not attached or leased has nobody to tell; an earlier attach's reset is not ours
     }
-    if (p->kind == RADIO_MUX_KIND_C6) { // the reset GPIO pulse; the C6 task posts RESET when the RCP answers
+    if (p->kind == RADIO_MUX_KIND_BUILTIN) { // the reset GPIO pulse; the C6 task posts RESET when the RCP answers
         if (c6_transport_reset() == ESP_OK) {
             taskENTER_CRITICAL(&p->lock);
             p->ctr.resets++;
@@ -1495,7 +1495,7 @@ static void handle_note_fw(radio_mux_chan_t *h, const radio_mux_fw_record_t *fw)
     ch->fw.source = RADIO_MUX_FW_SRC_PASSIVE;
     ch->fw.at = mux_now_epoch();
     mux_unlock();
-    if (ch->kind == RADIO_MUX_KIND_C6 || ch->remembered) {
+    if (ch->kind == RADIO_MUX_KIND_BUILTIN || ch->remembered) {
         mux_store_chan(ch);
     }
 }
@@ -1639,7 +1639,7 @@ static esp_err_t port_init(mux_port_t *p, radio_mux_kind_t kind)
 // RAM once done): the C6 is in reinit from the start until they end. Deletes itself.
 static void boot_task(void *arg)
 {
-    mux_maint_finish(RADIO_MUX_C6_ID);
+    mux_maint_finish(RADIO_MUX_BUILTIN_ID);
     vTaskDelete(NULL);
 }
 
@@ -1649,7 +1649,7 @@ esp_err_t radio_mux_start(void)
     g_mux.lock = xSemaphoreCreateMutex();
     g_mux.queue = xQueueCreate(QUEUE_LEN, sizeof(mux_msg_t));
     ESP_RETURN_ON_FALSE(g_mux.lock && g_mux.queue, ESP_ERR_NO_MEM, TAG, "queue and lock");
-    ESP_RETURN_ON_ERROR(port_init(&g_mux.c6, RADIO_MUX_KIND_C6), TAG, "c6 port");
+    ESP_RETURN_ON_ERROR(port_init(&g_mux.c6, RADIO_MUX_KIND_BUILTIN), TAG, "c6 port");
     ESP_RETURN_ON_ERROR(port_init(&g_mux.usb, RADIO_MUX_KIND_USB), TAG, "USB port");
     mux_load_chans();
     ESP_RETURN_ON_ERROR(c6_transport_start(), TAG, "c6 task");
@@ -1669,7 +1669,7 @@ esp_err_t radio_mux_start(void)
         if (call) {
             call->done = xSemaphoreCreateBinary();
             atomic_store(&call->refs, 1); // the owner's only
-            snprintf(call->id, sizeof(call->id), "%s", RADIO_MUX_C6_ID);
+            snprintf(call->id, sizeof(call->id), "%s", RADIO_MUX_BUILTIN_ID);
             const mux_msg_t m = {.type = MUX_MSG_MAINT_DONE, .call = call};
 
             if (!call->done || xQueueSend(g_mux.queue, &m, portMAX_DELAY) != pdTRUE) {

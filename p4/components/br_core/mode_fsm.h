@@ -21,8 +21,8 @@ extern "C" {
 /** A reset the radio mux could not post (ESP_ERR_TIMEOUT, ESP_ERR_NO_MEM: its queue full) is tried once more after
  * this long before it counts as failed. */
 #define MODE_FSM_RESET_RETRY_MS 100
-/** The on-board C6's channel id (RADIO_MUX_C6_ID; mode_fsm stays free of the mux). */
-#define MODE_FSM_C6_ID "c6"
+/** The built-in channel's id (RADIO_MUX_BUILTIN_ID; mode_fsm stays free of the mux). */
+#define MODE_FSM_BUILTIN_ID "builtin-c6"
 /** mode_fsm_move_otbr results besides ESP_OK and ESP_ERR_INVALID_STATE (busy). */
 #define MODE_FSM_ERR_PROBE_FAILED ESP_ERR_INVALID_RESPONSE /**< the target's probe failed; nothing changed */
 #define MODE_FSM_ERR_DRAIN_TIMEOUT ESP_ERR_TIMEOUT        /**< the OpenThread sessions did not end; nothing changed */

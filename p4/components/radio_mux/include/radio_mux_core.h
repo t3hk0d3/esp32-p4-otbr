@@ -13,8 +13,11 @@ extern "C" {
 
 // "usb-" + vid + "-" + pid + "-" + serial is cut to 47 characters; the buffer adds the NUL.
 #define RADIO_MUX_ID_MAX 48
-// The id of the on-board C6 channel (radio_mux.h documents it with the API).
-#define RADIO_MUX_C6_ID "c6"
+// The id of the board's built-in RCP channel: "builtin-<chip>" (radio_mux.h documents it with the API).
+#define RADIO_MUX_BUILTIN_ID "builtin-c6"
+// What the built-in channel is stored under in NVS (its key, and its id in the index and the blob): its id before the
+// orchestrator, so a board updated from an older build, or back to one, reads its settings.
+#define RADIO_MUX_BUILTIN_NVS_ID "c6"
 #define RADIO_MUX_CP210X_FLOW_LEN 16
 #define RADIO_MUX_RULES_MAX 4
 #define RADIO_MUX_PROXY_DEFAULT_PORT 6638
@@ -190,7 +193,7 @@ typedef enum {
     RADIO_MUX_BAUD_FAR,
 } radio_mux_baud_t;
 
-// "c6" is the on-board channel. A USB channel is "usb-<vid>-<pid>", plus "-<serial>" when the device reports a serial
+// RADIO_MUX_BUILTIN_ID is the built-in channel. A USB channel is "usb-<vid>-<pid>", plus "-<serial>" when the device reports a serial
 // string: lowercase 4-digit hex, serial reduced to [A-Za-z0-9], the whole id at most 47 characters. serial may be NULL.
 void radio_mux_channel_id(uint16_t vid, uint16_t pid, const char *serial, char out[RADIO_MUX_ID_MAX]);
 
@@ -256,9 +259,14 @@ bool radio_mux_attach_wanted(const radio_mux_rules_t *rules, const radio_mux_cha
 // in; DROPPED (queue_full) counts a drop and tells the caller to put the slot back. Never waits.
 radio_mux_post_t radio_mux_post_rx(bool queue_full, size_t len, radio_mux_counters_t *c);
 
-// NVS key of a channel's settings blob: "c6" for the C6, else "u" + 8 lowercase hex digits of the FNV-1a (32 bit)
-// hash of the id.
+// NVS key of a channel's settings blob: RADIO_MUX_BUILTIN_NVS_ID for the built-in channel (its id or its stored id),
+// else "u" + 8 lowercase hex digits of the FNV-1a (32 bit) hash of the id.
 void radio_mux_nvs_key(const char *id, char out[16]);
+// The id a channel is stored under in NVS (the index and its blob): RADIO_MUX_BUILTIN_NVS_ID for the built-in channel,
+// else the id itself.
+const char *radio_mux_nvs_id(const char *id);
+// Whether `id` names the built-in channel: RADIO_MUX_BUILTIN_ID, or RADIO_MUX_BUILTIN_NVS_ID as NVS stores it.
+bool radio_mux_is_builtin_id(const char *id);
 
 // What the consumer of a port gets: the C6 port always delivers and takes spinel frames (its SPI transport has no byte
 // stream), whatever the consumer declares; a byte transport (USB) follows the consumer's `frames`.

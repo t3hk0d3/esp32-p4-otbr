@@ -43,7 +43,8 @@ extern "C" {
 #define RADIO_MUX_PEER_MAX 64
 // The rcp-proxy's last open or connect failure, as text (rcp_proxy fills it, device_api renders it).
 #define RADIO_MUX_PROXY_ERROR_MAX 48
-// RADIO_MUX_C6_ID ("c6", radio_mux_core.h): the id of the on-board C6 channel; USB channels are "usb-<vid>-<pid>[-serial]".
+// RADIO_MUX_BUILTIN_ID ("builtin-c6", radio_mux_core.h): the id of the built-in RCP's channel, kind
+// RADIO_MUX_KIND_BUILTIN; USB channels are "usb-<vid>-<pid>[-serial]".
 
 /* ---- events ---- */
 
@@ -226,7 +227,7 @@ typedef struct {
 } radio_mux_set_req_t;
 
 typedef enum {
-    RADIO_MUX_KIND_C6,
+    RADIO_MUX_KIND_BUILTIN,
     RADIO_MUX_KIND_USB,
 } radio_mux_kind_t;
 

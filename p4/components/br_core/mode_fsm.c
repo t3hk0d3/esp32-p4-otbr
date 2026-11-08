@@ -270,7 +270,7 @@ esp_err_t mode_fsm_radio_job_result(bool base_only, esp_err_t job_err, esp_err_t
 
 bool mode_fsm_boot(mode_fsm_t *fsm, const char *otbr_id)
 {
-    if (otbr_id && strcmp(otbr_id, MODE_FSM_C6_ID) == 0) {
+    if (otbr_id && strcmp(otbr_id, MODE_FSM_BUILTIN_ID) == 0) {
         return true; // the C6 boots as it always did
     }
     set_mode(fsm, BR_MODE_NO_RADIO);
@@ -279,7 +279,7 @@ bool mode_fsm_boot(mode_fsm_t *fsm, const char *otbr_id)
 
 static bool is_c6(const char *id)
 {
-    return id && strcmp(id, MODE_FSM_C6_ID) == 0;
+    return id && strcmp(id, MODE_FSM_BUILTIN_ID) == 0;
 }
 
 bool mode_fsm_probe_fault_incompatible(const char *id, esp_err_t probe_err)

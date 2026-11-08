@@ -31,7 +31,7 @@ extern "C" {
  *  "rcp_proxy":{"direction","adapter","port","host","framing","state","peer","last_error"}|null,
  *  "firmware":{"type","version","chip","baud","source","at"}|null,
  *  "counters":{"frames_in","frames_out","bytes_in","bytes_out","drops","resets","rx_errors","uart_errors"}}.
- * kind "c6" or "usb"; error, usb.serial, usb.driver, rcp_proxy.state, .peer and .last_error, firmware.version, .chip,
+ * kind "builtin" or "usb"; error, usb.serial, usb.driver, rcp_proxy.state, .peer and .last_error, firmware.version, .chip,
  * .baud (0) and .at (0: the clock was not set) are null when empty; error is the channel's reason, or, when it has none
  * and its proxy is in backoff, the proxy's last_error; usb.vid and .pid are 4 lowercase hex digits; usb is null for
  * the C6; rcp_proxy (the stored settings) is null for a USB device without a driver, where no mode runs; firmware is

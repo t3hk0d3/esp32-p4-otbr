@@ -48,7 +48,7 @@ esp_err_t builtin_rcp_register(void)
     const builtin_rcp_board_t *b = &builtin_rcp_board;
 
     s_desc = (radio_mux_builtin_t) {
-        .id = RADIO_MUX_C6_ID, .label = b->label, .chip = b->chip, .present = b->present, .boot_steps = b->boot_steps,
+        .id = RADIO_MUX_BUILTIN_ID, .label = b->label, .chip = b->chip, .present = b->present, .boot_steps = b->boot_steps,
         .push = b->push, .rom_recover = b->rom_recover,
     };
     ESP_LOGI(TAG, "%s: %s", s_desc.id, s_desc.label);

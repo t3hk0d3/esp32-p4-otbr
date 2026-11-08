@@ -35,7 +35,13 @@ typedef struct {
 // A change of the layout above (or of a type in it) is a new blob version: the old blobs would be read wrongly.
 _Static_assert(sizeof(chan_blob_t) == 336, "chan_blob_t changed: bump BLOB_VERSION (and read the old one) first");
 
-#define C6_LABEL "ESP32-C6 (built-in)"
+#define C6_LABEL "ESP32-C6 (built-in)" // without a built-in RCP described (radio_mux_set_builtin)
+
+// The built-in channel's label: its descriptor's.
+static const char *builtin_label(void)
+{
+    return g_mux.builtin && g_mux.builtin->label ? g_mux.builtin->label : C6_LABEL;
+}
 
 static void blob_from_chan(const struct radio_mux_chan *ch, chan_blob_t *b)
 {
@@ -56,7 +62,7 @@ static void blob_from_chan(const struct radio_mux_chan *ch, chan_blob_t *b)
     b->driver = (uint8_t)ch->usb.driver;
     memcpy(b->serial, ch->usb.serial, sizeof(b->serial));
     memcpy(b->label, ch->label, sizeof(b->label));
-    memcpy(b->id, ch->id, sizeof(b->id));
+    snprintf(b->id, sizeof(b->id), "%s", radio_mux_nvs_id(ch->id)); // the built-in: its stored id, as older builds read
 }
 
 // A blob that is malformed or out of range keeps the channel's defaults for that part.
@@ -100,7 +106,7 @@ static esp_err_t store_index(nvs_handle_t nvs)
     memset(ids, 0, sizeof(ids));
     for (size_t i = 0; i < RADIO_MUX_CHANNELS_MAX; i++) {
         if (g_mux.chans[i].used && g_mux.chans[i].remembered) {
-            memcpy(ids[n++], g_mux.chans[i].id, RADIO_MUX_ID_MAX);
+            snprintf(ids[n++], RADIO_MUX_ID_MAX, "%s", radio_mux_nvs_id(g_mux.chans[i].id));
         }
     }
     return n ? nvs_set_blob(nvs, NVS_INDEX, ids, n * RADIO_MUX_ID_MAX) : nvs_erase_key(nvs, NVS_INDEX);
@@ -194,8 +200,8 @@ void mux_chan_defaults(struct radio_mux_chan *ch, const char *id, radio_mux_kind
     ch->used = true;
     snprintf(ch->id, sizeof(ch->id), "%s", id);
     ch->kind = kind;
-    ch->port = kind == RADIO_MUX_KIND_C6 ? &g_mux.c6 : &g_mux.usb;
-    ch->mode = kind == RADIO_MUX_KIND_C6 ? RADIO_MUX_MODE_OTBR : RADIO_MUX_MODE_OFF;
+    ch->port = kind == RADIO_MUX_KIND_BUILTIN ? &g_mux.c6 : &g_mux.usb;
+    ch->mode = kind == RADIO_MUX_KIND_BUILTIN ? RADIO_MUX_MODE_OTBR : RADIO_MUX_MODE_OFF;
     radio_mux_proxy_defaults(&ch->proxy);
     ch->eff_mode = RADIO_MUX_MODE_UNAVAILABLE;
     ch->supported = true;
@@ -235,8 +241,8 @@ void mux_load_chans(void)
     nvs_handle_t nvs;
     chan_blob_t b;
 
-    mux_chan_defaults(&g_mux.chans[0], RADIO_MUX_C6_ID, RADIO_MUX_KIND_C6); // listed by the owner task (c6_init)
-    snprintf(g_mux.chans[0].label, sizeof(g_mux.chans[0].label), "%s", C6_LABEL);
+    mux_chan_defaults(&g_mux.chans[0], RADIO_MUX_BUILTIN_ID, RADIO_MUX_KIND_BUILTIN); // listed by the owner task (c6_init)
+    snprintf(g_mux.chans[0].label, sizeof(g_mux.chans[0].label), "%s", builtin_label());
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
 
     if (err != ESP_OK) {
@@ -259,7 +265,7 @@ void mux_load_chans(void)
             ESP_LOGW(TAG, "stored channel %s unreadable: skipped", ids[i]);
             continue;
         }
-        const bool c6 = strcmp(ids[i], RADIO_MUX_C6_ID) == 0;
+        const bool c6 = radio_mux_is_builtin_id(ids[i]); // stored as RADIO_MUX_BUILTIN_NVS_ID
         struct radio_mux_chan *ch = c6 ? &g_mux.chans[0] : (slot < RADIO_MUX_CHANNELS_MAX ? &g_mux.chans[slot++] : NULL);
 
         if (ch == NULL) {
@@ -269,8 +275,8 @@ void mux_load_chans(void)
             mux_chan_defaults(ch, ids[i], RADIO_MUX_KIND_USB);
         }
         chan_from_blob(ch, &b);
-        if (c6) { // the C6's label is the firmware's: one stored by an older build never replaces it
-            snprintf(ch->label, sizeof(ch->label), "%s", C6_LABEL);
+        if (c6) { // the built-in's label is the firmware's: one stored by an older build never replaces it
+            snprintf(ch->label, sizeof(ch->label), "%s", builtin_label());
         }
         ch->remembered = true;
     }

@@ -43,7 +43,7 @@ function dongleFaultText(reason) {
  * Thread's radio; the settings storage is the board's whatever the radio. */
 var BOARD_FAULTS = [ 'storage unavailable', 'esp-hosted firmware', 'no rcp firmware' ];
 
-function isDongle(s) { return !!s.otbr_channel && s.otbr_channel !== 'c6'; }
+function isDongle(s) { return !!s.otbr_channel && s.otbr_channel.indexOf('builtin-') !== 0; }
 
 function boardFault(s) {
   if (s.mode !== 'RADIO_FAULT' || BOARD_FAULTS.indexOf(s.fault_reason) < 0)
@@ -73,7 +73,7 @@ function radiosView(body) {
   function word(c) { return MODE_WORDS[c.mode] || String(c.mode); }
   if (!body || !body.channels)
     return [ {slot : 'ESP32-C6 (built-in)', mode : '-'}, {slot : 'USB radio', mode : '-'} ];
-  var c6 = body.channels.filter(function(c) { return c.id === 'c6'; })[0];
+  var c6 = body.channels.filter(function(c) { return c.kind === 'builtin'; })[0];
   var usb = body.channels.filter(function(c) { return c.kind === 'usb' && c.mode !== 'unavailable'; })[0];
   return [
     {slot : 'ESP32-C6 (built-in)', mode : c6 ? word(c6) : '-'},

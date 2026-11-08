@@ -6,8 +6,8 @@ import pytest
 from device_js import FRONTEND, logic, needs_node, page, scenario
 
 C6 = {
-    "id": "c6",
-    "kind": "c6",
+    "id": "builtin-c6",
+    "kind": "builtin",
     "label": "ESP32-C6 (built-in)",
     "mode": "otbr",
     "stored_mode": "otbr",
@@ -142,7 +142,7 @@ EZSP = {
 SNAP = {"channels": [C6, OLLY, SLZB, EZSP]}
 SNAP_ZIG = {**SNAP, "available_modes": ["off", "otbr", "rcp-proxy", "ziggurat"]}
 SNAP_NOZIG = {**SNAP, "available_modes": ["off", "otbr", "rcp-proxy"]}
-RUNNING = {"mode": "BR_RUNNING", "otbr_channel": "c6", "fault_reason": None}
+RUNNING = {"mode": "BR_RUNNING", "otbr_channel": "builtin-c6", "fault_reason": None}
 NO_RADIO = {"mode": "NO_RADIO", "otbr_channel": None, "fault_reason": None}
 
 # t.snap, t.status: the bodies GET answers; t.put(url, body, method) -> {status, body} answers a PUT or DELETE.
@@ -708,7 +708,7 @@ class TestSave:
         # On 202 for off on the radio that runs Thread: "Stopping Thread"; once its stored mode is off: "stopped".
         r = scenario(
             setup()
-            + "t.put = () => ({status: 202, body: {moving: true, moved_from: 'c6'}});"
+            + "t.put = () => ({status: 202, body: {moving: true, moved_from: 'builtin-c6'}});"
             + open_row(0)
             + f"{card('off')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10);"
             + "const first = t.el('rMsg').textContent;"
@@ -723,7 +723,7 @@ class TestSave:
         # On a stop whose sessions did not end: the radio stays in otbr with error drain_timeout; the page says so.
         r = scenario(
             setup()
-            + "t.put = () => ({status: 202, body: {moving: true, moved_from: 'c6'}});"
+            + "t.put = () => ({status: 202, body: {moving: true, moved_from: 'builtin-c6'}});"
             + open_row(0)
             + f"{card('off')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10);"
             + f"t.snap = {{channels: [Object.assign({{}}, {json.dumps(C6)}, {{error: 'drain_timeout'}})]}};"
@@ -750,7 +750,7 @@ class TestSave:
             setup()
             + "t.put = () => { t.snap = {channels: [Object.assign({}, t.snap.channels[0], {mode: 'off', stored_mode: 'off'}),"
             + json.dumps(starting)
-            + "]}; return {status: 202, body: {moving: true, moved_from: 'c6'}}; };"
+            + "]}; return {status: 202, body: {moving: true, moved_from: 'builtin-c6'}}; };"
             + open_row(1)
             + f"{card('otbr')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10);"
             + "const text = t.el('rMsg').textContent; const open = t.el('dlg').open;"
@@ -877,8 +877,8 @@ class TestHideRule:
             "null",
             "{mode: 'NO_RADIO', otbr_channel: null}",
             "{mode: 'NO_RADIO', otbr_channel: 'u1'}",
-            "{mode: 'RADIO_FAULT', otbr_channel: 'c6'}",
-            "{mode: 'BR_RUNNING', otbr_channel: 'c6'}",
+            "{mode: 'RADIO_FAULT', otbr_channel: 'builtin-c6'}",
+            "{mode: 'BR_RUNNING', otbr_channel: 'builtin-c6'}",
             "{mode: 'BR_RUNNING'}",
         ]
         r = scenario(
@@ -891,8 +891,8 @@ class TestHideRule:
         r = scenario(
             """const C = H.Common;
             return [C.threadNotice({mode: 'NO_RADIO', otbr_channel: null}), C.threadNotice({mode: 'NO_RADIO', otbr_channel: null}, 'capture'),
-                    C.threadNotice({mode: 'NO_RADIO', otbr_channel: 'u1'}), C.threadNotice({mode: 'BR_RUNNING', otbr_channel: 'c6'}),
-                    C.threadNotice({mode: 'RADIO_FAULT', otbr_channel: 'c6', fault_reason: 'x'})];"""
+                    C.threadNotice({mode: 'NO_RADIO', otbr_channel: 'u1'}), C.threadNotice({mode: 'BR_RUNNING', otbr_channel: 'builtin-c6'}),
+                    C.threadNotice({mode: 'RADIO_FAULT', otbr_channel: 'builtin-c6', fault_reason: 'x'})];"""
         )
         assert r[0]["href"] == "/radios.html"
         assert (
@@ -919,7 +919,7 @@ class TestHideRule:
         # On RADIO_FAULT with no RCP firmware on the C6: the board line says it, the Thread content stays shown.
         r = scenario(
             page("index", ROUTES)
-            + "t.snap = {channels: []}; t.status = {mode: 'RADIO_FAULT', otbr_channel: 'c6', fault_reason: 'no rcp firmware'};"
+            + "t.snap = {channels: []}; t.status = {mode: 'RADIO_FAULT', otbr_channel: 'builtin-c6', fault_reason: 'no rcp firmware'};"
             + "t.page.init(); await t.advance(100);"
             + "return [t.el('b-title').textContent, t.el('thread-off').hidden()];"
         )
@@ -1115,7 +1115,7 @@ class TestSharedBehaviour:
             "const ctx = vm.createContext({document: {getElementById: () => null}});"
             f"for (const f of {json.dumps(upto)}) vm.runInContext(fs.readFileSync({json.dumps(str(FRONTEND / 'static'))} + '/' + f, 'utf8'), ctx);"
             "process.stdout.write(JSON.stringify(vm.runInContext(\"[MgmtLogic.modeBanner({mode: 'NO_RADIO', otbr_channel: null}), "
-            "MgmtLogic.modeBanner({mode: 'BR_RUNNING', otbr_channel: 'c6'}), typeof MgmtPage]\", ctx)));"
+            "MgmtLogic.modeBanner({mode: 'BR_RUNNING', otbr_channel: 'builtin-c6'}), typeof MgmtPage]\", ctx)));"
         )
         out = subprocess.run(
             ["node", "-e", source],
@@ -1290,7 +1290,7 @@ class TestSettleMove:
         return (
             setup()
             + after_js
-            + "t.put = () => ({status: 202, body: {moving: true, moved_from: 'c6'}});"
+            + "t.put = () => ({status: 202, body: {moving: true, moved_from: 'builtin-c6'}});"
             + open_row(1)
             + f"{card('otbr')}.click(); await t.flush(); t.el('mSave').click();"
         )

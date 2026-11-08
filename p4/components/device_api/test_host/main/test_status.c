@@ -30,7 +30,7 @@ static device_api_status_t sample(void)
         .sniffer_duration_s = 600,
         .fault_reason = "",
         .storage_ok = true,
-        .otbr_channel = "c6",
+        .otbr_channel = "builtin-c6",
     };
     strcpy(s.ipv6[0], "fe80::1");
     strcpy(s.ipv6[1], "fd00::2");
@@ -227,7 +227,7 @@ TEST_CASE("On a build without TREL: trel is null", "[device_api]")
     device_api_status_t s = sample();
 
     render(&s);
-    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":null,\"otbr_channel\":\"c6\",\"zigbee_channel\""));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"trel\":null,\"otbr_channel\":\"builtin-c6\",\"zigbee_channel\""));
 }
 
 TEST_CASE("On a board in NO_RADIO: mode NO_RADIO, otbr_channel as stored, right after trel", "[device_api]")
