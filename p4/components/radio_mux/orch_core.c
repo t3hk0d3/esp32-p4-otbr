@@ -127,6 +127,25 @@ bool radio_mux_orch_should_bind(radio_mux_chan_state_t cs, bool fits, bool bound
     return cs == RADIO_MUX_CS_READY && fits && !bound;
 }
 
+radio_mux_input_type_t radio_mux_orch_input_for(radio_mux_chan_state_t before, radio_mux_chan_state_t after, bool fits,
+                                                bool bound)
+{
+    if (after == RADIO_MUX_CS_READY) {
+        if (!fits) {
+            return RADIO_MUX_IN_NONE;
+        }
+        if (!bound) {
+            return RADIO_MUX_IN_BIND;
+        }
+        return before == RADIO_MUX_CS_READY ? RADIO_MUX_IN_NONE : RADIO_MUX_IN_BACK;
+    }
+    if ((after == RADIO_MUX_CS_ABSENT || after == RADIO_MUX_CS_FAULT) && bound &&
+            (before == RADIO_MUX_CS_READY || before == RADIO_MUX_CS_REINIT)) {
+        return RADIO_MUX_IN_LOST;
+    }
+    return RADIO_MUX_IN_NONE;
+}
+
 size_t radio_mux_singleton_dedupe(radio_mux_mode_t *modes, bool *changed, size_t n)
 {
     bool seen_otbr = false, seen_zig = false;

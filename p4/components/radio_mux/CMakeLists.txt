@@ -5,8 +5,8 @@ if(IDF_TARGET STREQUAL "linux")
     return()
 endif()
 
-idf_component_register(SRCS "core.c" "detect.c" "hdlc.c" "orch_core.c" "pool.c" "mux.c" "mux_api.c" "mux_deliver.c"
-                            "mux_nvs.c" "usb_transport.c" "c6_transport.c"
+idf_component_register(SRCS "core.c" "detect.c" "hdlc.c" "orch.c" "orch_core.c" "pool.c" "mux.c" "mux_api.c"
+                            "mux_deliver.c" "mux_nvs.c" "usb_transport.c" "c6_transport.c"
                        INCLUDE_DIRS "include"
                        REQUIRES freertos
                        PRIV_REQUIRES board_cores esp_driver_gpio esp_driver_spi esp_ringbuf esp_rom esp_timer heap log

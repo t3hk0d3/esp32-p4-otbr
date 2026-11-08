@@ -553,3 +553,58 @@ TEST_CASE("On each maintenance work: returns today's busy text of the channel", 
     TEST_ASSERT_EQUAL_STRING("", radio_mux_busy_reason(RADIO_MUX_WORK_DETECT));
     TEST_ASSERT_EQUAL_STRING("", radio_mux_busy_reason(RADIO_MUX_WORK_NONE));
 }
+
+/* ---- radio_mux_orch_input_for: what the binding loop delivers on a channel's change ---- */
+
+TEST_CASE("On a ready channel with a fitting stored mode: delivers BIND", "[radio_mux]")
+{
+    // At boot (reinit: boot steps or detection), after a plug-in, and on a ready channel (a user's bind).
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_BIND, radio_mux_orch_input_for(RADIO_MUX_CS_REINIT, RADIO_MUX_CS_READY, true, false));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_BIND, radio_mux_orch_input_for(RADIO_MUX_CS_ABSENT, RADIO_MUX_CS_READY, true, false));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_BIND, radio_mux_orch_input_for(RADIO_MUX_CS_READY, RADIO_MUX_CS_READY, true, false));
+}
+
+TEST_CASE("On an instance already running on the ready channel: delivers nothing", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_NONE, radio_mux_orch_input_for(RADIO_MUX_CS_READY, RADIO_MUX_CS_READY, true, true));
+}
+
+TEST_CASE("On an unplug or a link/firmware fault while bound: delivers LOST", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_LOST, radio_mux_orch_input_for(RADIO_MUX_CS_READY, RADIO_MUX_CS_ABSENT, true, true));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_LOST, radio_mux_orch_input_for(RADIO_MUX_CS_READY, RADIO_MUX_CS_FAULT, true, true));
+}
+
+TEST_CASE("On a channel lost with no instance bound, or lost again: delivers nothing", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_NONE, radio_mux_orch_input_for(RADIO_MUX_CS_READY, RADIO_MUX_CS_ABSENT, true, false));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_NONE, radio_mux_orch_input_for(RADIO_MUX_CS_ABSENT, RADIO_MUX_CS_FAULT, true, true));
+}
+
+TEST_CASE("On the channel's return (detection done, fits): delivers BACK", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_BACK, radio_mux_orch_input_for(RADIO_MUX_CS_REINIT, RADIO_MUX_CS_READY, true, true));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_BACK, radio_mux_orch_input_for(RADIO_MUX_CS_ABSENT, RADIO_MUX_CS_READY, true, true));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_BACK, radio_mux_orch_input_for(RADIO_MUX_CS_FAULT, RADIO_MUX_CS_READY, true, true));
+}
+
+TEST_CASE("On the return with firmware that no longer fits: delivers nothing (the binding is kept)", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_NONE, radio_mux_orch_input_for(RADIO_MUX_CS_REINIT, RADIO_MUX_CS_READY, false, true));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_NONE, radio_mux_orch_input_for(RADIO_MUX_CS_ABSENT, RADIO_MUX_CS_READY, false, true));
+    // Nor a first bind.
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_NONE, radio_mux_orch_input_for(RADIO_MUX_CS_REINIT, RADIO_MUX_CS_READY, false, false));
+}
+
+TEST_CASE("On a ready channel entering reinit: delivers nothing (the maintenance asks with REINIT)", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_NONE, radio_mux_orch_input_for(RADIO_MUX_CS_READY, RADIO_MUX_CS_REINIT, true, true));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_NONE, radio_mux_orch_input_for(RADIO_MUX_CS_ABSENT, RADIO_MUX_CS_REINIT, true, true));
+}
+
+TEST_CASE("On a PUT of another mode: the new mode's instance binds on the ready channel", "[radio_mux]")
+{
+    // The old instance got UNBIND (it is no longer bound); the new one is not bound yet.
+    TEST_ASSERT_TRUE(radio_mux_orch_should_bind(RADIO_MUX_CS_READY, true, false));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_BIND, radio_mux_orch_input_for(RADIO_MUX_CS_READY, RADIO_MUX_CS_READY, true, false));
+}

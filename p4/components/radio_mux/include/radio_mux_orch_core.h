@@ -74,6 +74,28 @@ bool radio_mux_orch_should_bind(radio_mux_chan_state_t cs, bool fits, bool bound
 // many changed. Repairs a move whose two stores were cut apart (a reset between them).
 size_t radio_mux_singleton_dedupe(radio_mux_mode_t *modes, bool *changed, size_t n);
 
+/* ---- inputs: what the orchestrator tells an instance ---- */
+
+// The inputs an instance's state machine handles (design section 4.2). NONE is never delivered: it is the "nothing to
+// deliver" answer of radio_mux_orch_input_for.
+typedef enum {
+    RADIO_MUX_IN_NONE,
+    RADIO_MUX_IN_BIND,   // the instance may start on the channel (it is ready); a new handle
+    RADIO_MUX_IN_UNBIND, // the configuration took the channel away: stop and let go
+    RADIO_MUX_IN_REINIT, // maintenance wants the channel: let go (radio_mux_reinit_reply) or refuse
+    RADIO_MUX_IN_LOST,   // the channel went absent or into fault while bound; the binding is kept
+    RADIO_MUX_IN_BACK,   // the channel is ready again, binding unchanged: start again (a new handle)
+} radio_mux_input_type_t;
+
+// What a channel's change from `before` to `after` delivers to the instance of its stored mode. `fits`: the channel's
+// firmware fits the mode; `bound`: the instance holds the binding (it was sent BIND and no UNBIND since; a LOST keeps
+// it). A ready channel binds an instance that does not hold it (BIND: boot, plug-in, a user's bind) and gives a held
+// one back after reinit, absence or a fault (BACK); one whose firmware no longer fits gets nothing (the binding stays;
+// the orchestrator shows no_radio with the fit reason). A held binding whose channel goes absent or into fault from
+// ready or reinit is LOST. Entering reinit delivers nothing: maintenance asks with REINIT itself.
+radio_mux_input_type_t radio_mux_orch_input_for(radio_mux_chan_state_t before, radio_mux_chan_state_t after, bool fits,
+                                                bool bound);
+
 /* ---- the reinit run: the bound instance is asked to let go before maintenance runs ---- */
 
 // How long the orchestrator waits for the bound instance's answer: Thread's 45 s session drain plus margin. No answer

@@ -16,6 +16,7 @@
 #include "freertos/queue.h"
 #include "radio_mux_core.h"
 #include "radio_mux_detect.h"
+#include "radio_mux_orch_core.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -56,6 +57,9 @@ typedef struct {
     int64_t rx_us; // esp_timer time the transport received the frame (RX_FRAME), else the post time
 } radio_mux_ev_t;
 
+// An instance refused a reinit because a peer is connected to it (the RCP proxy): 409 c6_busy.
+#define RADIO_MUX_ERR_PEER_CONNECTED 0x7c01
+
 /* ---- consumers ---- */
 
 // A consumer's handle: one attach (or lease) of a channel, not the channel itself. The mux passes a new handle to every
@@ -72,6 +76,52 @@ typedef struct {
 // handle from an earlier attach can no longer take events, raw bytes or the transmit path of the attach after it (it
 // used to work until the next attach on the transport; it still does).
 typedef struct radio_mux_handle radio_mux_chan_t;
+
+/* ---- mode instances (the orchestrator binds them to channels) ---- */
+
+// One input from the orchestrator to an instance (radio_mux_input_type_t: BIND, UNBIND, REINIT, LOST, BACK).
+typedef struct {
+    radio_mux_input_type_t type;
+    // Grows by 1 with every input to the instance (to each channel's own instance for a per_channel one): the latest
+    // input wins, and a gap tells the instance it missed one.
+    uint32_t seq;
+    // BIND and BACK: the new handle (a new generation). Otherwise the handle the instance holds (NULL when it holds
+    // none). REINIT is answered through it (radio_mux_reinit_reply).
+    radio_mux_chan_t *ch;
+    radio_mux_fault_kind_t kind;      // LOST: firmware or link fault, NONE for an unplug; else NONE
+    char reason[RADIO_MUX_REASON_MAX]; // LOST: the channel's reason; REINIT: the work ("firmware push"); else ""
+} radio_mux_input_t;
+
+typedef struct {
+    radio_mux_mode_t mode;  // otbr, ziggurat or rcp-proxy
+    radio_mux_fw_t needs;   // firmware the mode needs; UNKNOWN = any (otbr always needs spinel, rcp-proxy nothing)
+    uint8_t limit;          // channels that may run the mode at once; 0 = no limit (otbr is always 1)
+    bool reboot_on_change;  // binding or unbinding it reboots the board (the orchestrator answers APPLY_REBOOT)
+    bool frames;            // as radio_mux_consumer_t.frames
+    bool per_channel;       // one instance per channel bound to the mode (the RCP proxy); else a singleton
+    // Called on the owner task for every input. Copy *in as the latest input and wake the instance's own task: never
+    // block, never call the mux from here. The instance acts on the latest input from its task and ignores one whose
+    // seq is older than one it already handled.
+    void (*input)(const radio_mux_input_t *in, void *ctx);
+    void *ctx;
+} radio_mux_instance_t;
+
+// Before radio_mux_start only. The declaration is copied. The errors of radio_mux_register_consumer, plus
+// ESP_ERR_INVALID_ARG without `input`.
+esp_err_t radio_mux_register_instance(const radio_mux_instance_t *inst);
+
+// The instance's own state and reason on the channel of handle `ch`, shown in the read API (mode_state, mode_reason;
+// state at most 15 characters). Ignored unless `ch` is the transport's current handle. Copies under the registry's
+// lock; never waits for the owner task. reason may be NULL ("").
+void radio_mux_report(radio_mux_chan_t *ch, const char *state, const char *reason);
+
+// The answer to the REINIT input `seq` received with handle `ch`: ESP_OK accepts (the instance let go of the radio),
+// anything else refuses with that code and `reason` (may be NULL; cut to 71 characters). Answer when you let go: at
+// once, or once a drain ends; no answer within RADIO_MUX_REINIT_REPLY_MS is a refusal. Ignored for a stale handle or
+// seq. Never blocks: ESP_FAIL when the owner's queue was full (the answer is lost: the maintenance times out).
+esp_err_t radio_mux_reinit_reply(radio_mux_chan_t *ch, uint32_t seq, esp_err_t verdict, const char *reason);
+
+/* ---- consumers (transitional: registered consumers are wrapped as instances until every mode is one) ---- */
 
 typedef struct {
     radio_mux_mode_t mode;  // otbr, ziggurat or rcp-proxy
@@ -211,16 +261,32 @@ typedef struct {
     char proxy_last_error[RADIO_MUX_PROXY_ERROR_MAX]; // left empty here; device_api fills it from rcp_proxy
     radio_mux_firmware_t firmware;
     radio_mux_counters_t counters; // since boot
+    // The orchestrator's view (design section 6): the channel's lifecycle and the bound instance's own state.
+    radio_mux_chan_state_t chan_state;
+    char chan_reason[RADIO_MUX_REASON_MAX]; // reinit: the work; fault: why; else ""
+    char mode_state[16];                    // the instance's state ("" when nothing is bound or it reported none)
+    char mode_reason[RADIO_MUX_REASON_MAX];
 } radio_mux_chan_info_t;
+
+// A registered mode instance as the read API lists it: a singleton once, a per-channel instance once per channel
+// stored in its mode. Its state and reason are those of its channel (chans[chan].mode_state and .mode_reason);
+// chan -1: no channel is stored in the mode (the instance is unbound).
+typedef struct {
+    radio_mux_mode_t mode;
+    int8_t chan; // index into chans[], or -1
+    bool reboot_on_change;
+} radio_mux_mode_info_t;
 
 typedef struct {
     uint32_t available_modes; // RADIO_MUX_MODE_BIT set: off, plus every mode with a registered consumer
     uint32_t reboot_modes;    // RADIO_MUX_MODE_BIT set: modes whose consumer reboots the board (reboot_on_change)
     size_t n;
     radio_mux_chan_info_t chans[RADIO_MUX_CHANNELS_MAX]; // c6 first, then USB channels in the order first seen
+    size_t n_modes;
+    radio_mux_mode_info_t modes[RADIO_MUX_RULES_MAX + RADIO_MUX_CHANNELS_MAX];
 } radio_mux_snapshot_t;
 
-// Every known channel (about 4 KB: allocate it, don't put it on a small stack). Zero channels before the start.
+// Every known channel (about 6 KB: allocate it, don't put it on a small stack). Zero channels before the start.
 void radio_mux_get_snapshot(radio_mux_snapshot_t *out);
 
 // Validates, stores in NVS and applies a change (attach, detach, re-attach; line settings reconfigure an open device).

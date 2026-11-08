@@ -1,5 +1,6 @@
 // The consumer side (bind, poll, release, tx, reset, raw reads, firmware notes) and the API side (snapshot, set,
 // forget, otbr channel, mover) of the mux. Calls that change a channel post a message and wait for the owner task.
+#include <inttypes.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,26 +17,6 @@ static const char *TAG = "radio_mux";
 #define CALL_WAIT_MS 5000
 #define RESET_POST_WAIT_MS 1000 // a reset must not be lost to a queue that is full for a moment
 #define END_ALLOC_RETRY_MS 100
-
-/* ---- registration ---- */
-
-esp_err_t radio_mux_register_consumer(const radio_mux_consumer_t *c)
-{
-    ESP_RETURN_ON_FALSE(c && c->attach && c->detach, ESP_ERR_INVALID_ARG, TAG, "consumer needs attach and detach");
-    ESP_RETURN_ON_FALSE(c->mode == RADIO_MUX_MODE_OTBR || c->mode == RADIO_MUX_MODE_ZIGGURAT ||
-                        c->mode == RADIO_MUX_MODE_RCP_PROXY, ESP_ERR_INVALID_ARG, TAG, "no consumer for mode %d",
-                        (int)c->mode);
-    ESP_RETURN_ON_FALSE(!atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "register before radio_mux_start");
-    ESP_RETURN_ON_FALSE(!mux_find_consumer(c->mode), ESP_ERR_INVALID_STATE, TAG, "%s already has a consumer",
-                        radio_mux_mode_name(c->mode));
-    ESP_RETURN_ON_FALSE(g_mux.n_consumers < RADIO_MUX_RULES_MAX, ESP_ERR_NO_MEM, TAG, "too many consumers");
-    g_mux.consumers[g_mux.n_consumers++] = *c;
-    g_mux.rules.rules[g_mux.rules.n++] = (radio_mux_rule_t) {
-        .mode = c->mode, .needs = c->needs, .limit = c->limit, .reboot_on_change = c->reboot_on_change,
-    };
-    ESP_LOGI(TAG, "%s consumer registered", radio_mux_mode_name(c->mode));
-    return ESP_OK;
-}
 
 /* ---- consumer side ---- */
 
@@ -254,6 +235,37 @@ void radio_mux_set_busy_peer(radio_mux_chan_t *ch, bool has_peer)
     taskEXIT_CRITICAL(&p->lock);
 }
 
+void radio_mux_report(radio_mux_chan_t *ch, const char *state, const char *reason)
+{
+    struct radio_mux_chan *rec;
+    mux_port_t *p = current_port(ch, &rec);
+
+    if (!p || !state) {
+        return;
+    }
+    mux_lock();
+    if (is_current(p, ch)) {
+        snprintf(rec->mode_state, sizeof(rec->mode_state), "%s", state);
+        snprintf(rec->mode_reason, sizeof(rec->mode_reason), "%s", reason ? reason : "");
+    }
+    mux_unlock();
+}
+
+esp_err_t radio_mux_reinit_reply(radio_mux_chan_t *ch, uint32_t seq, esp_err_t verdict, const char *reason)
+{
+    mux_msg_t m = {.type = MUX_MSG_REINIT_REPLY};
+
+    m.reply.h = ch; // the owner checks the generation and the seq
+    m.reply.seq = seq;
+    m.reply.verdict = verdict;
+    snprintf(m.reply.reason, sizeof(m.reply.reason), "%s", reason ? reason : "");
+    if (!mux_post(&m)) {
+        ESP_LOGW(TAG, "reinit answer %" PRIu32 " lost: queue full", seq);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
 void radio_mux_note_firmware(radio_mux_chan_t *ch, const radio_mux_fw_record_t *fw)
 {
     mux_port_t *p;
@@ -309,11 +321,16 @@ static void fill_info(const struct radio_mux_chan *ch, radio_mux_chan_info_t *o)
     } else {
         o->counters = ch->ctr;
     }
+    o->chan_state = ch->chan_state;
+    memcpy(o->chan_reason, ch->chan_reason, sizeof(o->chan_reason));
+    memcpy(o->mode_state, ch->mode_state, sizeof(o->mode_state));
+    memcpy(o->mode_reason, ch->mode_reason, sizeof(o->mode_reason));
 }
 
 void radio_mux_get_snapshot(radio_mux_snapshot_t *out)
 {
     out->n = 0;
+    out->n_modes = 0;
     out->available_modes = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF);
     out->reboot_modes = 0;
     if (!atomic_load(&g_mux.started)) {
@@ -327,6 +344,7 @@ void radio_mux_get_snapshot(radio_mux_snapshot_t *out)
             fill_info(&g_mux.chans[i], &out->chans[out->n++]);
         }
     }
+    orch_fill_modes(out);
     mux_unlock();
 }
 
