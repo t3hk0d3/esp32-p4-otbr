@@ -789,7 +789,10 @@ esp_err_t cdc_acm_host_close(cdc_acm_dev_hdl_t cdc_hdl)
     // [patch 33] The notification interface (when it is a separate one) is released inside the same rounds: its
     // interrupt transfer can be in flight just like a bulk IN one. Each interface's release is remembered in the
     // device, so a later close of a device whose first close failed releases only what is still claimed.
-    const bool notif_separate = (cdc_dev->notif.intf_desc != NULL) && (cdc_dev->notif.intf_desc != cdc_dev->data.intf_desc);
+    // Claimed by open only with an interrupt transfer (a device whose notification element is EP0 has none): the same
+    // condition here, or such a device's close could never release it.
+    const bool notif_separate = (cdc_dev->notif.xfer != NULL) && (cdc_dev->notif.intf_desc != NULL) &&
+                                (cdc_dev->notif.intf_desc != cdc_dev->data.intf_desc);
     if (!notif_separate) {
         cdc_dev->notif_released = true;
     }

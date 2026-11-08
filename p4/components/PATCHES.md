@@ -537,6 +537,8 @@ the sequence above.
    `data_released` and `notif_released` (set when that interface's release succeeded, so a retried close of a device
    whose first close failed releases only what is still claimed and does not halt endpoints of a released interface).
    radio_mux keeps the handle of a failed close and closes it again (usb_transport.c, a few seconds of retries).
+   The notification interface counts as separate only when open claimed it, i.e. with an interrupt transfer (a device
+   whose notification element is EP0 has none and its interface is never claimed, so releasing it would fail forever).
 
 ## Known upstream behaviour (not patches)
 
