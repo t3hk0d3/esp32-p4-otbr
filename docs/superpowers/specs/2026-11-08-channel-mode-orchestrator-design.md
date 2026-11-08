@@ -1,6 +1,6 @@
 # Channel/mode orchestrator: channels, mode instances and one orchestrator: design
 
-Status: draft for review, 2026-11-08. The model was agreed with the user in a brainstorm on 2026-11-08, after PR #39
+Status: approved by the user and reviewed by the Zigbee session, 2026-11-08. The model was agreed with the user in a brainstorm on 2026-11-08, after PR #39
 (radio channel mux) and PR #40 (Zigbee mode); both are merged (master dd5da30). Order: the user reviews this design,
 then the Zigbee session (it asked to, for section 4.7 and Zigbee's reinit answer), then the plan is written. Branch
 `feat/channel-orchestrator`, one PR. It replaces parts of
@@ -142,6 +142,18 @@ with "rcp incompatible", as today.
   inside `ready`: the mode gets RESET (or GONE when the device did not come back) as today. They are not maintenance.
 - The channel layer never decides what runs on it. It reports `channel_state` changes to the orchestrator, and carries
   frames and events to whichever mode the orchestrator bound to it.
+- **A channel in `reinit` refuses `radio_mux_tx` and `radio_mux_reset` from the bound instance**, harmlessly: tx gets
+  `ESP_ERR_INVALID_STATE` with nothing written, and a reset is ignored. Nothing an instance sends reaches the radio
+  during maintenance. The channel delivers none of the maintenance's own resets to it: no RESET event while paused.
+  The instance first hears of the `reinit` as a GONE-equivalent event in its own queue, which stops anything it retries
+  (Zigbee's reset retry). The input in section 4.3 guarantees it is not lost.
+- **Frame slots stay safe across `reinit`.** A slot an instance holds from an RX frame before the `reinit` can be
+  released at any time during or after it, and goes back to the channel's pool. Maintenance never needs those slots,
+  and the pool is not freed or reused for anything else meanwhile. This is today's contract for a handle of an earlier
+  attach.
+- **Each bind gets a new handle (generation), channel back included.** Releasing a slot through an older handle stays
+  safe, as above. Every other call through it is refused as today. The instance swaps to the new handle when it handles
+  the bind.
 
 ### 4.2 Mode instances
 
@@ -165,7 +177,13 @@ Every instance's state machine handles these inputs from the orchestrator:
   with the channel's reason and waits. Thread is the exception for a `fault` of kind firmware: it goes to `fault`
   instead, which keeps today's `RADIO_FAULT` for those (section 6).
 - **channel back**: the channel is `ready` again after `reinit`, `absent` or `fault`, with the binding unchanged. The
-  instance starts again (a bind of the same channel).
+  instance starts again (a bind of the same channel, with a new handle).
+  - The orchestrator checks the firmware fit again first: a dongle can come back re-flashed (ZNP where spinel was).
+  - If the fit fails, the channel is `ready` but the instance is not bound. Its state shows today's fit reason
+    (Zigbee and the proxy: `no_radio`; Thread: `no_radio`, board `NO_RADIO`), and the binding is kept.
+  - The channel's derived fields read as today: `mode` "off", `state` "idle", `error` the fit reason, and `stored_mode`
+    unchanged.
+  - A later plug-in with fitting firmware binds it.
 
 An instance reports its state and reason to the orchestrator, which shows them in the read API. Each instance keeps its
 own state names:
@@ -183,9 +201,13 @@ How each instance answers a reinit request (decided here; today's behavior kept)
   again"), while it runs as a sniffer, and while it is starting. These are today's `mode_fsm_push_allowed` refusals.
   On channel back it starts OpenThread on the channel again. A firmware push or ROM recovery that changes the RCP makes
   it re-read `rcp_compatible`, as today.
-- **Zigbee**: always accepts. It goes `no_radio` with the reason "radio reinit: <work>". Its client stays connected,
-  and its radio settings are replayed on channel back. This uses its existing GONE/RESET handling (the Zigbee
-  session's input).
+- **Zigbee**: always accepts. The reinit notice is handled like today's GONE (`handle_gone`, then
+  `zigbee_spinel_on_gone`): transmits and scans in flight fail, the radio is cleared, and the state becomes `no_radio`
+  with the reason "radio reinit: <work>". Its client stays connected; its transmits fail fast while paused, which
+  ziggurat tolerates (as with `rcp_kill`), so a long push needs no delay.
+  Channel back is handled like today's ATTACH (`zigbee_spinel_attach`): CMD_RESET, the caps and version check, the full
+  configuration replay. A push that installs an image ziggurat cannot use therefore ends in `incompatible`, not a
+  broken radio. (Reviewed by the Zigbee session, 2026-11-08.)
 - **RCP proxy**: refuses while a peer is connected (today's 409 `c6_busy`). Otherwise it accepts: its sessions close
   and its listener closes, and both reopen on channel back.
 
@@ -220,6 +242,16 @@ It is policy-free:
 - it never clears a binding because of a fault.
 
 A Thread fault is retried by the user's PUT of `otbr` on the same channel, as today.
+
+**Its inputs to an instance are never lost and never block.** This is a requirement, not only "nothing blocks":
+
+- Every input (bind, unbind, reinit request, channel lost, channel back) is delivered by a callback on the owner task.
+  The callback records the input and a sequence number in the instance's own state, then wakes the instance's task. It
+  does not post into a queue that can be full.
+- The instance compares sequence numbers to see whether it missed one; the latest input wins. This generalizes the
+  Zigbee consumer's `gone_backstop` (on_detach stores the detached attachment number and kicks the task).
+- An instance's frame queue can overflow (frames are dropped and counted, as today), but its inputs never are.
+- Today's blocking posts in attach callbacks go away: Zigbee's `on_attach` waits up to 1 s (`ATTACH_POST_MS`).
 
 The orchestrator runs on the mux owner task (my call, no new task). Instances run on their own tasks as today (Thread:
 br_radio and the OpenThread task; Zigbee: its task; RCP proxy: the proxy task). The orchestrator talks to them through
@@ -313,6 +345,7 @@ hangs is bounded by the step's own timeouts (rcp_sync's), and the channel then e
 | Firmware push / ROM recovery on the C6 | reinit request to the C6's instance → `reinit` → work → `ready` | `c6_busy` comes from the proxy instance's refusal; the reply texts stay |
 | Push with Thread on a dongle | the C6's instance (proxy, Zigbee or none) is asked; Thread is not touched | none |
 | Push with Zigbee on the C6 | Zigbee accepts, `no_radio` "radio reinit: firmware push", replays after | none (today: GONE then attach) |
+| A dongle comes back with firmware that no longer fits its mode (re-flashed) | channel `ready`, instance not bound, `no_radio` with the fit reason, binding kept | none (`mode` "off", `state` "idle", the reason) |
 | Proxy peer connected, push asked | proxy refuses → 409 `c6_busy` | none |
 | Thread start fails on its channel | Thread `fault`, board `RADIO_FAULT`, binding kept; PUT otbr retries | none |
 | Sniffer | inside Thread's state machine, as today | none |
@@ -331,6 +364,10 @@ Reads keep every existing field with today's meaning and add these (my call on t
   - `mode_state` and `mode_reason`: the bound instance's state in its own names (section 4.2), `null` for `off`.
 - Today's `state` and `error` stay, derived exactly as today from the two above, so the Radios page, the Dashboard and
   the tests keep working. The page may switch to the new fields later.
+- The four new fields are in the snapshot the firmware's own readers use (`radio_mux_get_snapshot` or the
+  orchestrator's equivalent), not only in the JSON. Zigbee's `status.c` copies the channel's reason into
+  `/device/zigbee` while it is `idle` or `no_radio`, so before the first bind (the C6 in its boot steps) and during a
+  `reinit` it shows why.
 - At the top of `GET /device/channels`: `modes`, a read-only list of the instances. Each entry has `mode`, `channel`
   (the configured channel id or `null`), `state`, `reason` and `reboot_on_change`. Example:
   `{"mode": "otbr", "channel": "builtin-c6", "state": "running", "reason": null, "reboot_on_change": false}`. A proxy instance
@@ -413,9 +450,15 @@ What goes where. Names of new files and types are the builder's call within thes
      `/device/zigbee` `channel`, the pages and the logs.
    - The old id is not accepted as an alias (my call): the pages and the tests in this repo are its only known
      clients, and they change with it.
-   - In the repo: about 25 files use the id or kind: three pages (`firmware.js`, `status.js`, `zigbee.js`),
-     `device_api`'s channel JSON, the host tests, `test_channels`, `test_dongle`, `test_zigbee`, the page tests, and
-     `docs/api.md`.
+   - In the repo: about 25 files use the id or kind, and this work renames all of them:
+     - three pages (`firmware.js`, `status.js`, `zigbee.js`). `zigbee.js`'s `radioName` keys on `'c6'`; it shows the
+       channel's label instead.
+     - `device_api`'s channel JSON and the host tests;
+     - `test_channels`, `test_dongle`, and `test_zigbee` (its C6 radio parameters and the "rcp_kill holds the C6 only"
+       skip);
+     - the page tests (`test_zigbee_page`'s `test_radio_ids_read_as_names` among them);
+     - `docs/api.md` and `docs/zigbee.md`.
+     `zigbee`'s `status.c` finds its channel by id from `zigbee_channel()`, so it needs no special case.
    - The firmware record's `chip` (`esp32c6`) already names the chip.
 
 ## 10. Testing
@@ -448,7 +491,9 @@ The pass, with a written flash budget:
   9's items change their expectations.
 - **Targeted checks:**
   - boot with each mode on the C6: each instance bound once, and no resets beyond the instance's own;
-  - a push with Zigbee on the C6;
+  - a push with Zigbee on the C6, with a connected ZHA client. The client stays connected, `/device/zigbee` shows
+    `no_radio` "radio reinit: firmware push" and then `running` again, and the test device still toggles
+    (`test_zigbee`'s `radio_held_comes_back` has the pieces);
   - a push refused while a proxy peer is connected;
   - a failed move: Thread `fault` on the target, no rollback;
   - an abandoned start during a move: `RADIO_FAULT`, no reboot, with a test-build hook that makes the start hang;
@@ -477,8 +522,8 @@ The pass, with a written flash budget:
 ## 12. Left to the builder
 
 - File, type and function names.
-- How instances receive orchestrator inputs (callbacks that post to their task, or a queue per instance), as long as
-  nothing blocks the owner task.
+- How instances record and see orchestrator inputs, within section 4.3's requirement: never lost, never blocking,
+  with a sequence number.
 - The staging of the plan.
 - Log texts.
 - Whether `delay` carries its own deadline or the orchestrator applies one per reason.
@@ -495,8 +540,8 @@ The pass, with a written flash budget:
    reboots back onto the old radio (section 4.5).
 5. Channel faults have two kinds, firmware and link, so the board mode keeps today's values: `RADIO_FAULT` for the
    C6's firmware faults, `NO_RADIO` for a dongle's link faults. The C6 is never `absent` (sections 4.1 and 6).
-6. Zigbee's reboot on entering or leaving is an instance property, not an orchestrator rule (section 4.7). Open to the
-   Zigbee session's review.
+6. Zigbee's reboot on entering or leaving is an instance property, not an orchestrator rule (section 4.7). Agreed by the
+   Zigbee session (it already declares `reboot_on_change`).
 7. The instances' reinit answers keep today's refusals: Thread's drain and sniffer, and the proxy's connected peer
    (section 4.2).
 8. A reset that a mode asks for, and the USB error recovery, are not `reinit` (section 4.1).
@@ -504,3 +549,6 @@ The pass, with a written flash budget:
    with only the C6 over SPI implemented (section 4.1).
 10. The built-in channel's kind becomes `builtin` along with its id `builtin-c6`, and `c6` is not kept as an alias
     (section 9).
+11. From the Zigbee session's review: a channel in `reinit` refuses tx and reset harmlessly and delivers no resets to a
+    paused instance; slot releases stay safe; each bind gets a new handle; inputs are never lost (sequence numbers);
+    the fit is checked again at channel back (sections 4.1 to 4.3).
