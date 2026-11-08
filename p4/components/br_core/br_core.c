@@ -65,12 +65,12 @@ static const char *TAG = "br_core";
 #define LEADER_NVS_KEY "leader_adj"
 #define REBOOT_DELAY_MS 1500 // lets the caller of a push report its result before the reboot
 #define FAULT_NO_RCP "no rcp firmware"
-#define FAULT_INCOMPATIBLE "rcp incompatible"
+#define FAULT_INCOMPATIBLE MODE_FSM_FAULT_INCOMPATIBLE
 #define FAULT_ROM_RECOVERY "rom recovery failed"
 #define TREL_SET_LOCK_MS 1000
 #define TREL_QUERY_MS 3000 // how long a peer query collects answers (esp mdns sends it about once a second)
 #define TREL_QUERY_DELAY_MS 100 // after an address event: a burst of them gets one query
-#define FAULT_C6_HELD "rcp incompatible" // the test build's c6_hold: the C6 stays in reset, as an RCP that never answers
+#define FAULT_C6_HELD FAULT_INCOMPATIBLE // the test build's c6_hold: the C6 stays in reset, as an RCP that never answers
 
 core_state_t g_core;
 bool g_storage_degraded; // set by br_core_note_storage_init before br_core_start
@@ -183,6 +183,14 @@ static void park_gone(void)
     vTaskDelete(NULL);
 }
 
+void core_set_c6_compatible(bool compatible)
+{
+    xSemaphoreTake(g_core.mutex, portMAX_DELAY);
+    g_core.rcp_compatible = compatible;
+    g_core.rcp_compatible_known = true;
+    xSemaphoreGive(g_core.mutex);
+}
+
 // rcp_compatible is the C6's (the status page, the firmware page's C6 card, the metrics' br_info): OpenThread's verdict
 // on a dongle leaves it alone.
 static void set_compatible(bool compatible)
@@ -192,10 +200,7 @@ static void set_compatible(bool compatible)
     if (!ch || strcmp(radio_mux_chan_id(ch), RADIO_MUX_C6_ID) != 0) {
         return;
     }
-    xSemaphoreTake(g_core.mutex, portMAX_DELAY);
-    g_core.rcp_compatible = compatible;
-    g_core.rcp_compatible_known = true;
-    xSemaphoreGive(g_core.mutex);
+    core_set_c6_compatible(compatible);
 }
 
 // A dead or mismatching RCP while OpenThread starts is reported as "rcp incompatible": the cure is the same, a push.
@@ -593,6 +598,9 @@ esp_err_t core_c6_boot_steps(bool affects_mode)
         fault = "resetting the RCP failed";
     }
     if (fault && affects_mode) {
+        if (held) {
+            core_set_c6_compatible(false); // as an RCP that never answers (core_radio_probe_channel's verdict)
+        }
         core_enter_fault(fault);
     }
     return held ? ESP_ERR_INVALID_STATE : fault ? ESP_ERR_NOT_FOUND : ESP_OK;

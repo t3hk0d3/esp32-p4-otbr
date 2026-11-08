@@ -139,6 +139,8 @@ esp_err_t mode_fsm_push_allowed(br_core_mode_t mode, bool caller_is_openthread_t
 
 /** Reason shown when OpenThread cannot start because NVS (its settings, the Thread credentials) is unusable. */
 #define MODE_FSM_FAULT_STORAGE "storage unavailable"
+/** Reason shown when the C6's RCP is rejected: OpenThread refused it, or it did not answer (reset, probe). */
+#define MODE_FSM_FAULT_INCOMPATIBLE "rcp incompatible"
 
 /**
  * Whether the storage init result leaves the device degraded: any error (NVS full or corrupt) does. NVS is never erased
@@ -248,6 +250,15 @@ bool mode_fsm_boot(mode_fsm_t *fsm, const char *otbr_id);
  * of OpenThread through the channel overrides the fault the boot entered. Pure.
  */
 bool mode_fsm_c6_usable_after_steps(esp_err_t steps);
+
+/**
+ * Whether the failed RCP probe (`probe_err`) before a start of OpenThread on channel `id` (not a move's probe: that
+ * refuses and changes nothing) is the C6's RCP rejected: the C6, and any failure but ESP_ERR_INVALID_STATE (the
+ * channel went away, which br_radio handles as such). The fault is then MODE_FSM_FAULT_INCOMPATIBLE with rcp.compatible
+ * false, as when OpenThread rejects it or it does not answer its reset (the Firmware page's install hint, the docs);
+ * the probe's own text goes to the log. A dongle's probe failure keeps the probe's text. Pure.
+ */
+bool mode_fsm_probe_fault_incompatible(const char *id, esp_err_t probe_err);
 
 /**
  * Whether a C6 job (push, ROM recovery) runs alone, leaving OpenThread and the board mode untouched: the channel stored

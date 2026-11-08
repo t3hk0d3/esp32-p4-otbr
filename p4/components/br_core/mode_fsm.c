@@ -372,6 +372,11 @@ static bool is_c6(const char *id)
     return id && strcmp(id, MODE_FSM_C6_ID) == 0;
 }
 
+bool mode_fsm_probe_fault_incompatible(const char *id, esp_err_t probe_err)
+{
+    return is_c6(id) && probe_err != ESP_OK && probe_err != ESP_ERR_INVALID_STATE;
+}
+
 bool mode_fsm_c6_job_alone(const char *otbr_id)
 {
     return !is_c6(otbr_id);

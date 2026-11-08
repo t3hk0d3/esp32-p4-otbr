@@ -75,6 +75,8 @@ esp_err_t core_start_ot_task(void);
 bool core_backbone_has_ip6(void);
 // The C6's boot steps inside a C6 job (see br_core.c).
 esp_err_t core_c6_boot_steps(bool affects_mode);
+// The C6's rcp.compatible verdict (known from now on), whatever channel OpenThread runs on.
+void core_set_c6_compatible(bool compatible);
 
 /* ---- br_core_radio.c ---- */
 

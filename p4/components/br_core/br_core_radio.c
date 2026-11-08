@@ -36,6 +36,7 @@ static const char *TAG = "br_core";
 #define PROBE_ANSWER_WAIT_MS 500 // each property answer
 #define PROBE_POLL_SLICE_MS 50
 #define FAULT_NO_CHANNEL_START "OpenThread did not start on its channel"
+#define FAULT_C6_INCOMPATIBLE MODE_FSM_FAULT_INCOMPATIBLE
 // After the OTBR channel was lost (unplugged, failed), the teardown waits for the open OpenThread sessions in rounds of
 // this long and never deletes the OpenThread lock under one: esp_openthread_deinit frees it, and FreeRTOS does not check
 // for waiters. Longer than httpd's 15 s socket I/O timeout, so a REST handler stuck writing to a slow client ends within
@@ -88,7 +89,7 @@ static unsigned s_ot_gen;           // the attach it was started on: another att
 static unsigned s_tried_gen;        // the last attach a start was tried on (a failed start waits for the next one)
 static radio_mux_chan_t *s_lease;   // a move's target, leased from the mux until the move ends
 static radio_mux_fw_record_t s_probe_fw; // what the last probe read
-static char s_probe_err[64];        // why the last probe failed
+static char s_probe_err[64];        // why the last probe failed: the fault reason a failed start shows
 // A move of OpenThread: the caller of br_core_move_otbr waits for the probe's verdict, br_radio runs the move.
 enum { MOVE_IDLE, MOVE_WAITING, MOVE_SIGNALLED, MOVE_ABANDONED };
 static struct {
@@ -384,6 +385,7 @@ esp_err_t core_radio_probe_channel(const char *id, char *err, size_t cap)
     radio_mux_chan_t *ch = id[0] ? channel_for(id) : NULL;
     radio_mux_fw_record_t fw;
     esp_err_t ret = ESP_OK;
+    const bool move = s_move_probe; // a move's probe refuses and changes nothing; another's failure is a fault
 
     if (s_move_probe && atomic_load(&s_move.state) == MOVE_ABANDONED) {
         s_move_probe = false;
@@ -414,6 +416,13 @@ esp_err_t core_radio_probe_channel(const char *id, char *err, size_t cap)
         }
     } else {
         strlcpy(s_probe_err, err, sizeof(s_probe_err));
+        if (!move && mode_fsm_probe_fault_incompatible(id, ret)) {
+            // The C6's RCP did not answer as one: "rcp incompatible" with rcp.compatible false, as when OpenThread
+            // rejects it (the cure is the same, a push); the probe's text stays in the log.
+            ESP_LOGW(TAG, "%s: %s: the RCP counts as incompatible", id, err);
+            strlcpy(s_probe_err, FAULT_C6_INCOMPATIBLE, sizeof(s_probe_err));
+            core_set_c6_compatible(false);
+        }
     }
     if (s_move_probe) {
         s_move_probe = false;
@@ -970,7 +979,7 @@ esp_err_t core_radio_restart_on_c6(void)
     }
     s_tried_gen = atomic_load(&s_attach_gen);
     if (core_radio_probe_channel(RADIO_MUX_C6_ID, err, sizeof(err)) != ESP_OK) {
-        core_set_reason(err);
+        core_set_reason(s_probe_err); // "rcp incompatible" unless the channel went away
         core_radio_set_start_failed(true); // a PUT of mode otbr on the C6 tries again
         return ESP_ERR_INVALID_RESPONSE;
     }
