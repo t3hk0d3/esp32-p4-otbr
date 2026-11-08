@@ -99,8 +99,8 @@ typedef struct {
 esp_err_t radio_mux_register_consumer(const radio_mux_consumer_t *c);
 
 // Loads the channels from NVS, lists c6, creates the eventfds (the eventfd VFS must be registered), starts the owner
-// task, which installs the USB host (its interrupt on MGMT_CORE) and attaches registered consumers to present channels.
-// Once.
+// task (MGMT_CORE), which installs the USB host from NET_CORE (its interrupt and the CDC driver's task run there, off
+// the management core's interrupt-masking code) and attaches registered consumers to present channels. Once.
 esp_err_t radio_mux_start(void);
 
 /* ---- consumer side (between attach and detach) ---- */
