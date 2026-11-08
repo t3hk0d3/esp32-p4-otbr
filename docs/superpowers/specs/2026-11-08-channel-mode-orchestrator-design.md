@@ -45,6 +45,8 @@ Goals:
 - Moves of Thread as rebinds: probe the target, commit, start; no fallback to the old radio.
 - An honest read API: the channel's lifecycle and the bound mode's state shown separately.
 - The C6's maintenance moved out of Thread's code.
+- The board's built-in RCP as a channel kind of its own (section 4.1), so a board with another built-in RCP needs a new
+  descriptor and maintenance ops, not a new channel kind. The C6 channel's id becomes `builtin-c6`.
 - Remove the special cases this replaces: the C6 boot hold, the C6 job flags in br_core, br_radio's reconcile and the
   proxy's own attach reconcile.
 
@@ -55,6 +57,8 @@ Non-goals:
 - A Radios page redesign. Only its texts that describe the rollback change, and it may show the new fields.
 - Changes to the transports (USB host, CDC driver, C6 SPI), the frame path, firmware detection or the proxy's adapters.
 - A Ziggurat stop. Leaving Zigbee still reboots (section 4.7).
+- Another built-in RCP (an ESP32-H2 board) or another transport for it (UART). Only the seam is built, with the C6
+  over SPI as its one implementation.
 
 Anti-goals (a failure even if it works):
 
@@ -75,7 +79,8 @@ Anti-goals (a failure even if it works):
   it runs on the mux owner task). Internal heap free at idle with no dongle must not drop by more than 4 KB from
   master dd5da30 (my call, measured on the board before and after).
 - The API's write shape is kept: `PUT /device/channels/{id}` with `mode` binds or unbinds, with today's bodies, codes
-  and `detail` texts (except the move change in section 9). `DELETE` is unchanged.
+  and `detail` texts. `DELETE` is unchanged. The exceptions are in section 9: the move change, and the built-in
+  channel's id and kind.
 - Storage stays readable both ways: a board updated from master keeps its modes; see section 7.
 - The existing on-board suites (`test_channels`, `test_dongle`, `test_rcp_push`, `test_device_api`, `test_br_boot`,
   `test_jumper`, `test_rest_guard` and `test_sniffer` with their RCP kill cases, `test_radio_firmware_e2e`,
@@ -86,8 +91,33 @@ Anti-goals (a failure even if it works):
 
 ### 4.1 Channels
 
-A channel is a connection to an RCP: the C6 over SPI, or a USB dongle. It keeps today's id, label, line settings,
-firmware record, counters and transport. Its lifecycle state, `channel_state`, is one of:
+A channel is a connection to an RCP. It keeps today's label, line settings, firmware record, counters and transport.
+There are two kinds:
+
+| | BuiltinRcpChannel | UsbSerialChannel |
+| --- | --- | --- |
+| What | the board's own RCP, soldered on | a USB dongle |
+| id, kind | `builtin-<chip>`: `builtin-c6` on this board; kind `builtin` | `usb-<vid>-<pid>[-<serial>]`; kind `usb` (unchanged) |
+| Presence | always there, never `absent` | hot-plug; up to 7 remembered, one open at a time |
+| Data path | its transport: spinel over SPI (OpenThread's SPI framing) on this board | bytes over a serial bridge (CDC-ACM, CP210x, CH34x); HDLC framing by the mux for frame modes, raw for the proxy |
+| `reinit` work | its maintenance ops: boot steps, firmware push, ROM recovery | firmware detection after plug-in |
+| Reset | the board's reset pin | close and reopen over USB |
+| Line settings | fixed | baud, flow control |
+| Fault kinds | firmware (below) | link (below) |
+
+**A built-in RCP has three parts:**
+
+- **A board descriptor:** the chip, the id, the label ("ESP32-C6 (built-in)"), and the pins (reset, boot, INT, the bus).
+- **A transport:** spinel over SPI here. It is generic and works for any SPI spinel RCP. A UART transport could come
+  later.
+- **Maintenance ops** behind one interface: probe the installed image, push an image, ROM recovery, and what the board
+  checks at boot.
+
+This board has one implementation: the C6 on the ESP32-P4 board, with its checks for the factory ESP-Hosted image and
+the jumper. `rcp_sync` stays its flashing engine. A board with an ESP32-H2 would bring its own descriptor and ops; the
+Espressif ROM bootloader path is mostly shared. In the rest of this document, "the C6" means this board's built-in RCP.
+
+Its lifecycle state, `channel_state`, is one of:
 
 | `channel_state` | Meaning |
 | --- | --- |
@@ -121,7 +151,7 @@ A mode instance is a service with its own state machine, bound to at most one ch
 | --- | --- | --- |
 | Thread | one (singleton) | today's `mode_fsm` in br_core is its state machine; the board mode is derived from it (section 6) |
 | Zigbee | one (singleton) | today's ziggurat consumer in the `zigbee` component |
-| RCP proxy | one per channel | the user rejected a single proxy that serves several channels. Its instance belongs to its channel: rcp-proxy on `c6` and on a dongle are two instances |
+| RCP proxy | one per channel | the user rejected a single proxy that serves several channels. Its instance belongs to its channel: rcp-proxy on `builtin-c6` and on a dongle are two instances |
 | off | none | a channel bound to nothing |
 
 Every instance's state machine handles these inputs from the orchestrator:
@@ -303,7 +333,7 @@ Reads keep every existing field with today's meaning and add these (my call on t
   the tests keep working. The page may switch to the new fields later.
 - At the top of `GET /device/channels`: `modes`, a read-only list of the instances. Each entry has `mode`, `channel`
   (the configured channel id or `null`), `state`, `reason` and `reboot_on_change`. Example:
-  `{"mode": "otbr", "channel": "c6", "state": "running", "reason": null, "reboot_on_change": false}`. A proxy instance
+  `{"mode": "otbr", "channel": "builtin-c6", "state": "running", "reason": null, "reboot_on_change": false}`. A proxy instance
   appears once per channel bound to rcp-proxy.
 - `/device/status`'s board mode (`BR_RUNNING`, `NO_RADIO`, `RADIO_FAULT`, `STARTING`, `SNIFFER`) is derived from
   Thread's state and its channel, with today's values in every scenario of section 5:
@@ -330,6 +360,8 @@ The binding table needs no new record (my call): it is the union of the per-chan
 singletons are found by scanning. So:
 
 - A board updated from master reads its configuration unchanged, and a downgrade reads it unchanged too.
+- The built-in channel keeps its NVS key `c6` (today `radio_mux_nvs_key` special-cases the C6's id to that key). Only
+  the API id changes to `builtin-c6`, so its stored mode and settings carry over.
 - A rebind stores both channels in one NVS commit (today's two-blob commit, W-2).
 - The load rule for duplicates stays: two channels stored `otbr` keep the first in slot order, and the rest become
   `off`. The same rule applies to two `ziggurat`.
@@ -376,6 +408,15 @@ What goes where. Names of new files and types are the builder's call within thes
    Now it changes at the commit, step 4.
 4. **New read fields** (section 6). They are additive.
 5. **Zigbee during a C6 push** shows `no_radio` "radio reinit: firmware push" instead of a GONE and a new attach.
+6. **The built-in channel's id and kind:** `c6` becomes `builtin-c6`, and kind `c6` becomes `builtin`.
+   - It shows wherever a channel id shows: `GET/PUT /device/channels/{id}`, `/device/status` `otbr_channel`,
+     `/device/zigbee` `channel`, the pages and the logs.
+   - The old id is not accepted as an alias (my call): the pages and the tests in this repo are its only known
+     clients, and they change with it.
+   - In the repo: about 25 files use the id or kind: three pages (`firmware.js`, `status.js`, `zigbee.js`),
+     `device_api`'s channel JSON, the host tests, `test_channels`, `test_dongle`, `test_zigbee`, the page tests, and
+     `docs/api.md`.
+   - The firmware record's `chip` (`esp32c6`) already names the chip.
 
 ## 10. Testing
 
@@ -459,3 +500,7 @@ The pass, with a written flash budget:
 7. The instances' reinit answers keep today's refusals: Thread's drain and sniffer, and the proxy's connected peer
    (section 4.2).
 8. A reset that a mode asks for, and the USB error recovery, are not `reinit` (section 4.1).
+9. The built-in RCP is a channel kind of its own, built from a board descriptor, a transport and maintenance ops,
+   with only the C6 over SPI implemented (section 4.1).
+10. The built-in channel's kind becomes `builtin` along with its id `builtin-c6`, and `c6` is not kept as an alias
+    (section 9).
