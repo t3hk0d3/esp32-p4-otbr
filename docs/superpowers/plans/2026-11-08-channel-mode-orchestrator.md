@@ -11,7 +11,7 @@ today except for the listed changes.
 - The orchestrator lives in `radio_mux`: a pure core (`orch_core.c`) and a runtime (`orch.c`) on the mux owner task.
 - It owns the binding table and delivers never-lost inputs to the instances: Thread in `br_core`, Zigbee in `zigbee`,
   and one RCP proxy per channel in `rcp_proxy`.
-- The board's built-in RCP becomes a seam: a descriptor plus maintenance ops, implemented by a new `builtin_c6`
+- The board's built-in RCP becomes a seam: a descriptor plus maintenance ops, implemented by a new `builtin_rcp`
   component that takes the C6 maintenance out of `br_core`.
 
 **Tech stack:** ESP-IDF v6.1 (C, FreeRTOS) on the ESP32-P4. Host tests use Unity on the ESP-IDF `linux` target.
@@ -24,7 +24,7 @@ the Zigbee session, d36eac5). Section numbers below (§) refer to it.
 
 - **Branch** `feat/channel-orchestrator` (from master dd5da30), one PR. Never push or open the PR unless the user asks.
 - **Style:** `STYLEGUIDE.md`:
-  - snake_case; public symbols carry the component prefix (`radio_mux_`, `builtin_c6_`, `br_core_`, `rcp_proxy_`,
+  - snake_case; public symbols carry the component prefix (`radio_mux_`, `builtin_rcp_`, `br_core_`, `rcp_proxy_`,
     `zigbee_`, `device_api_`);
   - `esp_err_t` returns with `ESP_RETURN_ON_ERROR`;
   - one `TAG` per file;
@@ -183,7 +183,7 @@ radio_mux runtime (orch.c, mux.c, mux_api.c, mux_deliver.c)
             - carries channel_state, channel_reason, mode_state, mode_reason and the instances list
             - keeps today's mode, state and reason values (§6)
 
-builtin_c6 (maintenance ops)
+builtin_rcp (maintenance ops)
     boot_steps
         On an installed RCP
             - returns ESP_OK; updates the installed version
@@ -194,7 +194,7 @@ builtin_c6 (maintenance ops)
     push / rom_recover
         On success, failure, or no jumper
             - returns today's errors (ESP_ERR_NOT_SUPPORTED for no jumper)
-    builtin_c6_get_status
+    builtin_rcp_get_status
         On any state
             - returns installed version, known flag, recovery flags as br_core did
 
@@ -481,30 +481,34 @@ device_api
 - [ ] **Step 4:** br_core's and radio_mux's host tests pass, and `make test-host` and `make build` pass. Commit:
   "refactor(br_core): Thread as an orchestrator instance; the board-mode table".
 
-### Task 6a: The built-in RCP seam and the `builtin_c6` component (code moved, no behavior change)
+### Task 6a: The built-in RCP seam and the `builtin_rcp` component (code moved, no behavior change)
 
 **Files:**
 - Create:
-  - `p4/components/builtin_c6/CMakeLists.txt`;
-  - `builtin_c6/include/builtin_c6.h`;
-  - `builtin_c6/builtin_c6.c` (ops and status);
-  - `builtin_c6/builtin_c6_core.c` and `builtin_c6/include/builtin_c6_core.h` (pure decisions);
-  - `builtin_c6/test_host/` (CMakeLists, main/CMakeLists, `main/test_builtin_c6.c`).
+  - `p4/components/builtin_rcp/CMakeLists.txt`;
+  - `builtin_rcp/include/builtin_rcp.h`;
+  - `builtin_rcp/builtin_rcp.c`: the chip-independent part. That is the registration with `radio_mux`, the status
+    and the descriptor, built from the board's chip;
+  - `builtin_rcp/c6.c`: this board's implementation, the C6 on the ESP32-P4 board. It covers the probe, the push, the
+    ROM recovery, the ESP-Hosted and jumper checks, and the test overrides. A board with another built-in RCP (an
+    ESP32-H2) would add its own file next to it and nothing else;
+  - `builtin_rcp/builtin_rcp_core.c` and `builtin_rcp/include/builtin_rcp_core.h` (pure decisions);
+  - `builtin_rcp/test_host/` (CMakeLists, main/CMakeLists, `main/test_builtin_rcp.c`).
 - Modify:
   - `include/radio_mux.h` (the built-in section);
   - `mux.c` (the C6 listing reads the built-in descriptor);
   - `br_core.c`: `run_probe`, `core_c6_boot_steps`, `run_c6_job`, the `g_core.rcp_installed*` and recovery fields,
     and the probe override move out;
   - `br_core_test.c`;
-  - `device_api/status_json.c` (reads `builtin_c6_get_status`);
-  - `p4/main/test_cmds.c` (`c6_hold`, `rcp_probe_override`, `c6_jumper_ignore` call builtin_c6);
-  - `p4/main/app_main.c` (`builtin_c6_register()` before `radio_mux_start`);
-  - `STYLEGUIDE.md` (add `builtin_c6_` to the prefix list).
+  - `device_api/status_json.c` (reads `builtin_rcp_get_status`);
+  - `p4/main/test_cmds.c` (`c6_hold`, `rcp_probe_override`, `c6_jumper_ignore` call builtin_rcp);
+  - `p4/main/app_main.c` (`builtin_rcp_register()` before `radio_mux_start`);
+  - `STYLEGUIDE.md` (add `builtin_rcp_` to the prefix list).
 - Move:
   - `mode_fsm_rom_failure_is_fault`, `mode_fsm_next_recovery_failed` and `mode_fsm_installed_after_push` →
-    `builtin_c6_core.c` as `builtin_c6_rom_failure_is_fault`, `builtin_c6_next_recovery_failed` and
-    `builtin_c6_installed_after_push`;
-  - `radio_mux_c6_present` → `builtin_c6_present`, which also returns the fault kind (always firmware).
+    `builtin_rcp_core.c` as `builtin_rcp_rom_failure_is_fault`, `builtin_rcp_next_recovery_failed` and
+    `builtin_rcp_installed_after_push`;
+  - `radio_mux_c6_present` → `builtin_rcp_present`, which also returns the fault kind (always firmware).
   Their host tests move with them, assertions unchanged.
 
 **Interfaces (produces):**
@@ -513,21 +517,21 @@ device_api
   - `esp_err_t radio_mux_set_builtin(const radio_mux_builtin_t *b)`: before `radio_mux_start`; ESP_ERR_INVALID_STATE
     after it.
   - The ops run on the caller's task while the channel is in `reinit`.
-- In `builtin_c6.h`:
-  - `esp_err_t builtin_c6_register(void)`;
-  - `typedef struct { bool installed_known; char installed[32]; bool rom_recovery_failed; bool jumper; } builtin_c6_status_t;`
+- In `builtin_rcp.h`:
+  - `esp_err_t builtin_rcp_register(void)`;
+  - `typedef struct { bool installed_known; char installed[32]; bool rom_recovery_failed; bool jumper; } builtin_rcp_status_t;`
     (the fields `/device/status` reads today from `g_core`);
-  - `void builtin_c6_get_status(builtin_c6_status_t *out)`.
-- The id stays `"c6"` in this task; Task 9 renames it.
+  - `void builtin_rcp_get_status(builtin_rcp_status_t *out)`.
+- The id stays `"c6"` in this task; Task 9 renames it to `builtin-c6` (the descriptor builds it as `builtin-<chip>`).
 
-- [ ] **Step 1:** Create the `builtin_c6` test_host with the moved host tests and their assertions unchanged. Add a
-  failing case for `builtin_c6_present`'s kind: "On no RCP firmware, the ESP-Hosted image or a failed ROM recovery:
+- [ ] **Step 1:** Create the `builtin_rcp` test_host with the moved host tests and their assertions unchanged. Add a
+  failing case for `builtin_rcp_present`'s kind: "On no RCP firmware, the ESP-Hosted image or a failed ROM recovery:
   returns a firmware fault with today's reason".
-- [ ] **Step 2:** Run builtin_c6's host tests: they fail to build.
+- [ ] **Step 2:** Run builtin_rcp's host tests: they fail to build.
 - [ ] **Step 3:** Move the code and register the ops. br_core still drives the C6 job (`c6_job_window`), but calls the
   ops through `radio_mux`'s built-in descriptor instead of its own copies. The behavior is the same.
-- [ ] **Step 4:** builtin_c6's, br_core's and radio_mux's host tests pass, and `make test-host`, `make build` and
-  `make build-test` pass. Commit: "refactor(builtin_c6): the C6's maintenance behind the built-in RCP seam".
+- [ ] **Step 4:** builtin_rcp's, br_core's and radio_mux's host tests pass, and `make test-host`, `make build` and
+  `make build-test` pass. Commit: "refactor(builtin_rcp): the C6's maintenance behind the built-in RCP seam".
 
 ### Task 6b: Maintenance is `reinit`
 
@@ -672,7 +676,7 @@ then, so nothing is bound first.
     (`radioName` shows the channel's label), `test_channels.py`, `test_dongle.py`, `test_zigbee.py` (its C6 radio
     parameters and the "rcp_kill holds the C6 only" skip), the page tests (`test_zigbee_page.py`
     `test_radio_ids_read_as_names` among them), `docs/api.md`, `docs/radios.md` and `docs/zigbee.md`.
-  - `builtin_c6`'s descriptor gets `id "builtin-c6"`, `chip "esp32c6"` and the label "ESP32-C6 (built-in)".
+  - `builtin_rcp`'s descriptor gets `id "builtin-c6"`, `chip "esp32c6"` and the label "ESP32-C6 (built-in)".
 
 **Interfaces:**
 - `/device/channels` lists `{"id": "builtin-c6", "kind": "builtin", ...}`.
