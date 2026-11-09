@@ -18,7 +18,7 @@ line; the others show in the Thread section, as here with the C6 held in reset:
 | `rcp incompatible` | OpenThread rejected the RCP, or it did not answer (its reset, or the probe before OpenThread starts on the C6; the log names what failed). Upload the `c6_rcp.bin` of the same release. |
 | `storage unavailable` | NVS did not initialise (for example no free pages), `storage_ok` is `false`. The board booted degraded instead of boot-looping: HTTP, OTA and `/device/*` work, OpenThread does not start. NVS is never erased automatically because it holds the Thread credentials. Update to a firmware that fixes it, or erase NVS by hand (`esptool --chip esp32p4 -p /dev/ttyACM0 erase-region 0x9000 0x10000`; the Thread network has to be set up again) and reboot. |
 | `rom recovery failed` | The updater was silent and the jumper recovery failed. Check the jumper wires and `GET /device/radio/log`; try `make recover`; without a jumper use Path 3 of [First install](first-install.md) (USB-UART on H7). |
-| `resetting the RCP failed`, `radio boot timed out`, `radio restart failed`, `OpenThread main loop ended` | Radio did not come up. The board retries (at most three automatic recoveries per 10 minutes), then waits: reboot, or upload firmware. Check the antenna and the C6 console log. |
+| `resetting the RCP failed`, `radio boot timed out`, `OpenThread main loop ended` | Radio did not come up. The board retries (at most three automatic recoveries per 10 minutes), then waits: reboot, or upload firmware. Check the antenna and the C6 console log. |
 
 ## Other problems
 

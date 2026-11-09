@@ -298,8 +298,9 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
   (`channel_reason` says why). `mode_state` and `mode_reason` are the state of the mode bound to the channel in that
   mode's own words (Thread: `no_radio`, `starting`, `running`, `sniffer`, `releasing`, `fault`; Zigbee: `idle`,
   `starting`, `running`, `no_radio`, `incompatible`; the proxy: `off`, `listening`, `connecting`, `backoff`,
-  `connected`, `no_radio`), `null` for a channel in `off` or before its mode reported one. A reason is `null` when
-  there is none.
+  `connected`, `no_radio`), `null` for a channel in `off` or before its mode reported one. At the end of a maintenance
+  the orchestrator shows the bound mode as `starting`, whatever the mode, until it reports again. A reason is `null`
+  when there is none.
 - `modes` lists the mode instances: Thread and Zigbee once each, the proxy once per channel in `rcp-proxy`. `channel`
   is the channel stored in that mode (`null` for none: Thread is `no_radio` "no channel in otbr", Zigbee `idle`);
   `state` and `reason` are that channel's `mode_state` and `mode_reason`; `reboot_on_change` says whether entering or
