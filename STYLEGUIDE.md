@@ -63,3 +63,19 @@ see `.pre-commit-config.yaml`).
   call the scripts in `tools/`. Documentation and CI use the make targets, not the scripts or `idf.py` directly. A new
   routine task gets a target with a `## ` help comment.
 - `README.md` is a short overview; the documentation lives in `docs/`, one file per topic, indexed in `docs/README.md`.
+- Every page in `docs/` is either a **guide** or **reference**:
+    - A guide is for someone who runs the board from a release download. It says what the feature is for, then how
+      to use it in the web UI, then the `curl` call, and links to the reference for fields and error codes. It has
+      no source paths, test names, test-build commands, dated bench results or internals. A sentence on a limit
+      the reader can hit stays; the reason behind it goes to the reference.
+    - Reference pages (`docs/api.md`, `docs/metrics.md`, `docs/reference/`) list endpoints, fields, states and
+      internals. On-board check lists and measurements go to `docs/development.md`.
+- Release users never need `make`: a guide gives the release-file way first and the checkout way (`make ...`) as a
+  short note after it.
+- Words: **radio** is a radio on the board (the C6 or a USB dongle, `builtin-c6` / `usb-...` in the API); **Thread
+  channel** or **Zigbee channel** is the 802.15.4 channel 11 to 26. Jargon is defined in `docs/glossary.md` and linked
+  at its first use on a page.
+- Images live in `docs/images/`. Screenshots are PNG, taken from the preview server (`tools/docs_preview.py`) where it
+  can show the page, and carry an `alt` text that says what the reader should notice. Diagrams are standalone SVG in
+  the style of `docs/images/hero.svg`: their own `<style>` with a light and a dark scheme, teal for radio, copper for
+  wire.
