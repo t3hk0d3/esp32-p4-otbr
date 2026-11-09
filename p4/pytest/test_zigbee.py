@@ -352,6 +352,10 @@ class TestZigbeeMode:
 
         async def body():
             async with zigpy_app(base_url.removeprefix("http://")) as app:
+                if app.state.network_info.channel != TEST_CHANNEL:
+                    # A network an earlier client formed is still on the stack: zigpy reuses it. Form ours.
+                    await app.form_network()
+                    await app.load_network_info(load_devices=False)
                 info, node = app.state.network_info, app.state.node_info
                 assert info.channel == TEST_CHANNEL
                 assert info.pan_id != 0
