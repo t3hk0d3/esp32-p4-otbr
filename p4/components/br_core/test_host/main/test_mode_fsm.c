@@ -1153,25 +1153,25 @@ TEST_CASE("On RADIO_FAULT with OpenThread still running, or any other mode: no r
     TEST_ASSERT_FALSE(mode_fsm_start_failed(BR_MODE_STARTING, false));
 }
 
-TEST_CASE("On a move whose start on the target and back on the source fail: a retry is recorded", "[mode_fsm]")
+TEST_CASE("On a move whose start on the target fails: Thread stays there in fault and a retry is recorded",
+          "[mode_fsm]")
 {
     char err[64];
 
     setup(BR_MODE_BR_RUNNING);
     fake.start_fail_on[0] = DST;
-    fake.start_fail_on[1] = SRC;
     mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err));
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
     TEST_ASSERT_TRUE(mode_fsm_start_failed(mode_fsm_get_mode(&fsm), false));
 }
 
-TEST_CASE("On a move whose start on the target fails but back on the source works: no retry recorded", "[mode_fsm]")
+TEST_CASE("On a move whose start on the target works: no retry recorded", "[mode_fsm]")
 {
     char err[64];
 
     setup(BR_MODE_BR_RUNNING);
-    fake.start_fail_on[0] = DST;
     mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err));
-    TEST_ASSERT_FALSE(mode_fsm_start_failed(mode_fsm_get_mode(&fsm), true));
+    TEST_ASSERT_FALSE(mode_fsm_start_failed(mode_fsm_get_mode(&fsm), false));
 }
 
 /* ---- the board-mode table (design section 6): mode_fsm_mode_for ---- */

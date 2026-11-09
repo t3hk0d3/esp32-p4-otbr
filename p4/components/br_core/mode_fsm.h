@@ -187,7 +187,7 @@ bool mode_fsm_probe_fault_incompatible(const char *id, esp_err_t probe_err);
 /**
  * Whether an OpenThread (re)start failed in a way a PUT of mode otbr on its channel retries (br_core_retry_otbr): the
  * mode is RADIO_FAULT and OpenThread is not running (`ot_running`). Every path that tries a start (br_radio's start on
- * a bind, a move with its start back on the source) records it. Pure.
+ * a bind, a move's start on its target) records it. Pure.
  */
 bool mode_fsm_start_failed(br_core_mode_t mode, bool ot_running);
 

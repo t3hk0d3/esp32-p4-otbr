@@ -683,7 +683,8 @@ static void c6_list(bool present, const char *why)
 // Owner: the C6 to what its channel wants (R8). Open, with the stored mode's consumer attached, while that consumer is
 // registered and the C6 listed present; else closed: held in reset in mode off, left running otherwise (before an otbr
 // consumer exists, OpenThread's own SPI path uses it). `reattach`: an attached consumer is detached (GONE) and the
-// stored mode's attached again, the C6 staying open. Nothing while it is in reinit or unavailable.
+// stored mode's attached again, the C6 staying open. Nothing while it is in reinit or unavailable. handle_maint_done
+// calls it with g_mux.maint_ending set: the bind it makes then shows its instance "starting" first (orch_bind).
 static void c6_apply(bool reattach)
 {
     mux_port_t *p = &g_mux.c6;
