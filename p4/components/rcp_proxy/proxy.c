@@ -60,6 +60,8 @@ typedef struct {
     radio_mux_input_type_t type;       // the latest input
     uint32_t seq;                      // its seq
     radio_mux_chan_t *in_ch;           // its handle: REINIT's answer and LOST's report go through it
+    uint32_t bind_seq;                 // the seq of the latest BIND or BACK (a REINIT does not replace the bind)
+    radio_mux_input_type_t bind_type;  // its type
     char reason[RADIO_MUX_REASON_MAX]; // its reason (LOST: the channel's; REINIT: the work)
     bool kick;
 } want_t;
@@ -100,6 +102,7 @@ static bool s_task_up; // false: no task acts on the inputs (it could not be cre
 // Proxy task only.
 static proxy_t s_px[SLOTS];
 static uint32_t s_seen[SLOTS];                 // the seq of the last input handled
+static uint32_t s_bind_seen[SLOTS];            // the seq of the last BIND or BACK acted on (proxy task)
 static char s_seen_id[SLOTS][RADIO_MUX_ID_MAX]; // and its channel (the USB slot serves one channel after another)
 static proxy_state_t s_rep_state[SLOTS];       // what was last reported (radio_mux_report)
 static char s_rep_err[SLOTS][RADIO_MUX_PROXY_ERROR_MAX];
@@ -725,20 +728,35 @@ static void take_answers(void)
 }
 
 // REINIT (maintenance wants the channel): refused while a peer is connected (409 c6_busy); otherwise the session and
-// the listener close, and both open again on BACK.
-static void reinit(proxy_t *p, const want_t *w)
+// the listener close, and both open again on BACK. Returns whether the proxy let go.
+static bool reinit(proxy_t *p, const want_t *w)
 {
     char why[RADIO_MUX_REASON_MAX];
 
     if (rcp_proxy_reinit_verdict(p->ch && p->state == PROXY_CONNECTED) == RCP_PROXY_REINIT_REFUSE_PEER) {
         ESP_LOGW(TAG, "%s: reinit (%s) refused: peer %s is connected", w->id, w->reason, p->peer);
         radio_mux_reinit_reply(w->in_ch, w->seq, RADIO_MUX_ERR_PEER_CONNECTED, "rcp-proxy has a connected peer");
-        return;
+        return false;
     }
     session_close(p);
     snprintf(why, sizeof(why), "radio reinit: %.80s", w->reason); // the work: a few words
     radio_mux_report(w->in_ch, "no_radio", why);
     radio_mux_reinit_reply(w->in_ch, w->seq, ESP_OK, NULL);
+    return true;
+}
+
+// BIND or BACK: the session on the bound handle with its settings.
+static void bind_session(proxy_t *p, int i, const want_t *w)
+{
+    s_bind_seen[i] = w->bind_seq;
+    session_close(p);
+    if (!w->set_ok) {
+        ESP_LOGE(TAG, "%s: stored rcp_proxy settings are invalid", w->id);
+        radio_mux_report(w->ch, "off", "stored rcp_proxy settings are invalid");
+        return;
+    }
+    session_open(p, w);
+    s_rep_state[i] = PROXY_IDLE; // the first state is reported
 }
 
 // Whether slot i's latest input is one not handled yet: a newer seq, or the first input of another channel.
@@ -765,22 +783,23 @@ static void reconcile(void)
             switch (w.type) {
             case RADIO_MUX_IN_BIND:
             case RADIO_MUX_IN_BACK:
-                session_close(p);
-                if (!w.set_ok) {
-                    ESP_LOGE(TAG, "%s: stored rcp_proxy settings are invalid", w.id);
-                    radio_mux_report(w.ch, "off", "stored rcp_proxy settings are invalid");
-                    break;
-                }
-                session_open(p, &w);
-                s_rep_state[i] = PROXY_IDLE; // the first state is reported
+                bind_session(p, i, &w);
                 break;
             case RADIO_MUX_IN_LOST:
                 session_close(p);
                 radio_mux_report(w.in_ch, "no_radio", w.reason);
                 break;
-            case RADIO_MUX_IN_REINIT:
-                reinit(p, &w);
+            case RADIO_MUX_IN_REINIT: {
+                const bool let_go = reinit(p, &w);
+
+                if (w.ch && rcp_proxy_bind_after_reinit(let_go, w.bind_seq, s_bind_seen[i])) {
+                    ESP_LOGI(TAG, "%s: the bind the refused reinit arrived on", w.id);
+                    bind_session(p, i, &w);
+                } else if (let_go) {
+                    s_bind_seen[i] = w.bind_seq; // superseded: BACK binds again
+                }
                 break;
+            }
             default: // UNBIND: the orchestrator shows nothing bound
                 session_close(p);
                 break;
@@ -948,6 +967,8 @@ static void on_input(const radio_mux_input_t *in, void *ctx)
     memcpy(w->reason, in->reason, sizeof(w->reason));
     w->kick = false;
     if (bind) {
+        w->bind_seq = in->seq;
+        w->bind_type = in->type;
         w->ch = in->ch;
         w->frames = frames;
         w->set = set;
@@ -959,13 +980,22 @@ static void on_input(const radio_mux_input_t *in, void *ctx)
     poke();
 }
 
-// The instance first, then the task: a refused registration leaves nothing running. A task that cannot be created
-// leaves the instance registered with nothing acting on its inputs (logged).
+// The task first, then the instance: without its task the mode is not registered (not offered, never bound), so no
+// channel shows rcp-proxy running with nothing serving it. A refused registration stops the task again.
 esp_err_t rcp_proxy_register(void)
 {
+    TaskHandle_t task = NULL;
+
     ESP_RETURN_ON_FALSE(!s_registered, ESP_ERR_INVALID_STATE, TAG, "already registered");
     s_kick_fd = eventfd(0, 0);
     ESP_RETURN_ON_FALSE(s_kick_fd >= 0, ESP_ERR_NO_MEM, TAG, "eventfd (is the eventfd VFS registered?)");
+    if (xTaskCreatePinnedToCore(proxy_task, "rcp_proxy", TASK_STACK, NULL, TASK_PRIORITY, &task, MGMT_CORE) != pdPASS) {
+        ESP_LOGE(TAG, "the proxy task could not be created: rcp-proxy is not offered");
+        close(s_kick_fd);
+        s_kick_fd = -1;
+        return ESP_ERR_NO_MEM;
+    }
+    s_task_up = true;
     const radio_mux_instance_t inst = {
         .mode = RADIO_MUX_MODE_RCP_PROXY,
         .needs = RADIO_MUX_FW_UNKNOWN,
@@ -979,6 +1009,8 @@ esp_err_t rcp_proxy_register(void)
     const esp_err_t err = radio_mux_register_instance(&inst);
 
     if (err != ESP_OK) {
+        s_task_up = false;
+        vTaskDelete(task); // idle: no input reached it
         close(s_kick_fd);
         s_kick_fd = -1;
         return err;
@@ -989,11 +1021,6 @@ esp_err_t rcp_proxy_register(void)
         s_resolver = NULL;
         ESP_LOGE(TAG, "the resolver task could not be created: connect targets by name do not resolve");
     }
-    if (xTaskCreatePinnedToCore(proxy_task, "rcp_proxy", TASK_STACK, NULL, TASK_PRIORITY, NULL, MGMT_CORE) != pdPASS) {
-        ESP_LOGE(TAG, "the proxy task could not be created: rcp-proxy channels stay in fault");
-        return ESP_ERR_NO_MEM;
-    }
-    s_task_up = true;
     return ESP_OK;
 }
 

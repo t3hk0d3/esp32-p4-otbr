@@ -267,6 +267,11 @@ rcp_proxy_reinit_t rcp_proxy_reinit_verdict(bool peer_connected);
 // false for the same input again or an older one.
 bool rcp_proxy_input_current(uint32_t seen_seq, uint32_t input_seq);
 
+// After the proxy answered a REINIT that arrived on top of a bind (BIND or BACK, `bind_seq`) it had not acted on yet
+// (`bind_seen` is the last bind it acted on): whether it acts on that bind now. Only after a refusal: a REINIT it let go
+// for supersedes the earlier bind (BACK binds it again at the maintenance's end).
+bool rcp_proxy_bind_after_reinit(bool accepted, uint32_t bind_seq, uint32_t bind_seen);
+
 #ifdef __cplusplus
 }
 #endif

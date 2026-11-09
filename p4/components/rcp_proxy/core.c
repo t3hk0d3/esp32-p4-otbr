@@ -447,3 +447,8 @@ bool rcp_proxy_input_current(uint32_t seen_seq, uint32_t input_seq)
 {
     return (int32_t)(input_seq - seen_seq) > 0;
 }
+
+bool rcp_proxy_bind_after_reinit(bool accepted, uint32_t bind_seq, uint32_t bind_seen)
+{
+    return !accepted && rcp_proxy_input_current(bind_seen, bind_seq);
+}

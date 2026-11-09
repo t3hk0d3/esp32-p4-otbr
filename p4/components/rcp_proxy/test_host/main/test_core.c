@@ -936,3 +936,21 @@ void app_main(void)
     int failures = (int)UNITY_END();
     exit(failures == 0 ? 0 : 1);
 }
+
+/* ---- rcp_proxy_bind_after_reinit: a bind REINIT arrived on top of ---- */
+
+TEST_CASE("On a REINIT refused while a newer bind was not acted on: the bind is acted on", "[rcp_proxy]")
+{
+    TEST_ASSERT_TRUE(rcp_proxy_bind_after_reinit(false, 5, 4));
+}
+
+TEST_CASE("On a REINIT refused with the bind already acted on: nothing more", "[rcp_proxy]")
+{
+    TEST_ASSERT_FALSE(rcp_proxy_bind_after_reinit(false, 5, 5));
+    TEST_ASSERT_FALSE(rcp_proxy_bind_after_reinit(false, 0, 0)); // never bound
+}
+
+TEST_CASE("On a REINIT the proxy let go for: the earlier bind is superseded (BACK binds it again)", "[rcp_proxy]")
+{
+    TEST_ASSERT_FALSE(rcp_proxy_bind_after_reinit(true, 5, 4));
+}
