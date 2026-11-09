@@ -357,7 +357,7 @@ static bool take_input(void)
             handle_gone("radio lost meanwhile");
         }
         bind_radio(&in);
-        return false;
+        return skipped; // the radio went away first: a waiting request stops
     case RADIO_MUX_IN_REINIT: // always accepted: the client stays, its transmits fail fast while the radio is paused
         snprintf(why, sizeof(why), "radio reinit: %.80s", in.reason);
         ESP_LOGI(TAG, "%s", why);
@@ -680,9 +680,20 @@ static void on_input(const radio_mux_input_t *in, void *ctx)
     zigbee_t *z = &g_zigbee;
 
     if ((in->type == RADIO_MUX_IN_BIND || in->type == RADIO_MUX_IN_BACK) && ensure_up() != ESP_OK) {
-        // Nothing would act on the input: say so (the read API, a push's wait). The next bind tries again.
+        // Nothing would act on the input: say so (the read API, a push's wait). The next bind tries again; its seq
+        // then follows this one (no "radio lost meanwhile").
         ESP_LOGE(TAG, "%s: the zigbee task could not be made: the radio is not used", radio_mux_chan_id(in->ch));
         radio_mux_report(in->ch, "no_radio", "the Zigbee stack could not start (no memory): reboot the board");
+        taskENTER_CRITICAL(&z->in_lock);
+        z->in_seen = in->seq;
+        taskEXIT_CRITICAL(&z->in_lock);
+        return;
+    }
+    if (!atomic_load(&z->up)) {
+        // No stack has ever run on the radio: nothing to let go (a REINIT is accepted at once), nothing to stop.
+        if (in->type == RADIO_MUX_IN_REINIT) {
+            radio_mux_reinit_reply(in->ch, in->seq, ESP_OK, NULL);
+        }
         return;
     }
     taskENTER_CRITICAL(&z->in_lock);
