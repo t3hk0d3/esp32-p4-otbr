@@ -15,6 +15,7 @@ Get the board from [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.
 
 [![build](https://github.com/t3hk0d3/esp32-p4-otbr/actions/workflows/build.yml/badge.svg)](https://github.com/t3hk0d3/esp32-p4-otbr/actions/workflows/build.yml)
 [![release](https://img.shields.io/github/v/release/t3hk0d3/esp32-p4-otbr)](https://github.com/t3hk0d3/esp32-p4-otbr/releases)
+[![docs](https://img.shields.io/badge/docs-t3hk0d3.github.io-blue)](https://t3hk0d3.github.io/esp32-p4-otbr/)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 
 ![Matter and Thread devices reach the ESP32-C6 radio over 802.15.4; the ESP32-P4 border router on the same board bridges them over Ethernet and PoE to Home Assistant, Matter controllers, Wireshark and the web UI](docs/images/hero.svg)
@@ -117,12 +118,14 @@ jumper, or a USB-UART adapter on the C6 header.
 
 ## Documentation
 
-Everything is in [`docs/`](docs/README.md), also published as a [documentation site](https://t3hk0d3.github.io/esp32-p4-otbr/): [Home Assistant](docs/home-assistant.md), [building](docs/building.md), [updates](docs/updates.md),
-[API and web UI](docs/api.md), [radios and USB dongles](docs/radios.md), [Zigbee coordinator](docs/zigbee.md),
-[networking, VLANs, TREL and mesh routing](docs/networking.md), [sniffer](docs/sniffer.md),
-[maintenance jumper](docs/maintenance-jumper.md), [diagnostics](docs/diagnostics.md), [Prometheus metrics](docs/metrics.md),
-[troubleshooting and limitations](docs/troubleshooting.md) and [development](docs/development.md). Run `make help`
-to list the targets for building, flashing, updating and testing.
+**Read it online at [t3hk0d3.github.io/esp32-p4-otbr](https://t3hk0d3.github.io/esp32-p4-otbr/).**
+
+The same pages are in [`docs/`](docs/README.md): [Home Assistant](docs/home-assistant.md), [building](docs/building.md),
+[updates](docs/updates.md), [API and web UI](docs/api.md), [radios and USB dongles](docs/radios.md),
+[Zigbee coordinator](docs/zigbee.md), [networking, VLANs, TREL and mesh routing](docs/networking.md),
+[sniffer](docs/sniffer.md), [maintenance jumper](docs/maintenance-jumper.md), [diagnostics](docs/diagnostics.md),
+[Prometheus metrics](docs/metrics.md), [troubleshooting and limitations](docs/troubleshooting.md) and
+[development](docs/development.md). Run `make help` to list the targets for building, flashing, updating and testing.
 
 > There is no authentication: anyone on the network can reconfigure or update the board. Put it on a trusted network.
 
