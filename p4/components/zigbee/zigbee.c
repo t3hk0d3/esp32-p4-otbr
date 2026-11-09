@@ -345,10 +345,17 @@ static bool take_input(void)
     if (!zigbee_input_newer(z->in_seen, in.seq)) {
         return false;
     }
+    const bool skipped = zigbee_input_skipped(z->in_seen, in.seq);
+
     z->in_seen = in.seq;
     switch (in.type) {
     case RADIO_MUX_IN_BIND:
     case RADIO_MUX_IN_BACK:
+        if (skipped) {
+            // An input this task never saw came before (a LOST it replaced, its GONE maybe dropped by a full queue):
+            // what was in flight on the old radio fails first, as on a loss.
+            handle_gone("radio lost meanwhile");
+        }
         bind_radio(&in);
         return false;
     case RADIO_MUX_IN_REINIT: // always accepted: the client stays, its transmits fail fast while the radio is paused
@@ -673,7 +680,10 @@ static void on_input(const radio_mux_input_t *in, void *ctx)
     zigbee_t *z = &g_zigbee;
 
     if ((in->type == RADIO_MUX_IN_BIND || in->type == RADIO_MUX_IN_BACK) && ensure_up() != ESP_OK) {
+        // Nothing would act on the input: say so (the read API, a push's wait). The next bind tries again.
         ESP_LOGE(TAG, "%s: the zigbee task could not be made: the radio is not used", radio_mux_chan_id(in->ch));
+        radio_mux_report(in->ch, "no_radio", "the Zigbee stack could not start (no memory): reboot the board");
+        return;
     }
     taskENTER_CRITICAL(&z->in_lock);
     z->in = *in;

@@ -24,3 +24,8 @@ bool zigbee_input_newer(uint32_t seen_seq, uint32_t input_seq)
 {
     return (int32_t)(input_seq - seen_seq) > 0;
 }
+
+bool zigbee_input_skipped(uint32_t seen_seq, uint32_t input_seq)
+{
+    return (int32_t)(input_seq - seen_seq) > 1;
+}

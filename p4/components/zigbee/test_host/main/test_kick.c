@@ -148,3 +148,16 @@ TEST_CASE("input newer: an input older than the latest is ignored", "[zigbee]")
     TEST_ASSERT_FALSE(zigbee_input_newer(5, 4));
     TEST_ASSERT_FALSE(zigbee_input_newer(0, UINT32_MAX));
 }
+
+TEST_CASE("input skipped: a bind after inputs never seen (a LOST it replaced) is a loss first", "[zigbee]")
+{
+    TEST_ASSERT_TRUE(zigbee_input_skipped(3, 5));
+    TEST_ASSERT_TRUE(zigbee_input_skipped(UINT32_MAX, 1)); // the seq wraps
+}
+
+TEST_CASE("input skipped: the next input in order skipped nothing", "[zigbee]")
+{
+    TEST_ASSERT_FALSE(zigbee_input_skipped(4, 5));
+    TEST_ASSERT_FALSE(zigbee_input_skipped(0, 1)); // the first input
+    TEST_ASSERT_FALSE(zigbee_input_skipped(5, 5));
+}

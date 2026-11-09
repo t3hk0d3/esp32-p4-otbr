@@ -38,6 +38,13 @@ void zigbee_kick_taken(zigbee_kick_t *k);
  */
 bool zigbee_input_newer(uint32_t seen_seq, uint32_t input_seq);
 
+/**
+ * Whether inputs between the last one handled (`seen_seq`) and `input_seq` were never seen (a newer input replaced
+ * them before the zigbee task got to them), the seq wrapping at 2^32. A BIND or BACK after a gap may follow a LOST the
+ * task never saw.
+ */
+bool zigbee_input_skipped(uint32_t seen_seq, uint32_t input_seq);
+
 #ifdef __cplusplus
 }
 #endif
