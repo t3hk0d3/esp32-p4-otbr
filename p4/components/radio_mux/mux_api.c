@@ -253,9 +253,24 @@ esp_err_t radio_mux_reinit_reply(radio_mux_chan_t *ch, uint32_t seq, esp_err_t v
     bool dropped = false;
 
     snprintf(r.reason, sizeof(r.reason), "%s", reason ? reason : "");
+    // The seq the asked run waits for (written by the owner; a torn read only picks another slot to drop).
+    const uint32_t asked = g_mux.reinit.seq;
+
     taskENTER_CRITICAL(&s_reply_lock);
-    if (s_reply_n == REPLY_SLOTS) { // the oldest goes: the newest answer is the one a running reinit waits for
-        s_reply_head = (s_reply_head + 1) % REPLY_SLOTS;
+    if (s_reply_n == REPLY_SLOTS) {
+        // Full: an answer to another seq goes (stale or late), never the one the asked run waits for; the oldest only
+        // when every slot holds that seq.
+        size_t victim = 0;
+
+        for (size_t k = 0; k < s_reply_n; k++) {
+            if (s_replies[(s_reply_head + k) % REPLY_SLOTS].seq != asked) {
+                victim = k;
+                break;
+            }
+        }
+        for (size_t k = victim; k + 1 < s_reply_n; k++) {
+            s_replies[(s_reply_head + k) % REPLY_SLOTS] = s_replies[(s_reply_head + k + 1) % REPLY_SLOTS];
+        }
         s_reply_n--;
         dropped = true;
     }
@@ -263,7 +278,7 @@ esp_err_t radio_mux_reinit_reply(radio_mux_chan_t *ch, uint32_t seq, esp_err_t v
     s_reply_n++;
     taskEXIT_CRITICAL(&s_reply_lock);
     if (dropped) {
-        ESP_LOGW(TAG, "reinit answers: the oldest was dropped");
+        ESP_LOGW(TAG, "reinit answers: one for another run was dropped");
     }
     if (!mux_post(&wake)) {
         ESP_LOGW(TAG, "reinit answer %" PRIu32 ": queue full, the owner takes it on its next round", seq);

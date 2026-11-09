@@ -1388,8 +1388,14 @@ class TestSettleMove:
     def test_drain_timeout_keeps_thread_on_the_source_and_says_retry(self):
         # On a move refused after the 202 because sessions did not end (the target in fault with drain_timeout,
         # otbr_channel still the source): Thread runs on where it was; the text says so and asks for a retry.
-        fault = json.dumps({"channels": [C6, {**OLLY, "state": "fault", "error": "drain_timeout"}]})
-        kept = {"mode": "BR_RUNNING", "otbr_channel": "builtin-c6", "fault_reason": None}
+        fault = json.dumps(
+            {"channels": [C6, {**OLLY, "state": "fault", "error": "drain_timeout"}]}
+        )
+        kept = {
+            "mode": "BR_RUNNING",
+            "otbr_channel": "builtin-c6",
+            "fault_reason": None,
+        }
         r = scenario(
             self.accept(f"t.status = {json.dumps(kept)};")
             + f"await t.advance(10); t.snap = {fault}; await t.advance(2500); await t.advance(2500);"
@@ -1399,6 +1405,37 @@ class TestSettleMove:
         assert "still runs on ESP32-C6 (built-in)" in r, r
         assert "try" in r.lower(), r
         assert "in fault" not in r, r
+
+    def test_committed_target_in_fault_with_stale_status_is_not_called_a_drain_timeout(
+        self,
+    ):
+        # On a target already stored otbr (the move committed) in fault while /device/status still names the source (a
+        # status read that failed or lags): never "still runs on" the source; the target is where Thread stays.
+        fault = json.dumps(
+            {
+                "channels": [
+                    {**C6, "mode": "off", "stored_mode": "off"},
+                    {
+                        **OLLY,
+                        "mode": "otbr",
+                        "stored_mode": "otbr",
+                        "state": "fault",
+                        "error": "rcp incompatible",
+                    },
+                ]
+            }
+        )
+        stale = {
+            "mode": "BR_RUNNING",
+            "otbr_channel": "builtin-c6",
+            "fault_reason": None,
+        }
+        r = scenario(
+            self.accept(f"t.status = {json.dumps(stale)};")
+            + f"await t.advance(10); t.snap = {fault}; await t.advance(2500); await t.advance(2500);"
+            + "return t.el('rMsg').textContent;"
+        )
+        assert "still runs on" not in r, r
 
     def test_nothing_after_90_seconds_is_a_failure(self):
         # On a target never seen starting and never becoming otbr_channel: failed after 90 s, not before.

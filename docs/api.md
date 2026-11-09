@@ -341,7 +341,9 @@ A move can fail in two ways after the 202. When open Thread sessions do not end 
 Thread keeps running on the old channel, `otbr_channel` still names it, and the target shows `"state": "fault"` with
 `error` `drain_timeout` (send the move again). When the target does not start, the move is already committed: Thread
 stays on the target in `fault` (`RADIO_FAULT`, the reason in `fault_reason` and the target's `error`); there is no
-switch back, a PUT of `otbr` on the target retries and one on another channel moves it. A refused stop leaves the
+switch back, a PUT of `otbr` on the target retries and one on another channel moves it. After an abandoned start
+(`fault_reason` "an earlier OpenThread start was abandoned: reboot") no retry or move starts OpenThread again until
+the board reboots. A refused stop leaves the
 channel `running` in `otbr` with `error` `drain_timeout`. Poll
 `GET /device/channels` after a 202. While OpenThread starts on its channel, that channel shows `starting`.
 

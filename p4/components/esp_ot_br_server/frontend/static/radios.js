@@ -424,8 +424,10 @@ function settleMove() {
   // A move commits before it starts (otbr_channel names the target from then on): it worked once Thread runs there.
   var ok = !!status && status.otbr_channel === moving.to &&
            (status.mode === 'BR_RUNNING' || status.mode === 'SNIFFER');
-  // Not committed (open sessions did not end in time): Thread runs on where it was.
-  var kept = !!status && !!moving.from && status.otbr_channel === moving.from && !!to && to.state === 'fault';
+  // Not committed (open sessions did not end in time): Thread runs on where it was. The channel list decides: the target
+  // is stored otbr once the move committed, whatever a status read (failed, or late) still says.
+  var kept = !!to && to.state === 'fault' && to.stored_mode !== 'otbr' && !!status && !!moving.from &&
+             status.otbr_channel === moving.from;
   if (ok && !anyStarting()) {
     note('rMsg', 'Thread now runs on ' + name + '.', false);
   } else if (kept && !anyStarting()) {
