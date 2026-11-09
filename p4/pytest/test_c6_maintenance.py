@@ -180,7 +180,9 @@ def test_push_right_after_the_boot_steps_still_lets_thread_start(
     dut, reboot, base_url, good_image
 ):
     # On a push sent as soon as the C6's boot steps ended: refused while Thread starts (409 busy) or done, and Thread
-    # reaches BR_RUNNING either way (a REINIT never erases the BIND Thread starts on).
+    # reaches BR_RUNNING either way. It does not force a REINIT onto a BIND Thread has not taken yet: device_api refuses
+    # a push while Thread on the C6 is STARTING, so HTTP cannot reach that overlap. The host tests pin it
+    # (mode_fsm_inbox: "On a REINIT after an unhandled BIND: both are taken fresh").
     reboot_and_reach(dut, reboot)
     assert wait_for(
         lambda: c6_channel(base_url)["channel_state"] == "ready", BOOT_TIMEOUT_S
