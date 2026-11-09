@@ -31,7 +31,9 @@ the board had stored.
 3. ZHA forms a new network (the stack keeps no state of its own: ZHA's database holds the network settings) or
    restores one from a backup.
 
-Zigbee2MQTT and other zigpy-based software work the same way if they have the Ziggurat adapter.
+Other zigpy-based software works the same way if it has the Ziggurat adapter. Zigbee2MQTT is not zigpy-based and has no
+Ziggurat adapter: give it a USB dongle with Z-Stack or EZSP firmware in `rcp-proxy` mode instead (see
+[RCP proxy](radios.md#rcp-proxy)).
 
 One client at a time. A second client that connects takes the connection over: the first one is dropped. The Zigbee
 page and `GET /device/zigbee` show the current client and the last one.
@@ -68,7 +70,8 @@ runs Zigbee it says so in one line and links the Radios page, and nothing is pol
 ## Limits
 
 - Experimental; the on-board checks are listed in the tests (`p4/pytest/test_zigbee.py`).
-- No hybrid: a radio runs either Thread or Zigbee, never both at once.
+- No hybrid: Thread and the Zigbee coordinator never run at once on the board, even on separate radios (409
+  `hybrid_not_supported`). A channel in `rcp-proxy` mode can run beside either.
 - One Zigbee radio at a time; a second channel in Zigbee mode is refused.
 - No settings on the board: the network (channel, PAN ID, keys) is ZHA's. Resetting the board forgets the network, so
   keep ZHA's backups.
