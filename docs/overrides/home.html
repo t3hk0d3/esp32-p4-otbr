@@ -214,7 +214,7 @@
     <p class="lede">Plug a radio stick into the USB port and give each radio a job. Switch it from the browser.</p>
   </div>
   <figure class="radios-diag">
-    <svg viewBox="0 0 1100 380" role="img" aria-label="The built-in ESP32-C6 and a USB radio dongle connect to the ESP32-P4, which runs each radio as Thread, Zigbee, a network proxy or off: Thread serves Home Assistant's Thread integration, Zigbee serves Home Assistant's ZHA, and the proxy serves the radio over TCP or UDP to any other host.">
+    <svg viewBox="0 0 1100 380" role="img" aria-label="The built-in ESP32-C6 and a USB radio dongle connect to the ESP32-P4, which runs each radio as Thread, Zigbee, a network proxy or off: Thread serves Home Assistant and Matter controllers; Zigbee serves Home Assistant's ZHA as a coordinator, and the proxy serves a radio over TCP to Zigbee2MQTT or ZHA.">
       <g class="rd-radio">
         <rect class="thread" x="40" y="70" width="240" height="90" rx="18"/>
         <text class="t1" x="64" y="108">ESP32-C6</text>
@@ -240,12 +240,12 @@
         <path d="M680 240 C 760 240, 760 310, 820 310"/>
       </g>
       <g class="rd-out">
-        <rect x="820" y="40" width="250" height="60" rx="14"/>
+        <rect x="820" y="40" width="264" height="60" rx="14"/>
         <text class="t1" x="842" y="66">Home Assistant</text><text class="t3 thread" x="842" y="86">Thread border router</text>
-        <rect x="820" y="160" width="250" height="60" rx="14"/>
-        <text class="t1" x="842" y="186">Home Assistant ZHA</text><text class="t3 zigbee" x="842" y="206">Zigbee coordinator · beta</text>
-        <rect x="820" y="280" width="250" height="60" rx="14"/>
-        <text class="t1" x="842" y="306">Any other host</text><text class="t3 proxy" x="842" y="326">radio over TCP or UDP</text>
+        <rect x="820" y="160" width="264" height="60" rx="14"/>
+        <text class="t1" x="842" y="186">Matter</text><text class="t3 thread" x="842" y="206">controllers reach Thread devices</text>
+        <rect x="820" y="280" width="264" height="60" rx="14"/>
+        <text class="t1" x="842" y="306">Z2M / ZHA</text><text class="t3 zigbee" x="842" y="326">coordinator (beta) or radio over TCP</text>
       </g>
     </svg>
   </figure>
