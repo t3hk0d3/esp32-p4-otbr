@@ -29,7 +29,7 @@ The Dashboard has three sections:
 
 - **Device and network:** the board's status, uptime, last reset and a Reboot button; the two radios and their modes;
   Ethernet addresses; board firmware; CPU load, memory and chip temperature.
-- **Thread:** while the border router runs, the network (name, channel, PAN ID), this board's role, the radio
+- **Thread:** while the border router runs, the network (name, Thread channel, PAN ID), this board's role, the radio
   firmware, the address to enter in Home Assistant, prefix delegation, packet capture and the board's Thread addresses.
 - **Zigbee:** while a radio runs the Zigbee coordinator, its state, the `ws://` address for ZHA with a Copy button, the
   connected client and the network ZHA formed. See [Zigbee coordinator](zigbee.md).

@@ -1,7 +1,7 @@
 # Your Thread network
 
 The board never forms or joins a Thread network by itself: it waits until you give it one. A Thread network is defined
-by its **dataset** (name, channel, network key and a few IDs); every border router and device on the network shares it.
+by its **dataset** (name, Thread channel, network key and a few IDs; see the [Glossary](glossary.md)); every border router and device on the network shares it.
 The board stores the dataset and uses it again after every reboot.
 
 Three ways to give the board a network:

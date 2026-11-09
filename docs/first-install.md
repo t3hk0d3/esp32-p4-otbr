@@ -43,7 +43,7 @@ the radio firmware.
 
 ## 2. Put the radio firmware on the C6
 
-A new board's C6 runs Espressif's factory firmware (ESP-Hosted), which this project replaces. Pick a way:
+A new board's C6 runs Espressif's factory firmware ([ESP-Hosted](glossary.md)), which this project replaces. Pick a way:
 
 | Your board | Way |
 | --- | --- |

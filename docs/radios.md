@@ -5,7 +5,7 @@ ZigStar OllyZig. Each radio runs in one **mode** that you pick on the **Radios**
 
 | Mode | What the radio does |
 | --- | --- |
-| **Thread border router** (`otbr`) | Runs this board's Thread network. One radio at a time. |
+| **Thread border router** (`otbr`) | Runs this board's Thread network. Needs OpenThread [RCP](glossary.md) firmware. One radio at a time. |
 | **Zigbee (Ziggurat)** (`ziggurat`, experimental) | Runs the board's own Zigbee coordinator for Home Assistant's ZHA, see [Zigbee coordinator](zigbee.md). One radio at a time; switching into or out of it reboots the board. |
 | **RCP proxy** (`rcp-proxy`) | Hands the radio's serial line to another computer over the network, see [RCP proxy](#rcp-proxy). Works with any dongle firmware. |
 | **Off** (`off`) | Listed, not used. The C6 is held in reset. |

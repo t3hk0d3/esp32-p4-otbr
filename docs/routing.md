@@ -1,6 +1,7 @@
 # Routing to the mesh
 
-Thread devices get IPv6 addresses from the mesh's **OMR prefix** (off-mesh routable prefix). Computers on the same
+Thread devices get IPv6 addresses from the mesh's **OMR prefix** (off-mesh routable prefix; see the
+[Glossary](glossary.md)). Computers on the same
 Ethernet link as the board reach them through the board's router advertisements. Computers on **other** networks reach
 them only when your main router knows that the prefix lives behind the board. This page is about telling it.
 

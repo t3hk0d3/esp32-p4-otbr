@@ -66,9 +66,9 @@ transmit power), radio traffic, the memory the stack uses and the radio firmware
 ## Limits
 
 - No hybrid: Thread and the Zigbee coordinator never run at once on the board, even on separate radios (409
-  `hybrid_not_supported`). A channel in `rcp-proxy` mode can run beside either.
-- One Zigbee radio at a time; a second channel in Zigbee mode is refused.
-- No settings on the board: the network (channel, PAN ID, keys) is ZHA's. Resetting the board forgets the network, so
+  `hybrid_not_supported`). A radio in RCP proxy mode can run beside either.
+- One Zigbee radio at a time; a second radio in Zigbee mode is refused.
+- No settings on the board: the network (Zigbee channel, PAN ID, keys) is ZHA's. Resetting the board forgets the network, so
   keep ZHA's backups.
 - Mode changes into and out of Zigbee reboot the board.
 - Slow pairing of router devices (mains-powered bulbs, plugs, switches): a device that joins as a router often fails

@@ -13,7 +13,7 @@ devices on the board's Thread network reach Home Assistant through it.
 - **A fixed address.** The integration stores the URL you type. Give the board a DHCP reservation, or a static address
   on the Ethernet page.
 - **Home Assistant reaches the board.** Home Assistant must reach port 80 for the REST API.
-- **The board and Home Assistant are on the same network.** Home Assistant finds border routers by mDNS: the board
+- **The board and Home Assistant are on the same network.** Home Assistant finds border routers by [mDNS](glossary.md): the board
   announces itself as `_meshcop._udp`. mDNS is multicast and does not cross routers or VLANs, so the board must be on
   the same network segment (subnet or VLAN) as Home Assistant, or a gateway must reflect mDNS between the two. Without
   that, the integration can still connect by URL, but the board is missing from the Thread panel, together with its ⋮
