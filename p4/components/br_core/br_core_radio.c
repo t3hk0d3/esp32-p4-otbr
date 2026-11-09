@@ -830,8 +830,13 @@ static void reconcile(void)
     }
     radio_mux_chan_t *att = atomic_load(&s_attached);
     const bool lost_firmware = fresh && in.type == RADIO_MUX_IN_LOST && in.kind == RADIO_MUX_FAULT_FIRMWARE;
+    // A link LOST while OpenThread is stopped (it let go for a maintenance and the channel did not come back): NO_RADIO
+    // with the channel's reason instead of STARTING for good.
+    const bool lost_stopped = fresh && in.type == RADIO_MUX_IN_LOST && !lost_firmware && !s_ot_chan &&
+                              br_core_get_mode() == BR_MODE_STARTING;
 
-    if ((s_ot_chan && (s_ot_chan != att || atomic_load(&s_link.gone))) || (!s_ot_chan && !att && s_start_failed)) {
+    if ((s_ot_chan && (s_ot_chan != att || atomic_load(&s_link.gone))) || (!s_ot_chan && !att && s_start_failed) ||
+            lost_stopped) {
         bool firmware_fault;
 
         radio_busy_begin("OpenThread's stop");

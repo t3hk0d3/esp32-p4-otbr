@@ -186,7 +186,8 @@ static bool state_in(const char *state, const char *const *list, size_t n)
     return false;
 }
 
-radio_mux_settle_t radio_mux_orch_settle(radio_mux_chan_state_t cs, bool instance, const char *mode_state)
+radio_mux_settle_t radio_mux_orch_settle(radio_mux_chan_state_t cs, bool instance, const char *mode_state,
+                                         const char *mode_reason)
 {
     static const char *const wait[] = {"", "starting", "releasing"};
     static const char *const up[] = {"running", "sniffer", "listening", "connecting", "backoff", "connected"};
@@ -204,6 +205,9 @@ radio_mux_settle_t radio_mux_orch_settle(radio_mux_chan_state_t cs, bool instanc
     if (state_in(state, wait, sizeof(wait) / sizeof(wait[0]))) {
         return RADIO_MUX_SETTLE_WAIT;
     }
+    if (strcmp(state, "fault") == 0 && (mode_reason == NULL || mode_reason[0] == '\0')) {
+        return RADIO_MUX_SETTLE_WAIT; // Thread's reason follows its state
+    }
     return state_in(state, up, sizeof(up) / sizeof(up[0])) ? RADIO_MUX_SETTLE_UP : RADIO_MUX_SETTLE_DOWN;
 }
 
@@ -213,7 +217,6 @@ radio_mux_reinit_act_t radio_mux_reinit_ask(radio_mux_reinit_run_t *r, uint32_t 
         return RADIO_MUX_RA_REFUSE;
     }
     r->seq = seq;
-    r->timed_out = false; // a new run: the timed-out one's late accept is for nothing now
     if (!bound) {
         r->phase = RADIO_MUX_RP_RUNNING;
         return RADIO_MUX_RA_RUN;
@@ -225,9 +228,16 @@ radio_mux_reinit_act_t radio_mux_reinit_ask(radio_mux_reinit_run_t *r, uint32_t 
 
 radio_mux_reinit_act_t radio_mux_reinit_answer(radio_mux_reinit_run_t *r, uint32_t seq, bool accept)
 {
-    if (r->phase == RADIO_MUX_RP_IDLE && r->timed_out && seq == r->seq) {
-        r->timed_out = false;
-        return accept ? RADIO_MUX_RA_REBIND : RADIO_MUX_RA_IGNORE;
+    if (r->late_pending && seq == r->late_seq && r->phase != RADIO_MUX_RP_RUNNING) {
+        r->late_pending = false;
+        if (!accept) {
+            return RADIO_MUX_RA_IGNORE;
+        }
+        if (r->phase == RADIO_MUX_RP_ASKED) {
+            r->phase = RADIO_MUX_RP_RUNNING; // the instance let go for the earlier run: the channel is free now
+            return RADIO_MUX_RA_RUN;
+        }
+        return RADIO_MUX_RA_REBIND;
     }
     if (r->phase != RADIO_MUX_RP_ASKED || seq != r->seq) {
         return RADIO_MUX_RA_IGNORE;
@@ -245,11 +255,13 @@ radio_mux_reinit_act_t radio_mux_reinit_tick(radio_mux_reinit_run_t *r, int64_t 
         return RADIO_MUX_RA_WAIT;
     }
     r->phase = RADIO_MUX_RP_IDLE;
-    r->timed_out = true;
+    r->late_pending = true;
+    r->late_seq = r->seq;
     return RADIO_MUX_RA_REFUSE;
 }
 
 void radio_mux_reinit_done(radio_mux_reinit_run_t *r)
 {
     r->phase = RADIO_MUX_RP_IDLE;
+    r->late_pending = false; // the run's end bound the instance again
 }

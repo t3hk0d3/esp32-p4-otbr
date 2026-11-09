@@ -504,17 +504,53 @@ TEST_CASE("On an accept that comes after the timeout: rebinds once, phase stays 
     TEST_ASSERT_EQUAL(RADIO_MUX_RA_IGNORE, radio_mux_reinit_answer(&r, 7, true));
 }
 
-TEST_CASE("On a late accept of an older seq, or after a new run was asked: is ignored", "[radio_mux]")
+TEST_CASE("On a late accept of an older seq than the timed-out run's: is ignored", "[radio_mux]")
 {
     radio_mux_reinit_run_t r = {0};
 
     radio_mux_reinit_ask(&r, 7, true, NOW);
     radio_mux_reinit_tick(&r, NOW + RADIO_MUX_REINIT_REPLY_MS);
     TEST_ASSERT_EQUAL(RADIO_MUX_RA_IGNORE, radio_mux_reinit_answer(&r, 6, true));
-    // A new run asks with seq 8: its own end binds the instance back.
+}
+
+TEST_CASE("On the timed-out run's late accept while a newer run asks: the newer run runs (the instance let go)",
+          "[radio_mux]")
+{
+    radio_mux_reinit_run_t r = {0};
+
+    radio_mux_reinit_ask(&r, 7, true, NOW);
+    radio_mux_reinit_tick(&r, NOW + RADIO_MUX_REINIT_REPLY_MS);
     radio_mux_reinit_ask(&r, 8, true, NOW + RADIO_MUX_REINIT_REPLY_MS + 1);
-    TEST_ASSERT_EQUAL(RADIO_MUX_RA_IGNORE, radio_mux_reinit_answer(&r, 7, true));
+    TEST_ASSERT_EQUAL(RADIO_MUX_RA_RUN, radio_mux_reinit_answer(&r, 7, true));
+    TEST_ASSERT_EQUAL(RADIO_MUX_RP_RUNNING, r.phase);
+    // The newer seq's own answer (a refusal: the instance has stopped) comes after: ignored.
+    TEST_ASSERT_EQUAL(RADIO_MUX_RA_IGNORE, radio_mux_reinit_answer(&r, 8, false));
+    TEST_ASSERT_EQUAL(RADIO_MUX_RP_RUNNING, r.phase);
+}
+
+TEST_CASE("On the timed-out run's late refusal while a newer run asks: ignored, the newer run still waits",
+          "[radio_mux]")
+{
+    radio_mux_reinit_run_t r = {0};
+
+    radio_mux_reinit_ask(&r, 7, true, NOW);
+    radio_mux_reinit_tick(&r, NOW + RADIO_MUX_REINIT_REPLY_MS);
+    radio_mux_reinit_ask(&r, 8, true, NOW + RADIO_MUX_REINIT_REPLY_MS + 1);
+    TEST_ASSERT_EQUAL(RADIO_MUX_RA_IGNORE, radio_mux_reinit_answer(&r, 7, false));
     TEST_ASSERT_EQUAL(RADIO_MUX_RP_ASKED, r.phase);
+    TEST_ASSERT_EQUAL(RADIO_MUX_RA_RUN, radio_mux_reinit_answer(&r, 8, true));
+}
+
+TEST_CASE("On the timed-out run's late accept after a newer run ended: is ignored (its end bound the instance)",
+          "[radio_mux]")
+{
+    radio_mux_reinit_run_t r = {0};
+
+    radio_mux_reinit_ask(&r, 7, true, NOW);
+    radio_mux_reinit_tick(&r, NOW + RADIO_MUX_REINIT_REPLY_MS);
+    radio_mux_reinit_ask(&r, 8, false, NOW + RADIO_MUX_REINIT_REPLY_MS + 1);
+    radio_mux_reinit_done(&r);
+    TEST_ASSERT_EQUAL(RADIO_MUX_RA_IGNORE, radio_mux_reinit_answer(&r, 7, true));
 }
 
 TEST_CASE("On an accept after a refusal or a finished run: is ignored", "[radio_mux]")
@@ -671,30 +707,40 @@ TEST_CASE("On LOST for a link fault or an unplug: every mode's state is no_radio
 
 /* ---- radio_mux_orch_settle: has the channel's mode run again after a maintenance ---- */
 
+TEST_CASE("On Thread's fault reported before its reason: settle is WAIT until the reason comes", "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, "fault", ""));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, "fault", NULL));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_DOWN,
+                      radio_mux_orch_settle(RADIO_MUX_CS_READY, true, "fault", "no rcp firmware"));
+    // Other down states may come without a reason: they end the wait.
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_DOWN, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, "no_radio", ""));
+}
+
 TEST_CASE("On no instance stored on the channel: settle is NONE", "[radio_mux]")
 {
-    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_NONE, radio_mux_orch_settle(RADIO_MUX_CS_READY, false, ""));
-    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_NONE, radio_mux_orch_settle(RADIO_MUX_CS_FAULT, false, "no_radio"));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_NONE, radio_mux_orch_settle(RADIO_MUX_CS_READY, false, "", "why"));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_NONE, radio_mux_orch_settle(RADIO_MUX_CS_FAULT, false, "no_radio", "why"));
 }
 
 TEST_CASE("On the channel in fault or absent: settle is DOWN", "[radio_mux]")
 {
-    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_DOWN, radio_mux_orch_settle(RADIO_MUX_CS_FAULT, true, "fault"));
-    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_DOWN, radio_mux_orch_settle(RADIO_MUX_CS_FAULT, true, "starting"));
-    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_DOWN, radio_mux_orch_settle(RADIO_MUX_CS_ABSENT, true, "running"));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_DOWN, radio_mux_orch_settle(RADIO_MUX_CS_FAULT, true, "fault", "why"));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_DOWN, radio_mux_orch_settle(RADIO_MUX_CS_FAULT, true, "starting", "why"));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_DOWN, radio_mux_orch_settle(RADIO_MUX_CS_ABSENT, true, "running", "why"));
 }
 
 TEST_CASE("On the channel still in reinit: settle is WAIT", "[radio_mux]")
 {
-    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_REINIT, true, "running"));
-    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_REINIT, true, "no_radio"));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_REINIT, true, "running", "why"));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_REINIT, true, "no_radio", "why"));
 }
 
 TEST_CASE("On a ready channel whose state is \"\", starting or releasing: settle is WAIT", "[radio_mux]")
 {
-    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, ""));
-    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, "starting"));
-    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, "releasing"));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, "", "why"));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, "starting", "why"));
+    TEST_ASSERT_EQUAL(RADIO_MUX_SETTLE_WAIT, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, "releasing", "why"));
 }
 
 TEST_CASE("On a ready channel whose mode runs (running, sniffer, listening, connecting, backoff, connected): settle "
@@ -703,7 +749,7 @@ TEST_CASE("On a ready channel whose mode runs (running, sniffer, listening, conn
     static const char *const up[] = {"running", "sniffer", "listening", "connecting", "backoff", "connected"};
 
     for (size_t i = 0; i < sizeof(up) / sizeof(up[0]); i++) {
-        TEST_ASSERT_EQUAL_MESSAGE(RADIO_MUX_SETTLE_UP, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, up[i]), up[i]);
+        TEST_ASSERT_EQUAL_MESSAGE(RADIO_MUX_SETTLE_UP, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, up[i], "why"), up[i]);
     }
 }
 
@@ -713,7 +759,7 @@ TEST_CASE("On a ready channel whose mode does not run (fault, no_radio, incompat
     static const char *const down[] = {"fault", "no_radio", "incompatible", "idle", "off", "bogus"};
 
     for (size_t i = 0; i < sizeof(down) / sizeof(down[0]); i++) {
-        TEST_ASSERT_EQUAL_MESSAGE(RADIO_MUX_SETTLE_DOWN, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, down[i]),
+        TEST_ASSERT_EQUAL_MESSAGE(RADIO_MUX_SETTLE_DOWN, radio_mux_orch_settle(RADIO_MUX_CS_READY, true, down[i], "why"),
                                   down[i]);
     }
 }

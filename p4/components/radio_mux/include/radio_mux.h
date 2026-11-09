@@ -115,7 +115,7 @@ void radio_mux_report(radio_mux_chan_t *ch, const char *state, const char *reaso
 // The answer to the REINIT input `seq` received with handle `ch`: ESP_OK accepts (the instance let go of the radio),
 // anything else refuses with that code and `reason` (may be NULL; cut to 71 characters). Answer when you let go: at
 // once, or once a drain ends; no answer within RADIO_MUX_REINIT_REPLY_MS is a refusal. Ignored for a stale handle or
-// seq. Never blocks: ESP_FAIL when the owner's queue was full (the answer is lost: the maintenance times out).
+// seq. Never blocks and is never lost: the answer waits in a mailbox the owner drains (ESP_OK).
 esp_err_t radio_mux_reinit_reply(radio_mux_chan_t *ch, uint32_t seq, esp_err_t verdict, const char *reason);
 
 /* ---- the built-in RCP (the board's own radio: the C6 on this board) ---- */

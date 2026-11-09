@@ -239,19 +239,50 @@ void radio_mux_report(radio_mux_chan_t *ch, const char *state, const char *reaso
     mux_unlock();
 }
 
+// Reinit answers until the owner takes them, oldest first: a few slots (one reinit runs at a time; the others are
+// late or stale answers the owner ignores). Under s_reply_lock.
+#define REPLY_SLOTS 4
+static portMUX_TYPE s_reply_lock = portMUX_INITIALIZER_UNLOCKED;
+static mux_reply_t s_replies[REPLY_SLOTS];
+static size_t s_reply_head, s_reply_n;
+
 esp_err_t radio_mux_reinit_reply(radio_mux_chan_t *ch, uint32_t seq, esp_err_t verdict, const char *reason)
 {
-    mux_msg_t m = {.type = MUX_MSG_REINIT_REPLY};
+    mux_reply_t r = {.h = ch, .seq = seq, .verdict = verdict}; // the owner checks the generation and the seq
+    const mux_msg_t wake = {.type = MUX_MSG_REINIT_REPLY};
+    bool dropped = false;
 
-    m.reply.h = ch; // the owner checks the generation and the seq
-    m.reply.seq = seq;
-    m.reply.verdict = verdict;
-    snprintf(m.reply.reason, sizeof(m.reply.reason), "%s", reason ? reason : "");
-    if (!mux_post(&m)) {
-        ESP_LOGW(TAG, "reinit answer %" PRIu32 " lost: queue full", seq);
-        return ESP_FAIL;
+    snprintf(r.reason, sizeof(r.reason), "%s", reason ? reason : "");
+    taskENTER_CRITICAL(&s_reply_lock);
+    if (s_reply_n == REPLY_SLOTS) { // the oldest goes: the newest answer is the one a running reinit waits for
+        s_reply_head = (s_reply_head + 1) % REPLY_SLOTS;
+        s_reply_n--;
+        dropped = true;
+    }
+    s_replies[(s_reply_head + s_reply_n) % REPLY_SLOTS] = r;
+    s_reply_n++;
+    taskEXIT_CRITICAL(&s_reply_lock);
+    if (dropped) {
+        ESP_LOGW(TAG, "reinit answers: the oldest was dropped");
+    }
+    if (!mux_post(&wake)) {
+        ESP_LOGW(TAG, "reinit answer %" PRIu32 ": queue full, the owner takes it on its next round", seq);
     }
     return ESP_OK;
+}
+
+bool mux_take_reply(mux_reply_t *out)
+{
+    taskENTER_CRITICAL(&s_reply_lock);
+    const bool pending = s_reply_n > 0;
+
+    if (pending) {
+        *out = s_replies[s_reply_head];
+        s_reply_head = (s_reply_head + 1) % REPLY_SLOTS;
+        s_reply_n--;
+    }
+    taskEXIT_CRITICAL(&s_reply_lock);
+    return pending;
 }
 
 void radio_mux_note_firmware(radio_mux_chan_t *ch, const radio_mux_fw_record_t *fw)
@@ -494,7 +525,8 @@ static void wait_settled(radio_mux_maint_t *res)
 
         mux_lock();
         res->mode = ch->mode;
-        res->settle = radio_mux_orch_settle(ch->chan_state, orch_find(ch->mode) != NULL, ch->mode_state);
+        res->settle = radio_mux_orch_settle(ch->chan_state, orch_find(ch->mode) != NULL, ch->mode_state,
+                                            ch->mode_reason);
         snprintf(res->mode_state, sizeof(res->mode_state), "%s", ch->mode_state);
         snprintf(res->mode_reason, sizeof(res->mode_reason), "%s", ch->mode_reason);
         mux_unlock();

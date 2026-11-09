@@ -128,10 +128,12 @@ typedef enum {
 } radio_mux_settle_t;
 
 // The decision on a channel in state `cs`, `instance` whether its stored mode has a registered instance, `mode_state`
-// what that instance (or the orchestrator for it) reports. Waits on "", "starting" and "releasing"; up on the states
-// in which a mode runs (Thread's running and sniffer, Zigbee's running, the proxy's listening, connecting, backoff
-// and connected); every other state is down.
-radio_mux_settle_t radio_mux_orch_settle(radio_mux_chan_state_t cs, bool instance, const char *mode_state);
+// and `mode_reason` what that instance (or the orchestrator for it) reports. Waits on "", "starting" and "releasing",
+// and on Thread's "fault" until its reason follows (Thread reports the state first, the reason a moment later); up on
+// the states in which a mode runs (Thread's running and sniffer, Zigbee's running, the proxy's listening, connecting,
+// backoff and connected); every other state is down.
+radio_mux_settle_t radio_mux_orch_settle(radio_mux_chan_state_t cs, bool instance, const char *mode_state,
+                                         const char *mode_reason);
 
 // How long radio_mux_maintain waits for the channel's mode to run again after the work (radio_mux_orch_settle).
 #define RADIO_MUX_SETTLE_MS 180000
@@ -172,16 +174,18 @@ typedef struct {
     radio_mux_reinit_phase_t phase;
     uint32_t seq;        // the seq of the REINIT input the instance was sent
     int64_t deadline_ms; // ASKED: when no answer counts as a refusal
-    bool timed_out;      // IDLE: the last run (seq) ended by its deadline; its instance's accept is still to come
+    bool late_pending;   // a run timed out (late_seq) and its instance's accept may still come
+    uint32_t late_seq;   // that run's seq
 } radio_mux_reinit_run_t;
 
 // Maintenance asks for the channel at now_ms. With no instance bound: RUN at once. With one bound (sent the REINIT
 // input `seq`): WAIT, until RADIO_MUX_REINIT_REPLY_MS later. While another run is asked or running: REFUSE, the run
 // unchanged.
 radio_mux_reinit_act_t radio_mux_reinit_ask(radio_mux_reinit_run_t *r, uint32_t seq, bool bound, int64_t now_ms);
-// The instance's answer to the REINIT input `seq`: accept → RUN, refuse → REFUSE (back to idle). An accept of the last
-// run's seq after that run timed out → REBIND, once (the instance let go for nothing). IGNORE for anything else: an
-// answer to another seq, a late refusal, an answer while the run runs or after it ended.
+// The instance's answer to the REINIT input `seq`: accept → RUN, refuse → REFUSE (back to idle). The accept of a run
+// that timed out comes late, once: with nothing asked → REBIND (the instance let go for nothing); while a newer run
+// waits for its answer → RUN (the instance let go: that run proceeds). IGNORE for anything else: an answer to another
+// seq, a late refusal, an answer while a run runs, after a run ended.
 radio_mux_reinit_act_t radio_mux_reinit_answer(radio_mux_reinit_run_t *r, uint32_t seq, bool accept);
 // Time passes: REFUSE (back to idle) once an asked run reaches its deadline, WAIT before it, IGNORE when nothing is
 // asked.

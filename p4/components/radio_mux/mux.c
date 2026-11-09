@@ -892,6 +892,9 @@ static void handle_maint_done(mux_call_t *call)
     g_mux.maint_ending = false;
     if (!present) {
         orch_lost(p->chan, p->att_handle, RADIO_MUX_FAULT_FIRMWARE, call->reason[0] ? call->reason : why);
+    } else if (p->att.state != RADIO_MUX_AS_ATTACHED && p->fault[0] != '\0' && p->fault_kind != RADIO_MUX_FAULT_NONE) {
+        // Listed usable, but the C6 did not open again (a link fault): the instance that let go must hear of it.
+        orch_lost(p->chan, p->att_handle, p->fault_kind, p->fault);
     }
     ESP_LOGI(TAG, "%s: reinit (%s) ended: %s", p->chan->id, radio_mux_work_reason(work), present ? "ready" : why);
 }
@@ -1094,6 +1097,11 @@ static void list_unsupported(const mux_usb_dev_t *dev)
     ch->eff_mode = RADIO_MUX_MODE_UNAVAILABLE;
     ch->state = RADIO_MUX_STATE_IDLE;
     snprintf(ch->reason, sizeof(ch->reason), "no driver for %04x:%04x", dev->vid, dev->pid);
+    // Not on a port, so no attach state sets its lifecycle: a link fault with the reason while it is plugged in.
+    ch->chan_state = RADIO_MUX_CS_FAULT;
+    ch->fault_kind = RADIO_MUX_FAULT_LINK;
+    ch->work = RADIO_MUX_WORK_NONE;
+    snprintf(ch->chan_reason, sizeof(ch->chan_reason), "%s", ch->reason);
     mux_unlock();
     ESP_LOGI(TAG, "%s: %s", ch->id, ch->reason);
 }
@@ -1108,6 +1116,9 @@ static void drop_unopened(mux_port_t *p, const mux_usb_dev_t *dev)
             mux_lock();
             ch->present = false;
             ch->used = ch->remembered; // an unsupported device leaves the list
+            ch->chan_state = RADIO_MUX_CS_ABSENT;
+            ch->fault_kind = RADIO_MUX_FAULT_NONE;
+            ch->chan_reason[0] = '\0';
             mux_unlock();
         }
     }
@@ -1175,6 +1186,9 @@ static void check_presence(mux_port_t *p)
             mux_lock();
             ch->present = false;
             ch->used = ch->remembered;
+            ch->chan_state = RADIO_MUX_CS_ABSENT;
+            ch->fault_kind = RADIO_MUX_FAULT_NONE;
+            ch->chan_reason[0] = '\0';
             mux_unlock();
         }
     }
@@ -1514,9 +1528,14 @@ static void handle(const mux_msg_t *m)
     case MUX_MSG_USB_ERROR: // a wakeup: the flag says what happened
         usb_error_check(&g_mux.usb);
         break;
-    case MUX_MSG_REINIT_REPLY:
-        orch_reinit_reply(m->reply.h, m->reply.seq, m->reply.verdict, m->reply.reason);
+    case MUX_MSG_REINIT_REPLY: { // a wakeup: the answer is in the mailbox
+        mux_reply_t r;
+
+        while (mux_take_reply(&r)) {
+            orch_reinit_reply(r.h, r.seq, r.verdict, r.reason);
+        }
         break;
+    }
     case MUX_MSG_SET:
         handle_set(m->call);
         xSemaphoreGive(m->call->done);
@@ -1611,6 +1630,11 @@ static void owner_task(void *arg)
         check_presence(&g_mux.usb);
         usb_error_check(&g_mux.usb);
         usb_close_check(&g_mux.usb);
+        mux_reply_t r;
+
+        while (mux_take_reply(&r)) { // answers whose wakeup did not fit into the queue: before the deadline is checked
+            orch_reinit_reply(r.h, r.seq, r.verdict, r.reason);
+        }
         maint_tick();
     }
 }

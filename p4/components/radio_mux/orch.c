@@ -223,6 +223,9 @@ esp_err_t radio_mux_set_builtin(const radio_mux_builtin_t *b)
     ESP_RETURN_ON_FALSE(b && b->id && b->present && b->boot_steps && b->push && b->rom_recover, ESP_ERR_INVALID_ARG, TAG,
                         "the built-in RCP needs an id and its ops");
     ESP_RETURN_ON_FALSE(!atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "set it before radio_mux_start");
+    // The channel, its NVS record ("c6") and maintenance use RADIO_MUX_BUILTIN_ID: another id would half-work.
+    ESP_RETURN_ON_FALSE(strcmp(b->id, RADIO_MUX_BUILTIN_ID) == 0, ESP_ERR_NOT_SUPPORTED, TAG,
+                        "built-in RCP id %s: only %s is supported", b->id, RADIO_MUX_BUILTIN_ID);
     g_mux.builtin = b;
     ESP_LOGI(TAG, "built-in RCP: %s (%s)", b->id, b->chip ? b->chip : "?");
     return ESP_OK;

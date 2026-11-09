@@ -42,6 +42,14 @@ typedef struct {
 // The answer to a reinit as a message carries this much of the instance's reason.
 #define MUX_REPLY_REASON_MAX 72
 
+// An instance's answer to a REINIT input (radio_mux_reinit_reply).
+typedef struct {
+    radio_mux_chan_t *h;
+    uint32_t seq;
+    esp_err_t verdict;
+    char reason[MUX_REPLY_REASON_MAX];
+} mux_reply_t;
+
 // A registered mode instance (orch.c).
 typedef struct orch_inst {
     radio_mux_instance_t inst;
@@ -150,12 +158,7 @@ typedef struct {
             radio_mux_chan_t *h;
             radio_mux_fw_record_t fw;
         } note;                   // NOTE_FW
-        struct {
-            radio_mux_chan_t *h;
-            uint32_t seq;
-            esp_err_t verdict;
-            char reason[MUX_REPLY_REASON_MAX];
-        } reply;                  // REINIT_REPLY
+        mux_reply_t reply;        // REINIT_REPLY: a wakeup only; the answer is in the mailbox (mux_take_reply)
     };
 } mux_msg_t;
 
@@ -299,6 +302,9 @@ void mux_maint_answer(radio_mux_reinit_act_t act, esp_err_t verdict, const char 
 
 // Any task but the owner: the built-in RCP's boot steps on the channel in reinit, then MAINT_DONE (never dropped).
 void mux_maint_finish(const char *id);
+// Owner: the oldest reinit answer waiting (radio_mux_reinit_reply keeps them in a mailbox, so a full queue never loses
+// one). True when *out got one.
+bool mux_take_reply(mux_reply_t *out);
 
 /* ---- mux_deliver.c ---- */
 
