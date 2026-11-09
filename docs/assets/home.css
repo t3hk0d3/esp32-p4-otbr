@@ -109,7 +109,8 @@
 .otbr-home .trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
 .otbr-home .tag { font: 500 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--zig); border: 1px solid color-mix(in srgb, var(--zig) 45%, transparent); border-radius: 6px; padding: 1px 6px; vertical-align: middle; margin-left: 6px; }
 @media (max-width: 860px) { .otbr-home .trio { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 640px) { .otbr-home .radios-diag { overflow-x: auto; } .otbr-home .radios-diag svg { width: 760px; max-width: none; } }
+.otbr-home .diag-note { text-align: center; color: var(--quiet); font-size: 14.5px; margin-top: 12px; }
+@media (max-width: 900px) { .otbr-home .radios-diag { overflow-x: auto; } .otbr-home .radios-diag svg { width: 900px; max-width: none; } }
 
 /* comparison */
 .otbr-home .cmp { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }

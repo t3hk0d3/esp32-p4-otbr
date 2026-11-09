@@ -51,8 +51,9 @@ release's `versions.txt`.
 - The C6's channel id is `builtin-c6` (kind `builtin`; it was `c6`). Channels report `channel_state` (`absent`,
   `reinit`, `ready`, `fault`) and `mode_state` beside `state`, and `GET /device/channels` lists the modes and where
   they run (`modes`).
-- A C6 firmware push (`POST /device/radio/firmware`) answers once the mode on the C6 (Thread, Zigbee or the RCP proxy)
-  runs again on the new firmware, up to 180 s; when it does not, 502 `restart_failed` says which mode and why. The
+- A push of `c6_rcp.bin` (`POST /device/radio/firmware`) answers once the mode on the C6 (Thread, Zigbee or the RCP
+  proxy) runs again on the new firmware: after the push it waits up to 180 s, and when the mode does not start, 502
+  `restart_failed` says which mode and why. A push of `c6_installer.bin` still leaves the C6 without RCP firmware. The
   push and the ROM recovery moved out of the Thread stack into the built-in radio's own code.
 - Moving Thread to another radio no longer rolls back or reboots: a failed start stays on the new radio with its
   reason, and the Radios page says where Thread is.
