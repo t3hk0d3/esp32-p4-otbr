@@ -111,7 +111,7 @@ class TestBoot:
         # rcp_installed equals the version and rcp_compatible is true.
         version = (
             dut.expect(
-                rb"br_core: installed RCP firmware (\S+)", timeout=BOOT_TIMEOUT_S
+                rb"builtin_rcp: installed RCP firmware (\S+)", timeout=BOOT_TIMEOUT_S
             )
             .group(1)
             .decode()

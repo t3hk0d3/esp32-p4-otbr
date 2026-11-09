@@ -282,7 +282,7 @@ class TestConsolePage:
             page("console", routes(status=NO_RADIO))
             + START
             + "await t.advance(5500); const during = t.el('con-toggle').textContent;"
-            " globalThis.st = {mode: 'BR_RUNNING', otbr_channel: 'c6'}; await t.advance(5500);"
+            " globalThis.st = {mode: 'BR_RUNNING', otbr_channel: 'builtin-c6'}; await t.advance(5500);"
             " return [during, t.sockets.length, t.el('con-toggle').textContent];"
         )
         assert r == ["Disconnect", 1, "Disconnect"]

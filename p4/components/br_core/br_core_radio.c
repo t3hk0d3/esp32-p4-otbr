@@ -1,6 +1,6 @@
-// OpenThread on a radio mux channel (spec section 3, OTBR mode): the otbr consumer, the mux operations of
-// MuxSpinelInterface, the RCP probe through the channel, OpenThread's start and stop on it, and the br_radio task that
-// follows the channel (attach, GONE) and runs moves. The OpenThread state machine's other operations, the boot and the
+// OpenThread on a radio mux channel (spec section 3, OTBR mode): the Thread instance of the orchestrator, the mux
+// operations of MuxSpinelInterface, the RCP probe through the channel, OpenThread's start and stop on it, and the
+// br_radio task that acts on the orchestrator's inputs (bind, unbind, lost, back, reinit) and runs moves. The OpenThread state machine's other operations, the boot and the
 // C6 jobs are in br_core.c.
 #include <inttypes.h>
 #include <stdatomic.h>
@@ -57,19 +57,23 @@ typedef struct {
     atomic_bool gone;
 } otbr_link_t;
 static otbr_link_t s_link;
-// The otbr consumer's attached channel (set by the mux owner task in attach and detach) and the count of attaches.
+// The channel Thread is bound to now: set by BIND and BACK, cleared by UNBIND and LOST (the mux owner task, on_input).
 static radio_mux_chan_t *_Atomic s_attached;
-static atomic_uint s_attach_gen;
+// The handle Thread's state is reported through (radio_mux_report): set by BIND and BACK, cleared by UNBIND only (a lost
+// channel still shows why).
+static radio_mux_chan_t *_Atomic s_report_ch;
+// The orchestrator's latest binding input and latest request, each with the seq of the last one acted on (by br_radio,
+// or by a move's commit that acted on the binding input itself), under s_in_lock.
+static portMUX_TYPE s_in_lock = portMUX_INITIALIZER_UNLOCKED;
+static mode_fsm_inbox_t s_inbox;
 static TaskHandle_t _Atomic s_radio_task;
 static const esp_openthread_mux_ops_t s_mux_ops;
 static bool s_move_probe;   // br_radio: the next probe is a move's (its verdict answers the waiting PUT)
 static bool s_start_failed; // br_radio: the last start on the attached channel failed (RADIO_FAULT from it)
-static atomic_bool s_booting; // the C6's boot job runs: br_radio stays out until its end attaches the C6
-static atomic_bool s_c6_boot_steps; // the C6's boot steps run (whatever channel is in otbr): no C6 job meanwhile
 static atomic_bool s_retry;   // br_core_retry_otbr: try the failed start on the attached channel again
 static void (*_Atomic s_move_done)(void); // br_core_set_move_done_cb
 static char s_no_radio_reason[96]; // br_radio: why the mode is NO_RADIO
-static bool s_lost;                // br_radio: OpenThread's channel was lost, not detached by a deliberate change
+static bool s_lost;                // br_radio: OpenThread's channel was lost, not unbound by a deliberate change
 // br_radio runs a channel operation (OpenThread torn down after GONE, or started after an attach): a move, start or
 // stop asked for meanwhile is refused at once (br_core_move_otbr) instead of waiting for its probe.
 static atomic_bool s_radio_busy;
@@ -83,10 +87,8 @@ static atomic_uint s_radio_busy_since;
 static portMUX_TYPE s_refusal_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_refused_id[RADIO_MUX_ID_MAX];
 static char s_refused_reason[RADIO_MUX_REASON_MAX];
-// Owned by the task that starts and stops OpenThread (br_radio, or a radio job while push_busy):
-static radio_mux_chan_t *s_ot_chan; // the channel OpenThread was started on, NULL when it is stopped
-static unsigned s_ot_gen;           // the attach it was started on: another attach since means the channel went
-static unsigned s_tried_gen;        // the last attach a start was tried on (a failed start waits for the next one)
+// Owned by br_radio, the task that starts and stops OpenThread:
+static radio_mux_chan_t *s_ot_chan; // the channel (handle) OpenThread was started on, NULL when it is stopped
 static radio_mux_chan_t *s_lease;   // a move's target, leased from the mux until the move ends
 static radio_mux_fw_record_t s_probe_fw; // what the last probe read
 static char s_probe_err[64];        // why the last probe failed: the fault reason a failed start shows
@@ -211,26 +213,88 @@ static const esp_openthread_mux_ops_t s_mux_ops = {
     .gone = mux_gone,
 };
 
-// The otbr consumer (radio mux owner task): note the channel and wake br_radio, which starts and stops OpenThread.
-static esp_err_t otbr_attach(radio_mux_chan_t *ch, void *ctx)
+// The Thread instance's input (radio mux owner task): the bound channel noted at once (a C6 job's restart reads it),
+// the input kept as the latest of its slot (a REINIT never replaces a binding input), br_radio woken to act on it.
+// Never blocks.
+static void on_input(const radio_mux_input_t *in, void *ctx)
 {
-    atomic_store(&s_attached, ch);
-    atomic_fetch_add(&s_attach_gen, 1);
-    ESP_LOGI(TAG, "%s: otbr attached", radio_mux_chan_id(ch));
+    switch (in->type) {
+    case RADIO_MUX_IN_BIND:
+    case RADIO_MUX_IN_BACK:
+        atomic_store(&s_attached, in->ch);
+        atomic_store(&s_report_ch, in->ch);
+        break;
+    case RADIO_MUX_IN_UNBIND:
+    case RADIO_MUX_IN_LOST: {
+        radio_mux_chan_t *expected = in->ch;
+
+        atomic_compare_exchange_strong(&s_attached, &expected, NULL);
+        if (in->ch && atomic_load(&s_link.ch) == in->ch) {
+            atomic_store(&s_link.gone, true); // the interface refuses requests from now on (no recovery, no DieNow)
+        }
+        if (in->type == RADIO_MUX_IN_UNBIND) {
+            atomic_store(&s_report_ch, NULL);
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    taskENTER_CRITICAL(&s_in_lock);
+    mode_fsm_inbox_put(&s_inbox, in);
+    taskEXIT_CRITICAL(&s_in_lock);
     core_radio_notify();
-    return ESP_OK;
 }
 
-static void otbr_detach(radio_mux_chan_t *ch, void *ctx)
+// The latest request (want_req) or binding input into *in; true when it was not acted on yet (it is from now on).
+static bool take_input(bool want_req, radio_mux_input_t *in)
 {
-    radio_mux_chan_t *expected = ch;
+    taskENTER_CRITICAL(&s_in_lock);
+    const bool fresh = want_req ? mode_fsm_inbox_take_req(&s_inbox, in) : mode_fsm_inbox_take_bind(&s_inbox, in);
+    taskEXIT_CRITICAL(&s_in_lock);
+    return fresh;
+}
 
-    atomic_compare_exchange_strong(&s_attached, &expected, NULL);
-    if (atomic_load(&s_link.ch) == ch) {
-        atomic_store(&s_link.gone, true); // the interface refuses requests from now on (no recovery, no DieNow)
+// A move's commit acted on the latest binding input itself (as br_radio would have).
+static void input_handled(void)
+{
+    taskENTER_CRITICAL(&s_in_lock);
+    mode_fsm_inbox_handled(&s_inbox);
+    taskEXIT_CRITICAL(&s_in_lock);
+}
+
+// Thread's state names in the orchestrator's read API (design section 4.2).
+static const char *thread_state(br_core_mode_t mode)
+{
+    switch (mode) {
+    case BR_MODE_STARTING:
+        return "starting";
+    case BR_MODE_BR_RUNNING:
+        return "running";
+    case BR_MODE_SNIFFER:
+        return "sniffer";
+    case BR_MODE_RADIO_FAULT:
+        return "fault";
+    default:
+        return "no_radio";
     }
-    ESP_LOGI(TAG, "%s: otbr detached", radio_mux_chan_id(ch));
+}
+
+void core_radio_mode_changed(br_core_mode_t mode)
+{
+    radio_mux_report(atomic_load(&s_report_ch), thread_state(mode), NULL); // the reason follows from br_radio
     core_radio_notify();
+}
+
+// br_radio: Thread's state and the board's reason to the orchestrator.
+static void report_state(void)
+{
+    char reason[sizeof(g_core.fault_reason)];
+
+    xSemaphoreTake(g_core.mutex, portMAX_DELAY);
+    strlcpy(reason, g_core.fault_reason, sizeof(reason));
+    xSemaphoreGive(g_core.mutex);
+    radio_mux_report(atomic_load(&s_report_ch), thread_state(br_core_get_mode()), reason);
 }
 
 static void wait_readable(int fd, int64_t us)
@@ -504,9 +568,17 @@ esp_err_t core_radio_ot_start(const char *id)
         return ESP_ERR_NOT_FOUND;
     }
     if (g_core.init_abandoned) { // an earlier start parked inside esp_openthread_init: nothing of it can be released
-        core_set_reason("an earlier OpenThread start was abandoned: reboot");
+        core_set_reason(MODE_FSM_FAULT_ABANDONED);
         return MODE_FSM_ERR_START_ABANDONED;
     }
+#ifdef OTBR_TEST_BUILD
+    if (core_test_take_start_abandon(id)) { // ot_start_abandon: this start ends as an abandoned one, at once
+        ESP_LOGW(TAG, "test build: OpenThread's start on %s abandoned", id);
+        g_core.init_abandoned = true; // as a real one: nothing starts OpenThread again until a reboot
+        core_set_reason(MODE_FSM_FAULT_ABANDONED);
+        return MODE_FSM_ERR_START_ABANDONED;
+    }
+#endif
     if (!mode_fsm_radio_start_allowed(g_storage_degraded)) {
         ESP_LOGE(TAG, "storage is unavailable (NVS): OpenThread is not started");
         core_set_reason(MODE_FSM_FAULT_STORAGE);
@@ -515,7 +587,6 @@ esp_err_t core_radio_ot_start(const char *id)
     atomic_store(&s_link.ch, ch);
     atomic_store(&s_link.gone, false);
     s_ot_chan = ch;
-    s_ot_gen = atomic_load(&s_attach_gen);
     xSemaphoreTake(g_core.mutex, portMAX_DELAY);
     g_core.ot_ready = false;
     g_core.bringup_started = false;
@@ -531,6 +602,7 @@ esp_err_t core_radio_ot_start(const char *id)
     // semaphore only one wakes (the other waited BOOT_WAIT_MS, then abandoned a running OpenThread).
     if (err == ESP_OK && xSemaphoreTake(g_core.init_done, pdMS_TO_TICKS(BOOT_WAIT_MS)) != pdTRUE) {
         g_core.init_abandoned = true; // still inside esp_openthread_init: never torn down under it
+        core_set_reason(MODE_FSM_FAULT_ABANDONED); // the RADIO_FAULT says why, and that a reboot is the way out
         return MODE_FSM_ERR_START_ABANDONED;
     }
     if (err == ESP_OK && !core_ot_ready_now()) {
@@ -550,6 +622,7 @@ esp_err_t core_radio_ot_start(const char *id)
         }
         core_radio_stop_openthread(); // with an abandoned init it releases nothing of it (no deinit)
         if (g_core.init_abandoned) {
+            core_set_reason(MODE_FSM_FAULT_ABANDONED);
             return MODE_FSM_ERR_START_ABANDONED; // an error or a park inside esp_openthread_init
         }
     }
@@ -585,9 +658,8 @@ esp_err_t core_radio_store_otbr(const char *from, const char *to)
         }
         return err;
     }
-    s_lease = NULL; // now the otbr consumer's attach
-    s_ot_gen = atomic_load(&s_attach_gen);
-    s_tried_gen = s_ot_gen;
+    s_lease = NULL; // now Thread's binding (the commit's BIND came with the lease's handle)
+    input_handled(); // OpenThread already runs on it
     radio_mux_chan_t *ch = atomic_load(&s_attached);
 
     if (ch) {
@@ -617,49 +689,62 @@ static void after_channel_op(void)
     xSemaphoreGive(g_core.boot_done);
 }
 
-// Why there is no OpenThread now (the reason NO_RADIO shows): no channel stored in otbr, it is unplugged, a C6 job
-// holds it, it is in fault (its own reason; the mux's "no answer after 3 resets" give-up lands here if an otbr flow ever
-// reaches it), or it left otbr. Returns whether the channel OpenThread ran on (`ran_on`, may be NULL) was lost: it is
-// still the one stored in otbr and no C6 job holds it, so it went by an unplug or a failure, not a deliberate change (a
-// mode change, a move, a C6 job), which keeps the normal drain.
-static bool note_no_radio_reason(radio_mux_chan_t *ran_on)
+// Why there is no OpenThread now (the reason NO_RADIO shows), from the channel stored in otbr as the orchestrator sees
+// it (mode_fsm_mode_for: no channel in otbr, unplugged, its link fault, ...). A firmware fault of that channel is a
+// RADIO_FAULT (design section 6): returned in *fault (may be NULL) with the reason in s_no_radio_reason. Returns whether
+// the channel OpenThread ran on (`ran_on`, may be NULL) was lost: it is still the one stored in otbr and no maintenance
+// holds it, so it went by an unplug or a failure, not a deliberate change (a mode change, a move, a C6 job), which
+// keeps the normal drain.
+static bool note_no_radio_reason(radio_mux_chan_t *ran_on, bool *fault)
 {
     char otbr[RADIO_MUX_ID_MAX];
     const bool stored = radio_mux_otbr_channel(otbr, sizeof(otbr));
     radio_mux_snapshot_t *snap = stored ? malloc(sizeof(*snap)) : NULL;
-    const char *why = "the OTBR channel went away";
-    char fault[RADIO_MUX_REASON_MAX] = "";
-    bool busy = false;
+    char went[sizeof(s_no_radio_reason)];
+    mode_fsm_view_t v = {.bound = stored, .chan_id = otbr, .chan_reason = "", .thread = BR_MODE_NO_RADIO,
+                         .thread_reason = went, .unplugged = true, .chan_state = RADIO_MUX_CS_READY
+                        };
+    bool busy = false, found = false;
 
-    if (!stored) {
-        snprintf(s_no_radio_reason, sizeof(s_no_radio_reason), "no channel in otbr");
-        return false;
+    snprintf(went, sizeof(went), "the OTBR channel went away (%s)", stored ? otbr : ""); // ready, but not ours now
+
+    if (fault) {
+        *fault = false;
     }
     if (snap) {
         radio_mux_get_snapshot(snap);
         for (size_t i = 0; i < snap->n; i++) {
-            if (strcmp(snap->chans[i].id, otbr) == 0) {
-                busy = snap->chans[i].state == RADIO_MUX_STATE_BUSY;
-                why = busy ? "a C6 job holds the radio" : !snap->chans[i].present ? "radio unplugged" : why;
-                if (!busy && snap->chans[i].present && snap->chans[i].state == RADIO_MUX_STATE_FAULT &&
-                        snap->chans[i].reason[0] != '\0') {
-                    strlcpy(fault, snap->chans[i].reason, sizeof(fault)); // the snapshot is freed below
-                    why = fault;
+            const radio_mux_chan_info_t *c = &snap->chans[i];
+
+            if (stored && strcmp(c->id, otbr) == 0) {
+                found = true;
+                v.chan_state = c->chan_state;
+                v.kind = c->fault_kind;
+                v.work = c->work;
+                busy = c->chan_state == RADIO_MUX_CS_REINIT && c->work != RADIO_MUX_WORK_DETECT; // a C6 job
+                if (c->chan_state == RADIO_MUX_CS_FAULT) {
+                    strlcpy(s_no_radio_reason, c->chan_reason, sizeof(s_no_radio_reason)); // freed below
+                    v.chan_reason = s_no_radio_reason;
                 }
             }
         }
-        free(snap);
     }
-    // "<why> (<id>)", cut to fit: a channel's own fault reason can fill the buffer by itself.
-    strlcpy(s_no_radio_reason, why, sizeof(s_no_radio_reason));
-    strlcat(s_no_radio_reason, " (", sizeof(s_no_radio_reason));
-    strlcat(s_no_radio_reason, otbr, sizeof(s_no_radio_reason));
-    strlcat(s_no_radio_reason, ")", sizeof(s_no_radio_reason));
-    return ran_on && !busy && strcmp(radio_mux_chan_id(ran_on), otbr) == 0;
+    char reason[sizeof(s_no_radio_reason)];
+    const br_core_mode_t m = mode_fsm_mode_for(&v, reason, sizeof(reason));
+
+    free(snap);
+    if (stored && (!found || m == BR_MODE_STARTING)) { // no snapshot, or a C6 job holds it
+        snprintf(reason, sizeof(reason), "%s (%s)", busy ? "a C6 job holds the radio" : "the OTBR channel went away",
+                 otbr);
+    }
+    strlcpy(s_no_radio_reason, reason, sizeof(s_no_radio_reason));
+    if (fault) {
+        *fault = m == BR_MODE_RADIO_FAULT;
+    }
+    return ran_on && !busy && stored && strcmp(radio_mux_chan_id(ran_on), otbr) == 0;
 }
 
-// OpenThread follows the otbr channel: torn down when it went (unplug, mode change, a C6 job outside a push), started
-// when one is attached (boot, plug-in, the end of a C6 job, a mode change); a failed start waits for the next attach.
+// The last refused stop of OpenThread on channel `id` and why (NULL: none any more), for the channel's read API.
 static void note_refusal(const char *id, const char *reason)
 {
     taskENTER_CRITICAL(&s_refusal_lock);
@@ -668,49 +753,117 @@ static void note_refusal(const char *id, const char *reason)
     taskEXIT_CRITICAL(&s_refusal_lock);
 }
 
-bool core_radio_job_holds_openthread(void)
+// The channel's firmware fault (the C6's boot steps found no RCP firmware, the factory image, a failed ROM recovery,
+// the test build's c6_hold): RADIO_FAULT with that reason. "rcp incompatible" (an RCP that never answers) clears
+// rcp.compatible, as a start that found it so.
+static void enter_firmware_fault(const char *reason)
 {
-    if (!atomic_load(&g_core.push_busy)) {
-        return false;
+    if (strcmp(reason, MODE_FSM_FAULT_INCOMPATIBLE) == 0) {
+        core_set_c6_compatible(false);
     }
-    radio_mux_chan_t *ch = core_radio_chan();
-    char otbr[RADIO_MUX_ID_MAX];
-    const bool stored = radio_mux_otbr_channel(otbr, sizeof(otbr));
-
-    return mode_fsm_job_holds_openthread(true, ch ? radio_mux_chan_id(ch) : NULL, stored ? otbr : NULL);
+    s_start_failed = false; // nothing a PUT of mode otbr could retry on: the channel is not usable
+    core_enter_fault(reason);
 }
 
+// REINIT (maintenance wants Thread's channel): Thread lets go once its sessions drained, or refuses with today's text
+// (a move, the sniffer, a start, a drain timeout); the answer goes back through the input's handle and is returned
+// (ESP_OK: Thread let go).
+static esp_err_t reinit(const radio_mux_input_t *in)
+{
+    const char *why = NULL;
+    esp_err_t verdict;
+
+    radio_busy_begin("OpenThread's release for maintenance");
+    note_refusal(NULL, NULL);
+    if (g_core.ot_task && !g_core.loop_running) { // after a boot timeout OpenThread may still be initialising
+        verdict = ESP_ERR_INVALID_STATE;
+        why = "the radio is still booting";
+    } else if ((why = mode_fsm_reinit_refusal(br_core_get_mode(), br_core_move_running())) != NULL) {
+        verdict = ESP_ERR_INVALID_STATE; // nothing touched: a move, a capture or a start keeps the radio
+    } else {
+        radio_mux_report(atomic_load(&s_report_ch), "releasing", in->reason);
+        verdict = mode_fsm_on_reinit(&g_fsm);
+        if (verdict == ESP_ERR_INVALID_STATE) { // the mode changed since the check above
+            why = mode_fsm_reinit_refusal(br_core_get_mode(), false);
+        } else if (verdict == MODE_FSM_ERR_DRAIN_TIMEOUT) {
+            verdict = ESP_ERR_INVALID_STATE;
+            why = "OpenThread is busy, try again";
+        } else if (verdict == ESP_OK) {
+            // The maintenance changes what the C6 holds: only the next start on it judges it again.
+            xSemaphoreTake(g_core.mutex, portMAX_DELAY);
+            g_core.rcp_compatible = false;
+            g_core.rcp_compatible_known = false;
+            xSemaphoreGive(g_core.mutex);
+        }
+    }
+    ESP_LOGI(TAG, "reinit (%s): %s%s%s", in->reason, verdict == ESP_OK ? "OpenThread let go" : "refused",
+             why ? ": " : "", why ? why : "");
+    radio_mux_reinit_reply(in->ch, in->seq, verdict, why);
+    after_channel_op();
+    radio_busy_end();
+    return verdict;
+}
+
+// OpenThread follows the orchestrator's inputs: a fresh request (REINIT) is answered first; then OpenThread is torn
+// down when its channel went (UNBIND, LOST: OpenThread runs on a channel that is not the bound one any more, or its
+// link is gone), started on a fresh BIND or BACK (boot, plug-in, the end of a maintenance, a mode change) or a retry (a
+// PUT of mode otbr after a failed start). A failed start waits for the next bind. A LOST for a firmware fault of its
+// channel (what the C6's boot steps found) is a RADIO_FAULT with the steps' reason. Once Thread let go for a request,
+// only a binding input newer than it is acted on (the maintenance's end binds Thread again); a refused request leaves
+// the binding input to act on (a BIND it arrived on top of still starts OpenThread).
 static void reconcile(void)
 {
-    if (atomic_load(&s_booting) || core_radio_job_holds_openthread()) {
-        // A C6 job with OpenThread on (or stored on) the C6 stops and starts it itself; the boot job's end attaches the
-        // C6. A C6 job while OpenThread runs on a dongle keeps nothing out: that channel's GONE is handled at once.
-        return;
+    radio_mux_input_t req;
+    bool let_go = false;
+
+    if (take_input(true, &req) && reinit(&req) == ESP_OK) {
+        taskENTER_CRITICAL(&s_in_lock);
+        mode_fsm_inbox_let_go(&s_inbox, req.seq);
+        taskEXIT_CRITICAL(&s_in_lock);
+        let_go = true;
+    }
+    radio_mux_input_t in;
+    const bool fresh = take_input(false, &in);
+
+    if (let_go && !fresh) {
+        return; // the maintenance has the channel
     }
     radio_mux_chan_t *att = atomic_load(&s_attached);
-    const unsigned gen = atomic_load(&s_attach_gen);
+    const bool lost_firmware = fresh && in.type == RADIO_MUX_IN_LOST && in.kind == RADIO_MUX_FAULT_FIRMWARE;
+    // A link LOST while OpenThread is stopped (it let go for a maintenance and the channel did not come back): NO_RADIO
+    // with the channel's reason instead of STARTING for good.
+    const bool lost_stopped = fresh && in.type == RADIO_MUX_IN_LOST && !lost_firmware && !s_ot_chan &&
+                              br_core_get_mode() == BR_MODE_STARTING;
 
-    if ((s_ot_chan && (s_ot_chan != att || s_ot_gen != gen || atomic_load(&s_link.gone))) ||
-            (!s_ot_chan && !att && s_start_failed)) {
+    if ((s_ot_chan && (s_ot_chan != att || atomic_load(&s_link.gone))) || (!s_ot_chan && !att && s_start_failed) ||
+            lost_stopped) {
+        bool firmware_fault;
+
         radio_busy_begin("OpenThread's stop");
         note_refusal(NULL, NULL);
-        s_lost = note_no_radio_reason(s_ot_chan);
+        s_lost = note_no_radio_reason(s_ot_chan, NULL);
         ESP_LOGW(TAG, "%s: NO_RADIO, OpenThread stops", s_no_radio_reason);
         s_start_failed = false;
         mode_fsm_on_channel_gone(&g_fsm); // NO_RADIO first: new sessions are refused while the open ones drain
         s_lost = false;
-        // Again after the teardown: GONE reaches us before the mux lists an unplugged dongle absent, so the first
-        // reason said "went away" where it is "radio unplugged" (hardware pass 2026-11-07).
-        note_no_radio_reason(NULL);
+        // Again after the teardown: the channel's state may have moved on (an unplugged dongle is listed absent only
+        // after its LOST).
+        note_no_radio_reason(NULL, &firmware_fault);
+        if ((lost_firmware || firmware_fault) && br_core_get_mode() == BR_MODE_NO_RADIO) {
+            enter_firmware_fault(lost_firmware ? in.reason : s_no_radio_reason);
+        }
         after_channel_op();
         radio_busy_end();
+    } else if (lost_firmware) {
+        enter_firmware_fault(in.reason); // OpenThread did not run on it (the boot, or it had stopped for a maintenance)
+        after_channel_op();
     }
     const bool retry = atomic_exchange(&s_retry, false) && s_start_failed; // a PUT of mode otbr (device_api)
+    const bool bind = fresh && (in.type == RADIO_MUX_IN_BIND || in.type == RADIO_MUX_IN_BACK);
 
-    if (!s_ot_chan && att && (gen != s_tried_gen || retry)) {
+    if (!s_ot_chan && att && (bind || retry)) {
         radio_busy_begin("the RCP probe");
         note_refusal(NULL, NULL);
-        s_tried_gen = gen;
         s_probe_err[0] = '\0';
         ESP_LOGI(TAG, "%s: starting OpenThread", radio_mux_chan_id(att));
         mode_fsm_on_channel_back(&g_fsm, radio_mux_chan_id(att));
@@ -767,7 +920,7 @@ static void run_move(void)
     }
     if (ret == ESP_OK) {
         if (stop) {
-            note_no_radio_reason(NULL); // "no channel in otbr"
+            note_no_radio_reason(NULL, NULL); // "no channel in otbr"
         }
         ESP_LOGI(TAG, "OpenThread %s %s", stop ? "stopped on" : "moved to", stop ? s_move.from : s_move.to);
     } else {
@@ -777,13 +930,14 @@ static void run_move(void)
         ESP_LOGW(TAG, "%s OpenThread %s %s: %s (%s)", stop ? "stopping" : "moving", stop ? "on" : "to",
                  stop ? s_move.from : s_move.to, esp_err_to_name(ret), err);
     }
-    after_channel_op();
     if (ret == MODE_FSM_ERR_START_ABANDONED) {
-        // OpenThread's init was abandoned on the target: only a reboot starts it again, on the source's stored mode.
+        // OpenThread's init was abandoned on the target: RADIO_FAULT, as on every other path. No reboot: the binding
+        // already names the target, so a reboot would come back there (a PUT of mode otbr on another channel, then a
+        // reboot, is the way out).
         ESP_LOGE(TAG, "%s", err);
         core_set_reason(err);
-        core_schedule_reboot();
     }
+    after_channel_op();
     move_finished();
 }
 
@@ -795,6 +949,7 @@ static void radio_task(void *arg)
             run_move();
         }
         reconcile();
+        report_state();
     }
 }
 
@@ -813,24 +968,16 @@ static esp_err_t start_radio_task(void)
     return ESP_OK;
 }
 
-// The board's radio at boot (spec: Board mode): no channel stored in otbr, or a dongle, is NO_RADIO until it attaches;
-// the C6 runs its boot steps inside a C6 job (R29: rcp_sync drives SPI3 and the INT pin) at every boot, whatever channel
-// is in otbr: the probe of its installed RCP, the jumper's detection, the automatic ROM recovery. The mux holds the C6
-// unattached from its start, and this job runs in that hold, so the C6's stored mode is attached once, at the job's
-// end. With the C6 in otbr that attach starts OpenThread on br_radio; a fault the steps found stays (the C6 is not
-// listed, nothing starts on it). Otherwise they only update the C6's status and listing, and OpenThread starts on its
-// own channel meanwhile (br_radio is not held).
+// The board's radio at boot (spec: Board mode): no channel stored in otbr, or a dongle, is NO_RADIO until its channel
+// is bound; the C6 stays STARTING while its boot steps run (the orchestrator keeps it in reinit), then OpenThread
+// starts on its BIND, or its LOST says why it cannot (RADIO_FAULT with the steps' reason).
 void core_radio_boot(void)
 {
     char id[RADIO_MUX_ID_MAX];
     const bool stored = radio_mux_otbr_channel(id, sizeof(id));
     const bool c6 = mode_fsm_boot(&g_fsm, stored ? id : NULL);
 
-    // br_radio first, so moves and the channel's return work whatever the boot below does. The C6's boot job keeps it
-    // out until its end attaches the C6 when the C6 is the OTBR channel (R29: rcp_sync drives SPI3 and the INT pin).
-    atomic_store(&s_booting, c6);
     if (start_radio_task() != ESP_OK) {
-        atomic_store(&s_booting, false);
         core_enter_fault("cannot create the radio task");
         return;
     }
@@ -840,49 +987,26 @@ void core_radio_boot(void)
         core_set_reason(s_no_radio_reason);
         ESP_LOGI(TAG, "NO_RADIO: %s", s_no_radio_reason);
         xSemaphoreGive(g_core.boot_done);
-        core_radio_notify(); // a dongle attached before the start
     }
-    atomic_store(&s_c6_boot_steps, true);
-    const esp_err_t job = radio_mux_c6_job_begin();
-
-    if (job != ESP_OK) {
-        atomic_store(&s_c6_boot_steps, false);
-        if (c6) {
-            atomic_store(&s_booting, false);
-            core_enter_fault(job == ESP_ERR_TIMEOUT ? "the radio mux did not answer" : "the C6 is busy");
-            core_radio_notify();
-        } else {
-            ESP_LOGW(TAG, "the C6's boot steps did not run: %s", esp_err_to_name(job));
-        }
-        return;
-    }
-    const esp_err_t steps = core_c6_boot_steps(c6);
-
-    // Only a C6 whose steps passed is attached again: a fault they entered stays (as before the mux), instead of
-    // OpenThread's start through the channel clearing it. The test build's c6_hold keeps the C6 in reset as well.
-    radio_mux_c6_job_end(mode_fsm_c6_usable_after_steps(steps));
-    atomic_store(&s_c6_boot_steps, false);
-    atomic_store(&s_booting, false);
-    core_radio_notify();
+    core_radio_notify(); // a channel bound before the start
 }
 
 esp_err_t br_core_register_otbr(void)
 {
     static StaticSemaphore_t probed_buf;
-    const radio_mux_consumer_t consumer = {
+    const radio_mux_instance_t inst = {
         .mode = RADIO_MUX_MODE_OTBR,
         .needs = RADIO_MUX_FW_SPINEL,
         .limit = 1,
         .reboot_on_change = false,
         .frames = true,
-        .attach = otbr_attach,
-        .detach = otbr_detach,
+        .input = on_input,
     };
 
     if (!s_move.probed) {
         s_move.probed = xSemaphoreCreateBinaryStatic(&probed_buf);
     }
-    ESP_RETURN_ON_ERROR(radio_mux_register_consumer(&consumer), TAG, "the otbr consumer");
+    ESP_RETURN_ON_ERROR(radio_mux_register_instance(&inst), TAG, "the Thread instance");
     radio_mux_set_otbr_mover(br_core_move_otbr);
     return ESP_OK;
 }
@@ -913,7 +1037,10 @@ esp_err_t br_core_move_otbr(const char *from, const char *to, char *reason, size
         snprintf(reason, cap, "OpenThread is already being moved");
         return ESP_ERR_INVALID_STATE;
     }
-    if (atomic_load(&g_core.push_busy)) { // a push checks s_move.running after it set push_busy: one of them refuses
+    // A maintenance of the C6 checks s_move.running before it asks: one of them refuses. The C6's boot steps keep a
+    // move to the C6 out by its lease (the channel is in reinit).
+    if (radio_mux_maintenance_running() && ((from && strcmp(from, RADIO_MUX_BUILTIN_ID) == 0) ||
+                                            strcmp(to, RADIO_MUX_BUILTIN_ID) == 0)) {
         atomic_store(&s_move.running, false);
         snprintf(reason, cap, "a C6 firmware push or recovery runs");
         return ESP_ERR_INVALID_STATE;
@@ -964,39 +1091,6 @@ void br_core_retry_otbr(void)
 {
     atomic_store(&s_retry, true);
     core_radio_notify();
-}
-
-// OpenThread on the C6 again after a job: the mux attached it at the job's end when it answers. Probe and start, as
-// br_radio does for any attach (the radio job keeps br_radio out meanwhile).
-esp_err_t core_radio_restart_on_c6(void)
-{
-    char err[64];
-    radio_mux_chan_t *ch = atomic_load(&s_attached);
-
-    if (!ch || strcmp(radio_mux_chan_id(ch), RADIO_MUX_C6_ID) != 0) {
-        core_radio_set_start_failed(false); // nothing to retry on: the boot steps' fault says why
-        return ESP_ERR_NOT_FOUND; // unavailable after the job
-    }
-    s_tried_gen = atomic_load(&s_attach_gen);
-    if (core_radio_probe_channel(RADIO_MUX_C6_ID, err, sizeof(err)) != ESP_OK) {
-        core_set_reason(s_probe_err); // "rcp incompatible" unless the channel went away
-        core_radio_set_start_failed(true); // a PUT of mode otbr on the C6 tries again
-        return ESP_ERR_INVALID_RESPONSE;
-    }
-    const esp_err_t start = core_radio_ot_start(RADIO_MUX_C6_ID);
-
-    core_radio_set_start_failed(start != ESP_OK);
-    return start;
-}
-
-void core_radio_set_start_failed(bool failed)
-{
-    s_start_failed = failed;
-}
-
-bool core_radio_c6_boot_running(void)
-{
-    return atomic_load(&s_c6_boot_steps);
 }
 
 radio_mux_chan_t *core_radio_chan(void)

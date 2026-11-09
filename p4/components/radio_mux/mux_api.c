@@ -1,5 +1,6 @@
 // The consumer side (bind, poll, release, tx, reset, raw reads, firmware notes) and the API side (snapshot, set,
 // forget, otbr channel, mover) of the mux. Calls that change a channel post a message and wait for the owner task.
+#include <inttypes.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,35 +8,18 @@
 
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "radio_mux_priv.h"
+
+#define MAINT_SETTLE_POLL_MS 100 // how often a maintenance looks whether its channel's mode runs again
 
 static const char *TAG = "radio_mux";
 
 #define CALL_WAIT_MS 5000
 #define RESET_POST_WAIT_MS 1000 // a reset must not be lost to a queue that is full for a moment
 #define END_ALLOC_RETRY_MS 100
-
-/* ---- registration ---- */
-
-esp_err_t radio_mux_register_consumer(const radio_mux_consumer_t *c)
-{
-    ESP_RETURN_ON_FALSE(c && c->attach && c->detach, ESP_ERR_INVALID_ARG, TAG, "consumer needs attach and detach");
-    ESP_RETURN_ON_FALSE(c->mode == RADIO_MUX_MODE_OTBR || c->mode == RADIO_MUX_MODE_ZIGGURAT ||
-                        c->mode == RADIO_MUX_MODE_RCP_PROXY, ESP_ERR_INVALID_ARG, TAG, "no consumer for mode %d",
-                        (int)c->mode);
-    ESP_RETURN_ON_FALSE(!atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "register before radio_mux_start");
-    ESP_RETURN_ON_FALSE(!mux_find_consumer(c->mode), ESP_ERR_INVALID_STATE, TAG, "%s already has a consumer",
-                        radio_mux_mode_name(c->mode));
-    ESP_RETURN_ON_FALSE(g_mux.n_consumers < RADIO_MUX_RULES_MAX, ESP_ERR_NO_MEM, TAG, "too many consumers");
-    g_mux.consumers[g_mux.n_consumers++] = *c;
-    g_mux.rules.rules[g_mux.rules.n++] = (radio_mux_rule_t) {
-        .mode = c->mode, .needs = c->needs, .limit = c->limit, .reboot_on_change = c->reboot_on_change,
-    };
-    ESP_LOGI(TAG, "%s consumer registered", radio_mux_mode_name(c->mode));
-    return ESP_OK;
-}
 
 /* ---- consumer side ---- */
 
@@ -154,7 +138,7 @@ esp_err_t radio_mux_tx(radio_mux_chan_t *ch, const uint8_t *data, size_t n)
     xSemaphoreTake(p->tx_lock, portMAX_DELAY);
     if (!atomic_load(&p->tx_ok) || !is_current(p, ch)) {
         err = ESP_ERR_INVALID_STATE;
-    } else if (p->kind == RADIO_MUX_KIND_C6) {
+    } else if (p->kind == RADIO_MUX_KIND_BUILTIN) {
         err = radio_mux_tx_transport_err(c6_transport_tx(data, n)); // one SPI transaction (frames only, R23)
     } else if (p->tx_frames) {
         const size_t len = radio_mux_hdlc_encode(data, n, p->tx_buf, p->tx_cap);
@@ -212,7 +196,7 @@ bool radio_mux_chan_frames(const radio_mux_chan_t *ch)
 {
     mux_port_t *p = current_port(ch, NULL);
 
-    return p && (p->kind == RADIO_MUX_KIND_C6 || p->tx_frames);
+    return p && (p->kind == RADIO_MUX_KIND_BUILTIN || p->tx_frames);
 }
 
 const char *radio_mux_chan_id(const radio_mux_chan_t *ch)
@@ -239,19 +223,81 @@ void radio_mux_get_proxy(const radio_mux_chan_t *ch, radio_mux_proxy_settings_t 
     mux_unlock();
 }
 
-void radio_mux_set_busy_peer(radio_mux_chan_t *ch, bool has_peer)
+void radio_mux_report(radio_mux_chan_t *ch, const char *state, const char *reason)
 {
-    mux_port_t *p = current_port(ch, NULL);
+    struct radio_mux_chan *rec;
+    mux_port_t *p = current_port(ch, &rec);
 
-    if (!p) {
-        return; // a handle of an earlier attach: the flag is the current consumer's
+    if (!p || !state) {
+        return;
     }
-    // A true from a consumer that is no longer attached (its GONE not yet taken) is dropped: detach cleared the flag.
-    taskENTER_CRITICAL(&p->lock);
-    if (is_current(p, ch) && (!has_peer || atomic_load(&p->tx_ok))) {
-        p->busy_peer = has_peer;
+    mux_lock();
+    if (is_current(p, ch)) {
+        snprintf(rec->mode_state, sizeof(rec->mode_state), "%s", state);
+        snprintf(rec->mode_reason, sizeof(rec->mode_reason), "%s", reason ? reason : "");
     }
-    taskEXIT_CRITICAL(&p->lock);
+    mux_unlock();
+}
+
+// Reinit answers until the owner takes them, oldest first: a few slots (one reinit runs at a time; the others are
+// late or stale answers the owner ignores). Under s_reply_lock.
+#define REPLY_SLOTS 4
+static portMUX_TYPE s_reply_lock = portMUX_INITIALIZER_UNLOCKED;
+static mux_reply_t s_replies[REPLY_SLOTS];
+static size_t s_reply_head, s_reply_n;
+
+esp_err_t radio_mux_reinit_reply(radio_mux_chan_t *ch, uint32_t seq, esp_err_t verdict, const char *reason)
+{
+    mux_reply_t r = {.h = ch, .seq = seq, .verdict = verdict}; // the owner checks the generation and the seq
+    const mux_msg_t wake = {.type = MUX_MSG_REINIT_REPLY};
+    bool dropped = false;
+
+    snprintf(r.reason, sizeof(r.reason), "%s", reason ? reason : "");
+    // The seq the asked run waits for (written by the owner; a torn read only picks another slot to drop).
+    const uint32_t asked = g_mux.reinit.seq;
+
+    taskENTER_CRITICAL(&s_reply_lock);
+    if (s_reply_n == REPLY_SLOTS) {
+        // Full: an answer to another seq goes (stale or late), never the one the asked run waits for; the oldest only
+        // when every slot holds that seq.
+        size_t victim = 0;
+
+        for (size_t k = 0; k < s_reply_n; k++) {
+            if (s_replies[(s_reply_head + k) % REPLY_SLOTS].seq != asked) {
+                victim = k;
+                break;
+            }
+        }
+        for (size_t k = victim; k + 1 < s_reply_n; k++) {
+            s_replies[(s_reply_head + k) % REPLY_SLOTS] = s_replies[(s_reply_head + k + 1) % REPLY_SLOTS];
+        }
+        s_reply_n--;
+        dropped = true;
+    }
+    s_replies[(s_reply_head + s_reply_n) % REPLY_SLOTS] = r;
+    s_reply_n++;
+    taskEXIT_CRITICAL(&s_reply_lock);
+    if (dropped) {
+        ESP_LOGW(TAG, "reinit answers: one for another run was dropped");
+    }
+    if (!mux_post(&wake)) {
+        ESP_LOGW(TAG, "reinit answer %" PRIu32 ": queue full, the owner takes it on its next round", seq);
+    }
+    return ESP_OK;
+}
+
+bool mux_take_reply(mux_reply_t *out)
+{
+    taskENTER_CRITICAL(&s_reply_lock);
+    const bool pending = s_reply_n > 0;
+
+    if (pending) {
+        *out = s_replies[s_reply_head];
+        s_reply_head = (s_reply_head + 1) % REPLY_SLOTS;
+        s_reply_n--;
+    }
+    taskEXIT_CRITICAL(&s_reply_lock);
+    return pending;
 }
 
 void radio_mux_note_firmware(radio_mux_chan_t *ch, const radio_mux_fw_record_t *fw)
@@ -309,11 +355,18 @@ static void fill_info(const struct radio_mux_chan *ch, radio_mux_chan_info_t *o)
     } else {
         o->counters = ch->ctr;
     }
+    o->chan_state = ch->chan_state;
+    o->fault_kind = ch->fault_kind;
+    o->work = ch->work;
+    memcpy(o->chan_reason, ch->chan_reason, sizeof(o->chan_reason));
+    memcpy(o->mode_state, ch->mode_state, sizeof(o->mode_state));
+    memcpy(o->mode_reason, ch->mode_reason, sizeof(o->mode_reason));
 }
 
 void radio_mux_get_snapshot(radio_mux_snapshot_t *out)
 {
     out->n = 0;
+    out->n_modes = 0;
     out->available_modes = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF);
     out->reboot_modes = 0;
     if (!atomic_load(&g_mux.started)) {
@@ -327,13 +380,14 @@ void radio_mux_get_snapshot(radio_mux_snapshot_t *out)
             fill_info(&g_mux.chans[i], &out->chans[out->n++]);
         }
     }
+    orch_fill_modes(out);
     mux_unlock();
 }
 
 // Posts a call to the owner and waits for it. ESP_ERR_TIMEOUT when it could not be posted in time: the owner never
 // sees it. ESP_ERR_NOT_FINISHED when it was posted but not answered in time: the owner still runs it when it gets to
 // it (unless the caller abandons a claimable call) and frees the record then.
-static esp_err_t call_owner(mux_msg_type_t type, mux_call_t *call)
+static esp_err_t call_owner_ms(mux_msg_type_t type, mux_call_t *call, uint32_t answer_ms)
 {
     const mux_msg_t m = {.type = type, .call = call};
 
@@ -342,16 +396,21 @@ static esp_err_t call_owner(mux_msg_type_t type, mux_call_t *call)
         ESP_LOGW(TAG, "%s: the owner task's queue stayed full for %d ms: not posted", call->id, CALL_WAIT_MS);
         return ESP_ERR_TIMEOUT;
     }
-    if (xSemaphoreTake(call->done, pdMS_TO_TICKS(CALL_WAIT_MS)) != pdTRUE) {
-        ESP_LOGW(TAG, "%s: the owner task did not answer in %d ms", call->id, CALL_WAIT_MS);
+    if (xSemaphoreTake(call->done, pdMS_TO_TICKS(answer_ms)) != pdTRUE) {
+        ESP_LOGW(TAG, "%s: the owner task did not answer in %" PRIu32 " ms", call->id, answer_ms);
         return ESP_ERR_NOT_FINISHED;
     }
     return ESP_OK;
 }
 
-// An end message (C6 job end, lease end) must reach the owner, or c6 stays busy or the channel leased until a reboot:
-// its record is allocated until it can be (call_new_end), the post waits as long as it takes, and only the answer may
-// time out (logged; the owner runs it later).
+static esp_err_t call_owner(mux_msg_type_t type, mux_call_t *call)
+{
+    return call_owner_ms(type, call, CALL_WAIT_MS);
+}
+
+// An end message (a reinit's end, a lease's end) must reach the owner, or c6 stays in reinit or the channel leased until
+// a reboot: its record is allocated until it can be (call_new_end), the post waits as long as it takes, and only the
+// answer may time out (logged; the owner runs it later).
 static void call_owner_end(mux_msg_type_t type, mux_call_t *call, const char *what)
 {
     const mux_msg_t m = {.type = type, .call = call};
@@ -470,48 +529,101 @@ esp_err_t radio_mux_forget(const char *id)
     return err;
 }
 
-esp_err_t radio_mux_c6_job_begin(void)
+// After a maintenance: until the built-in channel's stored mode runs again or says it does not (radio_mux_orch_settle),
+// at most RADIO_MUX_SETTLE_MS; the outcome into *res.
+static void wait_settled(radio_mux_maint_t *res)
 {
-    if (!atomic_load(&g_mux.started)) {
-        return ESP_OK; // nothing holds the C6
+    const int64_t until = esp_timer_get_time() + (int64_t)RADIO_MUX_SETTLE_MS * 1000;
+
+    for (;;) {
+        const struct radio_mux_chan *ch = g_mux.c6.chan;
+
+        mux_lock();
+        res->mode = ch->mode;
+        res->settle = radio_mux_orch_settle(ch->chan_state, orch_find(ch->mode) != NULL, ch->mode_state,
+                                            ch->mode_reason);
+        snprintf(res->mode_state, sizeof(res->mode_state), "%s", ch->mode_state);
+        snprintf(res->mode_reason, sizeof(res->mode_reason), "%s", ch->mode_reason);
+        mux_unlock();
+        if (res->settle != RADIO_MUX_SETTLE_WAIT || esp_timer_get_time() >= until) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(MAINT_SETTLE_POLL_MS));
     }
-    mux_call_t *call = call_new(RADIO_MUX_C6_ID);
+    ESP_LOGI(TAG, "%s after the maintenance: %s %s%s%s", g_mux.c6.chan->id, radio_mux_mode_name(res->mode),
+             res->mode_state[0] ? res->mode_state : "-", res->mode_reason[0] ? ": " : "", res->mode_reason);
+}
+
+void mux_maint_finish(const char *id)
+{
+    const radio_mux_builtin_t *b = g_mux.builtin;
+    mux_call_t *call = call_new_end(id);
+
+    call->steps = b ? b->boot_steps(&call->kind, call->reason, sizeof(call->reason)) : ESP_OK;
+    call_owner_end(MUX_MSG_MAINT_DONE, call, "reinit end");
+    mux_call_put(call);
+}
+
+esp_err_t radio_mux_maintain(const char *id, radio_mux_work_t work, const void *source, char *detail, size_t cap,
+                             radio_mux_maint_t *out)
+{
+    const radio_mux_builtin_t *b = g_mux.builtin;
+    radio_mux_maint_t res = {0};
+
+    if (detail && cap > 0) {
+        detail[0] = '\0';
+    }
+    if (out) {
+        *out = res;
+    }
+    ESP_RETURN_ON_FALSE(id && atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "not started");
+    ESP_RETURN_ON_FALSE(b, ESP_ERR_NOT_SUPPORTED, TAG, "no built-in RCP");
+    ESP_RETURN_ON_FALSE(work == RADIO_MUX_WORK_PUSH || work == RADIO_MUX_WORK_ROM_RECOVERY, ESP_ERR_INVALID_ARG, TAG,
+                        "not a maintenance: %d", (int)work);
+    mux_call_t *call = call_new(id);
 
     ESP_RETURN_ON_FALSE(call, ESP_ERR_NO_MEM, TAG, "call");
-    esp_err_t err = call_owner(MUX_MSG_C6_JOB_BEGIN, call);
+    call->work = work;
+    // The owner answers by the instance's deadline (RADIO_MUX_REINIT_REPLY_MS) at the latest.
+    esp_err_t err = call_owner_ms(MUX_MSG_MAINT_ASK, call, RADIO_MUX_REINIT_REPLY_MS + 2 * CALL_WAIT_MS);
 
     if (err == ESP_ERR_TIMEOUT) {
+        snprintf(detail, cap, "the radio mux did not answer");
         mux_call_put(call);
-        return ESP_ERR_TIMEOUT; // not posted: nothing ran
+        return ESP_ERR_TIMEOUT; // not posted: nothing asked
     }
     if (err == ESP_ERR_NOT_FINISHED) {
         int pending = MUX_CALL_PENDING;
 
         if (atomic_compare_exchange_strong(&call->claim, &pending, MUX_CALL_ABANDONED)) {
+            snprintf(detail, cap, "the radio mux did not answer");
             mux_call_put(call);
-            return ESP_ERR_TIMEOUT; // the owner skips it when it gets there: nothing ran
+            return ESP_ERR_TIMEOUT; // the owner ends the reinit by itself if it ever runs: nothing ran here
         }
-        // The owner took it just now: it runs to the end, so its result stands.
-        xSemaphoreTake(call->done, portMAX_DELAY);
-        err = ESP_OK;
+        xSemaphoreTake(call->done, portMAX_DELAY); // taken just now: the channel is in reinit
     }
-    if (err == ESP_OK) {
-        err = call->err;
+    err = call->err;
+    if (err != ESP_OK && detail && cap > 0) {
+        snprintf(detail, cap, "%s", call->reason);
     }
     mux_call_put(call);
+    if (err != ESP_OK) {
+        return err;
+    }
+    // The channel is in reinit: the work, then the boot steps; the owner then makes it ready or a fault again.
+    res.ran = true;
+    err = work == RADIO_MUX_WORK_PUSH ? b->push(source, detail, cap, &res.base_only) : b->rom_recover(detail, cap);
+    mux_maint_finish(id);
+    wait_settled(&res);
+    if (out) {
+        *out = res;
+    }
     return err;
 }
 
-void radio_mux_c6_job_end(bool c6_ok)
+bool radio_mux_maintenance_running(void)
 {
-    if (!atomic_load(&g_mux.started)) {
-        return;
-    }
-    mux_call_t *call = call_new_end(RADIO_MUX_C6_ID);
-
-    call->c6_ok = c6_ok;
-    call_owner_end(MUX_MSG_C6_JOB_END, call, "job end");
-    mux_call_put(call);
+    return atomic_load(&g_mux.maint_running);
 }
 
 bool radio_mux_otbr_channel(char *out, size_t cap)

@@ -7,6 +7,7 @@
 #include "esp_err.h"
 #include "openthread/link_raw.h"
 #include "br_core_mode.h"
+#include "radio_mux_orch_core.h"
 #include "rcp_sync.h"
 
 #ifdef __cplusplus
@@ -20,8 +21,8 @@ extern "C" {
 /** A reset the radio mux could not post (ESP_ERR_TIMEOUT, ESP_ERR_NO_MEM: its queue full) is tried once more after
  * this long before it counts as failed. */
 #define MODE_FSM_RESET_RETRY_MS 100
-/** The on-board C6's channel id (RADIO_MUX_C6_ID; mode_fsm stays free of the mux). */
-#define MODE_FSM_C6_ID "c6"
+/** The built-in channel's id (RADIO_MUX_BUILTIN_ID; mode_fsm stays free of the mux). */
+#define MODE_FSM_BUILTIN_ID "builtin-c6"
 /** mode_fsm_move_otbr results besides ESP_OK and ESP_ERR_INVALID_STATE (busy). */
 #define MODE_FSM_ERR_PROBE_FAILED ESP_ERR_INVALID_RESPONSE /**< the target's probe failed; nothing changed */
 #define MODE_FSM_ERR_DRAIN_TIMEOUT ESP_ERR_TIMEOUT        /**< the OpenThread sessions did not end; nothing changed */
@@ -33,6 +34,8 @@ extern "C" {
 #define MODE_FSM_ERR_START_ABANDONED ESP_ERR_NOT_FINISHED
 /** The reason of a drain timeout (the API's error code). */
 #define MODE_FSM_DRAIN_TIMEOUT "drain_timeout"
+/** The fault reason once OpenThread's init was abandoned: no start can run again until a reboot. */
+#define MODE_FSM_FAULT_ABANDONED "an earlier OpenThread start was abandoned: reboot"
 
 /** Everything the FSM does to the outside world; br_core.c provides the real ones, host tests fakes. */
 typedef struct {
@@ -61,14 +64,6 @@ typedef struct {
     esp_err_t (*reset_rcp)(void);
     /** Block the calling task for `ms` milliseconds (the reset's retry delay). */
     void (*sleep_ms)(uint32_t ms);
-    /**
-     * Stop OpenThread, push the firmware, hardware-reset the C6, start OpenThread again. Returns the push error
-     * (or the restart error when the push worked). *restarted tells whether OpenThread runs again, whatever the
-     * push result: a failed push restarts it with the previous firmware.
-     */
-    esp_err_t (*push_firmware)(const rcp_fw_source_t *source, char *err_detail, size_t err_cap, bool *restarted);
-    /** As push_firmware, but the job is a ROM recovery of the C6 base image over the maintenance jumper (no image). */
-    esp_err_t (*rom_recover)(char *err_detail, size_t err_cap, bool *restarted);
     void (*reboot)(void);
     int64_t (*now_us)(void);
     /**
@@ -87,8 +82,10 @@ typedef struct {
      * drain: nothing was stopped. ESP_OK when nothing runs.
      */
     esp_err_t (*ot_stop)(void);
-    /** Store channel `to` in mode otbr and `from` in mode off (both stored modes, after `to` runs). */
+    /** The commit of a move: channel `to` in mode otbr and `from` in mode off (both stored modes), before `to` starts. */
     esp_err_t (*store_otbr)(const char *from, const char *to);
+    /** The mode changed (to `mode`); Thread's state goes to the orchestrator's read API. Never blocks. May be NULL. */
+    void (*mode_changed)(br_core_mode_t mode);
 } mode_fsm_ops_t;
 
 typedef struct {
@@ -98,8 +95,6 @@ typedef struct {
     size_t recovery_count;
     void (*sniffer_end_cb)(void); /**< see mode_fsm_set_sniffer_end_cb; NULL = none */
     bool thread_stopped_by_capture; /**< Thread/netif were stopped for a capture and not restored yet */
-    bool radio_job; /**< a push or ROM recovery began (mode_fsm_begin_radio_job) and has not ended */
-    br_core_mode_t radio_job_prev; /**< the mode before it, put back by mode_fsm_cancel_radio_job */
 } mode_fsm_t;
 
 /** Mode STARTING. `ops` must outlive the FSM. */
@@ -118,8 +113,7 @@ br_core_mode_t mode_fsm_get_mode(const mode_fsm_t *fsm);
 /** True only in BR_MODE_BR_RUNNING. */
 bool mode_fsm_thread_ops_allowed(const mode_fsm_t *fsm);
 
-/** STARTING to BR_RUNNING once the border router is up; any other mode stays (a fault entered meanwhile wins). No
- *  change while a push or ROM recovery runs (its STARTING ends with the job). */
+/** STARTING to BR_RUNNING once the border router is up; any other mode stays (a fault entered meanwhile wins). */
 bool mode_fsm_set_started(mode_fsm_t *fsm);
 
 /** Unrecoverable-here fault (init failure, dead radio): RADIO_FAULT from any mode, no recovery attempt. */
@@ -130,12 +124,6 @@ esp_err_t mode_fsm_enter_sniffer(mode_fsm_t *fsm, uint8_t channel, otLinkRawRece
 
 /** ESP_ERR_INVALID_STATE unless SNIFFER. A failed restore reboots the device. */
 esp_err_t mode_fsm_leave_sniffer(mode_fsm_t *fsm);
-
-/**
- * Whether a firmware push may start: ESP_ERR_INVALID_STATE in STARTING and SNIFFER, and from the OpenThread task
- * (it cannot stop its own main loop). Pure; br_core calls it before it touches any state.
- */
-esp_err_t mode_fsm_push_allowed(br_core_mode_t mode, bool caller_is_openthread_task);
 
 /** Reason shown when OpenThread cannot start because NVS (its settings, the Thread credentials) is unusable. */
 #define MODE_FSM_FAULT_STORAGE "storage unavailable"
@@ -164,31 +152,6 @@ typedef enum {
  */
 mode_fsm_fault_action_t mode_fsm_fault_action(bool caller_is_openthread_task);
 
-/** Final state of the Thread REST flag after a push, whatever its outcome: on only in BR_RUNNING with OpenThread up. */
-bool mode_fsm_rest_ready_after_push(br_core_mode_t mode, bool openthread_ready);
-
-/**
- * Start a push or ROM recovery: ESP_ERR_INVALID_STATE in STARTING and SNIFFER (nothing changes). Otherwise the mode
- * becomes STARTING (the REST guard refuses Thread access, the border router start does not complete, an RCP failure
- * only resets the C6) until the job ends. Called under the OpenThread lock while OpenThread runs, so that the check
- * and the change cannot be separated by a mode change.
- */
-esp_err_t mode_fsm_begin_radio_job(mode_fsm_t *fsm);
-
-/** A begun job that will not run (nothing was stopped): the mode before mode_fsm_begin_radio_job comes back. */
-void mode_fsm_cancel_radio_job(mode_fsm_t *fsm);
-
-/**
- * Push an RCP image on request. Begins the job (mode_fsm_begin_radio_job) unless the caller already did:
- * ESP_ERR_INVALID_STATE in STARTING and SNIFFER (nothing is touched). The mode is STARTING while the push runs and
- * BR_RUNNING afterwards when OpenThread runs again (also after a failed push, which then returns its error),
- * RADIO_FAULT when it does not. Works from RADIO_FAULT.
- */
-esp_err_t mode_fsm_push_firmware(mode_fsm_t *fsm, const rcp_fw_source_t *source, char *err_detail, size_t err_cap);
-
-/** ROM recovery on request (spec 5.10): the same mode discipline as mode_fsm_push_firmware, with the rom_recover op as the job. */
-esp_err_t mode_fsm_rom_recover(mode_fsm_t *fsm, char *err_detail, size_t err_cap);
-
 /**
  * The RCP has to be reset (OpenThread's hardware-reset hook). In STARTING it is only reset. Otherwise: end a
  * running capture (locally, `raw_abort`), RADIO_FAULT, then the recovery ladder (reset the C6; if that fails, stay in
@@ -206,50 +169,11 @@ void mode_fsm_on_rcp_failure(mode_fsm_t *fsm);
 esp_err_t mode_fsm_reset_rcp(mode_fsm_t *fsm);
 
 /**
- * What a failed ROM recovery in the boot probe means: RADIO_FAULT "rom recovery failed" only when the updater was
- * silent before the attempt. When it was reachable (the trigger was a base version mismatch) an RCP may be installed
- * and the boot goes on with it; the failure is only recorded in the status. False when no recovery failed.
- */
-bool mode_fsm_rom_failure_is_fault(const rcp_sync_probe_result_t *probe);
-
-/**
- * The sticky "a ROM recovery failed" flag of the status: unchanged without an attempt, set by a failed attempt, cleared
- * by a successful one. Applies to automatic (boot probe) and manual recoveries alike.
- */
-bool mode_fsm_next_recovery_failed(bool previous, bool attempted, bool succeeded);
-
-/**
- * Result of a C6 job (the part of op_radio_job after the job ran): `job_err` is the push or the ROM recovery, `restart_err`
- * the OpenThread restart that follows. A firmware push reports its own error first; a push that worked followed by a
- * failed restart is RCP_SYNC_ERR_RESTART (the image is installed, so a retry of the push cannot help). A ROM recovery
- * reports only its own result: the restart after it fails when the C6 has no RCP firmware (the normal outcome of a
- * recovery), and that state is in the status (RADIO_FAULT "no rcp firmware"), not an error of the recovery. A push of
- * c6_installer.bin through ESP-Hosted leaves the same state and counts as base-only too (`base_only` true for both).
- */
-esp_err_t mode_fsm_radio_job_result(bool base_only, esp_err_t job_err, esp_err_t restart_err);
-
-/**
- * What the status shows as the installed RCP version after a push whose version was read back from the C6 (`probe_ok`) or
- * not: the read-back version, or, when it could not be read, unknown (`*known` false, `out` empty) — never the version
- * from before the push.
- */
-void mode_fsm_installed_after_push(bool probe_ok, const char *probed_version, bool *known, char *out, size_t cap);
-
-/**
- * The board mode at boot from the channel stored in otbr (NULL: none). The C6: true, the mode stays STARTING and the
- * C6's boot (rcp_sync probe, recovery, then the start on its channel) goes on as before the mux. No channel or a
- * dongle: NO_RADIO (no fault) and false; a dongle starts when it attaches (mode_fsm_on_channel_back). The C6's boot
- * steps run in both cases; false only means they do not decide the board mode.
+ * The board mode at boot from the channel stored in otbr (NULL: none). The C6: true, the mode stays STARTING while
+ * its boot steps run (the orchestrator then binds Thread to it, or tells it why it cannot). No channel or a dongle:
+ * NO_RADIO (no fault) and false; a dongle starts when it is bound (mode_fsm_on_channel_back).
  */
 bool mode_fsm_boot(mode_fsm_t *fsm, const char *otbr_id);
-
-/**
- * Whether the C6 is listed and its stored mode attached after its boot steps (core_c6_boot_steps returned `steps`):
- * only when they passed (ESP_OK). A fault they found ("no rcp firmware", a failed ROM recovery, the factory firmware,
- * a failed reset into the RCP, the test build's c6_hold or forced empty probe) leaves the C6 unavailable, so no start
- * of OpenThread through the channel overrides the fault the boot entered. Pure.
- */
-bool mode_fsm_c6_usable_after_steps(esp_err_t steps);
 
 /**
  * Whether the failed RCP probe (`probe_err`) before a start of OpenThread on channel `id` (not a move's probe: that
@@ -261,44 +185,24 @@ bool mode_fsm_c6_usable_after_steps(esp_err_t steps);
 bool mode_fsm_probe_fault_incompatible(const char *id, esp_err_t probe_err);
 
 /**
- * Whether a C6 job (push, ROM recovery) runs alone, leaving OpenThread and the board mode untouched: the channel stored
- * in otbr (`otbr_id`, NULL for none) is not the C6. Then the board mode's gates (SNIFFER, STARTING, a booting radio)
- * do not apply to it: that mode is another channel's. Pure.
- */
-bool mode_fsm_c6_job_alone(const char *otbr_id);
-
-/**
- * Whether a running C6 job (`job_running`) holds OpenThread, which keeps br_radio's reconcile out: OpenThread runs on
- * the C6 (`ot_chan_id`, NULL when stopped) or the C6 is the channel stored in otbr (`otbr_id`, NULL for none), so the
- * job stops and starts it itself. A job while OpenThread runs on (or waits for) a dongle holds nothing: that channel's
- * GONE or attach is handled at once. Pure.
- */
-bool mode_fsm_job_holds_openthread(bool job_running, const char *ot_chan_id, const char *otbr_id);
-
-/**
  * Whether an OpenThread (re)start failed in a way a PUT of mode otbr on its channel retries (br_core_retry_otbr): the
  * mode is RADIO_FAULT and OpenThread is not running (`ot_running`). Every path that tries a start (br_radio's start on
- * an attach, the restart after a C6 job, a move with its start back on the source) records it. Pure.
+ * a bind, a move with its start back on the source) records it. Pure.
  */
 bool mode_fsm_start_failed(br_core_mode_t mode, bool ot_running);
 
 /**
  * Move OpenThread from channel `from` ("" for a start: no channel runs it) to `to` ("" for a stop of OpenThread on
- * `from`, which leaves otbr): the spec's plain stop and start "work the same way". A stop: the probe op is called with
- * "" (it only accepts), then STARTING, ot_stop (MODE_FSM_ERR_DRAIN_TIMEOUT: the mode before back, nothing stored, never
- * RADIO_FAULT), store_otbr(from, "") and NO_RADIO; a failed store starts OpenThread on `from` again as below.
- * A move or start: in order: probe `to` (refused with
- * MODE_FSM_ERR_PROBE_FAILED, the reason in `err`, nothing changed); STARTING; stop OpenThread (MODE_FSM_ERR_DRAIN_TIMEOUT,
- * `err` MODE_FSM_DRAIN_TIMEOUT, the mode before the move back, nothing changed); start on `to`; store both modes only
- * then. A failed start on `to`, or a failed store after it (OpenThread stopped on `to` again), starts OpenThread on
- * `from` again and returns MODE_FSM_ERR_START_FAILED with nothing stored; when that start fails too the mode is
- * RADIO_FAULT. From NO_RADIO (`from` is absent) or for a start the stop does nothing and a failed start leaves NO_RADIO.
- * A start on
- * `to` that abandoned OpenThread's init (MODE_FSM_ERR_START_ABANDONED) cannot be followed by another start: the move
- * returns it, nothing stored, the mode stays STARTING, and the caller reboots the board (it boots on `from`). The same
- * when the start on `from` again abandons the init.
- * ESP_ERR_INVALID_STATE (nothing touched) in STARTING and SNIFFER and during a radio job. A successful start ends in
- * BR_RUNNING through mode_fsm_set_started (the border router start). Blocks for the whole move.
+ * `from`, which leaves otbr): a move is a rebind (design section 4.5). In order: probe `to` (refused with
+ * MODE_FSM_ERR_PROBE_FAILED, the reason in `err`, nothing changed; a stop's probe only accepts); STARTING; stop
+ * OpenThread on the source (MODE_FSM_ERR_DRAIN_TIMEOUT, `err` MODE_FSM_DRAIN_TIMEOUT, the mode before back, nothing
+ * changed, never RADIO_FAULT); the commit, store_otbr(from, to) (a stop: NO_RADIO and done; a failure changed nothing:
+ * OpenThread starts again on `from`, NO_RADIO without one, MODE_FSM_ERR_START_FAILED); then the start on `to`. A
+ * failed start stays on `to`: RADIO_FAULT, MODE_FSM_ERR_START_FAILED, no start back on `from` (a PUT of mode otbr on
+ * `to` retries, one on another channel moves it). A start that abandoned OpenThread's init: RADIO_FAULT, `err`
+ * MODE_FSM_FAULT_ABANDONED, MODE_FSM_ERR_START_ABANDONED, no reboot. ESP_ERR_INVALID_STATE (nothing touched) in
+ * STARTING and SNIFFER (a maintenance of the C6 keeps it STARTING). A successful start ends in BR_RUNNING through
+ * mode_fsm_set_started (the border router start). Blocks for the whole move.
  */
 esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, char *err, size_t cap);
 
@@ -306,16 +210,92 @@ esp_err_t mode_fsm_move_otbr(mode_fsm_t *fsm, const char *from, const char *to, 
  * The OTBR channel is gone (unplugged, failed, its mode changed): NO_RADIO at once (the guards refuse new Thread
  * sessions while the open ones drain), a capture ends (sniffer end callback), then OpenThread is torn down (ot_stop);
  * NO_RADIO again once it is (a fault entered meanwhile, e.g. a parked OpenThread task, does not stay), RADIO_FAULT when
- * the teardown did not finish. Nothing during a radio job (its own detach).
+ * the teardown did not finish.
  */
 void mode_fsm_on_channel_gone(mode_fsm_t *fsm);
 
 /**
- * The channel stored in otbr is present again (plug-in, the end of a C6 job, a mode change, the boot attach): STARTING,
- * probe, start; BR_RUNNING through the border router start. A failed probe or start ends in RADIO_FAULT. Nothing
- * during a radio job (it starts OpenThread itself).
+ * The channel stored in otbr is bound (again): plug-in, the end of a maintenance, a mode change, the boot. STARTING,
+ * probe, start; BR_RUNNING through the border router start. A failed probe or start ends in RADIO_FAULT.
  */
 void mode_fsm_on_channel_back(mode_fsm_t *fsm, const char *id);
+
+/** The board's view of Thread and the channel stored in otbr (design section 6). */
+typedef struct {
+    bool bound;                        /**< a channel is stored in otbr */
+    radio_mux_chan_state_t chan_state; /**< that channel's lifecycle state */
+    radio_mux_fault_kind_t kind;       /**< its fault kind (chan_state fault) */
+    radio_mux_work_t work;             /**< its maintenance (chan_state reinit) */
+    const char *chan_id;
+    const char *chan_reason;           /**< its reason (fault: why) */
+    /** Thread's own state: STARTING (starting, releasing), BR_RUNNING, SNIFFER or RADIO_FAULT while bound and started;
+     *  NO_RADIO otherwise. */
+    br_core_mode_t thread;
+    /** RADIO_FAULT: the start's reason; NO_RADIO on a ready channel: why Thread is not bound to it (the fit). */
+    const char *thread_reason;
+    bool unplugged; /**< the channel went absent after Thread ran on it (not at boot) */
+} mode_fsm_view_t;
+
+/**
+ * The board mode and its reason (into `reason`, cap `cap`) for a view, one row of the design's table per case:
+ * no binding: NO_RADIO "no channel in otbr"; Thread starting: STARTING; running or sniffing on a ready channel:
+ * BR_RUNNING or SNIFFER; in fault on a ready channel: RADIO_FAULT with the start's reason; the channel in a firmware
+ * fault: RADIO_FAULT with its reason; in a link fault: NO_RADIO "<its reason> (<id>)"; in reinit: STARTING for the
+ * built-in RCP's maintenance, NO_RADIO "waiting for <id>" for a dongle's detection; absent: NO_RADIO "waiting for <id>"
+ * ("radio unplugged (<id>)" once it ran); ready but not bound (the fit): NO_RADIO with Thread's reason ("waiting for
+ * <id>" when it has none). Pure.
+ */
+br_core_mode_t mode_fsm_mode_for(const mode_fsm_view_t *v, char *reason, size_t cap);
+
+/**
+ * Thread's answer to a reinit request (maintenance wants its channel): ESP_OK (it lets go once its sessions drained),
+ * or ESP_ERR_INVALID_STATE in SNIFFER and STARTING. The drain's timeout refusal comes from the drain itself. Pure.
+ */
+esp_err_t mode_fsm_reinit_verdict(br_core_mode_t mode);
+
+/**
+ * Why Thread refuses a reinit request, as today's texts: "OpenThread is being moved to another radio" while a move
+ * runs (`moving`), "a capture is running" in SNIFFER, "the border router is starting" in STARTING; NULL when it does
+ * not refuse. Pure.
+ */
+const char *mode_fsm_reinit_refusal(br_core_mode_t mode, bool moving);
+
+/**
+ * REINIT (maintenance wants Thread's channel): refused with ESP_ERR_INVALID_STATE in SNIFFER and STARTING (nothing
+ * touched, mode_fsm_reinit_verdict). Otherwise STARTING, then OpenThread stopped after its sessions drained (ot_stop):
+ * a drain timeout puts the mode back and returns MODE_FSM_ERR_DRAIN_TIMEOUT (nothing stopped). ESP_OK: OpenThread is
+ * stopped and the mode stays STARTING until the channel comes back (mode_fsm_on_channel_back) or is lost.
+ */
+esp_err_t mode_fsm_on_reinit(mode_fsm_t *fsm);
+
+/** Whether the orchestrator's input `input_seq` is newer than the last one handled (`seen_seq`), the seq wrapping. */
+bool mode_fsm_input_newer(uint32_t seen_seq, uint32_t input_seq);
+
+/**
+ * Thread's inputs from the orchestrator, in two slots: the binding input (BIND, UNBIND, LOST, BACK: each replaces the
+ * last) and the request (REINIT: asked on top of the binding, never replacing it), each with the seq of the one last
+ * taken. All seqs come from Thread's one counter, so the slots compare. The caller locks.
+ */
+typedef struct {
+    radio_mux_input_t bind;
+    radio_mux_input_t req;
+    uint32_t bind_seen;
+    uint32_t req_seen;
+} mode_fsm_inbox_t;
+
+/** Keep `in` in its slot (REINIT in the request's, the others in the binding input's); NONE changes nothing. */
+void mode_fsm_inbox_put(mode_fsm_inbox_t *box, const radio_mux_input_t *in);
+/** The request into *out; true when it was not taken before (it is from now on). */
+bool mode_fsm_inbox_take_req(mode_fsm_inbox_t *box, radio_mux_input_t *out);
+/** The binding input into *out; true when it was not taken before (it is from now on). */
+bool mode_fsm_inbox_take_bind(mode_fsm_inbox_t *box, radio_mux_input_t *out);
+/**
+ * Thread let go for the request `req_seq`: a binding input older than it is taken (the maintenance's end binds Thread
+ * again); a newer one stays to take.
+ */
+void mode_fsm_inbox_let_go(mode_fsm_inbox_t *box, uint32_t req_seq);
+/** The binding input was acted on elsewhere (a move's commit): it is taken. The request is left as it is. */
+void mode_fsm_inbox_handled(mode_fsm_inbox_t *box);
 
 #ifdef __cplusplus
 }

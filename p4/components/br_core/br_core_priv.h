@@ -34,11 +34,8 @@ typedef struct {
     esp_netif_t *ot_netif;
     TaskHandle_t ot_task;
     char fault_reason[64];
-    char rcp_installed[32];    // version from the last probe, "" = none
-    bool rcp_installed_known;  // the last probe reached the updater
     bool rcp_compatible;       // OpenThread accepted the C6's RCP at its last start on the C6 (set_compatible)
     bool rcp_compatible_known; // OpenThread has judged the C6's RCP this boot (false: Thread never ran on the C6)
-    bool rom_recovery_failed;  // a ROM recovery failed and no later one worked
     bool ot_ready;             // OpenThread runs and takes calls; cleared before a push tears it down
     bool ot_initialised;       // esp_openthread_init succeeded and not yet torn down
     bool init_abandoned;       // OpenThread's start was abandoned half-way (its SPI driver stays registered): only a reboot restarts it
@@ -48,7 +45,6 @@ typedef struct {
     bool loop_running;
     bool push_pending;         // a firmware push asked the OpenThread task to leave its main loop
     uint32_t ot_sessions;      // open br_core_ot_session_begin sessions; teardown waits for 0
-    atomic_bool push_busy;     // a firmware push is running (one long operation at a time)
     bool started;
     bool mdns_started;
     char mdns_hostname[64]; // as given to br_core_mdns_start, for the retry in br_core_start
@@ -68,13 +64,9 @@ void core_enter_fault(const char *reason);
 void core_teardown_openthread(void);
 // After ot_ready was cleared: false when sessions stay open longer than `wait_ms`.
 bool core_wait_sessions_closed(uint32_t wait_ms);
-// Reboots in 1.5 s (the caller reports first).
-void core_schedule_reboot(void);
 bool core_ot_ready_now(void);
 esp_err_t core_start_ot_task(void);
 bool core_backbone_has_ip6(void);
-// The C6's boot steps inside a C6 job (see br_core.c).
-esp_err_t core_c6_boot_steps(bool affects_mode);
 // The C6's rcp.compatible verdict (known from now on), whatever channel OpenThread runs on.
 void core_set_c6_compatible(bool compatible);
 
@@ -85,21 +77,18 @@ radio_mux_chan_t *core_radio_chan(void);
 bool core_radio_gone(void);
 // esp_openthread_mux_set for that channel (before every esp_openthread_init).
 void core_radio_mux_set(void);
-// Wakes br_radio: it reconciles OpenThread with the attached channel.
+// Wakes br_radio: it acts on the orchestrator's latest input (and a move, a retry).
 void core_radio_notify(void);
+// mode_fsm's mode_changed op: Thread's new state to the orchestrator (its reason follows from br_radio). Never blocks.
+void core_radio_mode_changed(br_core_mode_t mode);
 // The boot of the OTBR channel (from br_core_start).
 void core_radio_boot(void);
 // OpenThread stopped (no session drain) and its channel forgotten.
 void core_radio_stop_openthread(void);
-// OpenThread on the C6 again after a C6 job (probe and start). Records whether a PUT of mode otbr retries it.
-esp_err_t core_radio_restart_on_c6(void);
-// Whether the last start on the attached channel failed (RADIO_FAULT from it, a PUT of mode otbr retries it). Owned by
-// br_radio; a C6 job that holds OpenThread sets it while br_radio stays out.
-void core_radio_set_start_failed(bool failed);
-// A C6 job runs (push_busy) and holds OpenThread: OpenThread runs on, or is stored on, the C6 (br_radio stays out).
-bool core_radio_job_holds_openthread(void);
-// The C6's boot steps run (core_radio_boot): no other C6 job meanwhile.
-bool core_radio_c6_boot_running(void);
+#ifdef OTBR_TEST_BUILD
+// ot_start_abandon: whether the start on channel `id` is to end as an abandoned one (the setting is used up then).
+bool core_test_take_start_abandon(const char *id);
+#endif
 // The mode_fsm channel operations.
 esp_err_t core_radio_probe_channel(const char *id, char *err, size_t cap);
 esp_err_t core_radio_ot_start(const char *id);

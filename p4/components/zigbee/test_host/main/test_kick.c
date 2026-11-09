@@ -131,28 +131,33 @@ TEST_CASE("kick post failed: the next wake tries again", "[zigbee]")
     TEST_ASSERT_TRUE(zigbee_kick_claim(&k));
 }
 
-TEST_CASE("gone lost: the current attachment detached without its GONE is handled as gone", "[zigbee]")
+TEST_CASE("input newer: an input after the last one handled is acted on", "[zigbee]")
 {
-    TEST_ASSERT_TRUE(zigbee_gone_lost(3, 3, 2));
+    TEST_ASSERT_TRUE(zigbee_input_newer(0, 1));
+    TEST_ASSERT_TRUE(zigbee_input_newer(3, 5)); // one in between was never seen: the latest wins
+    TEST_ASSERT_TRUE(zigbee_input_newer(UINT32_MAX, 0)); // the seq wraps
 }
 
-TEST_CASE("gone lost: a GONE already handled for the attachment changes nothing", "[zigbee]")
+TEST_CASE("input newer: the input already handled again is ignored", "[zigbee]")
 {
-    TEST_ASSERT_FALSE(zigbee_gone_lost(3, 3, 3));
+    TEST_ASSERT_FALSE(zigbee_input_newer(5, 5));
 }
 
-TEST_CASE("gone lost: a detach of an older attachment changes nothing", "[zigbee]")
+TEST_CASE("input newer: an input older than the latest is ignored", "[zigbee]")
 {
-    TEST_ASSERT_FALSE(zigbee_gone_lost(2, 3, 1));
+    TEST_ASSERT_FALSE(zigbee_input_newer(5, 4));
+    TEST_ASSERT_FALSE(zigbee_input_newer(0, UINT32_MAX));
 }
 
-TEST_CASE("gone lost: a detach before the task handled its ATTACH waits for it", "[zigbee]")
+TEST_CASE("input skipped: a bind after inputs never seen (a LOST it replaced) is a loss first", "[zigbee]")
 {
-    TEST_ASSERT_FALSE(zigbee_gone_lost(4, 3, 3));
-    TEST_ASSERT_TRUE(zigbee_gone_lost(4, 4, 3)); // once the ATTACH is handled
+    TEST_ASSERT_TRUE(zigbee_input_skipped(3, 5));
+    TEST_ASSERT_TRUE(zigbee_input_skipped(UINT32_MAX, 1)); // the seq wraps
 }
 
-TEST_CASE("gone lost: nothing attached yet is never gone", "[zigbee]")
+TEST_CASE("input skipped: the next input in order skipped nothing", "[zigbee]")
 {
-    TEST_ASSERT_FALSE(zigbee_gone_lost(0, 0, 0));
+    TEST_ASSERT_FALSE(zigbee_input_skipped(4, 5));
+    TEST_ASSERT_FALSE(zigbee_input_skipped(0, 1)); // the first input
+    TEST_ASSERT_FALSE(zigbee_input_skipped(5, 5));
 }

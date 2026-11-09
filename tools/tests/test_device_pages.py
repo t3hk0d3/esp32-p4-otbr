@@ -222,7 +222,9 @@ class TestNav:
     def test_thread_menu_shows_when_a_channel_runs_otbr(self):
         # On a status with otbr_channel c6 after a hidden visit: shown again, cache cleared.
         _html, hidden, cached = nav_run(
-            "/index.html", {"otbr_channel": "c6", "mode": "NO_RADIO"}, cached="1"
+            "/index.html",
+            {"otbr_channel": "builtin-c6", "mode": "NO_RADIO"},
+            cached="1",
         )
         assert hidden is False
         assert cached == "0"

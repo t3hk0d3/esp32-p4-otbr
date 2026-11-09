@@ -17,8 +17,6 @@ typedef struct {
     esp_err_t fail[24]; /* per op name index, see OP_* */
     int64_t now;
     uint8_t raw_channel;
-    bool push_restarted; /* what the push op reports: OpenThread runs again */
-    br_core_mode_t mode_in_job; /* the mode the push or ROM recovery op saw */
     otLinkRawReceiveDone raw_cb;
     void (*deferred_fn)(void *ctx); /* what the defer op was given, run by run_deferred() */
     void *deferred_ctx;
@@ -34,10 +32,12 @@ typedef struct {
     esp_err_t reset_first;       /* what the first reset_rcp returns (fail[OP_RESET_RCP] for the later ones) */
     int resets;                  /* reset_rcp calls so far */
     uint32_t slept_ms;           /* what sleep_ms was given, summed */
+    br_core_mode_t heard[LOG_CAP]; /* the modes the mode_changed op heard, in order */
+    int heard_count;
 } fake_t;
 
 enum { OP_THREAD_STOP, OP_NETIF_DOWN, OP_RAW_ENABLE, OP_RAW_DISABLE, OP_RESTORE_CHANNEL, OP_NETIF_UP, OP_THREAD_START,
-       OP_RESET_RCP, OP_PUSH, OP_RAW_ABORT, OP_QUIET, OP_DEFER, OP_ROM_RECOVER, OP_PROBE, OP_OT_STOP, OP_OT_START,
+       OP_RESET_RCP, OP_RAW_ABORT, OP_QUIET, OP_DEFER, OP_PROBE, OP_OT_STOP, OP_OT_START,
        OP_STORE, OP_COUNT
      };
 
@@ -112,17 +112,6 @@ static void f_sleep_ms(uint32_t ms)
     fake.slept_ms += ms;
     record(OP_COUNT, "sleep_ms");
 }
-static esp_err_t f_push(const rcp_fw_source_t *source, char *err_detail, size_t err_cap, bool *restarted)
-{
-    *restarted = fake.push_restarted;
-    fake.mode_in_job = mode_fsm_get_mode(&fsm);
-    return record(OP_PUSH, "push_firmware");
-}
-static esp_err_t f_rom_recover(char *err_detail, size_t err_cap, bool *restarted)
-{
-    *restarted = fake.push_restarted;
-    return record(OP_ROM_RECOVER, "rom_recover");
-}
 static void f_reboot(void)
 {
     if (fake.count < LOG_CAP) {
@@ -178,6 +167,13 @@ static esp_err_t f_store_otbr(const char *from, const char *to)
     return record(OP_STORE, "store_otbr");
 }
 
+static void f_mode_changed(br_core_mode_t mode)
+{
+    if (fake.heard_count < LOG_CAP) {
+        fake.heard[fake.heard_count++] = mode;
+    }
+}
+
 static const mode_fsm_ops_t ops = {
     .thread_stop = f_thread_stop,
     .netif_down = f_netif_down,
@@ -190,8 +186,6 @@ static const mode_fsm_ops_t ops = {
     .netif_up = f_netif_up,
     .thread_start = f_thread_start,
     .reset_rcp = f_reset_rcp,
-    .push_firmware = f_push,
-    .rom_recover = f_rom_recover,
     .reboot = f_reboot,
     .now_us = f_now,
     .sleep_ms = f_sleep_ms,
@@ -199,6 +193,7 @@ static const mode_fsm_ops_t ops = {
     .ot_start = f_ot_start,
     .ot_stop = f_ot_stop,
     .store_otbr = f_store_otbr,
+    .mode_changed = f_mode_changed,
 };
 
 static void rx_done(otInstance *instance, otRadioFrame *frame, otError error)
@@ -402,15 +397,6 @@ TEST_CASE("On RCP failure callback: enters BR_RUNNING on success", "[mode_fsm]")
     TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
 }
 
-TEST_CASE("On RCP failure callback: never calls push_firmware", "[mode_fsm]")
-{
-    setup(BR_MODE_BR_RUNNING);
-    mode_fsm_on_rcp_failure(&fsm);
-    fake.fail[OP_RESET_RCP] = ESP_FAIL;
-    mode_fsm_on_rcp_failure(&fsm);
-    TEST_ASSERT_EQUAL(0, count_of("push_firmware"));
-}
-
 TEST_CASE("On RCP failure when the reset fails: stays in RADIO_FAULT", "[mode_fsm]")
 {
     setup(BR_MODE_BR_RUNNING);
@@ -492,7 +478,6 @@ TEST_CASE("On 4th failure within 10 minutes: stays in RADIO_FAULT without automa
     mode_fsm_on_rcp_failure(&fsm);
     TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
     TEST_ASSERT_EQUAL(3, count_of("reset_rcp"));
-    TEST_ASSERT_EQUAL(0, count_of("push_firmware"));
 }
 
 TEST_CASE("On a failure after the window has passed: recovers again", "[mode_fsm]")
@@ -528,7 +513,6 @@ TEST_CASE("On RCP failure while in SNIFFER: enters RADIO_FAULT and ends the capt
     TEST_ASSERT_EQUAL(1, count_of("raw_abort"));
     TEST_ASSERT_EQUAL(0, count_of("raw_disable")); /* no request to the failed RCP */
     assert_order("raw_abort", "reset_rcp");
-    TEST_ASSERT_EQUAL(0, count_of("push_firmware"));
 }
 
 TEST_CASE("On RCP failure while in SNIFFER and a successful reset: Thread is restored in a deferred step, not in the hook", "[mode_fsm]")
@@ -606,168 +590,6 @@ TEST_CASE("On RCP failure while STARTING: only resets the C6, no mode change, no
     TEST_ASSERT_EQUAL(5, count_of("reset_rcp"));
     TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
     TEST_ASSERT_EQUAL(0, fsm.recovery_count);
-}
-
-/* ---- firmware push ---- */
-
-static rcp_fw_source_t push_source;
-static char push_detail[32];
-
-TEST_CASE("On push in SNIFFER or STARTING: returns ESP_ERR_INVALID_STATE and starts nothing", "[mode_fsm]")
-{
-    setup(BR_MODE_SNIFFER);
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_push_firmware(&fsm, &push_source, push_detail, sizeof(push_detail)));
-    TEST_ASSERT_EQUAL(0, fake.count);
-    TEST_ASSERT_EQUAL(BR_MODE_SNIFFER, mode_fsm_get_mode(&fsm));
-    setup(BR_MODE_STARTING);
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_push_firmware(&fsm, &push_source, push_detail, sizeof(push_detail)));
-    TEST_ASSERT_EQUAL(0, fake.count);
-}
-
-TEST_CASE("On push in RADIO_FAULT with OpenThread running again: enters BR_RUNNING", "[mode_fsm]")
-{
-    setup(BR_MODE_RADIO_FAULT);
-    fake.push_restarted = true;
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_push_firmware(&fsm, &push_source, push_detail, sizeof(push_detail)));
-    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
-    TEST_ASSERT_EQUAL(1, count_of("push_firmware"));
-}
-
-TEST_CASE("On push failure with OpenThread restarted on the previous firmware: returns the push error in BR_RUNNING", "[mode_fsm]")
-{
-    setup(BR_MODE_BR_RUNNING);
-    fake.push_restarted = true;
-    fake.fail[OP_PUSH] = ESP_ERR_INVALID_SIZE;
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, mode_fsm_push_firmware(&fsm, &push_source, push_detail, sizeof(push_detail)));
-    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
-}
-
-TEST_CASE("On push when OpenThread does not come back: stays in RADIO_FAULT", "[mode_fsm]")
-{
-    setup(BR_MODE_BR_RUNNING);
-    fake.push_restarted = false;
-    fake.fail[OP_PUSH] = ESP_FAIL;
-    TEST_ASSERT_EQUAL(ESP_FAIL, mode_fsm_push_firmware(&fsm, &push_source, push_detail, sizeof(push_detail)));
-    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
-}
-
-TEST_CASE("On push: the mode is STARTING while the job runs", "[mode_fsm]")
-{
-    setup(BR_MODE_BR_RUNNING);
-    fake.push_restarted = true;
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_push_firmware(&fsm, &push_source, push_detail, sizeof(push_detail)));
-    TEST_ASSERT_EQUAL(BR_MODE_STARTING, fake.mode_in_job);
-    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
-}
-
-TEST_CASE("On a begun radio job: a second begin is refused and the push runs the begun job", "[mode_fsm]")
-{
-    setup(BR_MODE_RADIO_FAULT);
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_begin_radio_job(&fsm));
-    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_begin_radio_job(&fsm));
-    fake.push_restarted = true;
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_push_firmware(&fsm, &push_source, push_detail, sizeof(push_detail)));
-    TEST_ASSERT_EQUAL(1, count_of("push_firmware"));
-    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
-}
-
-TEST_CASE("On the border router start inside a radio job: the mode stays STARTING until the job ends", "[mode_fsm]")
-{
-    setup(BR_MODE_BR_RUNNING);
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_begin_radio_job(&fsm));
-    TEST_ASSERT_FALSE(mode_fsm_set_started(&fsm));
-    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
-    mode_fsm_cancel_radio_job(&fsm);
-}
-
-TEST_CASE("On a cancelled radio job: the mode before it comes back, unless a fault came meanwhile", "[mode_fsm]")
-{
-    setup(BR_MODE_BR_RUNNING);
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_begin_radio_job(&fsm));
-    mode_fsm_cancel_radio_job(&fsm);
-    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_begin_radio_job(&fsm)); /* the job flag was cleared */
-    atomic_store(&fsm.mode, BR_MODE_RADIO_FAULT);
-    mode_fsm_cancel_radio_job(&fsm);
-    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
-    TEST_ASSERT_EQUAL(0, fake.count);
-}
-
-TEST_CASE("On push without a source: returns ESP_ERR_INVALID_ARG and does not fall back to ROM recovery", "[mode_fsm]")
-{
-    setup(BR_MODE_BR_RUNNING);
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, mode_fsm_push_firmware(&fsm, NULL, push_detail, sizeof(push_detail)));
-    TEST_ASSERT_EQUAL(0, fake.count);
-}
-
-/* ---- ROM recovery ---- */
-
-TEST_CASE("On ROM recovery in SNIFFER or STARTING: returns ESP_ERR_INVALID_STATE and starts nothing", "[mode_fsm]")
-{
-    setup(BR_MODE_SNIFFER);
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_rom_recover(&fsm, push_detail, sizeof(push_detail)));
-    TEST_ASSERT_EQUAL(0, fake.count);
-    TEST_ASSERT_EQUAL(BR_MODE_SNIFFER, mode_fsm_get_mode(&fsm));
-    setup(BR_MODE_STARTING);
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_rom_recover(&fsm, push_detail, sizeof(push_detail)));
-    TEST_ASSERT_EQUAL(0, fake.count);
-}
-
-TEST_CASE("On ROM recovery from BR_RUNNING or RADIO_FAULT with OpenThread running again: runs the recovery job once and enters BR_RUNNING", "[mode_fsm]")
-{
-    setup(BR_MODE_RADIO_FAULT);
-    fake.push_restarted = true;
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_rom_recover(&fsm, push_detail, sizeof(push_detail)));
-    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
-    TEST_ASSERT_EQUAL(1, count_of("rom_recover"));
-    TEST_ASSERT_EQUAL(0, count_of("push_firmware"));
-}
-
-TEST_CASE("On ROM recovery failure with OpenThread restarted: returns the error in BR_RUNNING", "[mode_fsm]")
-{
-    setup(BR_MODE_BR_RUNNING);
-    fake.push_restarted = true;
-    fake.fail[OP_ROM_RECOVER] = ESP_FAIL;
-    TEST_ASSERT_EQUAL(ESP_FAIL, mode_fsm_rom_recover(&fsm, push_detail, sizeof(push_detail)));
-    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
-}
-
-TEST_CASE("On ROM recovery when OpenThread does not come back: stays in RADIO_FAULT", "[mode_fsm]")
-{
-    setup(BR_MODE_BR_RUNNING);
-    fake.push_restarted = false;
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_rom_recover(&fsm, push_detail, sizeof(push_detail)));
-    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
-}
-
-TEST_CASE("On push from BR_RUNNING or RADIO_FAULT on another task: push_allowed returns ESP_OK", "[mode_fsm]")
-{
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_push_allowed(BR_MODE_BR_RUNNING, false));
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_push_allowed(BR_MODE_RADIO_FAULT, false));
-}
-
-TEST_CASE("On push in SNIFFER or STARTING: push_allowed returns ESP_ERR_INVALID_STATE", "[mode_fsm]")
-{
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_push_allowed(BR_MODE_SNIFFER, false));
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_push_allowed(BR_MODE_STARTING, false));
-}
-
-TEST_CASE("On push from the OpenThread task in any mode: push_allowed returns ESP_ERR_INVALID_STATE", "[mode_fsm]")
-{
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_push_allowed(BR_MODE_BR_RUNNING, true));
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_push_allowed(BR_MODE_RADIO_FAULT, true));
-}
-
-TEST_CASE("On the end of a push in BR_RUNNING with OpenThread up: the Thread REST flag is on", "[mode_fsm]")
-{
-    TEST_ASSERT_TRUE(mode_fsm_rest_ready_after_push(BR_MODE_BR_RUNNING, true));
-}
-
-TEST_CASE("On the end of a push in RADIO_FAULT or without OpenThread: the Thread REST flag is off", "[mode_fsm]")
-{
-    TEST_ASSERT_FALSE(mode_fsm_rest_ready_after_push(BR_MODE_RADIO_FAULT, true));
-    TEST_ASSERT_FALSE(mode_fsm_rest_ready_after_push(BR_MODE_BR_RUNNING, false));
 }
 
 /* ---- storage ---- */
@@ -900,26 +722,6 @@ TEST_CASE("On RCP failure in SNIFFER without a registered callback: ends the cap
     TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
 }
 
-TEST_CASE("On a push whose version was read back: the new version is known", "[br_core]")
-{
-    bool known = false;
-    char installed[32] = "1.0.0";
-
-    mode_fsm_installed_after_push(true, "2.0.0", &known, installed, sizeof(installed));
-    TEST_ASSERT_TRUE(known);
-    TEST_ASSERT_EQUAL_STRING("2.0.0", installed);
-}
-
-TEST_CASE("On a push whose version could not be read back: unknown and the old version is gone", "[br_core]")
-{
-    bool known = true;
-    char installed[32] = "1.0.0";
-
-    mode_fsm_installed_after_push(false, "", &known, installed, sizeof(installed));
-    TEST_ASSERT_FALSE(known);
-    TEST_ASSERT_EQUAL_STRING("", installed);
-}
-
 void app_main(void)
 {
     UNITY_BEGIN();
@@ -928,90 +730,11 @@ void app_main(void)
     exit(failures == 0 ? 0 : 1);
 }
 
-TEST_CASE("On a failed ROM recovery after a silent updater: the boot enters RADIO_FAULT", "[mode_fsm]")
-{
-    rcp_sync_probe_result_t probe = {.rom_recovery_failed = true, .updater_reachable = false};
-
-    TEST_ASSERT_TRUE(mode_fsm_rom_failure_is_fault(&probe));
-}
-
-TEST_CASE("On a failed ROM recovery after a version mismatch (updater reachable): the boot goes on with the installed RCP", "[mode_fsm]")
-{
-    rcp_sync_probe_result_t probe = {.rom_recovery_failed = true, .updater_reachable = true, .installed_valid = true};
-
-    TEST_ASSERT_FALSE(mode_fsm_rom_failure_is_fault(&probe));
-}
-
-TEST_CASE("On a probe without a failed recovery: no fault from the recovery", "[mode_fsm]")
-{
-    rcp_sync_probe_result_t probe = {.updater_reachable = false};
-
-    TEST_ASSERT_FALSE(mode_fsm_rom_failure_is_fault(&probe));
-}
-
-TEST_CASE("On an automatic recovery failing and then a manual one succeeding: the failed flag is cleared", "[mode_fsm]")
-{
-    bool flag = mode_fsm_next_recovery_failed(false, true, false);
-
-    TEST_ASSERT_TRUE(flag);
-    flag = mode_fsm_next_recovery_failed(flag, true, true);
-    TEST_ASSERT_FALSE(flag);
-}
-
-TEST_CASE("On a manual recovery failing: the failed flag is set", "[mode_fsm]")
-{
-    TEST_ASSERT_TRUE(mode_fsm_next_recovery_failed(false, true, false));
-}
-
-TEST_CASE("On a probe-time recovery succeeding after an earlier failure: the failed flag is cleared", "[mode_fsm]")
-{
-    TEST_ASSERT_FALSE(mode_fsm_next_recovery_failed(true, true, true));
-}
-
-TEST_CASE("On no recovery attempt: the failed flag is unchanged", "[mode_fsm]")
-{
-    TEST_ASSERT_TRUE(mode_fsm_next_recovery_failed(true, false, false));
-    TEST_ASSERT_FALSE(mode_fsm_next_recovery_failed(false, false, false));
-}
-
 /* ---- result of a C6 job ---- */
-
-TEST_CASE("On a ROM recovery that worked and a failed restart: the job result is ESP_OK", "[mode_fsm]")
-{
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_radio_job_result(true, ESP_OK, ESP_FAIL));
-}
-
-TEST_CASE("On a c6_installer push that worked (base only) and a failed restart: the job result is ESP_OK", "[mode_fsm]")
-{
-    /* br_core passes base_only for an installer push as for a recovery: both leave the C6 without RCP firmware. */
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_radio_job_result(true, ESP_OK, ESP_ERR_TIMEOUT));
-}
-
-TEST_CASE("On a ROM recovery that failed: the job result is its error, whatever the restart did", "[mode_fsm]")
-{
-    TEST_ASSERT_EQUAL(ESP_FAIL, mode_fsm_radio_job_result(true, ESP_FAIL, ESP_OK));
-    TEST_ASSERT_EQUAL(ESP_FAIL, mode_fsm_radio_job_result(true, ESP_FAIL, ESP_ERR_TIMEOUT));
-}
-
-TEST_CASE("On a firmware push that worked and a failed restart: the job result is RCP_SYNC_ERR_RESTART", "[mode_fsm]")
-{
-    TEST_ASSERT_EQUAL(RCP_SYNC_ERR_RESTART, mode_fsm_radio_job_result(false, ESP_OK, ESP_ERR_TIMEOUT));
-    TEST_ASSERT_EQUAL(RCP_SYNC_ERR_RESTART, mode_fsm_radio_job_result(false, ESP_OK, ESP_FAIL));
-}
-
-TEST_CASE("On a firmware push that worked and a restart that worked: the job result is ESP_OK", "[mode_fsm]")
-{
-    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_radio_job_result(false, ESP_OK, ESP_OK));
-}
-
-TEST_CASE("On a firmware push that failed: the job result is the push error", "[mode_fsm]")
-{
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_CRC, mode_fsm_radio_job_result(false, ESP_ERR_INVALID_CRC, ESP_FAIL));
-}
 
 /* ---- moving OpenThread to another channel ---- */
 
-#define SRC "c6"
+#define SRC "builtin-c6"
 #define DST "usb-1a86-55d4"
 
 TEST_CASE("On a probe failure of the target: refuses with probe_failed and the probe's reason", "[mode_fsm]")
@@ -1037,15 +760,16 @@ TEST_CASE("On a probe failure of the target: no stop, no start, nothing stored, 
     TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
 }
 
-TEST_CASE("On a successful move: probes the target, stops, starts on the target, then stores both modes", "[mode_fsm]")
+TEST_CASE("On a successful move: probes the target, stops, stores both modes (the commit), then starts on the target",
+          "[mode_fsm]")
 {
     char err[64];
 
     setup(BR_MODE_BR_RUNNING);
     TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
     assert_order("probe_channel", "ot_stop");
-    assert_order("ot_stop", "ot_start");
-    assert_order("ot_start", "store_otbr");
+    assert_order("ot_stop", "store_otbr");
+    assert_order("store_otbr", "ot_start");
     TEST_ASSERT_EQUAL_STRING(DST, fake.started_on);
     TEST_ASSERT_EQUAL_STRING(SRC, fake.stored_from);
     TEST_ASSERT_EQUAL_STRING(DST, fake.stored_to);
@@ -1073,44 +797,25 @@ TEST_CASE("On a move from an absent source (NO_RADIO): starts on the target, sto
     TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
 }
 
-TEST_CASE("On a start failure on the target: starts on the source again, stores nothing, reports the failure",
-          "[mode_fsm]")
+TEST_CASE("On a start failure on the target: RADIO_FAULT on the target, the binding stays there, no start back on the "
+          "source", "[mode_fsm]")
 {
     char err[64] = "";
 
     setup(BR_MODE_BR_RUNNING);
     fake.start_fail_on[0] = DST;
     TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
-    TEST_ASSERT_EQUAL(2, count_of("ot_start"));
-    TEST_ASSERT_EQUAL_STRING(SRC, fake.started_on);
-    TEST_ASSERT_EQUAL(0, count_of("store_otbr"));
-    TEST_ASSERT_NOT_EQUAL(0, strlen(err));
-}
-
-TEST_CASE("On a start failure on the target: ends in BR_RUNNING on the source", "[mode_fsm]")
-{
-    char err[64];
-
-    setup(BR_MODE_BR_RUNNING);
-    fake.start_fail_on[0] = DST;
-    mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err));
-    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
-}
-
-TEST_CASE("On a start failure on the target and on the source: ends in RADIO_FAULT, nothing stored", "[mode_fsm]")
-{
-    char err[64] = "";
-
-    setup(BR_MODE_BR_RUNNING);
-    fake.start_fail_on[0] = DST;
-    fake.start_fail_on[1] = SRC;
-    TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
+    TEST_ASSERT_EQUAL(1, count_of("ot_start")); /* the target's only: no rollback */
+    TEST_ASSERT_EQUAL_STRING("", fake.started_on);
+    TEST_ASSERT_EQUAL_STRING(DST, fake.stored_to);
+    TEST_ASSERT_EQUAL_STRING(SRC, fake.stored_from);
     TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
-    TEST_ASSERT_EQUAL(0, count_of("store_otbr"));
+    TEST_ASSERT_EQUAL(0, count_of("reboot"));
     TEST_ASSERT_NOT_EQUAL(0, strlen(err));
 }
 
-TEST_CASE("On a start failure on the target from an absent source: no restart there, ends in NO_RADIO", "[mode_fsm]")
+TEST_CASE("On a start failure on the target from an absent source: RADIO_FAULT on the target, the binding there",
+          "[mode_fsm]")
 {
     char err[64];
 
@@ -1118,11 +823,12 @@ TEST_CASE("On a start failure on the target from an absent source: no restart th
     fake.start_fail_on[0] = DST;
     TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
     TEST_ASSERT_EQUAL(1, count_of("ot_start"));
-    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_fsm_get_mode(&fsm));
+    TEST_ASSERT_EQUAL_STRING(DST, fake.stored_to);
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
 }
 
-TEST_CASE("On a target start that abandoned OpenThread's init: no start on the source, nothing stored, a reboot asked",
-          "[mode_fsm]")
+TEST_CASE("On a target start that abandoned OpenThread's init: RADIO_FAULT with its text, the binding on the target, no "
+          "start on the source, no reboot", "[mode_fsm]")
 {
     char err[96] = "";
 
@@ -1131,36 +837,23 @@ TEST_CASE("On a target start that abandoned OpenThread's init: no start on the s
     fake.start_fail_code = MODE_FSM_ERR_START_ABANDONED;
     TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_ABANDONED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
     TEST_ASSERT_EQUAL(1, count_of("ot_start"));
-    TEST_ASSERT_EQUAL(0, count_of("store_otbr"));
-    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
-    TEST_ASSERT_NOT_NULL(strstr(err, "rebooting"));
+    TEST_ASSERT_EQUAL_STRING(DST, fake.stored_to);
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
+    TEST_ASSERT_EQUAL(0, count_of("reboot"));
+    TEST_ASSERT_EQUAL_STRING(MODE_FSM_FAULT_ABANDONED, err);
+    TEST_ASSERT_EQUAL_STRING("an earlier OpenThread start was abandoned: reboot", MODE_FSM_FAULT_ABANDONED);
 }
 
-TEST_CASE("On a target start failure and a start on the source that abandoned the init: a reboot asked, not a fault",
-          "[mode_fsm]")
-{
-    char err[96] = "";
-
-    setup(BR_MODE_BR_RUNNING);
-    fake.start_fail_on[0] = DST; /* the target fails plainly ... */
-    fake.abandon_on = SRC;       /* ... the start on the source abandons its init */
-    TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_ABANDONED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
-    TEST_ASSERT_EQUAL(2, count_of("ot_start"));
-    TEST_ASSERT_EQUAL(0, count_of("store_otbr"));
-    TEST_ASSERT_NOT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
-    TEST_ASSERT_NOT_NULL(strstr(err, "rebooting"));
-}
-
-TEST_CASE("On a store failure after the target runs: stops it, starts on the source, reports the failure",
-          "[mode_fsm]")
+TEST_CASE("On a store failure (the commit): nothing changed, the target never started, OpenThread starts again on the "
+          "source", "[mode_fsm]")
 {
     char err[96] = "";
 
     setup(BR_MODE_BR_RUNNING);
     fake.fail[OP_STORE] = ESP_ERR_NO_MEM;
     TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err)));
-    TEST_ASSERT_EQUAL(2, count_of("ot_stop"));
-    TEST_ASSERT_EQUAL(2, count_of("ot_start"));
+    TEST_ASSERT_EQUAL(1, count_of("ot_stop"));
+    TEST_ASSERT_EQUAL(1, count_of("ot_start"));
     TEST_ASSERT_EQUAL_STRING(SRC, fake.started_on);
     TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
     TEST_ASSERT_NOT_EQUAL(0, strlen(err));
@@ -1280,20 +973,32 @@ TEST_CASE("On a start (no source): probes the target, starts on it, stores it, e
     TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm));
 }
 
-TEST_CASE("On a start (no source) that fails: nothing stored, ends in NO_RADIO, also after a fault", "[mode_fsm]")
+TEST_CASE("On a start (no source) that fails: the binding on the target, RADIO_FAULT, also after a fault", "[mode_fsm]")
 {
     char err[64];
 
     setup(BR_MODE_NO_RADIO);
     fake.start_fail_on[0] = DST;
     TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, "", DST, err, sizeof(err)));
-    TEST_ASSERT_EQUAL(0, count_of("store_otbr"));
+    TEST_ASSERT_EQUAL(1, count_of("store_otbr"));
+    TEST_ASSERT_EQUAL_STRING(DST, fake.stored_to);
     TEST_ASSERT_EQUAL(1, count_of("ot_start"));
-    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_fsm_get_mode(&fsm));
-    setup(BR_MODE_RADIO_FAULT); /* a failed start earlier: still nothing to go back to */
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
+    setup(BR_MODE_RADIO_FAULT); /* a failed start earlier */
     fake.start_fail_on[0] = DST;
     TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, "", DST, err, sizeof(err)));
     TEST_ASSERT_EQUAL(1, count_of("ot_start"));
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_fsm_get_mode(&fsm));
+}
+
+TEST_CASE("On a start (no source) whose store fails: nothing to go back to, NO_RADIO", "[mode_fsm]")
+{
+    char err[64];
+
+    setup(BR_MODE_NO_RADIO);
+    fake.fail[OP_STORE] = ESP_ERR_NO_MEM;
+    TEST_ASSERT_EQUAL(MODE_FSM_ERR_START_FAILED, mode_fsm_move_otbr(&fsm, "", DST, err, sizeof(err)));
+    TEST_ASSERT_EQUAL(0, count_of("ot_start"));
     TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_fsm_get_mode(&fsm));
 }
 
@@ -1388,10 +1093,16 @@ TEST_CASE("On boot with a dongle in otbr: NO_RADIO until it attaches, nothing st
     TEST_ASSERT_EQUAL(0, fake.count);
 }
 
+TEST_CASE("On the built-in channel's id: builtin-c6 (the stored c6 is mapped by the radio mux)", "[mode_fsm]")
+{
+    TEST_ASSERT_EQUAL_STRING("builtin-c6", MODE_FSM_BUILTIN_ID);
+    TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible("c6", ESP_FAIL)); /* no channel has that id any more */
+}
+
 TEST_CASE("On boot with the C6 in otbr (default): the C6 boot goes on as today, mode STARTING", "[mode_fsm]")
 {
     setup(BR_MODE_STARTING);
-    TEST_ASSERT_TRUE(mode_fsm_boot(&fsm, MODE_FSM_C6_ID));
+    TEST_ASSERT_TRUE(mode_fsm_boot(&fsm, MODE_FSM_BUILTIN_ID));
     TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
     TEST_ASSERT_EQUAL(0, fake.count);
 }
@@ -1403,72 +1114,28 @@ TEST_CASE("On NO_RADIO: Thread operations are refused", "[mode_fsm]")
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_enter_sniffer(&fsm, 15, rx_done));
 }
 
-/* ---- the C6's boot steps and C6 jobs beside OpenThread (V9, V12, V14, the empty-probe regression) ---- */
-
-TEST_CASE("On the C6's boot steps passing: the C6 is listed and attached again", "[mode_fsm]")
-{
-    TEST_ASSERT_TRUE(mode_fsm_c6_usable_after_steps(ESP_OK));
-}
-
-TEST_CASE("On the C6's boot steps finding a fault (no rcp firmware, c6_hold): the C6 stays unavailable, nothing "
-          "starts on it", "[mode_fsm]")
-{
-    TEST_ASSERT_FALSE(mode_fsm_c6_usable_after_steps(ESP_ERR_NOT_FOUND));
-    TEST_ASSERT_FALSE(mode_fsm_c6_usable_after_steps(ESP_ERR_INVALID_STATE));
-}
+/* ---- the C6's RCP probe before a start (V9, the empty-probe regression) ---- */
 
 TEST_CASE("On the C6's RCP probe failing before a start (no answer, not an RCP, missing caps): rcp incompatible",
           "[mode_fsm]")
 {
-    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_ERR_TIMEOUT));
-    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_ERR_NOT_SUPPORTED));
-    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_ERR_INVALID_RESPONSE));
-    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_FAIL));
+    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_BUILTIN_ID, ESP_ERR_TIMEOUT));
+    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_BUILTIN_ID, ESP_ERR_NOT_SUPPORTED));
+    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_BUILTIN_ID, ESP_ERR_INVALID_RESPONSE));
+    TEST_ASSERT_TRUE(mode_fsm_probe_fault_incompatible(MODE_FSM_BUILTIN_ID, ESP_FAIL));
 }
 
 TEST_CASE("On the C6's channel going away during the probe: not an RCP verdict (the probe's text stays)",
           "[mode_fsm]")
 {
-    TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_ERR_INVALID_STATE));
+    TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(MODE_FSM_BUILTIN_ID, ESP_ERR_INVALID_STATE));
 }
 
 TEST_CASE("On a dongle's probe failing, or a probe that passed: not rcp incompatible", "[mode_fsm]")
 {
     TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(DST, ESP_ERR_TIMEOUT));
     TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(NULL, ESP_ERR_TIMEOUT));
-    TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(MODE_FSM_C6_ID, ESP_OK));
-}
-
-TEST_CASE("On a C6 job with the C6 in otbr: it touches OpenThread (not alone)", "[mode_fsm]")
-{
-    TEST_ASSERT_FALSE(mode_fsm_c6_job_alone(MODE_FSM_C6_ID));
-}
-
-TEST_CASE("On a C6 job with a dongle or no channel in otbr: it runs alone", "[mode_fsm]")
-{
-    TEST_ASSERT_TRUE(mode_fsm_c6_job_alone(DST));
-    TEST_ASSERT_TRUE(mode_fsm_c6_job_alone(NULL));
-}
-
-TEST_CASE("On a C6 job with OpenThread on or stored on the C6: it holds OpenThread (reconcile stays out)", "[mode_fsm]")
-{
-    TEST_ASSERT_TRUE(mode_fsm_job_holds_openthread(true, MODE_FSM_C6_ID, MODE_FSM_C6_ID));
-    TEST_ASSERT_TRUE(mode_fsm_job_holds_openthread(true, NULL, MODE_FSM_C6_ID)); // stopped for the job
-    TEST_ASSERT_TRUE(mode_fsm_job_holds_openthread(true, MODE_FSM_C6_ID, NULL));
-}
-
-TEST_CASE("On a C6 job while OpenThread runs on or waits for a dongle: it holds nothing (GONE handled at once)",
-          "[mode_fsm]")
-{
-    TEST_ASSERT_FALSE(mode_fsm_job_holds_openthread(true, DST, DST));
-    TEST_ASSERT_FALSE(mode_fsm_job_holds_openthread(true, NULL, DST));
-    TEST_ASSERT_FALSE(mode_fsm_job_holds_openthread(true, NULL, NULL));
-}
-
-TEST_CASE("On no C6 job: nothing is held, whatever channel OpenThread runs on", "[mode_fsm]")
-{
-    TEST_ASSERT_FALSE(mode_fsm_job_holds_openthread(false, MODE_FSM_C6_ID, MODE_FSM_C6_ID));
-    TEST_ASSERT_FALSE(mode_fsm_job_holds_openthread(false, DST, DST));
+    TEST_ASSERT_FALSE(mode_fsm_probe_fault_incompatible(MODE_FSM_BUILTIN_ID, ESP_OK));
 }
 
 /* ---- the retry of a failed start (V8) ---- */
@@ -1505,4 +1172,390 @@ TEST_CASE("On a move whose start on the target fails but back on the source work
     fake.start_fail_on[0] = DST;
     mode_fsm_move_otbr(&fsm, SRC, DST, err, sizeof(err));
     TEST_ASSERT_FALSE(mode_fsm_start_failed(mode_fsm_get_mode(&fsm), true));
+}
+
+/* ---- the board-mode table (design section 6): mode_fsm_mode_for ---- */
+
+#define USB_ID "usb-303a-1001"
+
+// Thread bound to a ready dongle, not started.
+static mode_fsm_view_t view(void)
+{
+    return (mode_fsm_view_t) {
+        .bound = true, .chan_state = RADIO_MUX_CS_READY, .kind = RADIO_MUX_FAULT_NONE, .work = RADIO_MUX_WORK_NONE,
+        .chan_id = USB_ID, .chan_reason = "", .thread = BR_MODE_NO_RADIO, .thread_reason = "", .unplugged = false,
+    };
+}
+
+static br_core_mode_t mode_for(const mode_fsm_view_t *v, char *reason)
+{
+    strcpy(reason, "stale");
+    return mode_fsm_mode_for(v, reason, 96);
+}
+
+TEST_CASE("On Thread running on a ready channel: BR_RUNNING, no reason", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.thread = BR_MODE_BR_RUNNING;
+    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("", reason);
+}
+
+TEST_CASE("On Thread sniffing on a ready channel: SNIFFER", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.thread = BR_MODE_SNIFFER;
+    TEST_ASSERT_EQUAL(BR_MODE_SNIFFER, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("", reason);
+}
+
+TEST_CASE("On Thread starting or releasing, whatever its channel: STARTING", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.thread = BR_MODE_STARTING;
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_for(&v, reason));
+    v.chan_state = RADIO_MUX_CS_ABSENT;
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("", reason);
+}
+
+TEST_CASE("On Thread bound and waiting for the C6's boot steps, push or ROM recovery: STARTING", "[mode_fsm]")
+{
+    const radio_mux_work_t works[] = {RADIO_MUX_WORK_BOOT_STEPS, RADIO_MUX_WORK_PUSH, RADIO_MUX_WORK_ROM_RECOVERY};
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.chan_id = "builtin-c6";
+    v.chan_state = RADIO_MUX_CS_REINIT;
+    for (size_t i = 0; i < sizeof(works) / sizeof(works[0]); i++) {
+        v.work = works[i];
+        TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_for(&v, reason));
+        TEST_ASSERT_EQUAL_STRING("", reason);
+    }
+}
+
+TEST_CASE("On Thread bound and waiting for a dongle's firmware detection: NO_RADIO waiting for <id>", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.chan_state = RADIO_MUX_CS_REINIT;
+    v.work = RADIO_MUX_WORK_DETECT;
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("waiting for " USB_ID, reason);
+}
+
+TEST_CASE("On Thread bound to an absent dongle at boot: NO_RADIO waiting for <id>", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.chan_state = RADIO_MUX_CS_ABSENT;
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("waiting for " USB_ID, reason);
+}
+
+TEST_CASE("On Thread bound to a dongle unplugged after it ran: NO_RADIO radio unplugged (<id>)", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.chan_state = RADIO_MUX_CS_ABSENT;
+    v.unplugged = true;
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("radio unplugged (" USB_ID ")", reason);
+}
+
+TEST_CASE("On Thread's channel in a link fault: NO_RADIO with the channel's reason and id", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.chan_state = RADIO_MUX_CS_FAULT;
+    v.kind = RADIO_MUX_FAULT_LINK;
+    v.chan_reason = "no answer after 3 resets";
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("no answer after 3 resets (" USB_ID ")", reason);
+}
+
+TEST_CASE("On Thread's channel in a firmware fault: RADIO_FAULT with the channel's reason", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.chan_id = "builtin-c6";
+    v.chan_state = RADIO_MUX_CS_FAULT;
+    v.kind = RADIO_MUX_FAULT_FIRMWARE;
+    v.chan_reason = "no rcp firmware";
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("no rcp firmware", reason);
+    v.thread = BR_MODE_RADIO_FAULT; // after its LOST (firmware) as well
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("no rcp firmware", reason);
+}
+
+TEST_CASE("On Thread in fault on a ready channel: RADIO_FAULT with the start's reason", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.chan_id = "builtin-c6";
+    v.thread = BR_MODE_RADIO_FAULT;
+    v.thread_reason = MODE_FSM_FAULT_INCOMPATIBLE;
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("rcp incompatible", reason);
+    v.thread_reason = "an earlier OpenThread start was abandoned: reboot";
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("an earlier OpenThread start was abandoned: reboot", reason);
+}
+
+TEST_CASE("On Thread bound to a ready channel whose firmware does not fit: NO_RADIO with the fit reason", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.thread_reason = "detected znp firmware does not fit otbr";
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("detected znp firmware does not fit otbr", reason);
+}
+
+TEST_CASE("On no channel stored in otbr: NO_RADIO no channel in otbr", "[mode_fsm]")
+{
+    mode_fsm_view_t v = view();
+    char reason[96];
+
+    v.bound = false;
+    v.chan_id = NULL;
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, mode_for(&v, reason));
+    TEST_ASSERT_EQUAL_STRING("no channel in otbr", reason);
+}
+
+/* ---- Thread's answer to a reinit request: mode_fsm_reinit_verdict ---- */
+
+TEST_CASE("On a reinit request while BR_RUNNING: accepts (after the sessions drain)", "[mode_fsm]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_reinit_verdict(BR_MODE_BR_RUNNING));
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_reinit_verdict(BR_MODE_RADIO_FAULT));
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_reinit_verdict(BR_MODE_NO_RADIO));
+}
+
+TEST_CASE("On a reinit request in SNIFFER: refuses with ESP_ERR_INVALID_STATE", "[mode_fsm]")
+{
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_reinit_verdict(BR_MODE_SNIFFER));
+}
+
+TEST_CASE("On a reinit request in STARTING: refuses with ESP_ERR_INVALID_STATE", "[mode_fsm]")
+{
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_reinit_verdict(BR_MODE_STARTING));
+}
+
+/* ---- mode_fsm_reinit_refusal: Thread's text when it refuses a reinit ---- */
+
+TEST_CASE("On a reinit while a move runs: refused with today's move text, whatever the mode", "[mode_fsm]")
+{
+    TEST_ASSERT_EQUAL_STRING("OpenThread is being moved to another radio",
+                             mode_fsm_reinit_refusal(BR_MODE_BR_RUNNING, true));
+    TEST_ASSERT_EQUAL_STRING("OpenThread is being moved to another radio",
+                             mode_fsm_reinit_refusal(BR_MODE_STARTING, true));
+}
+
+TEST_CASE("On a reinit in SNIFFER: refused with \"a capture is running\"", "[mode_fsm]")
+{
+    TEST_ASSERT_EQUAL_STRING("a capture is running", mode_fsm_reinit_refusal(BR_MODE_SNIFFER, false));
+}
+
+TEST_CASE("On a reinit in STARTING: refused with \"the border router is starting\"", "[mode_fsm]")
+{
+    TEST_ASSERT_EQUAL_STRING("the border router is starting", mode_fsm_reinit_refusal(BR_MODE_STARTING, false));
+}
+
+TEST_CASE("On a reinit in BR_RUNNING, RADIO_FAULT or NO_RADIO with no move: no refusal", "[mode_fsm]")
+{
+    TEST_ASSERT_NULL(mode_fsm_reinit_refusal(BR_MODE_BR_RUNNING, false));
+    TEST_ASSERT_NULL(mode_fsm_reinit_refusal(BR_MODE_RADIO_FAULT, false));
+    TEST_ASSERT_NULL(mode_fsm_reinit_refusal(BR_MODE_NO_RADIO, false));
+}
+
+/* ---- inputs: mode_fsm_input_newer ---- */
+
+TEST_CASE("On an input newer than the last one handled: acted on", "[mode_fsm]")
+{
+    TEST_ASSERT_TRUE(mode_fsm_input_newer(0, 1));
+    TEST_ASSERT_TRUE(mode_fsm_input_newer(2, 9));
+    TEST_ASSERT_TRUE(mode_fsm_input_newer(UINT32_MAX, 0));
+}
+
+TEST_CASE("On an input older than the latest, or the one handled: is ignored", "[mode_fsm]")
+{
+    TEST_ASSERT_FALSE(mode_fsm_input_newer(9, 9));
+    TEST_ASSERT_FALSE(mode_fsm_input_newer(9, 2));
+}
+
+/* ---- inputs: mode_fsm_inbox (the binding input and the pending request kept apart) ---- */
+
+static void put(mode_fsm_inbox_t *box, radio_mux_input_type_t type, uint32_t seq)
+{
+    const radio_mux_input_t in = {.type = type, .seq = seq};
+
+    mode_fsm_inbox_put(box, &in);
+}
+
+TEST_CASE("On a REINIT after an unhandled BIND: both are taken fresh (the start still happens)", "[mode_fsm]")
+{
+    mode_fsm_inbox_t box = {0};
+    radio_mux_input_t in;
+
+    put(&box, RADIO_MUX_IN_BIND, 1);
+    put(&box, RADIO_MUX_IN_REINIT, 2);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_req(&box, &in));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_REINIT, in.type);
+    TEST_ASSERT_EQUAL_UINT32(2, in.seq);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_bind(&box, &in));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_BIND, in.type);
+    TEST_ASSERT_EQUAL_UINT32(1, in.seq);
+}
+
+TEST_CASE("On a binding input: replaces the last binding input, the request kept", "[mode_fsm]")
+{
+    mode_fsm_inbox_t box = {0};
+    radio_mux_input_t in;
+
+    put(&box, RADIO_MUX_IN_REINIT, 1);
+    put(&box, RADIO_MUX_IN_BIND, 2);
+    put(&box, RADIO_MUX_IN_LOST, 3);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_bind(&box, &in));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_LOST, in.type);
+    TEST_ASSERT_EQUAL_UINT32(3, in.seq);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_req(&box, &in));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_REINIT, in.type);
+    TEST_ASSERT_EQUAL_UINT32(1, in.seq);
+}
+
+TEST_CASE("On an input taken: is not fresh again", "[mode_fsm]")
+{
+    mode_fsm_inbox_t box = {0};
+    radio_mux_input_t in;
+
+    TEST_ASSERT_FALSE(mode_fsm_inbox_take_bind(&box, &in));
+    TEST_ASSERT_FALSE(mode_fsm_inbox_take_req(&box, &in));
+    put(&box, RADIO_MUX_IN_BIND, 1);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_bind(&box, &in));
+    TEST_ASSERT_FALSE(mode_fsm_inbox_take_bind(&box, &in));
+    put(&box, RADIO_MUX_IN_REINIT, 2);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_req(&box, &in));
+    TEST_ASSERT_FALSE(mode_fsm_inbox_take_req(&box, &in));
+}
+
+TEST_CASE("On letting go for a request newer than the binding input: the binding input is not acted on",
+          "[mode_fsm]")
+{
+    mode_fsm_inbox_t box = {0};
+    radio_mux_input_t in;
+
+    put(&box, RADIO_MUX_IN_BACK, 1);
+    put(&box, RADIO_MUX_IN_REINIT, 2);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_req(&box, &in));
+    mode_fsm_inbox_let_go(&box, in.seq); // the maintenance's end binds it back
+    TEST_ASSERT_FALSE(mode_fsm_inbox_take_bind(&box, &in));
+}
+
+TEST_CASE("On a binding input newer than the request let go for: is still acted on", "[mode_fsm]")
+{
+    mode_fsm_inbox_t box = {0};
+    radio_mux_input_t in;
+
+    put(&box, RADIO_MUX_IN_REINIT, 1);
+    put(&box, RADIO_MUX_IN_BACK, 2);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_req(&box, &in));
+    mode_fsm_inbox_let_go(&box, in.seq);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_bind(&box, &in));
+    TEST_ASSERT_EQUAL(RADIO_MUX_IN_BACK, in.type);
+}
+
+TEST_CASE("On letting go for a request older than the binding input taken: that input stays taken", "[mode_fsm]")
+{
+    mode_fsm_inbox_t box = {0};
+    radio_mux_input_t in;
+
+    put(&box, RADIO_MUX_IN_BIND, 3);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_bind(&box, &in));
+    mode_fsm_inbox_let_go(&box, 2);
+    TEST_ASSERT_FALSE(mode_fsm_inbox_take_bind(&box, &in));
+    put(&box, RADIO_MUX_IN_BACK, 4);
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_bind(&box, &in));
+}
+
+TEST_CASE("On a binding input acted on elsewhere (a move's commit): it is taken, the request still fresh",
+          "[mode_fsm]")
+{
+    mode_fsm_inbox_t box = {0};
+    radio_mux_input_t in;
+
+    put(&box, RADIO_MUX_IN_REINIT, 1);
+    put(&box, RADIO_MUX_IN_BIND, 2);
+    mode_fsm_inbox_handled(&box);
+    TEST_ASSERT_FALSE(mode_fsm_inbox_take_bind(&box, &in));
+    TEST_ASSERT_TRUE(mode_fsm_inbox_take_req(&box, &in));
+}
+
+/* ---- the mode_changed op (Thread's state reported to the orchestrator) ---- */
+
+TEST_CASE("On every mode change: the mode_changed op hears the new mode", "[mode_fsm]")
+{
+    setup(BR_MODE_STARTING);
+    TEST_ASSERT_TRUE(mode_fsm_set_started(&fsm));
+    mode_fsm_set_fault(&fsm);
+    mode_fsm_on_channel_gone(&fsm);
+    TEST_ASSERT_EQUAL(4, fake.heard_count); /* BR_RUNNING, RADIO_FAULT, NO_RADIO (before and after the teardown) */
+    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, fake.heard[0]);
+    TEST_ASSERT_EQUAL(BR_MODE_RADIO_FAULT, fake.heard[1]);
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, fake.heard[2]);
+    TEST_ASSERT_EQUAL(BR_MODE_NO_RADIO, fake.heard[3]);
+}
+
+/* ---- REINIT: mode_fsm_on_reinit ---- */
+
+TEST_CASE("On a reinit while BR_RUNNING: OpenThread stops after its drain, STARTING, accepted", "[mode_fsm]")
+{
+    setup(BR_MODE_BR_RUNNING);
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_on_reinit(&fsm));
+    TEST_ASSERT_EQUAL(1, count_of("ot_stop"));
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, fake.mode_in_stop); /* the guards refuse new sessions during the drain */
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
+    TEST_ASSERT_EQUAL(0, count_of("ot_start"));
+}
+
+TEST_CASE("On a reinit in SNIFFER or STARTING: refused with ESP_ERR_INVALID_STATE, nothing stopped", "[mode_fsm]")
+{
+    setup(BR_MODE_SNIFFER);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_on_reinit(&fsm));
+    TEST_ASSERT_EQUAL(BR_MODE_SNIFFER, mode_fsm_get_mode(&fsm));
+    setup(BR_MODE_STARTING);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, mode_fsm_on_reinit(&fsm));
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
+    TEST_ASSERT_EQUAL(0, count_of("ot_stop"));
+}
+
+TEST_CASE("On a reinit whose sessions do not end: refused with a drain timeout, the mode back", "[mode_fsm]")
+{
+    setup(BR_MODE_BR_RUNNING);
+    fake.fail[OP_OT_STOP] = ESP_ERR_TIMEOUT;
+    TEST_ASSERT_EQUAL(MODE_FSM_ERR_DRAIN_TIMEOUT, mode_fsm_on_reinit(&fsm));
+    TEST_ASSERT_EQUAL(BR_MODE_BR_RUNNING, mode_fsm_get_mode(&fsm)); /* never RADIO_FAULT */
+}
+
+TEST_CASE("On a reinit with OpenThread not running (RADIO_FAULT, NO_RADIO): accepted, STARTING", "[mode_fsm]")
+{
+    setup(BR_MODE_RADIO_FAULT);
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_on_reinit(&fsm));
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
+    setup(BR_MODE_NO_RADIO);
+    TEST_ASSERT_EQUAL(ESP_OK, mode_fsm_on_reinit(&fsm));
+    TEST_ASSERT_EQUAL(BR_MODE_STARTING, mode_fsm_get_mode(&fsm));
 }

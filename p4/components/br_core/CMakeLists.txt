@@ -17,6 +17,6 @@ idf_component_register(SRCS ${srcs}
                        INCLUDE_DIRS "include"
                        REQUIRES esp_netif rcp_sync
                        PRIV_REQUIRES board_cores openthread esp_ot_br_server mdns esp_event esp_timer esp_hw_support console
-                                     esp_driver_gpio app_update vfs nvs_flash log radio_mux)
+                                     esp_driver_gpio app_update vfs nvs_flash log radio_mux builtin_rcp)
 # board.h lives in main (which depends on this component); include it by path.
 target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../main")

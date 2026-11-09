@@ -18,10 +18,11 @@ var COPY_RESET_MS = 2000;
 /** Poll period: quick while the coordinator starts, calm otherwise. */
 function pollMs(state) { return state === 'starting' ? 2000 : 5000; }
 
-/** The radio behind a mux channel id: "c6" is the on-board one, "usb-..." a stick. */
+/** The radio behind a mux channel id: "builtin-<chip>" is the board's own (its label: "ESP32-C6 (built-in)"),
+ *  "usb-..." a stick. */
 function radioName(channel) {
-  if (channel === 'c6')
-    return 'ESP32-C6 (built-in)';
+  if (channel && channel.indexOf('builtin-') === 0)
+    return 'ESP32-' + channel.slice('builtin-'.length).toUpperCase() + ' (built-in)';
   return channel ? 'USB radio ' + channel : '-';
 }
 

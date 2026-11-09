@@ -108,19 +108,44 @@ TEST_CASE("On a push whose image the C6 rejected at END: 400 invalid_image", "[d
     TEST_ASSERT_EQUAL_STRING("invalid_image", e.code);
 }
 
+TEST_CASE("On a recovery with Thread on the C6 still STARTING: the reply waits for Thread's own state",
+          "[device_api]")
+{
+    TEST_ASSERT_TRUE(device_api_recover_waits(BR_MODE_STARTING, true));
+}
+
+TEST_CASE("On a recovery with Thread settled, or on another radio: the reply does not wait", "[device_api]")
+{
+    TEST_ASSERT_FALSE(device_api_recover_waits(BR_MODE_RADIO_FAULT, true));
+    TEST_ASSERT_FALSE(device_api_recover_waits(BR_MODE_BR_RUNNING, true));
+    TEST_ASSERT_FALSE(device_api_recover_waits(BR_MODE_NO_RADIO, true));
+    TEST_ASSERT_FALSE(device_api_recover_waits(BR_MODE_STARTING, false));
+}
+
+TEST_CASE("On a move running: the radio job is busy with today's move text", "[device_api]")
+{
+    TEST_ASSERT_EQUAL_STRING("OpenThread is being moved to another radio",
+                             device_api_radio_job_busy(BR_MODE_BR_RUNNING, false, true));
+    TEST_ASSERT_EQUAL_STRING("OpenThread is being moved to another radio",
+                             device_api_radio_job_busy(BR_MODE_BR_RUNNING, true, true));
+    TEST_ASSERT_EQUAL_STRING("OpenThread is being moved to another radio",
+                             device_api_radio_job_busy(BR_MODE_STARTING, true, true));
+}
+
 TEST_CASE("On c6_installer.bin failing to go through ESP-Hosted: 502 install_failed", "[device_api]")
 {
     TEST_ASSERT_EQUAL(502, device_api_map_push_error(RCP_SYNC_ERR_HOSTED_OTA).http_status);
     TEST_ASSERT_EQUAL_STRING("install_failed", device_api_map_push_error(RCP_SYNC_ERR_HOSTED_OTA).code);
 }
 
-TEST_CASE("On a push that installed but whose OpenThread restart failed: 502 restart_failed", "[device_api]")
+TEST_CASE("On a push that installed but whose mode did not start again: 502 restart_failed, a detail for any mode",
+          "[device_api]")
 {
     device_api_error_t e = device_api_map_push_error(RCP_SYNC_ERR_RESTART);
 
     TEST_ASSERT_EQUAL(502, e.http_status);
     TEST_ASSERT_EQUAL_STRING("restart_failed", e.code);
-    TEST_ASSERT_NOT_NULL(e.detail);
+    TEST_ASSERT_EQUAL_STRING("the image is installed, but the radio's mode did not start on it", e.detail);
 }
 
 TEST_CASE("On a push that failed in the transfer: 502 push_failed", "[device_api]")
@@ -310,18 +335,18 @@ TEST_CASE("On a recovery that worked without RCP firmware while Thread runs on a
 
 TEST_CASE("On a C6 job with Thread on the C6: refused in SNIFFER and STARTING, allowed otherwise", "[device_api]")
 {
-    TEST_ASSERT_EQUAL_STRING("a capture is running", device_api_radio_job_busy(BR_MODE_SNIFFER, true));
-    TEST_ASSERT_EQUAL_STRING("the border router is starting", device_api_radio_job_busy(BR_MODE_STARTING, true));
-    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_BR_RUNNING, true));
-    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_RADIO_FAULT, true));
-    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_NO_RADIO, true));
+    TEST_ASSERT_EQUAL_STRING("a capture is running", device_api_radio_job_busy(BR_MODE_SNIFFER, true, false));
+    TEST_ASSERT_EQUAL_STRING("the border router is starting", device_api_radio_job_busy(BR_MODE_STARTING, true, false));
+    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_BR_RUNNING, true, false));
+    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_RADIO_FAULT, true, false));
+    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_NO_RADIO, true, false));
 }
 
 TEST_CASE("On a C6 job with Thread on a dongle or nowhere: the board mode never refuses it", "[device_api]")
 {
-    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_SNIFFER, false));
-    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_STARTING, false));
-    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_NO_RADIO, false));
+    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_SNIFFER, false, false));
+    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_STARTING, false, false));
+    TEST_ASSERT_NULL(device_api_radio_job_busy(BR_MODE_NO_RADIO, false, false));
 }
 
 TEST_CASE("On a recovery that worked without RCP firmware: detail tells to upload it", "[device_api]")

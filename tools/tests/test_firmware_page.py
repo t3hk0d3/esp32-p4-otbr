@@ -118,8 +118,8 @@ class TestFirmwareLogic:
         assert hint == {"highlight": False, "text": ""}
 
     def test_fault_with_thread_on_the_c6_still_highlights(self):
-        # On "rcp incompatible" with otbr_channel "c6": the C6 card is highlighted, as without a channel.
-        assert fw("L.faultHint('rcp incompatible', 'c6')")["highlight"] is True
+        # On "rcp incompatible" with otbr_channel "builtin-c6": the C6 card is highlighted, as without a channel.
+        assert fw("L.faultHint('rcp incompatible', 'builtin-c6')")["highlight"] is True
 
     @pytest.mark.parametrize("reason", ["null", "'other'"])
     def test_other_fault_reasons_do_not_highlight(self, reason):
@@ -292,14 +292,23 @@ class TestUpdateLogic:
         h = fw(f"L.updateHint({upd(app='same')})")
         assert "reboot" not in h and "half a minute" in h
 
-    def test_hint_for_a_newer_running_build_names_the_radio_rewrite_when_the_release_has_one(self):
+    def test_hint_for_a_newer_running_build_names_the_radio_rewrite_when_the_release_has_one(
+        self,
+    ):
         # On "Install anyway" with a c6_rcp in the release: force rewrites the radio even when it matches.
         h = fw(f"L.updateHint({upd(app='older', rcp_differs=False)})")
         assert "rewrites the radio firmware" in h and "half a minute" in h
 
-    def test_hint_for_a_newer_running_build_without_radio_firmware_has_no_radio_sentence(self):
-        h = fw(f"L.updateHint({upd(app='older', rcp_differs=False, release=rel(rcp=''))})")
-        assert h == "This board runs a build that is newer than v0.4.0. Installing goes back to the release."
+    def test_hint_for_a_newer_running_build_without_radio_firmware_has_no_radio_sentence(
+        self,
+    ):
+        h = fw(
+            f"L.updateHint({upd(app='older', rcp_differs=False, release=rel(rcp=''))})"
+        )
+        assert (
+            h
+            == "This board runs a build that is newer than v0.4.0. Installing goes back to the release."
+        )
 
     def test_hint_when_up_to_date(self):
         assert (
@@ -327,15 +336,23 @@ class TestUpdateLogic:
         q = fw(f"L.updateQuestion({upd(app='older')}, 'X')")
         assert "newer than this release" in q
 
-    def test_question_for_a_newer_running_build_names_the_radio_rewrite_when_the_release_has_one(self):
+    def test_question_for_a_newer_running_build_names_the_radio_rewrite_when_the_release_has_one(
+        self,
+    ):
         q = fw(f"L.updateQuestion({upd(app='older', rcp_differs=False)}, 'X')")
         assert "radio firmware is rewritten too" in q
 
-    def test_question_for_a_newer_running_build_without_radio_firmware_has_no_radio_sentence(self):
-        q = fw(f"L.updateQuestion({upd(app='older', rcp_differs=False, release=rel(rcp=''))}, 'X')")
+    def test_question_for_a_newer_running_build_without_radio_firmware_has_no_radio_sentence(
+        self,
+    ):
+        q = fw(
+            f"L.updateQuestion({upd(app='older', rcp_differs=False, release=rel(rcp=''))}, 'X')"
+        )
         assert "radio" not in q
 
-    def test_radio_failure_after_a_rollback_does_not_claim_the_border_router_was_updated(self):
+    def test_radio_failure_after_a_rollback_does_not_claim_the_border_router_was_updated(
+        self,
+    ):
         assert (
             fw("L.rcpFailedText('cut off', false)")
             == "The radio firmware was not updated either: cut off."
@@ -947,7 +964,9 @@ class TestUpdatesCard:
         assert r[1] == "var(--danger)"
         assert r[2:] == ["", []]
 
-    def test_after_a_rolled_back_reload_the_radio_failure_does_not_say_the_border_router_was_updated(self):
+    def test_after_a_rolled_back_reload_the_radio_failure_does_not_say_the_border_router_was_updated(
+        self,
+    ):
         # On the board coming back on the version it ran before: no "Border Router was updated", no "install again".
         r = scenario(
             page("firmware", routes())

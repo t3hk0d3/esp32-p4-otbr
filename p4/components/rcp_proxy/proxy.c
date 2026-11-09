@@ -1,5 +1,5 @@
-// RCP proxy: the rcp-proxy consumer of the radio mux and the proxy task. The mux's attach and detach (owner task) only
-// leave a wish per transport and wake the task; the task alone opens and closes sessions and sockets, and waits in one
+// RCP proxy: the rcp-proxy mode instances (one per channel) of the radio mux and the proxy task. The orchestrator's
+// inputs (owner task) only leave the latest input per transport and wake the task; the task alone opens and closes sessions and sockets, and waits in one
 // select() over the adapters' sockets, the channels' eventfds and its kick eventfd (spec section RCP proxy mode). A
 // connect target's name is looked up by the resolver task (rcp_resolve: getaddrinfo and mDNS block for seconds), which
 // leaves the answer per slot and wakes the proxy task through the kick eventfd; the other slot's session never waits.
@@ -50,17 +50,24 @@ static const char *TAG = "rcp_proxy";
 #define DEC_CAP (RADIO_MUX_FRAME_MAX + RADIO_MUX_HDLC_CRC_LEN)
 #define PORT_TEXT_MAX 6
 
+// The latest input from the orchestrator for a slot (the C6's channel, or the USB channel on the port).
 typedef struct {
-    radio_mux_chan_t *ch; // NULL: no channel
-    char id[RADIO_MUX_ID_MAX];
-    bool frames; // radio_mux_chan_frames at attach
+    radio_mux_chan_t *ch; // the handle of the latest BIND or BACK; NULL after UNBIND or LOST
+    char id[RADIO_MUX_ID_MAX]; // the latest input's channel
+    bool frames; // radio_mux_chan_frames at the bind
+    bool set_ok; // the stored settings passed radio_mux_proxy_check at the bind
     radio_mux_proxy_settings_t set;
-    uint32_t gen; // bumped by every attach and detach
+    radio_mux_input_type_t type;       // the latest input
+    uint32_t seq;                      // its seq
+    radio_mux_chan_t *in_ch;           // its handle: REINIT's answer and LOST's report go through it
+    uint32_t bind_seq;                 // the seq of the latest BIND or BACK (a REINIT does not replace the bind)
+    radio_mux_input_type_t bind_type;  // its type
+    char reason[RADIO_MUX_REASON_MAX]; // its reason (LOST: the channel's; REINIT: the work)
     bool kick;
 } want_t;
 
 typedef struct {
-    uint32_t gen; // the wish the session was opened for
+    uint32_t seq; // the input the session was opened for
     bool active;
     proxy_state_t state;
     char peer[RADIO_MUX_PEER_MAX];
@@ -83,18 +90,22 @@ typedef struct {
 } answer_t;
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
-static want_t s_want[SLOTS]; // under s_lock: attach, detach, kick
+static want_t s_want[SLOTS]; // under s_lock: the orchestrator's latest input, kick
 static pub_t s_pub[SLOTS];   // under s_lock: what the task last published
 static ask_t s_ask[SLOTS];   // under s_lock: the lookup each slot waits for (the resolver skips one cancelled meanwhile)
 static answer_t s_ans[SLOTS]; // under s_lock: the resolver's latest answer per slot, not yet taken
 static TaskHandle_t s_resolver; // NULL: no resolver task (a name never resolves; literals still do)
 static int s_kick_fd = -1;
 static bool s_registered;
-static bool s_task_up; // false: attach is refused (the task could not be created)
+static bool s_task_up; // false: no task acts on the inputs (it could not be created)
 
 // Proxy task only.
 static proxy_t s_px[SLOTS];
-static uint32_t s_gen[SLOTS];
+static uint32_t s_seen[SLOTS];                 // the seq of the last input handled
+static uint32_t s_bind_seen[SLOTS];            // the seq of the last BIND or BACK acted on (proxy task)
+static char s_seen_id[SLOTS][RADIO_MUX_ID_MAX]; // and its channel (the USB slot serves one channel after another)
+static proxy_state_t s_rep_state[SLOTS];       // what was last reported (radio_mux_report)
+static char s_rep_err[SLOTS][RADIO_MUX_PROXY_ERROR_MAX];
 static uint32_t s_lookup_seq; // rcp_proxy_lookup_ask's counter, shared by every session
 static uint8_t s_rx[RCP_PROXY_RX_MAX];
 static uint8_t s_raw[RCP_PROXY_UDP_RAW_MAX];
@@ -372,7 +383,6 @@ void rcp_proxy_retry(proxy_t *p, const char *why)
     p->retry_ms = now + (int64_t)p->backoff_s * 1000;
     p->state = PROXY_BACKOFF;
     p->peer[0] = '\0';
-    radio_mux_set_busy_peer(p->ch, false);
     ESP_LOGW(TAG, "%s: %s; again in %lu s", p->id, why, (unsigned long)p->backoff_s);
 }
 
@@ -417,7 +427,6 @@ static void session_close(proxy_t *p)
     }
     lookup_cancel(p);
     p->ad->close(p);
-    radio_mux_set_busy_peer(p->ch, false);
     ESP_LOGI(TAG, "%s: closed (to radio %llu B, to peer %llu B, discarded %lu B, refused %lu, overflows %lu, "
              "radio tx errors %lu)", p->id, (unsigned long long)p->to_radio, (unsigned long long)p->to_peer,
              (unsigned long)p->discarded, (unsigned long)p->refused, (unsigned long)p->overflows,
@@ -434,7 +443,6 @@ void rcp_proxy_peer_up(proxy_t *p, const struct sockaddr *peer, bool new_session
     rcp_proxy_peer_text(peer, p->peer, sizeof(p->peer));
     p->state = PROXY_CONNECTED;
     p->last_error[0] = '\0';
-    radio_mux_set_busy_peer(p->ch, true); // a C6 job is refused while a peer is connected (409 c6_busy)
     p->up_ms = rcp_proxy_now_ms();
     if (p->ring_buf) {
         rcp_proxy_ring_clear(&p->ring); // a new session starts clean
@@ -463,7 +471,6 @@ void rcp_proxy_peer_lost(proxy_t *p, proxy_state_t st)
 {
     p->state = st;
     p->peer[0] = '\0';
-    radio_mux_set_busy_peer(p->ch, false);
     if (p->ring_buf) {
         rcp_proxy_ring_clear(&p->ring);
     }
@@ -480,7 +487,7 @@ static bool session_current(const proxy_t *p)
     bool current;
 
     taskENTER_CRITICAL(&s_lock);
-    current = p->ch && s_want[i].ch == p->ch && s_want[i].gen == s_gen[i];
+    current = p->ch && s_want[i].ch == p->ch && s_want[i].seq == s_seen[i];
     taskEXIT_CRITICAL(&s_lock);
     return current;
 }
@@ -720,7 +727,45 @@ static void take_answers(void)
     }
 }
 
-// Applies the wishes of attach, detach and kick: a new generation closes the session and opens the wished one.
+// REINIT (maintenance wants the channel): refused while a peer is connected (409 c6_busy); otherwise the session and
+// the listener close, and both open again on BACK. Returns whether the proxy let go.
+static bool reinit(proxy_t *p, const want_t *w)
+{
+    char why[RADIO_MUX_REASON_MAX];
+
+    if (rcp_proxy_reinit_verdict(p->ch && p->state == PROXY_CONNECTED) == RCP_PROXY_REINIT_REFUSE_PEER) {
+        ESP_LOGW(TAG, "%s: reinit (%s) refused: peer %s is connected", w->id, w->reason, p->peer);
+        radio_mux_reinit_reply(w->in_ch, w->seq, RADIO_MUX_ERR_PEER_CONNECTED, "rcp-proxy has a connected peer");
+        return false;
+    }
+    session_close(p);
+    snprintf(why, sizeof(why), "radio reinit: %.80s", w->reason); // the work: a few words
+    radio_mux_report(w->in_ch, "no_radio", why);
+    radio_mux_reinit_reply(w->in_ch, w->seq, ESP_OK, NULL);
+    return true;
+}
+
+// BIND or BACK: the session on the bound handle with its settings.
+static void bind_session(proxy_t *p, int i, const want_t *w)
+{
+    s_bind_seen[i] = w->bind_seq;
+    session_close(p);
+    if (!w->set_ok) {
+        ESP_LOGE(TAG, "%s: stored rcp_proxy settings are invalid", w->id);
+        radio_mux_report(w->ch, "off", "stored rcp_proxy settings are invalid");
+        return;
+    }
+    session_open(p, w);
+    s_rep_state[i] = PROXY_IDLE; // the first state is reported
+}
+
+// Whether slot i's latest input is one not handled yet: a newer seq, or the first input of another channel.
+static bool input_current(int i, const want_t *w)
+{
+    return strcmp(w->id, s_seen_id[i]) != 0 || rcp_proxy_input_current(s_seen[i], w->seq);
+}
+
+// Acts on the orchestrator's latest input per slot (an older one is never seen: the latest wins) and on kicks.
 static void reconcile(void)
 {
     for (int i = 0; i < SLOTS; i++) {
@@ -732,11 +777,32 @@ static void reconcile(void)
         taskEXIT_CRITICAL(&s_lock);
         proxy_t *p = &s_px[i];
 
-        if (w.gen != s_gen[i]) {
-            session_close(p);
-            s_gen[i] = w.gen;
-            if (w.ch) {
-                session_open(p, &w);
+        if (w.seq != 0 && input_current(i, &w)) {
+            s_seen[i] = w.seq;
+            strlcpy(s_seen_id[i], w.id, sizeof(s_seen_id[i]));
+            switch (w.type) {
+            case RADIO_MUX_IN_BIND:
+            case RADIO_MUX_IN_BACK:
+                bind_session(p, i, &w);
+                break;
+            case RADIO_MUX_IN_LOST:
+                session_close(p);
+                radio_mux_report(w.in_ch, "no_radio", w.reason);
+                break;
+            case RADIO_MUX_IN_REINIT: {
+                const bool let_go = reinit(p, &w);
+
+                if (w.ch && rcp_proxy_bind_after_reinit(let_go, w.bind_seq, s_bind_seen[i])) {
+                    ESP_LOGI(TAG, "%s: the bind the refused reinit arrived on", w.id);
+                    bind_session(p, i, &w);
+                } else if (let_go) {
+                    s_bind_seen[i] = w.bind_seq; // superseded: BACK binds again
+                }
+                break;
+            }
+            default: // UNBIND: the orchestrator shows nothing bound
+                session_close(p);
+                break;
             }
         } else if (w.kick && p->ch && p->state != PROXY_BACKOFF) {
             ESP_LOGI(TAG, "%s: kicked", p->id);
@@ -750,8 +816,14 @@ static void publish(void)
     for (int i = 0; i < SLOTS; i++) {
         const proxy_t *p = &s_px[i];
 
+        if (p->ch && state_name(p->state) &&
+                (p->state != s_rep_state[i] || strcmp(p->last_error, s_rep_err[i]) != 0)) {
+            s_rep_state[i] = p->state;
+            strlcpy(s_rep_err[i], p->last_error, sizeof(s_rep_err[i]));
+            radio_mux_report(p->ch, state_name(p->state), p->last_error);
+        }
         taskENTER_CRITICAL(&s_lock);
-        s_pub[i].gen = s_gen[i];
+        s_pub[i].seq = s_seen[i];
         s_pub[i].active = p->ch != NULL;
         s_pub[i].state = p->state;
         memcpy(s_pub[i].peer, p->peer, sizeof(s_pub[i].peer));
@@ -833,7 +905,7 @@ static void proxy_task(void *arg)
             if (read(s_kick_fd, &v, sizeof(v)) != sizeof(v)) {
                 ESP_LOGW(TAG, "kick eventfd read failed");
             }
-            // A detach (and the next attach) comes before the next consumer's traffic on the same eventfd: apply it
+            // An unbind (and the next bind) comes before the next instance's traffic on the same eventfd: apply it
             // first, then wait again with fresh sets (every readiness is level-triggered, nothing is lost).
             reconcile();
             continue;
@@ -856,75 +928,89 @@ static void proxy_task(void *arg)
     }
 }
 
-/* ---- consumer ---- */
+/* ---- the orchestrator instance ---- */
 
 static int slot_of(const radio_mux_chan_t *ch)
 {
-    return strcmp(radio_mux_chan_id(ch), RADIO_MUX_C6_ID) == 0 ? SLOT_C6 : SLOT_USB;
+    return strcmp(radio_mux_chan_id(ch), RADIO_MUX_BUILTIN_ID) == 0 ? SLOT_C6 : SLOT_USB;
 }
 
-// Owner task: note the wish and wake the proxy task. The settings are read here, at attach: a change re-attaches.
-static esp_err_t on_attach(radio_mux_chan_t *ch, void *ctx)
+// Owner task: the orchestrator's input is noted as the slot's latest and the proxy task woken; nothing waits. A bind
+// reads the channel's stored settings and delivery kind here (a change of settings is a new bind).
+static void on_input(const radio_mux_input_t *in, void *ctx)
 {
-    radio_mux_proxy_settings_t set;
+    radio_mux_proxy_settings_t set = {0};
+    bool set_ok = false, frames = false;
 
+    if (!in->ch) {
+        return; // a proxy is never unbound from an absent channel (a mode change there is refused)
+    }
+    const bool bind = in->type == RADIO_MUX_IN_BIND || in->type == RADIO_MUX_IN_BACK;
+
+    if (bind) {
+        radio_mux_get_proxy(in->ch, &set);
+        set_ok = radio_mux_proxy_check(&set) == RADIO_MUX_PROXY_CHECK_OK;
+        frames = radio_mux_chan_frames(in->ch); // the mux owns the delivery kind (the C6: always frames)
+    }
     if (!s_task_up) {
-        return ESP_ERR_INVALID_STATE;
+        ESP_LOGE(TAG, "%s: no proxy task: the input is not acted on", radio_mux_chan_id(in->ch));
     }
-    radio_mux_get_proxy(ch, &set);
-    if (radio_mux_proxy_check(&set) != RADIO_MUX_PROXY_CHECK_OK) {
-        ESP_LOGE(TAG, "%s: stored rcp_proxy settings are invalid", radio_mux_chan_id(ch));
-        return ESP_ERR_INVALID_ARG;
-    }
-    const int i = slot_of(ch);
+    const int i = slot_of(in->ch);
 
     taskENTER_CRITICAL(&s_lock);
-    s_want[i].ch = ch;
-    strlcpy(s_want[i].id, radio_mux_chan_id(ch), sizeof(s_want[i].id));
-    s_want[i].frames = radio_mux_chan_frames(ch); // the mux owns the delivery kind (the C6: always frames)
-    s_want[i].set = set;
-    s_want[i].gen++;
-    s_want[i].kick = false;
-    taskEXIT_CRITICAL(&s_lock);
-    poke();
-    return ESP_OK;
-}
+    want_t *w = &s_want[i];
 
-static void on_detach(radio_mux_chan_t *ch, void *ctx)
-{
-    const int i = slot_of(ch);
-
-    taskENTER_CRITICAL(&s_lock);
-    if (s_want[i].ch == ch) {
-        s_want[i].ch = NULL;
-        s_want[i].id[0] = '\0';
-        s_want[i].gen++;
-        s_want[i].kick = false;
+    strlcpy(w->id, radio_mux_chan_id(in->ch), sizeof(w->id));
+    w->type = in->type;
+    w->seq = in->seq;
+    w->in_ch = in->ch;
+    memcpy(w->reason, in->reason, sizeof(w->reason));
+    w->kick = false;
+    if (bind) {
+        w->bind_seq = in->seq;
+        w->bind_type = in->type;
+        w->ch = in->ch;
+        w->frames = frames;
+        w->set = set;
+        w->set_ok = set_ok;
+    } else if (in->type != RADIO_MUX_IN_REINIT) {
+        w->ch = NULL;
     }
     taskEXIT_CRITICAL(&s_lock);
     poke();
 }
 
-// The consumer first, then the task: a refused registration leaves nothing running. A task that cannot be created
-// leaves the consumer registered with attach refused (its channels show the fault).
+// The task first, then the instance: without its task the mode is not registered (not offered, never bound), so no
+// channel shows rcp-proxy running with nothing serving it. A refused registration stops the task again.
 esp_err_t rcp_proxy_register(void)
 {
+    TaskHandle_t task = NULL;
+
     ESP_RETURN_ON_FALSE(!s_registered, ESP_ERR_INVALID_STATE, TAG, "already registered");
     s_kick_fd = eventfd(0, 0);
     ESP_RETURN_ON_FALSE(s_kick_fd >= 0, ESP_ERR_NO_MEM, TAG, "eventfd (is the eventfd VFS registered?)");
-    const radio_mux_consumer_t c = {
+    if (xTaskCreatePinnedToCore(proxy_task, "rcp_proxy", TASK_STACK, NULL, TASK_PRIORITY, &task, MGMT_CORE) != pdPASS) {
+        ESP_LOGE(TAG, "the proxy task could not be created: rcp-proxy is not offered");
+        close(s_kick_fd);
+        s_kick_fd = -1;
+        return ESP_ERR_NO_MEM;
+    }
+    s_task_up = true;
+    const radio_mux_instance_t inst = {
         .mode = RADIO_MUX_MODE_RCP_PROXY,
         .needs = RADIO_MUX_FW_UNKNOWN,
         .limit = 0,
         .reboot_on_change = false,
         .frames = false, // USB channels: raw bytes; the C6 always delivers frames (radio_mux_chan_frames)
-        .attach = on_attach,
-        .detach = on_detach,
+        .per_channel = true,
+        .input = on_input,
         .ctx = NULL,
     };
-    const esp_err_t err = radio_mux_register_consumer(&c);
+    const esp_err_t err = radio_mux_register_instance(&inst);
 
     if (err != ESP_OK) {
+        s_task_up = false;
+        vTaskDelete(task); // idle: no input reached it
         close(s_kick_fd);
         s_kick_fd = -1;
         return err;
@@ -935,11 +1021,6 @@ esp_err_t rcp_proxy_register(void)
         s_resolver = NULL;
         ESP_LOGE(TAG, "the resolver task could not be created: connect targets by name do not resolve");
     }
-    if (xTaskCreatePinnedToCore(proxy_task, "rcp_proxy", TASK_STACK, NULL, TASK_PRIORITY, NULL, MGMT_CORE) != pdPASS) {
-        ESP_LOGE(TAG, "the proxy task could not be created: rcp-proxy channels stay in fault");
-        return ESP_ERR_NO_MEM;
-    }
-    s_task_up = true;
     return ESP_OK;
 }
 
@@ -978,11 +1059,14 @@ esp_err_t rcp_proxy_get_status(const char *channel_id, rcp_proxy_status_t *out)
         if (!w->ch || strcmp(w->id, channel_id) != 0) {
             continue;
         }
-        if (pub->active && pub->gen == w->gen && state_name(pub->state)) {
+        if (w->type == RADIO_MUX_IN_REINIT && !(pub->active && pub->seq == w->seq)) {
+            break; // let go for maintenance (or about to): no session, as while the channel was busy before
+        }
+        if (pub->active && pub->seq == w->seq && state_name(pub->state)) {
             out->state = state_name(pub->state);
             memcpy(out->peer, pub->peer, sizeof(out->peer));
             memcpy(out->last_error, pub->last_error, sizeof(out->last_error));
-        } else { // attached, the task has not opened it yet
+        } else { // bound, the task has not opened it yet
             out->state = w->set.dir == RADIO_MUX_PROXY_CONNECT ? "connecting" : "listening";
             out->peer[0] = '\0';
             out->last_error[0] = '\0';

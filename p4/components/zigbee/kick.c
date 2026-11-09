@@ -20,7 +20,12 @@ void zigbee_kick_taken(zigbee_kick_t *k)
     atomic_store(&k->pending, false);
 }
 
-bool zigbee_gone_lost(uint32_t detached, uint32_t attached, uint32_t gone)
+bool zigbee_input_newer(uint32_t seen_seq, uint32_t input_seq)
 {
-    return attached != 0 && detached == attached && gone != attached;
+    return (int32_t)(input_seq - seen_seq) > 0;
+}
+
+bool zigbee_input_skipped(uint32_t seen_seq, uint32_t input_seq)
+{
+    return (int32_t)(input_seq - seen_seq) > 1;
 }

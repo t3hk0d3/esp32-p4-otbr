@@ -26,7 +26,12 @@ CHANNEL_KEYS = [
     "rcp_proxy",
     "firmware",
     "counters",
+    "channel_state",
+    "channel_reason",
+    "mode_state",
+    "mode_reason",
 ]
+MODE_KEYS = ["mode", "channel", "state", "reason", "reboot_on_change"]
 COUNTER_KEYS = [
     "frames_in",
     "frames_out",
@@ -54,7 +59,12 @@ PROXY_DEFAULTS = {
     "host": "",
     "framing": "hdlc",
 }
-OFFERED_MODES = {"off", "otbr", "rcp-proxy"}
+OFFERED_MODES = {
+    "off",
+    "otbr",
+    "rcp-proxy",
+    "ziggurat",
+}  # ziggurat: registered since the Zigbee merge
 NO_RADIO_DETAIL = "no radio in OTBR mode"
 # spinel PROP_VALUE_GET PROTOCOL_VERSION (TID 1), HDLC framed with its FCS: a first frame a proxy client sends.
 SPINEL_GET_PROTOCOL_VERSION_HDLC = bytes.fromhex("7e810201c5b27e")
@@ -109,14 +119,14 @@ def get_channels(base_url):
     return reply.json()
 
 
-def get_channel(base_url, channel_id="c6"):
+def get_channel(base_url, channel_id="builtin-c6"):
     for channel in get_channels(base_url)["channels"]:
         if channel["id"] == channel_id:
             return channel
     pytest.fail(f"no channel {channel_id!r} in the list")
 
 
-def put_channel(base_url, body, channel_id="c6"):
+def put_channel(base_url, body, channel_id="builtin-c6"):
     return requests.put(
         f"{base_url}/device/channels/{channel_id}", json=body, timeout=30
     )
@@ -143,7 +153,7 @@ def wait_mode(base_url, mode, timeout=STATUS_TIMEOUT_S):
     pytest.fail(f"board mode is {status.get('mode')!r}, expected {mode!r}")
 
 
-def set_mode(base_url, mode, channel_id="c6", timeout=SETTLE_TIMEOUT_S):
+def set_mode(base_url, mode, channel_id="builtin-c6", timeout=SETTLE_TIMEOUT_S):
     """PUT `mode` on the channel and wait until it settled; return the reply. A 200 applies at once. A 202 (a move,
     start or stop of Thread, a long operation) is waited for: until the channel stores the mode, and for otbr until
     Thread runs on it. Before otbr, a radio that runs rcp-proxy is set off first (the API refuses otbr while the proxy
@@ -179,9 +189,9 @@ def c6_in_otbr(base_url):
 def test_c6_listed_in_otbr(base_url, board_ip):
     # GET /device/channels on a board without a dongle: the C6 is listed in OTBR mode, running, with its caps.
     body = get_channels(base_url)
-    channel = next(c for c in body["channels"] if c["id"] == "c6")
+    channel = next(c for c in body["channels"] if c["id"] == "builtin-c6")
     assert list(channel) == CHANNEL_KEYS
-    assert channel["kind"] == "c6"
+    assert channel["kind"] == "builtin"
     assert channel["mode"] == "otbr"
     assert channel["stored_mode"] == "otbr"
     assert channel["state"] == "running"
@@ -197,15 +207,36 @@ def test_c6_listed_in_otbr(base_url, board_ip):
     assert channel["rcp_proxy"]["state"] is None
     assert channel["rcp_proxy"]["peer"] is None
     assert channel["rcp_proxy"]["last_error"] is None
+    # The orchestrator's view: the channel ready, Thread's own state on it, and Thread in the modes list.
+    assert channel["channel_state"] == "ready"
+    assert channel["channel_reason"] is None
+    assert channel["mode_state"] == "running"
+    assert channel["mode_reason"] is None
+    thread = [m for m in body["modes"] if m["mode"] == "otbr"]
+    assert len(thread) == 1, body["modes"]
+    assert list(thread[0]) == MODE_KEYS
+    assert thread[0]["channel"] == "builtin-c6"
+    assert thread[0]["state"] == "running"
+    assert thread[0]["reboot_on_change"] is False
     status = get_status(base_url)
     assert status["mode"] == "BR_RUNNING"
-    assert status["otbr_channel"] == "c6"
+    assert status["otbr_channel"] == "builtin-c6"
+
+
+def test_old_c6_id_is_unknown(base_url):
+    # PUT /device/channels/c6, On the id the built-in channel had before it was builtin-c6: 404 unknown_channel (no
+    # alias); nothing changes.
+    reply = put_channel(base_url, {"mode": "otbr"}, "c6")
+    assert reply.status_code == 404, reply.text
+    assert reply.json()["error"] == "unknown_channel"
+    assert get_channels(base_url)["channels"][0]["id"] == "builtin-c6"
 
 
 def test_available_modes(base_url):
-    # GET /device/channels: available_modes comes first, offers off, otbr and rcp-proxy, and never ziggurat or unavailable.
+    # GET /device/channels: available_modes comes first (then the channels and the modes list) and offers the registered
+    # modes: off, otbr, rcp-proxy and ziggurat, never unavailable.
     body = get_channels(base_url)
-    assert list(body) == ["available_modes", "channels"]
+    assert list(body) == ["available_modes", "channels", "modes"]
     assert set(body["available_modes"]) == OFFERED_MODES
     assert len(body["available_modes"]) == len(OFFERED_MODES)
     for channel in body["channels"]:
@@ -232,7 +263,9 @@ def without_counters(channel):
 def test_put_validation_not_an_object(base_url):
     # PUT with a body that is no JSON object: 400 bad_value.
     for raw in (b"[1]", b'"otbr"', b"42", b"not json"):
-        reply = requests.put(f"{base_url}/device/channels/c6", data=raw, timeout=10)
+        reply = requests.put(
+            f"{base_url}/device/channels/builtin-c6", data=raw, timeout=10
+        )
         assert reply.status_code == 400, (raw, reply.text)
 
 
@@ -256,18 +289,15 @@ def test_put_validation_unknown_channel(base_url):
 
 
 def test_put_validation_409(base_url):
-    # PUT/DELETE refusals reachable with the C6 alone: not_available (ziggurat), in_use (forget the C6).
+    # DELETE refusal reachable with the C6 alone: in_use (forget the C6). ziggurat is a registered mode since the Zigbee
+    # merge (test_zigbee.py covers it).
     before = get_channel(base_url)
-    reply = put_channel(base_url, {"mode": "ziggurat"})
-    assert reply.status_code == 409, reply.text
-    assert reply.json()["error"] == "not_available"
-    forget = requests.delete(f"{base_url}/device/channels/c6", timeout=10)
+    forget = requests.delete(f"{base_url}/device/channels/builtin-c6", timeout=10)
     assert forget.status_code == 409, forget.text
     assert forget.json()["error"] == "in_use"
-    assert get_channel(base_url) == before
+    assert without_counters(get_channel(base_url)) == without_counters(before)
     # The refusals that need a second radio (unavailable, incompatible, probe_failed, busy, and a move carrying line
-    # settings) are in test_dongle.py::test_move_refusals. mode_taken and hybrid_not_supported need a registered
-    # ziggurat consumer and belong to the Zigbee work.
+    # settings) are in test_dongle.py::test_move_refusals.
 
 
 def test_put_validation_c6_busy(base_url, c6_in_otbr):
@@ -321,34 +351,29 @@ def test_c6_off_and_back(dut, base_url, c6_in_otbr):
         base_url, "off"
     )  # a stop of Thread: 202, the mode stored once OpenThread stopped
     assert off.status_code == 202, off.text
-    assert off.json() == {"moving": True, "moved_from": "c6"}
+    assert off.json() == {"moving": True, "moved_from": "builtin-c6"}
     status = wait_mode(base_url, "NO_RADIO")
     assert status["otbr_channel"] is None
     channel = get_channel(base_url)
     assert channel["mode"] == "off"
     assert channel["stored_mode"] == "off"
     assert channel["state"] == "idle"
+    assert channel["mode_state"] is None  # nothing is bound to it
+    thread = next(m for m in get_channels(base_url)["modes"] if m["mode"] == "otbr")
+    assert thread["channel"] is None
+    assert thread["state"] == "no_radio"
+    assert thread["reason"] == "no channel in otbr"
     on = set_mode(
         base_url, "otbr"
     )  # a start of Thread: 202, probe, start, stored once it runs
     assert on.status_code == 202, on.text
     assert on.json() == {"moving": True, "moved_from": None}
     status = wait_mode(base_url, "BR_RUNNING")
-    assert status["otbr_channel"] == "c6"
+    assert status["otbr_channel"] == "builtin-c6"
     assert get_channel(base_url)["state"] == "running"
+    assert get_channel(base_url)["mode_state"] == "running"
     wait_ot_state(dut, {"leader", "router", "child"}, THREAD_TIMEOUT_S)
     assert ot(dut, "dataset active -x")[-1] == dataset
-
-
-def test_ziggurat_not_available(base_url):
-    # PUT mode ziggurat, On a build without a Zigbee consumer: 409 not_available, mode unchanged, not offered.
-    before = get_channel(base_url)
-    reply = put_channel(base_url, {"mode": "ziggurat"})
-    assert reply.status_code == 409, reply.text
-    assert reply.json()["error"] == "not_available"
-    assert "ziggurat" not in get_channels(base_url)["available_modes"]
-    assert get_channel(base_url)["mode"] == before["mode"]
-    assert get_channel(base_url)["stored_mode"] == before["stored_mode"]
 
 
 def test_rest_503_in_no_radio(base_url, c6_in_otbr):

@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "br_core.h"
+#include "radio_mux.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -180,7 +181,7 @@ static esp_err_t apply_ha_name(void)
     // stored, and the next boot publishes it. Without a session and without a push OpenThread is not up (STARTING,
     // or parked after a fault): the next start publishes with the name stored here.
     if (!br_core_ot_session_begin()) {
-        if (br_core_radio_job_running()) {
+        if (radio_mux_maintenance_running()) {
             return err == ESP_OK ? ESP_ERR_INVALID_STATE : err;
         }
         esp_openthread_set_meshcop_instance_name(s.ha_name);

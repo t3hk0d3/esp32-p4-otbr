@@ -14,10 +14,11 @@
 extern "C" {
 #endif
 
-// The GET body of RADIO_MUX_CHANNELS_MAX channels with every text at its longest (escaped); a host test checks it.
-#define DEVICE_API_CHANNELS_BODY_MAX 12288
-// One channel (the PUT reply), with "reboot".
-#define DEVICE_API_CHANNEL_BODY_MAX 1536
+// The GET body of RADIO_MUX_CHANNELS_MAX channels and every mode instance with every text at its longest (escaped,
+// 19840 bytes); a host test checks it.
+#define DEVICE_API_CHANNELS_BODY_MAX 20480
+// One channel (the PUT reply), with "reboot" (1961 bytes at its longest).
+#define DEVICE_API_CHANNEL_BODY_MAX 2048
 // A PUT body: every field with the longest host fits several times over.
 #define DEVICE_API_CHANNEL_PUT_MAX 512
 
@@ -30,7 +31,7 @@ extern "C" {
  *  "rcp_proxy":{"direction","adapter","port","host","framing","state","peer","last_error"}|null,
  *  "firmware":{"type","version","chip","baud","source","at"}|null,
  *  "counters":{"frames_in","frames_out","bytes_in","bytes_out","drops","resets","rx_errors","uart_errors"}}.
- * kind "c6" or "usb"; error, usb.serial, usb.driver, rcp_proxy.state, .peer and .last_error, firmware.version, .chip,
+ * kind "builtin" or "usb"; error, usb.serial, usb.driver, rcp_proxy.state, .peer and .last_error, firmware.version, .chip,
  * .baud (0) and .at (0: the clock was not set) are null when empty; error is the channel's reason, or, when it has none
  * and its proxy is in backoff, the proxy's last_error; usb.vid and .pid are 4 lowercase hex digits; usb is null for
  * the C6; rcp_proxy (the stored settings) is null for a USB device without a driver, where no mode runs; firmware is

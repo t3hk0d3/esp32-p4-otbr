@@ -8,6 +8,7 @@
 
 #include "board_cores.h"
 #include "br_core.h"
+#include "builtin_rcp.h"
 #include "c6_base_image.h"
 #include "rcp_sync.h"
 #include "device_api.h"
@@ -137,22 +138,39 @@ void app_main(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_vfs_eventfd_register: %s, no radio channels and no OpenThread", esp_err_to_name(err));
     }
-    // The rcp-proxy consumer registers before the mux starts (the mux attaches it to channels stored in rcp-proxy).
+    // The C6 base image (ROM recovery) before the mux starts: the mux's boot task probes the C6 at once, and a probe that
+    // needs a recovery skips it without the image.
+    err = rcp_sync_set_base_image(&(const rcp_sync_base_image_t) {
+        .bootloader_start = c6_base_bootloader_start, .bootloader_end = c6_base_bootloader_end,
+        .ptable_start = c6_base_ptable_start, .ptable_end = c6_base_ptable_end,
+        .updater_start = c6_base_updater_start, .updater_end = c6_base_updater_end,
+        .version_start = c6_base_version_start, .version_end = c6_base_version_end,
+    });
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "the embedded C6 base image is unusable, ROM recovery is off: %s", esp_err_to_name(err));
+    }
+    // The board's built-in RCP (the C6): its descriptor and maintenance ops, before the mux starts.
+    err = builtin_rcp_register();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "builtin_rcp_register: %s, the C6 is listed without its probe", esp_err_to_name(err));
+    }
+    // The rcp-proxy instances register before the mux starts (the orchestrator binds one to each channel stored in
+    // rcp-proxy).
     err = rcp_proxy_register();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "rcp_proxy_register: %s, no rcp-proxy mode", esp_err_to_name(err));
     }
-    // OpenThread is the otbr consumer: it runs on whichever channel is stored in otbr (the C6 by default).
+    // OpenThread is the otbr instance: it runs on whichever channel is stored in otbr (the C6 by default).
     err = br_core_register_otbr();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "br_core_register_otbr: %s, no OTBR mode", esp_err_to_name(err));
     }
-    // The ziggurat consumer (Zigbee mode): its task starts when the mux attaches a channel stored in ziggurat.
+    // The ziggurat instance (Zigbee mode): its task starts when the orchestrator binds a channel stored in ziggurat.
     err = zigbee_register();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "zigbee_register: %s, no ziggurat mode", esp_err_to_name(err));
     }
-    // The radio channel mux: the only USB host and C6 SPI owner. Consumers register before it starts.
+    // The radio channel mux: the only USB host and C6 SPI owner. Instances register before it starts.
     err = radio_mux_start();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "radio_mux_start: %s, no USB radios", esp_err_to_name(err));
@@ -167,15 +185,6 @@ void app_main(void)
     // device_api registers its handlers while the server starts, before the catch-all GET handler (patch 10); it
     // needs no OpenThread, so it is also served in RADIO_FAULT.
     device_api_set_base_expected(c6_base_version_start, c6_base_version_end);
-    err = rcp_sync_set_base_image(&(const rcp_sync_base_image_t) {
-        .bootloader_start = c6_base_bootloader_start, .bootloader_end = c6_base_bootloader_end,
-        .ptable_start = c6_base_ptable_start, .ptable_end = c6_base_ptable_end,
-        .updater_start = c6_base_updater_start, .updater_end = c6_base_updater_end,
-        .version_start = c6_base_version_start, .version_end = c6_base_version_end,
-    });
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "the embedded C6 base image is unusable, ROM recovery is off: %s", esp_err_to_name(err));
-    }
     esp_br_web_set_extra_handlers(register_extra_handlers);
     esp_br_web_start(s_web_base_path);
     // A stuck OpenThread lock or HTTP server task aborts (core dump, reboot) instead of waiting for a power cycle.

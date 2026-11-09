@@ -1,4 +1,4 @@
-"""br_core.br_core_push_radio_firmware through POST /device/radio/firmware (BDD: br_core push).
+"""builtin_rcp.builtin_rcp_push_firmware through POST /device/radio/firmware (BDD: builtin_rcp push).
 
 Needs a good RCP image (env OTBR_RCP_IMAGE, e.g. c6_rcp/build/c6_rcp.bin); the tests skip without it. A 404 from the
 endpoint fails them.
@@ -40,7 +40,7 @@ def post_image(base_url, image):
 
 
 class TestPush:
-    """br_core.br_core_push_radio_firmware"""
+    """builtin_rcp.builtin_rcp_push_firmware"""
 
     def test_healthy_push_restarts_openthread_and_reopens_the_thread_rest_api(
         self, dut, base_url, good_image
@@ -83,7 +83,7 @@ class TestPush:
 
 
 class TestPushFromIncompatibleRcp:
-    """br_core.br_core_push_radio_firmware, fault "rcp incompatible" found by the C6's boot steps"""
+    """builtin_rcp.builtin_rcp_push_firmware, fault "rcp incompatible" found by the C6's boot steps"""
 
     def test_push_recovers_the_board_to_br_running_without_a_reboot(
         self, dut, send, reboot, good_image
@@ -91,9 +91,9 @@ class TestPushFromIncompatibleRcp:
         # On RADIO_FAULT "rcp incompatible" from the boot steps (c6_hold: the C6 stays in reset, as an RCP that never
         # answers; the C6 is listed unavailable): the push lists the C6 again and starts OpenThread on it in place:
         # BR_RUNNING, rcp compatible, no reboot.
-        # The push after an abandoned OpenThread start (a reboot follows it) is not reachable from a test hook since the
-        # RCP probe runs before OpenThread's init: c6_hold faults in the boot steps, before any init. It needs an RCP
-        # that answers the probe and then fails esp_openthread_init (another OpenThread build's RCP).
+        # A push after an abandoned OpenThread start (502 restart_failed, no reboot) is not reachable from c6_hold since
+        # the RCP probe runs before OpenThread's init: c6_hold faults in the boot steps, before any init. The test
+        # build's ot_start_abandon reaches it (see test_dongle's abandoned move).
         send("c6_hold 1", rb"c6_hold: ok")
         reboot()
         address = dut.expect(GOT_IP, timeout=BOOT_TIMEOUT_S).group(1).decode()

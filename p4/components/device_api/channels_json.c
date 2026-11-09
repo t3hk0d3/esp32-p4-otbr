@@ -138,7 +138,7 @@ static void channel_fields(json_out_t *w, const radio_mux_chan_info_t *c)
     json_out_raw(w, "{\"id\":");
     json_out_str(w, c->id);
     json_out_raw(w, ",\"kind\":");
-    json_out_str(w, c->kind == RADIO_MUX_KIND_C6 ? "c6" : "usb");
+    json_out_str(w, c->kind == RADIO_MUX_KIND_BUILTIN ? "builtin" : "usb");
     json_out_raw(w, ",\"label\":");
     json_out_str(w, c->label);
     json_out_raw(w, ",\"mode\":");
@@ -167,6 +167,44 @@ static void channel_fields(json_out_t *w, const radio_mux_chan_info_t *c)
     firmware_json(w, &c->firmware);
     json_out_raw(w, ",\"counters\":");
     counters_json(w, &c->counters);
+    // The orchestrator's view (design section 6): the channel's lifecycle, and its instance's own state (null: off).
+    const bool bound = c->stored_mode != RADIO_MUX_MODE_OFF && c->stored_mode != RADIO_MUX_MODE_UNAVAILABLE;
+
+    json_out_raw(w, ",\"channel_state\":");
+    str_or_null(w, radio_mux_chan_state_name(c->chan_state));
+    json_out_raw(w, ",\"channel_reason\":");
+    str_or_null(w, c->chan_reason);
+    json_out_raw(w, ",\"mode_state\":");
+    str_or_null(w, bound ? c->mode_state : NULL);
+    json_out_raw(w, ",\"mode_reason\":");
+    str_or_null(w, bound ? c->mode_reason : NULL);
+}
+
+// One mode instance of the snapshot: its channel (null when no channel is stored in its mode) and that channel's
+// instance state; an unbound one is Thread's no_radio or Zigbee's idle, "no channel in <mode>".
+static void mode_json(json_out_t *w, const radio_mux_snapshot_t *s, const radio_mux_mode_info_t *m)
+{
+    const radio_mux_chan_info_t *c = m->chan >= 0 && (size_t)m->chan < s->n ? &s->chans[m->chan] : NULL;
+    char unbound[RADIO_MUX_REASON_MAX];
+
+    json_out_raw(w, "{\"mode\":");
+    json_out_str(w, radio_mux_mode_name(m->mode));
+    json_out_raw(w, ",\"channel\":");
+    str_or_null(w, c ? c->id : NULL);
+    json_out_raw(w, ",\"state\":");
+    if (c) {
+        str_or_null(w, c->mode_state);
+        json_out_raw(w, ",\"reason\":");
+        str_or_null(w, c->mode_reason);
+    } else {
+        json_out_str(w, m->mode == RADIO_MUX_MODE_ZIGGURAT ? "idle" : "no_radio");
+        json_out_raw(w, ",\"reason\":");
+        snprintf(unbound, sizeof(unbound), "no channel in %s", radio_mux_mode_name(m->mode));
+        json_out_str(w, unbound);
+    }
+    json_out_raw(w, ",\"reboot_on_change\":");
+    json_out_bool(w, m->reboot_on_change);
+    json_out_raw(w, "}");
 }
 
 int device_api_channels_json(char *buf, size_t cap, const radio_mux_snapshot_t *s)
@@ -191,6 +229,11 @@ int device_api_channels_json(char *buf, size_t cap, const radio_mux_snapshot_t *
         }
         channel_fields(&w, &s->chans[i]);
         json_out_raw(&w, "}");
+    }
+    json_out_raw(&w, "],\"modes\":[");
+    for (size_t i = 0; i < s->n_modes && i < RADIO_MUX_RULES_MAX + RADIO_MUX_CHANNELS_MAX; i++) {
+        json_out_raw(&w, i > 0 ? "," : "");
+        mode_json(&w, s, &s->modes[i]);
     }
     json_out_raw(&w, "]}");
     return w.overflow ? -1 : (int)w.len;

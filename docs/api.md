@@ -14,7 +14,7 @@ below, any of them can answer 500 `internal` or `no_memory`.
 | `POST /device/update[?force=1\|0]` | check again (the cached result is not used), then install the latest release: the bundle, then the radio firmware when it differs, then one reboot. The body is empty and the request is held until the install ends. 200 `{"status":"ok","app":"installed"\|"unchanged","rcp":"installed"\|"unchanged"\|"failed","detail":...,"rebooting":bool}`; `rcp` `failed` means the new app is committed and the board reboots, and the next update pushes only the radio firmware. `force=1` installs although nothing is newer | 400 `invalid_request` (a body, or `force` not `0` or `1`), `invalid_bundle`; 409 `up_to_date` (nothing to install, no `force`), `busy` (another long operation or a check runs; the radio firmware is to be installed and the board is sniffing or starting); 502 `check_failed` (`versions.txt` could not be fetched or read; nothing changed), `transfer_failed` (bundle download; nothing changed), radio-only update: the errors of `POST /device/radio/firmware?from_url=` |
 | `POST /device/ota` | upload an `otbr.bundle`, then reboot | 400 `length_required`, `invalid_bundle`; 413 `payload_too_large`; 409 `busy` |
 | `POST /device/ota/url` | body `{"url": "http(s)://..."}`, same via download (https is checked against the built-in certificate bundle; only 301, 302 and 307 redirects are followed) | 400 `invalid_request`, `invalid_bundle`; 409 `busy`; 502 `transfer_failed` |
-| `POST /device/radio/firmware[?from_url=]` | (`from_url` is an `http://` or `https://` address; redirects are followed) push `c6_rcp.bin` to the C6, restart the BR; on a factory C6 (`fault_reason` `esp-hosted firmware`) only a `c6_installer.bin` with this firmware's C6 base version, sent through ESP-Hosted, then `{"installed":null}` and `no rcp firmware` | 400 `length_required`, `invalid_image` (also `c6_installer.bin` to our updater, anything else to ESP-Hosted, an installer with another base version), `image_too_large`; 413 `payload_too_large`; 409 `busy` (sniffing, starting, update running); 502 `fetch_failed`, `push_failed`, `install_failed` (ESP-Hosted transfer of `c6_installer.bin`), `restart_failed` (the image is installed, but OpenThread did not start on it; the detail names the fault) |
+| `POST /device/radio/firmware[?from_url=]` | (`from_url` is an `http://` or `https://` address; redirects are followed) push `c6_rcp.bin` to the C6, then wait (up to 180 s) until the mode on the C6 runs again (Thread, Zigbee or the RCP proxy); on a factory C6 (`fault_reason` `esp-hosted firmware`) only a `c6_installer.bin` with this firmware's C6 base version, sent through ESP-Hosted, then `{"installed":null}` and `no rcp firmware` | 400 `length_required`, `invalid_image` (also `c6_installer.bin` to our updater, anything else to ESP-Hosted, an installer with another base version), `image_too_large`; 413 `payload_too_large`; 409 `busy` (sniffing, starting, OpenThread being moved, update running); 502 `fetch_failed`, `push_failed`, `install_failed` (ESP-Hosted transfer of `c6_installer.bin`), `restart_failed` (the image is installed, but the mode on the C6 did not start on it, whatever the mode; the detail names it and why: "the image is installed, but OpenThread did not start on it: <reason>", or "...: still starting after 180 s") |
 | `POST /device/radio/recover` | maintenance jumper: rewrite the C6 base image (no RCP firmware) and restart | 200 `{"recovered":true,"rcp":"<installed version>"\|"no rcp firmware"\|"unknown","mode":...}` (also when the C6 has no RCP firmware afterwards); 412 `no_jumper`; 409 `busy`; 502 `recovery_failed` (only when the recovery itself failed) |
 | `GET /device/radio/log` | jumper: the newest 16 KB of the C6 console (`text/plain`) | 412 `no_jumper` |
 | `GET /device/diag` | per-core load, per-task CPU/stack/affinity, memory, OpenThread lock stats, uptime, reset reason, chip temperature (`chip_temperature_c`, die temperature in °C with one decimal, `null` when unavailable) | |
@@ -250,20 +250,22 @@ websocat ws://<board>/device/console/ws
 
 ### Radio channels
 
-Every radio is a channel: the ESP32-C6 (built-in) (`c6`) and a USB dongle (`usb-<vid>-<pid>`, plus `-<serial>` when the device
+Every radio is a channel: the ESP32-C6 (built-in) (`builtin-c6`, kind `builtin`; its id was `c6` before, which is no
+longer accepted) and a USB dongle (`usb-<vid>-<pid>`, plus `-<serial>` when the device
 reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /device/channels` answers
 
 ```
-{"available_modes": ["off", "otbr", "rcp-proxy"],
+{"available_modes": ["off", "otbr", "rcp-proxy", "ziggurat"],
  "channels": [
-  {"id": "c6", "kind": "c6", "label": "ESP32-C6 (built-in)", "mode": "otbr", "stored_mode": "otbr",
+  {"id": "builtin-c6", "kind": "builtin", "label": "ESP32-C6 (built-in)", "mode": "otbr", "stored_mode": "otbr",
    "state": "running", "error": null, "line": {"baud": 460800, "flow_control": false}, "usb": null,
    "caps": {"firmware_update": true, "hw_reset": true, "flow_control": false},
    "rcp_proxy": {"direction": "listen", "adapter": "tcp", "port": 6638, "host": "", "framing": "hdlc",
                  "state": null, "peer": null, "last_error": null},
    "firmware": {"type": "spinel", "version": "1.4.0", "chip": "esp32c6", "baud": null, "source": "passive", "at": 1762430000},
    "counters": {"frames_in": 10, "frames_out": 9, "bytes_in": 1000, "bytes_out": 900, "drops": 1, "resets": 2, "rx_errors": 3,
-               "uart_errors": 0}},
+               "uart_errors": 0},
+   "channel_state": "ready", "channel_reason": null, "mode_state": "running", "mode_reason": null},
   {"id": "usb-10c4-ea60-abc123", "kind": "usb", "label": "Sonoff Zigbee 3.0 USB Dongle Plus", "mode": "rcp-proxy",
    "stored_mode": "rcp-proxy", "state": "running", "error": null, "line": {"baud": 115200, "flow_control": true},
    "usb": {"vid": "10c4", "pid": "ea60", "serial": "abc123", "driver": "cp210x"},
@@ -272,17 +274,36 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
                  "state": "connected", "peer": "192.168.1.20:9999", "last_error": null},
    "firmware": {"type": "znp", "version": "20240710", "chip": null, "baud": 115200, "source": "probe", "at": null},
    "counters": {"frames_in": 0, "frames_out": 0, "bytes_in": 0, "bytes_out": 0, "drops": 0, "resets": 0, "rx_errors": 0,
-               "uart_errors": 0}}
+               "uart_errors": 0},
+   "channel_state": "ready", "channel_reason": null, "mode_state": "connected", "mode_reason": null}
+ ],
+ "modes": [
+  {"mode": "otbr", "channel": "builtin-c6", "state": "running", "reason": null, "reboot_on_change": false},
+  {"mode": "rcp-proxy", "channel": "usb-10c4-ea60-abc123", "state": "connected", "reason": null,
+   "reboot_on_change": false}
  ]}
 ```
 
-- `available_modes` are the modes the build offers; `ziggurat` is reserved and not listed.
+- `available_modes` are the modes the build offers (those with a registered instance: `off`, `otbr`, `rcp-proxy` and
+  `ziggurat`).
 - `mode` is what the channel does now: `unavailable` (reported only: not detected, unplugged, no driver), `off`,
-  `otbr`, `ziggurat` (reserved) or `rcp-proxy`. `stored_mode` is the mode it returns to, also while unavailable or when
+  `otbr`, `ziggurat` or `rcp-proxy`. `stored_mode` is the mode it returns to, also while unavailable or when
   the firmware does not fit.
-- `state` is `idle`, `starting`, `running`, `fault` (with `error`) or `busy` (a C6 job runs, or the C6's boot steps:
-  `error` "the C6's boot steps run"). A failed start of OpenThread shows as `fault` on its channel, with the board's
-  fault reason.
+- `state` is `idle`, `starting`, `running`, `fault` (with `error`) or `busy` (the C6's maintenance: its boot steps,
+  `error` "the C6's boot steps run", or a firmware push or ROM recovery, "a C6 job holds the radio"). A failed start of
+  OpenThread shows as `fault` on its channel, with the board's fault reason. `state` and `error` are derived from the
+  four fields below, as before them.
+- `channel_state` is the channel's own lifecycle: `absent` (an unplugged dongle), `reinit` (maintenance runs on it;
+  `channel_reason` names it: `boot steps`, `detecting firmware`, `firmware push`, `ROM recovery`), `ready`, or `fault`
+  (`channel_reason` says why). `mode_state` and `mode_reason` are the state of the mode bound to the channel in that
+  mode's own words (Thread: `no_radio`, `starting`, `running`, `sniffer`, `releasing`, `fault`; Zigbee: `idle`,
+  `starting`, `running`, `no_radio`, `incompatible`; the proxy: `off`, `listening`, `connecting`, `backoff`,
+  `connected`, `no_radio`), `null` for a channel in `off` or before its mode reported one. A reason is `null` when
+  there is none.
+- `modes` lists the mode instances: Thread and Zigbee once each, the proxy once per channel in `rcp-proxy`. `channel`
+  is the channel stored in that mode (`null` for none: Thread is `no_radio` "no channel in otbr", Zigbee `idle`);
+  `state` and `reason` are that channel's `mode_state` and `mode_reason`; `reboot_on_change` says whether entering or
+  leaving the mode reboots the board.
 - `usb` is `null` for the C6. `rcp_proxy` always carries the stored settings; `state` (`listening`, `connecting`,
   `backoff`, `connected`) and `peer` are set only while the channel runs `rcp-proxy`. `last_error` says why the
   proxy's last try to listen or connect failed (`"tcp port 6638: Address already in use"`, `"host.local does not
@@ -305,7 +326,7 @@ settings are stored and applied at once, also for an unplugged radio.
 | Reply | Meaning |
 | --- | --- |
 | 200 + the channel | applied; with `"reboot": true` when the mode's consumer reboots the board on a change |
-| 202 `{"moving": true, "moved_from": "<id>"}` | `otbr` on a channel while another has it: Thread moves after the target passed a probe; the target shows `starting` until it settles, the stored modes change only when it runs. The same for a start (`otbr` while no channel has it; `moved_from` null) and a stop (another mode on the channel that has `otbr`; `moved_from` is that channel: its sessions drain, OpenThread stops, then the new mode is stored) |
+| 202 `{"moving": true, "moved_from": "<id>"}` | `otbr` on a channel while another has it: Thread moves after the target passed a probe; the target shows `starting` until it settles. The stored modes change once OpenThread stopped on the old radio, before it starts on the target; a start that fails leaves Thread on the target in `fault` (`RADIO_FAULT`, no rollback), and an abandoned start is `RADIO_FAULT` "an earlier OpenThread start was abandoned: reboot" without a reboot ([Radios](radios.md#moving-thread)). The same for a start (`otbr` while no channel has it; `moved_from` null) and a stop (another mode on the channel that has `otbr`; `moved_from` is that channel: its sessions drain, OpenThread stops, then the new mode is stored) |
 | 400 `bad_value` | wrong type or value; `detail` names the field (`mode`, `baud`, `rcp_proxy.port`, `rcp_proxy.host`, ...); `unavailable` cannot be set; a start, move or stop of Thread may not carry `baud`, `flow_control` or `rcp_proxy` settings (send them in a request of their own; nothing is stored) |
 | 404 `unknown_channel` | no such id |
 | 409 `unavailable`, `incompatible`, `not_available` | the radio is not usable, its detected firmware does not fit the mode, or no consumer is registered for the mode (`ziggurat`) |
@@ -316,9 +337,14 @@ settings are stored and applied at once, also for an unplugged radio.
 | 500 `failed` | the mux is not started, storage failed or a probe took too long |
 | 503 `mux_busy` | the radio mux took the change but did not answer within 5 s; a mode, speed or proxy change may still be applied, a start, move or stop will not (read the channel again) |
 
-A move that fails after the 202 (the target does not start, or open Thread sessions do not end within 45 s) leaves
-Thread on the old channel and shows on the target as `"state": "fault"` with the reason in `error` (`drain_timeout`
-among them); a refused stop leaves the channel `running` in `otbr` with `error` `drain_timeout`. Poll
+A move can fail in two ways after the 202. When open Thread sessions do not end within 45 s, nothing is committed:
+Thread keeps running on the old channel, `otbr_channel` still names it, and the target shows `"state": "fault"` with
+`error` `drain_timeout` (send the move again). When the target does not start, the move is already committed: Thread
+stays on the target in `fault` (`RADIO_FAULT`, the reason in `fault_reason` and the target's `error`); there is no
+switch back, a PUT of `otbr` on the target retries and one on another channel moves it. After an abandoned start
+(`fault_reason` "an earlier OpenThread start was abandoned: reboot") no retry or move starts OpenThread again until
+the board reboots. A refused stop leaves the
+channel `running` in `otbr` with `error` `drain_timeout`. Poll
 `GET /device/channels` after a 202. While OpenThread starts on its channel, that channel shows `starting`.
 
 ### Zigbee coordinator (experimental)
@@ -328,7 +354,7 @@ client, a second one takes over; 403 on an interface that does not serve the dev
 [Zigbee coordinator](zigbee.md). `GET /device/zigbee` answers:
 
 ```
-{"channel": "c6", "firmware": "spinel 1.2 efr32", "state": "running", "reason": "",
+{"channel": "builtin-c6", "firmware": "spinel 1.2 efr32", "state": "running", "reason": "",
  "client": {"address": "192.168.1.20:51234", "since": 1790000000}, "last_client": null,
  "radio": {"channel": 15, "pan_id": 6754, "short_address": 0, "extended_address": "00124b00abcdef01", "tx_power_dbm": 8},
  "counters": {"rx": 10, "rx_dropped": 1, "tx": 9, "tx_no_ack": 2, "tx_cca": 3, "tx_failed": 4, "energy_scans": 5,

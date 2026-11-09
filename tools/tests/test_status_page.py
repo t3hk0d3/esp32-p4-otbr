@@ -77,7 +77,7 @@ class TestStatusLogic:
     def test_fault_hero_of_the_c6_still_links_firmware(self):
         # On RADIO_FAULT with the C6 as Thread's radio: the firmware page, as before.
         h = st(
-            "L.threadHeroFor({mode: 'RADIO_FAULT', fault_reason: 'rcp incompatible', otbr_channel: 'c6', sniffer: {}})"
+            "L.threadHeroFor({mode: 'RADIO_FAULT', fault_reason: 'rcp incompatible', otbr_channel: 'builtin-c6', sniffer: {}})"
         )
         assert h["link"]["href"] == "/firmware.html"
 
@@ -139,7 +139,7 @@ class TestStatusLogic:
 
 CHANNELS = {
     "channels": [
-        {"id": "c6", "kind": "c6", "mode": "otbr", "state": "running"},
+        {"id": "builtin-c6", "kind": "builtin", "mode": "otbr", "state": "running"},
         {"id": "usb-1a86-7523", "kind": "usb", "mode": "ziggurat", "state": "running"},
     ]
 }
@@ -217,7 +217,7 @@ class TestDashboardLogic:
     def test_unavailable_c6_reads_unavailable(self):
         # On the C6 listed as unavailable (no RCP, ESP-Hosted, failed recovery): "Unavailable", not the API word.
         rows = st(
-            "L.radiosView({channels: [{id: 'c6', kind: 'c6', mode: 'unavailable'}]})"
+            "L.radiosView({channels: [{id: 'builtin-c6', kind: 'builtin', mode: 'unavailable'}]})"
         )
         assert rows[0] == {"slot": "ESP32-C6 (built-in)", "mode": "Unavailable"}
 
@@ -248,7 +248,7 @@ class TestDashboardLogic:
         # On otbr_channel null: false.
         assert st("L.isThreadActive({otbr_channel: null})") is False
 
-    @pytest.mark.parametrize("status", ["{otbr_channel: 'c6'}", "{}"])
+    @pytest.mark.parametrize("status", ["{otbr_channel: 'builtin-c6'}", "{}"])
     def test_thread_is_active_with_a_channel_or_on_older_firmware(self, status):
         # On otbr_channel set, or the field missing (older firmware): true.
         assert st(f"L.isThreadActive({status})") is True
@@ -803,7 +803,7 @@ class TestDashboardSections:
     def test_running_thread_shows_board_ok_and_the_thread_content(self):
         # On BR_RUNNING with a Thread channel: board line "Board OK", Thread content shown, placeholder hidden.
         r = sections(
-            f"t.s = {status(mode='BR_RUNNING', otbr_channel='c6')}; await t.page.refreshStatus();"
+            f"t.s = {status(mode='BR_RUNNING', otbr_channel='builtin-c6')}; await t.page.refreshStatus();"
             " return [t.el('b-title').textContent, t.el('board-hero').className, t.el('thread-on').hidden(),"
             " t.el('thread-off').hidden()];"
         )
@@ -812,7 +812,7 @@ class TestDashboardSections:
     def test_no_thread_channel_shows_the_placeholder_and_clears_thread_data(self):
         # On otbr_channel null: Thread content hidden, placeholder shown with its link, Thread values cleared.
         r = sections(
-            f"t.s = {status(mode='BR_RUNNING', otbr_channel='c6')}; await t.page.refreshStatus();"
+            f"t.s = {status(mode='BR_RUNNING', otbr_channel='builtin-c6')}; await t.page.refreshStatus();"
             " await t.page.refreshThread();"
             f" t.s = {status(mode='NO_RADIO', otbr_channel=None)}; await t.page.refreshStatus();"
             " return [t.el('thread-on').hidden(), t.el('thread-off').hidden(), t.el('thread-off').textContent,"
@@ -840,7 +840,7 @@ class TestDashboardSections:
         # On RADIO_FAULT "no rcp firmware" with the C6 as Thread's radio: board link to Firmware; Thread line
         # "Thread cannot start".
         r = sections(
-            f"t.s = {status(mode='RADIO_FAULT', fault_reason='no rcp firmware', otbr_channel='c6')};"
+            f"t.s = {status(mode='RADIO_FAULT', fault_reason='no rcp firmware', otbr_channel='builtin-c6')};"
             " await t.page.refreshStatus();"
             " return [t.el('b-link').getAttribute('href'), t.el('h-title').textContent, t.el('h-link').hidden()];"
         )
@@ -849,7 +849,7 @@ class TestDashboardSections:
     def test_failed_status_keeps_the_sections(self):
         # On the status request failing: offline line shown, the sections keep their state (no placeholder flip).
         r = sections(
-            f"t.s = {status(mode='BR_RUNNING', otbr_channel='c6')}; await t.page.refreshStatus();"
+            f"t.s = {status(mode='BR_RUNNING', otbr_channel='builtin-c6')}; await t.page.refreshStatus();"
             " t.fail = true; await t.page.refreshStatus();"
             " return [t.el('s-offline').hidden(), t.el('thread-on').hidden(), t.el('thread-off').hidden()];"
         )

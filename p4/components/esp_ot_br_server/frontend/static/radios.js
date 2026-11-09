@@ -421,12 +421,23 @@ function settleMove() {
   var name = L.labelOf(snap, moving.to);
   if (to && (to.state === 'starting' || to.state === 'fault'))
     moving.seen = true;
-  var ok = !!status && status.otbr_channel === moving.to;
+  // A move commits before it starts (otbr_channel names the target from then on): it worked once Thread runs there.
+  var ok = !!status && status.otbr_channel === moving.to &&
+           (status.mode === 'BR_RUNNING' || status.mode === 'SNIFFER');
+  // Not committed (open sessions did not end in time): Thread runs on where it was. The channel list decides: the target
+  // is stored otbr once the move committed, whatever a status read (failed, or late) still says.
+  var kept = !!to && to.state === 'fault' && to.stored_mode !== 'otbr' && !!status && !!moving.from &&
+             status.otbr_channel === moving.from;
   if (ok && !anyStarting()) {
     note('rMsg', 'Thread now runs on ' + name + '.', false);
+  } else if (kept && !anyStarting()) {
+    note('rMsg', 'Thread did not move' + (to.error ? ' (' + to.error + ')' : '') + ': it still runs on ' +
+                     L.labelOf(snap, moving.from) + '. Try the move again.',
+         true);
   } else if ((moving.seen && !anyStarting()) || env.now() - moving.at > MOVE_GIVE_UP_MS) {
     note('rMsg', 'Thread did not start on ' + name + (to && to.error ? ' (' + to.error + ')' : '') +
-                     '. It goes back to the previous radio if that is still there.', true);
+                     '. Thread stays on it, in fault: save otbr on it again to retry, or move Thread to another radio.',
+         true);
   } else {
     return;
   }
@@ -519,8 +530,8 @@ function moveText(ch) {
   if (!from)
     return 'Saving starts the Thread border router on this radio.';
   return 'Saving moves Thread from ' + from.label + ' to this radio. Thread devices lose the border router for a ' +
-         'few seconds; the network and its settings stay the same. If this radio does not start, Thread goes ' +
-         'back to ' + from.label + '.';
+         'few seconds; the network and its settings stay the same. If this radio does not start, Thread stays on ' +
+         'this radio in fault (it does not switch back): save otbr here again to retry, or move it to another radio.';
 }
 
 function renderDialog() {

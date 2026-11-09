@@ -61,12 +61,6 @@ void rcp_sync_get_last_probe(rcp_sync_probe_result_t *out);
 #define RCP_SYNC_ERR_RESTART 0x7a03
 
 /**
- * Radio push and ROM recovery result (br_core): the radio mux refused the C6 job because rcp-proxy on the C6 has a
- * connected peer (radio_mux_c6_job_begin); nothing was touched (device_api: 409 c6_busy).
- */
-#define RCP_SYNC_ERR_C6_BUSY 0x7a04
-
-/**
  * Where an RCP image comes from during a push. `read` delivers bytes sequentially: offsets ascend without
  * gaps. A NULL `reopen` marks a one-shot source (a request body). `reopen` is non-NULL only for sources that
  * can restart from offset 0 (a URL pull); it is called before every whole-transfer retry.
@@ -130,7 +124,7 @@ bool rcp_sync_jumper_present(void);
  * is erased, the embedded updater is written to `test`, each region verified (MD5) with one retry. No RCP firmware is
  * written, ota_0 and ota_1 stay as they are. The C6 is reset into its normal boot afterwards. JUMPER_BOOT is left
  * high-impedance on every path, errors included. Blocks for tens of seconds; pauses the C6 log capture meanwhile.
- * ESP_ERR_INVALID_STATE if a recovery already runs. It does not stop OpenThread: use br_core_rom_recover.
+ * ESP_ERR_INVALID_STATE if a recovery already runs. It does not stop OpenThread: use builtin_rcp_rom_recover.
  */
 esp_err_t rcp_sync_rom_recover(void);
 

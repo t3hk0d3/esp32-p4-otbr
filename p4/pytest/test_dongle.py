@@ -44,6 +44,8 @@ STATUS_TIMEOUT_S = 90
 THREAD_TIMEOUT_S = 120
 DETECT_TIMEOUT_S = 15
 MOVE_TIMEOUT_S = 120
+ABANDONED_REASON = "an earlier OpenThread start was abandoned: reboot"
+REBOOT_GRACE_S = 5
 PROXY_PEER_WAIT_S = 15
 LATENCY_ROUNDS = 100
 LATENCY_BUDGET_MS = 15.0
@@ -109,13 +111,13 @@ def reset_modes(base_url, channel_id):
     with contextlib.suppress(requests.RequestException):
         wait_no_move(base_url)
         put_channel(base_url, {"rcp_proxy": PROXY_DEFAULTS}, channel_id)
-        put_channel(base_url, {"rcp_proxy": PROXY_DEFAULTS}, "c6")
+        put_channel(base_url, {"rcp_proxy": PROXY_DEFAULTS}, "builtin-c6")
         if get_channel(base_url, channel_id)["stored_mode"] != "off":
             set_mode(
                 base_url, "off", channel_id
             )  # a stop when Thread ran on the dongle: wait for it
-        if get_channel(base_url, "c6")["stored_mode"] != "otbr":
-            set_mode(base_url, "otbr", "c6")
+        if get_channel(base_url, "builtin-c6")["stored_mode"] != "otbr":
+            set_mode(base_url, "otbr", "builtin-c6")
         wait_mode(base_url, "BR_RUNNING", MOVE_TIMEOUT_S)
 
 
@@ -299,22 +301,52 @@ def test_move_thread_to_dongle_and_back(dut, base_url, dongle):
     identity = network_identity(dut)
     first = move_thread(base_url, dongle)
     assert first.status_code == 202
-    assert first.json() == {"moving": True, "moved_from": "c6"}
+    assert first.json() == {"moving": True, "moved_from": "builtin-c6"}
     wait_ot_state(dut, {"leader", "router", "child"}, THREAD_TIMEOUT_S)
     assert network_identity(dut) == identity
-    assert get_channel(base_url, "c6")["mode"] == "off"
+    assert get_channel(base_url, "builtin-c6")["mode"] == "off"
     assert get_channel(base_url, dongle)["mode"] == "otbr"
     assert get_status(base_url)["otbr_channel"] == dongle
-    second = move_thread(base_url, "c6")
+    second = move_thread(base_url, "builtin-c6")
     assert second.status_code == 202
     assert second.json() == {"moving": True, "moved_from": dongle}
     wait_ot_state(dut, {"leader", "router", "child"}, THREAD_TIMEOUT_S)
     assert network_identity(dut) == identity
     assert get_channel(base_url, dongle)["mode"] == "off"
-    assert get_status(base_url)["otbr_channel"] == "c6"
+    assert get_status(base_url)["otbr_channel"] == "builtin-c6"
     # A third trip: the radio capability check passes every time (no RADIO_FAULT from it).
     move_thread(base_url, dongle)
     assert get_status(base_url)["mode"] == "BR_RUNNING"
+
+
+def test_move_abandoned_start_no_reboot(dut, send, reboot, base_url, dongle):
+    # PUT otbr on the dongle, On a start there that abandons OpenThread's init (test build: ot_start_abandon): the move
+    # committed (the dongle is stored otbr, the C6 off), RADIO_FAULT "an earlier OpenThread start was abandoned: reboot",
+    # no reboot by itself, no rollback to the C6. The way out: otbr back on the C6 (stored), then a reboot.
+    uptime = requests.get(f"{base_url}/device/diag", timeout=10).json()["uptime_s"]
+    send(f"ot_start_abandon {dongle}", rb"ot_start_abandon: ok")
+    reply = put_channel(base_url, {"mode": "otbr"}, dongle)
+    assert reply.status_code == 202, reply.text
+    status = wait_mode(base_url, "RADIO_FAULT", MOVE_TIMEOUT_S)
+    assert status["fault_reason"] == ABANDONED_REASON, status
+    assert status["otbr_channel"] == dongle
+    assert get_channel(base_url, dongle)["stored_mode"] == "otbr"
+    assert get_channel(base_url, "builtin-c6")["stored_mode"] == "off"
+    time.sleep(
+        REBOOT_GRACE_S
+    )  # the move's old behaviour rebooted ~1.5 s after the fault
+    later = requests.get(f"{base_url}/device/diag", timeout=10).json()["uptime_s"]
+    assert later > uptime, "the board rebooted"
+    assert get_status(base_url)["mode"] == "RADIO_FAULT"
+    # The way out: Thread back on the C6 (its probe and commit work, its start is refused the same way), then a reboot.
+    back = put_channel(base_url, {"mode": "otbr"}, "builtin-c6")
+    assert back.status_code == 202, back.text
+    # Committed once the mux logs it: the stored modes are saved by then (the read API shows them a moment before the
+    # save ends, and /device/status's otbr_channel names the C6 already while it is leased for the probe).
+    dut.expect(rb"radio_mux: otbr moved from \S+ to builtin-c6", timeout=MOVE_TIMEOUT_S)
+    reboot()
+    wait_mode(base_url, "BR_RUNNING", THREAD_TIMEOUT_S)
+    assert get_status(base_url)["otbr_channel"] == "builtin-c6"
 
 
 def test_move_refusals(dut, base_url, dongle):
@@ -324,16 +356,16 @@ def test_move_refusals(dut, base_url, dongle):
     mixed = put_channel(base_url, {"mode": "otbr", "baud": SPINEL_BAUD}, dongle)
     assert mixed.status_code == 400, mixed.text
     assert mixed.json()["error"] == "bad_value"
-    assert get_channel(base_url, "c6")["mode"] == "otbr"
-    c6_port = get_channel(base_url, "c6")["rcp_proxy"]["port"]
+    assert get_channel(base_url, "builtin-c6")["mode"] == "otbr"
+    c6_port = get_channel(base_url, "builtin-c6")["rcp_proxy"]["port"]
     stop_mixed = put_channel(
-        base_url, {"mode": "rcp-proxy", "rcp_proxy": {"port": 6639}}, "c6"
+        base_url, {"mode": "rcp-proxy", "rcp_proxy": {"port": 6639}}, "builtin-c6"
     )
     assert stop_mixed.status_code == 400, stop_mixed.text
     assert stop_mixed.json()["error"] == "bad_value"
     assert "stopping" in stop_mixed.json()["detail"]
-    assert get_channel(base_url, "c6")["mode"] == "otbr"
-    assert get_channel(base_url, "c6")["rcp_proxy"]["port"] == c6_port
+    assert get_channel(base_url, "builtin-c6")["mode"] == "otbr"
+    assert get_channel(base_url, "builtin-c6")["rcp_proxy"]["port"] == c6_port
     forget = requests.delete(f"{base_url}/device/channels/{dongle}", timeout=10)
     assert forget.status_code == 409, forget.text
     assert forget.json()["error"] == "in_use"
@@ -356,14 +388,14 @@ def test_proxy_port_taken(base_url, dongle):
     # PUT rcp-proxy on the dongle, On the C6 already listening in rcp-proxy on the same TCP port: 409 port_taken naming
     # the port and the C6; nothing changes. Another port is accepted.
     set_mode(
-        base_url, "rcp-proxy", "c6"
+        base_url, "rcp-proxy", "builtin-c6"
     )  # a stop of Thread on the C6, then its proxy listens on 6638
     taken = put_channel(
         base_url, {"mode": "rcp-proxy", "rcp_proxy": PROXY_DEFAULTS}, dongle
     )
     assert taken.status_code == 409, taken.text
     assert taken.json()["error"] == "port_taken"
-    assert "6638" in taken.json()["detail"] and "c6" in taken.json()["detail"]
+    assert "6638" in taken.json()["detail"] and "builtin-c6" in taken.json()["detail"]
     assert get_channel(base_url, dongle)["stored_mode"] == "off"
     other = put_channel(
         base_url, {"mode": "rcp-proxy", "rcp_proxy": {"port": 6639}}, dongle
@@ -800,18 +832,18 @@ def test_c6_proxy_otbr_agent(base_url, board_ip, agent_container):
     to a macvlan network they stay in the container. Either way it advertises a Thread Border Agent (_meshcop._udp) on
     the LAN while it runs. Uses only the C6 (no dongle needed)."""
     set_mode(
-        base_url, "rcp-proxy", "c6"
+        base_url, "rcp-proxy", "builtin-c6"
     )  # a stop of Thread on the C6 (202), then the proxy listens
     try:
         wait_mode(base_url, "NO_RADIO")
-        wait_proxy_state(base_url, "c6", "listening", PROXY_PEER_WAIT_S)
-        name = agent_container(board_ip, proxy_state(base_url, "c6")["port"])
+        wait_proxy_state(base_url, "builtin-c6", "listening", PROXY_PEER_WAIT_S)
+        name = agent_container(board_ip, proxy_state(base_url, "builtin-c6")["port"])
         deadline = time.monotonic() + AGENT_START_S
         while time.monotonic() < deadline:
-            if proxy_state(base_url, "c6")["state"] == "connected":
+            if proxy_state(base_url, "builtin-c6")["state"] == "connected":
                 break
             time.sleep(1)
-        assert proxy_state(base_url, "c6")["state"] == "connected", (
+        assert proxy_state(base_url, "builtin-c6")["state"] == "connected", (
             "otbr-agent never connected"
         )
         time.sleep(10)
@@ -829,11 +861,11 @@ def test_c6_proxy_otbr_agent(base_url, board_ip, agent_container):
             "router",
             "leader",
         )
-        counters = get_channel(base_url, "c6")["counters"]
+        counters = get_channel(base_url, "builtin-c6")["counters"]
         assert counters["frames_in"] > 0
         assert counters["frames_out"] > 0
     finally:
         set_mode(
-            base_url, "otbr", "c6"
+            base_url, "otbr", "builtin-c6"
         )  # off first (the proxy runs on it), then the start of Thread
         wait_mode(base_url, "BR_RUNNING", MOVE_TIMEOUT_S)

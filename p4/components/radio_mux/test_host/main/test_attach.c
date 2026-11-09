@@ -305,7 +305,7 @@ TEST_CASE("the C6 with a registered consumer: attach wanted like any channel", "
     radio_mux_chan_view_t c6 = view(RADIO_MUX_MODE_ZIGGURAT, RADIO_MUX_FW_SPINEL);
     const radio_mux_rules_t r = ziggurat_registered();
 
-    c6.id = "c6";
+    c6.id = "builtin-c6";
     TEST_ASSERT_TRUE(radio_mux_attach_wanted(&r, &c6, true));
 }
 
@@ -504,6 +504,34 @@ TEST_CASE("NVS key of the C6 id constant: the id itself", "[radio_mux]")
 {
     char key[16];
 
-    radio_mux_nvs_key(RADIO_MUX_C6_ID, key);
+    radio_mux_nvs_key(RADIO_MUX_BUILTIN_ID, key);
     TEST_ASSERT_EQUAL_STRING("c6", key);
+}
+
+TEST_CASE("NVS key of the built-in channel: builtin-c6, and c6 as older builds stored it, are both the key c6",
+          "[radio_mux]")
+{
+    char key[16];
+
+    TEST_ASSERT_EQUAL_STRING("builtin-c6", RADIO_MUX_BUILTIN_ID);
+    radio_mux_nvs_key("builtin-c6", key);
+    TEST_ASSERT_EQUAL_STRING("c6", key);
+    radio_mux_nvs_key("c6", key);
+    TEST_ASSERT_EQUAL_STRING("c6", key);
+}
+
+TEST_CASE("NVS id: the built-in channel is stored as c6 (an older build reads it); a USB channel as its id",
+          "[radio_mux]")
+{
+    TEST_ASSERT_EQUAL_STRING("c6", radio_mux_nvs_id("builtin-c6"));
+    TEST_ASSERT_EQUAL_STRING("usb-10c4-ea60", radio_mux_nvs_id("usb-10c4-ea60"));
+}
+
+TEST_CASE("Built-in id: builtin-c6 and the stored c6 name the built-in channel, nothing else does", "[radio_mux]")
+{
+    TEST_ASSERT_TRUE(radio_mux_is_builtin_id("builtin-c6"));
+    TEST_ASSERT_TRUE(radio_mux_is_builtin_id("c6"));
+    TEST_ASSERT_FALSE(radio_mux_is_builtin_id("usb-10c4-ea60"));
+    TEST_ASSERT_FALSE(radio_mux_is_builtin_id("builtin"));
+    TEST_ASSERT_FALSE(radio_mux_is_builtin_id(""));
 }

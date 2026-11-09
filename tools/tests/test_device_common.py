@@ -45,27 +45,30 @@ class TestCommonLogic:
         ("status", "chip"),
         [
             (
-                "{mode: 'BR_RUNNING', otbr_channel: 'c6'}",
+                "{mode: 'BR_RUNNING', otbr_channel: 'builtin-c6'}",
                 {"text": "Thread runs on: C6", "tone": "chip-ok"},
             ),
             (
-                "{mode: 'SNIFFER', otbr_channel: 'c6'}",
+                "{mode: 'SNIFFER', otbr_channel: 'builtin-c6'}",
                 {"text": "Thread runs on: C6", "tone": "chip-ok"},
             ),
             (
-                "{mode: 'NO_RADIO', otbr_channel: 'c6', fault_reason: 'radio unplugged (c6)'}",
-                {"text": "Thread on C6: radio unplugged (c6)", "tone": "chip-warn"},
+                "{mode: 'NO_RADIO', otbr_channel: 'builtin-c6', fault_reason: 'radio unplugged (builtin-c6)'}",
+                {
+                    "text": "Thread on C6: radio unplugged (builtin-c6)",
+                    "tone": "chip-warn",
+                },
             ),
             (
-                "{mode: 'NO_RADIO', otbr_channel: 'c6', fault_reason: null}",
+                "{mode: 'NO_RADIO', otbr_channel: 'builtin-c6', fault_reason: null}",
                 {"text": "Thread on C6: not available", "tone": "chip-warn"},
             ),
             (
-                "{mode: 'RADIO_FAULT', otbr_channel: 'c6', fault_reason: 'rcp incompatible'}",
+                "{mode: 'RADIO_FAULT', otbr_channel: 'builtin-c6', fault_reason: 'rcp incompatible'}",
                 {"text": "Thread on C6: fault: rcp incompatible", "tone": "chip-warn"},
             ),
             (
-                "{mode: 'STARTING', otbr_channel: 'c6'}",
+                "{mode: 'STARTING', otbr_channel: 'builtin-c6'}",
                 {"text": "Thread on C6: starting", "tone": "chip-warn"},
             ),
             (

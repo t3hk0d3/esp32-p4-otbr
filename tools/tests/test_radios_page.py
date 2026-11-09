@@ -6,8 +6,8 @@ import pytest
 from device_js import FRONTEND, logic, needs_node, page, scenario
 
 C6 = {
-    "id": "c6",
-    "kind": "c6",
+    "id": "builtin-c6",
+    "kind": "builtin",
     "label": "ESP32-C6 (built-in)",
     "mode": "otbr",
     "stored_mode": "otbr",
@@ -142,7 +142,7 @@ EZSP = {
 SNAP = {"channels": [C6, OLLY, SLZB, EZSP]}
 SNAP_ZIG = {**SNAP, "available_modes": ["off", "otbr", "rcp-proxy", "ziggurat"]}
 SNAP_NOZIG = {**SNAP, "available_modes": ["off", "otbr", "rcp-proxy"]}
-RUNNING = {"mode": "BR_RUNNING", "otbr_channel": "c6", "fault_reason": None}
+RUNNING = {"mode": "BR_RUNNING", "otbr_channel": "builtin-c6", "fault_reason": None}
 NO_RADIO = {"mode": "NO_RADIO", "otbr_channel": None, "fault_reason": None}
 
 # t.snap, t.status: the bodies GET answers; t.put(url, body, method) -> {status, body} answers a PUT or DELETE.
@@ -487,6 +487,9 @@ class TestDialog:
         assert r[2] is False
         assert "Thread devices lose the border router" in r[3]
         assert "ESP32-C6 (built-in)" in r[3]
+        # A move has no rollback: a target that does not start keeps Thread, in fault.
+        assert "goes back" not in r[3]
+        assert "stays on this radio in fault" in r[3]
 
     def test_the_radio_that_runs_thread_keeps_save(self):
         # On the C6 (already otbr): Save stays Save and no move text shows.
@@ -708,7 +711,7 @@ class TestSave:
         # On 202 for off on the radio that runs Thread: "Stopping Thread"; once its stored mode is off: "stopped".
         r = scenario(
             setup()
-            + "t.put = () => ({status: 202, body: {moving: true, moved_from: 'c6'}});"
+            + "t.put = () => ({status: 202, body: {moving: true, moved_from: 'builtin-c6'}});"
             + open_row(0)
             + f"{card('off')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10);"
             + "const first = t.el('rMsg').textContent;"
@@ -723,7 +726,7 @@ class TestSave:
         # On a stop whose sessions did not end: the radio stays in otbr with error drain_timeout; the page says so.
         r = scenario(
             setup()
-            + "t.put = () => ({status: 202, body: {moving: true, moved_from: 'c6'}});"
+            + "t.put = () => ({status: 202, body: {moving: true, moved_from: 'builtin-c6'}});"
             + open_row(0)
             + f"{card('off')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10);"
             + f"t.snap = {{channels: [Object.assign({{}}, {json.dumps(C6)}, {{error: 'drain_timeout'}})]}};"
@@ -750,7 +753,7 @@ class TestSave:
             setup()
             + "t.put = () => { t.snap = {channels: [Object.assign({}, t.snap.channels[0], {mode: 'off', stored_mode: 'off'}),"
             + json.dumps(starting)
-            + "]}; return {status: 202, body: {moving: true, moved_from: 'c6'}}; };"
+            + "]}; return {status: 202, body: {moving: true, moved_from: 'builtin-c6'}}; };"
             + open_row(1)
             + f"{card('otbr')}.click(); await t.flush(); t.el('mSave').click(); await t.advance(10);"
             + "const text = t.el('rMsg').textContent; const open = t.el('dlg').open;"
@@ -877,8 +880,8 @@ class TestHideRule:
             "null",
             "{mode: 'NO_RADIO', otbr_channel: null}",
             "{mode: 'NO_RADIO', otbr_channel: 'u1'}",
-            "{mode: 'RADIO_FAULT', otbr_channel: 'c6'}",
-            "{mode: 'BR_RUNNING', otbr_channel: 'c6'}",
+            "{mode: 'RADIO_FAULT', otbr_channel: 'builtin-c6'}",
+            "{mode: 'BR_RUNNING', otbr_channel: 'builtin-c6'}",
             "{mode: 'BR_RUNNING'}",
         ]
         r = scenario(
@@ -891,8 +894,8 @@ class TestHideRule:
         r = scenario(
             """const C = H.Common;
             return [C.threadNotice({mode: 'NO_RADIO', otbr_channel: null}), C.threadNotice({mode: 'NO_RADIO', otbr_channel: null}, 'capture'),
-                    C.threadNotice({mode: 'NO_RADIO', otbr_channel: 'u1'}), C.threadNotice({mode: 'BR_RUNNING', otbr_channel: 'c6'}),
-                    C.threadNotice({mode: 'RADIO_FAULT', otbr_channel: 'c6', fault_reason: 'x'})];"""
+                    C.threadNotice({mode: 'NO_RADIO', otbr_channel: 'u1'}), C.threadNotice({mode: 'BR_RUNNING', otbr_channel: 'builtin-c6'}),
+                    C.threadNotice({mode: 'RADIO_FAULT', otbr_channel: 'builtin-c6', fault_reason: 'x'})];"""
         )
         assert r[0]["href"] == "/radios.html"
         assert (
@@ -919,7 +922,7 @@ class TestHideRule:
         # On RADIO_FAULT with no RCP firmware on the C6: the board line says it, the Thread content stays shown.
         r = scenario(
             page("index", ROUTES)
-            + "t.snap = {channels: []}; t.status = {mode: 'RADIO_FAULT', otbr_channel: 'c6', fault_reason: 'no rcp firmware'};"
+            + "t.snap = {channels: []}; t.status = {mode: 'RADIO_FAULT', otbr_channel: 'builtin-c6', fault_reason: 'no rcp firmware'};"
             + "t.page.init(); await t.advance(100);"
             + "return [t.el('b-title').textContent, t.el('thread-off').hidden()];"
         )
@@ -1115,7 +1118,7 @@ class TestSharedBehaviour:
             "const ctx = vm.createContext({document: {getElementById: () => null}});"
             f"for (const f of {json.dumps(upto)}) vm.runInContext(fs.readFileSync({json.dumps(str(FRONTEND / 'static'))} + '/' + f, 'utf8'), ctx);"
             "process.stdout.write(JSON.stringify(vm.runInContext(\"[MgmtLogic.modeBanner({mode: 'NO_RADIO', otbr_channel: null}), "
-            "MgmtLogic.modeBanner({mode: 'BR_RUNNING', otbr_channel: 'c6'}), typeof MgmtPage]\", ctx)));"
+            "MgmtLogic.modeBanner({mode: 'BR_RUNNING', otbr_channel: 'builtin-c6'}), typeof MgmtPage]\", ctx)));"
         )
         out = subprocess.run(
             ["node", "-e", source],
@@ -1290,7 +1293,7 @@ class TestSettleMove:
         return (
             setup()
             + after_js
-            + "t.put = () => ({status: 202, body: {moving: true, moved_from: 'c6'}});"
+            + "t.put = () => ({status: 202, body: {moving: true, moved_from: 'builtin-c6'}});"
             + open_row(1)
             + f"{card('otbr')}.click(); await t.flush(); t.el('mSave').click();"
         )
@@ -1304,7 +1307,8 @@ class TestSettleMove:
         assert "did not start" not in r
 
     def test_target_seen_starting_then_settled_without_thread_is_a_failure(self):
-        # On a target that starts and then falls to a fault without becoming otbr_channel: the move failed.
+        # On a target that starts and then falls to a fault while Thread still runs on the C6 (drain_timeout): the move
+        # failed and Thread did not move.
         starting = json.dumps({"channels": [C6, OLLY_STARTING]})
         fault = json.dumps(
             {
@@ -1319,7 +1323,7 @@ class TestSettleMove:
             + f"await t.advance(10); t.snap = {starting}; await t.advance(2500);"
             + f"t.snap = {fault}; await t.advance(2500); return t.el('rMsg').textContent;"
         )
-        assert "did not start" in r and "drain_timeout" in r
+        assert "did not move" in r and "drain_timeout" in r
 
     def test_target_becoming_the_otbr_channel_is_success(self):
         # On a target that starts and then becomes otbr_channel: "Thread now runs on".
@@ -1346,6 +1350,92 @@ class TestSettleMove:
             + "return t.el('rMsg').textContent;"
         )
         assert "Thread now runs on OllyZig CC2652P" in r
+
+    def test_committed_target_whose_start_failed_is_a_failure_and_stays_there(self):
+        # On a move committed to the target (otbr_channel is it) whose start then failed (RADIO_FAULT, the target in
+        # fault): the move failed, Thread stays on the target in fault; no word of going back to the old radio.
+        starting = json.dumps({"channels": [C6, OLLY_STARTING]})
+        fault = json.dumps(
+            {
+                "channels": [
+                    {**C6, "mode": "off", "stored_mode": "off"},
+                    {
+                        **OLLY,
+                        "mode": "otbr",
+                        "stored_mode": "otbr",
+                        "state": "fault",
+                        "error": "rcp incompatible",
+                    },
+                ]
+            }
+        )
+        failed = {
+            "mode": "RADIO_FAULT",
+            "otbr_channel": "usb-10c4-ea60-abc123",
+            "fault_reason": "rcp incompatible",
+        }
+        r = scenario(
+            self.accept()
+            + f"await t.advance(10); t.snap = {starting}; await t.advance(2500);"
+            + f"t.snap = {fault}; t.status = {json.dumps(failed)}; await t.advance(2500);"
+            + "return t.el('rMsg').textContent;"
+        )
+        assert "did not start" in r and "rcp incompatible" in r, r
+        assert "now runs" not in r
+        assert "previous radio" not in r
+        assert "stays" in r
+
+    def test_drain_timeout_keeps_thread_on_the_source_and_says_retry(self):
+        # On a move refused after the 202 because sessions did not end (the target in fault with drain_timeout,
+        # otbr_channel still the source): Thread runs on where it was; the text says so and asks for a retry.
+        fault = json.dumps(
+            {"channels": [C6, {**OLLY, "state": "fault", "error": "drain_timeout"}]}
+        )
+        kept = {
+            "mode": "BR_RUNNING",
+            "otbr_channel": "builtin-c6",
+            "fault_reason": None,
+        }
+        r = scenario(
+            self.accept(f"t.status = {json.dumps(kept)};")
+            + f"await t.advance(10); t.snap = {fault}; await t.advance(2500); await t.advance(2500);"
+            + "return t.el('rMsg').textContent;"
+        )
+        assert "did not move" in r, r
+        assert "still runs on ESP32-C6 (built-in)" in r, r
+        assert "try" in r.lower(), r
+        assert "in fault" not in r, r
+
+    def test_committed_target_in_fault_with_stale_status_is_not_called_a_drain_timeout(
+        self,
+    ):
+        # On a target already stored otbr (the move committed) in fault while /device/status still names the source (a
+        # status read that failed or lags): never "still runs on" the source; the target is where Thread stays.
+        fault = json.dumps(
+            {
+                "channels": [
+                    {**C6, "mode": "off", "stored_mode": "off"},
+                    {
+                        **OLLY,
+                        "mode": "otbr",
+                        "stored_mode": "otbr",
+                        "state": "fault",
+                        "error": "rcp incompatible",
+                    },
+                ]
+            }
+        )
+        stale = {
+            "mode": "BR_RUNNING",
+            "otbr_channel": "builtin-c6",
+            "fault_reason": None,
+        }
+        r = scenario(
+            self.accept(f"t.status = {json.dumps(stale)};")
+            + f"await t.advance(10); t.snap = {fault}; await t.advance(2500); await t.advance(2500);"
+            + "return t.el('rMsg').textContent;"
+        )
+        assert "still runs on" not in r, r
 
     def test_nothing_after_90_seconds_is_a_failure(self):
         # On a target never seen starting and never becoming otbr_channel: failed after 90 s, not before.

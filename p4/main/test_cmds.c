@@ -25,6 +25,7 @@
 
 #include "board.h"
 #include "br_core.h"
+#include "builtin_rcp.h"
 #include "device_api.h"
 #include "c6_board.h"
 #include "self_update.h"
@@ -167,7 +168,7 @@ static int cmd_c6_hold(int argc, char **argv)
         printf("usage: c6_hold <0|1>\n");
         return 1;
     }
-    esp_err_t err = br_core_test_set_c6_hold(atoi(argv[1]) != 0);
+    esp_err_t err = builtin_rcp_test_set_c6_hold(atoi(argv[1]) != 0);
     printf("c6_hold: %s\n", err == ESP_OK ? "ok" : esp_err_to_name(err));
     return err == ESP_OK ? 0 : 1;
 }
@@ -190,9 +191,11 @@ static int cmd_br_status(int argc, char **argv)
 {
     static const char *const modes[] = {"STARTING", "BR_RUNNING", "SNIFFER", "RADIO_FAULT", "NO_RADIO"};
     br_core_status_t status;
+    builtin_rcp_status_t rcp;
     br_core_get_status(&status);
+    builtin_rcp_get_status(&rcp);
     printf("br_status: mode=%s installed=%s known=%d compatible=%d dataset=%d channel=%u pd=%d prefix=%s fault=%s\n",
-           modes[status.mode], status.rcp_installed, status.rcp_installed_known, status.rcp_compatible, status.has_dataset,
+           modes[status.mode], rcp.installed, rcp.installed_known, status.rcp_compatible, status.has_dataset,
            status.channel, status.pd_state, status.pd_prefix, status.fault_reason);
     return 0;
 }
@@ -224,15 +227,28 @@ static int cmd_rcp_probe_override(int argc, char **argv)
         printf("usage: rcp_probe_override <real|empty|fail>\n");
         return 1;
     }
-    esp_err_t err = br_core_test_set_probe_override((br_core_test_probe_t)mode);
+    esp_err_t err = builtin_rcp_test_set_probe_override((builtin_rcp_test_probe_t)mode);
     printf("rcp_probe_override: %s\n", err == ESP_OK ? "ok" : esp_err_to_name(err));
     return err == ESP_OK ? 0 : 1;
+}
+
+// ot_start_abandon <channel id|off>: the next OpenThread start on that channel ends as an abandoned one, at once (as an
+// init stuck past its wait would); nothing starts OpenThread again until a reboot. Not persisted.
+static int cmd_ot_start_abandon(int argc, char **argv)
+{
+    if (argc != 2) {
+        printf("usage: ot_start_abandon <channel id|off>\n");
+        return 1;
+    }
+    br_core_test_set_start_abandon(strcmp(argv[1], "off") == 0 ? NULL : argv[1]);
+    printf("ot_start_abandon: ok\n");
+    return 0;
 }
 
 // rcp_kill: hold the C6 in reset now (and for every reset until `c6_hold 0` and a reboot): a runtime RCP failure.
 static int cmd_rcp_kill(int argc, char **argv)
 {
-    esp_err_t err = br_core_test_set_c6_hold(true);
+    esp_err_t err = builtin_rcp_test_set_c6_hold(true);
     gpio_set_level(P4_PIN_C6_RESET, 0);
     printf("rcp_kill: %s\n", esp_err_to_name(err));
     return err == ESP_OK ? 0 : 1;
@@ -713,6 +729,8 @@ esp_err_t test_cmds_register(void)
     ESP_RETURN_ON_ERROR(register_command("br_status", "br_core mode, dataset and DHCPv6-PD state", cmd_br_status), TAG, "br_status");
     ESP_RETURN_ON_ERROR(register_command("rcp_probe_override", "force the next boot's probe: real, empty or fail", cmd_rcp_probe_override), TAG, "rcp_probe_override");
     ESP_RETURN_ON_ERROR(register_command("c6_inject_reset_at", "c6_inject_reset_at <offset>: reset the C6 mid-push", cmd_c6_inject_reset_at), TAG, "c6_inject_reset_at");
+    ESP_RETURN_ON_ERROR(register_command("ot_start_abandon", "ot_start_abandon <channel id|off>: the next OpenThread start "
+                                         "there is abandoned", cmd_ot_start_abandon), TAG, "ot_start_abandon");
     ESP_RETURN_ON_ERROR(register_command("rcp_kill", "hold the C6 in reset now (runtime RCP failure)", cmd_rcp_kill), TAG, "rcp_kill");
     ESP_RETURN_ON_ERROR(register_command("rcp_glitch", "reset the C6 briefly, no hold (self-recovering RCP crash)", cmd_rcp_glitch), TAG, "rcp_glitch");
     ESP_RETURN_ON_ERROR(register_command("ota_url", "ota_url <url>: bundle OTA by URL, restarts on success", cmd_ota_url), TAG, "ota_url");

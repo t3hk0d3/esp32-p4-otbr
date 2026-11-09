@@ -13,8 +13,11 @@ extern "C" {
 
 // "usb-" + vid + "-" + pid + "-" + serial is cut to 47 characters; the buffer adds the NUL.
 #define RADIO_MUX_ID_MAX 48
-// The id of the on-board C6 channel (radio_mux.h documents it with the API).
-#define RADIO_MUX_C6_ID "c6"
+// The id of the board's built-in RCP channel: "builtin-<chip>" (radio_mux.h documents it with the API).
+#define RADIO_MUX_BUILTIN_ID "builtin-c6"
+// What the built-in channel is stored under in NVS (its key, and its id in the index and the blob): its id before the
+// orchestrator, so a board updated from an older build, or back to one, reads its settings.
+#define RADIO_MUX_BUILTIN_NVS_ID "c6"
 #define RADIO_MUX_CP210X_FLOW_LEN 16
 #define RADIO_MUX_RULES_MAX 4
 #define RADIO_MUX_PROXY_DEFAULT_PORT 6638
@@ -71,7 +74,7 @@ typedef enum {
     RADIO_MUX_REFUSE_INCOMPATIBLE,
     RADIO_MUX_REFUSE_MODE_TAKEN,
     RADIO_MUX_REFUSE_HYBRID,
-    // radio_mux_set only, never from radio_mux_check_set_mode:
+    // radio_mux_set only, never from radio_mux_orch_check_bind (BUSY: only for a channel in reinit):
     RADIO_MUX_REFUSE_UNKNOWN_CHANNEL, // no channel with that id (404)
     RADIO_MUX_REFUSE_FAILED,          // the mux could not store or apply the change (not started, NVS, timeout: 500)
     RADIO_MUX_REFUSE_PROBE_FAILED,    // a move of otbr: the target's RCP probe failed, nothing changed (409 probe_failed)
@@ -190,7 +193,7 @@ typedef enum {
     RADIO_MUX_BAUD_FAR,
 } radio_mux_baud_t;
 
-// "c6" is the on-board channel. A USB channel is "usb-<vid>-<pid>", plus "-<serial>" when the device reports a serial
+// RADIO_MUX_BUILTIN_ID is the built-in channel. A USB channel is "usb-<vid>-<pid>", plus "-<serial>" when the device reports a serial
 // string: lowercase 4-digit hex, serial reduced to [A-Za-z0-9], the whole id at most 47 characters. serial may be NULL.
 void radio_mux_channel_id(uint16_t vid, uint16_t pid, const char *serial, char out[RADIO_MUX_ID_MAX]);
 
@@ -213,14 +216,9 @@ uint32_t radio_mux_reboot_modes(const radio_mux_rules_t *rules);
 // uses the type its registration declares; any other mode fits nothing.
 bool radio_mux_fits(const radio_mux_rules_t *rules, radio_mux_mode_t mode, radio_mux_fw_t fw);
 
-// Decision for setting channel `target` (index into chans[0..n)) to `want`. RADIO_MUX_MOVE is every change of where
-// OpenThread runs, each run by br_core as a long operation: otbr while another channel has it (a move; *move_from is
-// that channel's index), otbr while no channel has it (a start; *move_from is n), and the otbr channel leaving otbr
-// for another mode without a reboot (a stop; *move_from is target). move_from may be NULL. Checks run in the order of
-// the verdicts: bad value, unavailable channel, mode not registered, firmware fit, hybrid (otbr next to a stored
-// ziggurat only while a ziggurat consumer is registered), move or limit, start, reboot, stop.
-radio_mux_verdict_t radio_mux_check_set_mode(const radio_mux_rules_t *rules, const radio_mux_chan_view_t *chans,
-                                             size_t n, size_t target, radio_mux_mode_t want, size_t *move_from);
+// The rule of a mode that has one: otbr (built in), or a registered consumer's. NULL for off, rcp-proxy and
+// unregistered modes.
+const radio_mux_rule_t *radio_mux_rule_of(const radio_mux_rules_t *rules, radio_mux_mode_t mode);
 
 // The mode a channel takes once its firmware is detected: the stored mode when it fits, else OFF with the reason in
 // `reason` (empty when the stored mode is kept). reason may be NULL.
@@ -261,9 +259,14 @@ bool radio_mux_attach_wanted(const radio_mux_rules_t *rules, const radio_mux_cha
 // in; DROPPED (queue_full) counts a drop and tells the caller to put the slot back. Never waits.
 radio_mux_post_t radio_mux_post_rx(bool queue_full, size_t len, radio_mux_counters_t *c);
 
-// NVS key of a channel's settings blob: "c6" for the C6, else "u" + 8 lowercase hex digits of the FNV-1a (32 bit)
-// hash of the id.
+// NVS key of a channel's settings blob: RADIO_MUX_BUILTIN_NVS_ID for the built-in channel (its id or its stored id),
+// else "u" + 8 lowercase hex digits of the FNV-1a (32 bit) hash of the id.
 void radio_mux_nvs_key(const char *id, char out[16]);
+// The id a channel is stored under in NVS (the index and its blob): RADIO_MUX_BUILTIN_NVS_ID for the built-in channel,
+// else the id itself.
+const char *radio_mux_nvs_id(const char *id);
+// Whether `id` names the built-in channel: RADIO_MUX_BUILTIN_ID, or RADIO_MUX_BUILTIN_NVS_ID as NVS stores it.
+bool radio_mux_is_builtin_id(const char *id);
 
 // What the consumer of a port gets: the C6 port always delivers and takes spinel frames (its SPI transport has no byte
 // stream), whatever the consumer declares; a byte transport (USB) follows the consumer's `frames`.
@@ -365,11 +368,6 @@ typedef struct {
 // either. n when no slot can be had: the new device is not listed.
 size_t radio_mux_evict_pick(const radio_mux_slot_view_t *slots, size_t n, bool for_unsupported);
 
-// OTBR runs on one channel: of stored modes in slot order (the C6 first), the first otbr stays and every later otbr
-// becomes off (changed[i] set for it, cleared for the others). Returns how many changed. Repairs a move whose two
-// stores were cut apart (a reset between them).
-size_t radio_mux_otbr_dedupe(radio_mux_mode_t *modes, bool *changed, size_t n);
-
 // Whether a detection that found `detected` keeps the channel's record of `stored` instead: a detection that found
 // nothing (unknown) never overwrites a known firmware (the RCP may only have been slow to boot); any known result
 // replaces the record.
@@ -447,56 +445,6 @@ size_t radio_mux_spi_xfer_len(uint16_t tx_len, uint16_t accept);
 // the next transaction: 0 when at least gap_us passed since the previous one ended at last_end_us (negative: none
 // yet), else the rest of the gap. A clock that went backwards counts as "just ended" (the whole gap).
 uint32_t radio_mux_spi_gap_wait_us(int64_t now_us, int64_t last_end_us, uint32_t gap_us);
-
-// What rcp_sync's last probe of the C6 said (the fields of rcp_sync_probe_result_t the mux reads). All false: no probe
-// ran yet.
-typedef struct {
-    bool updater_reachable;
-    bool installed_valid;
-    bool esp_hosted;
-    bool rom_recovery_failed;
-} radio_mux_c6_probe_t;
-
-// Whether c6 is listed present: not when the C6 runs the factory ESP-Hosted firmware, when a ROM recovery failed and
-// the updater stayed silent, or when the updater answered with no RCP installed; `reason` (may be NULL) then names
-// which, else it is empty. No probe yet, or a silent updater without a failed recovery: present (the installed
-// firmware is tried, as br_core does).
-bool radio_mux_c6_present(const radio_mux_c6_probe_t *probe, char *reason, size_t cap);
-
-// Whether a C6 job (push, recovery, probe) is refused: only while the C6's stored mode is rcp-proxy, its consumer is
-// attached and it reported a connected peer.
-bool radio_mux_c6_job_refused(radio_mux_mode_t stored_mode, bool attached, bool has_peer);
-
-// The C6's boot hold. From the mux's start the C6 is held for its boot steps (br_core's boot job: rcp_sync's probe over
-// SPI3 and the INT pin, the ROM recovery, the reset into the RCP): listed busy with RADIO_MUX_C6_BOOT_REASON, no
-// consumer attached, SPI2 not opened. The first C6 job that begins while it is held runs inside the hold (nothing to
-// detach or release), and that job's end lets go: the stored mode's consumer is attached once, after the steps. When
-// no job begins within RADIO_MUX_C6_BOOT_HOLD_MS (br_core never ran its boot, or it failed early), the mux lets go by
-// itself and attaches the stored mode without the steps.
-#define RADIO_MUX_C6_BOOT_HOLD_MS 30000
-#define RADIO_MUX_C6_BOOT_REASON "the C6's boot steps run"
-
-typedef enum {
-    RADIO_MUX_C6_HOLD_NONE, // not held for the boot (never held, or let go)
-    RADIO_MUX_C6_HOLD_WAIT, // held, no job yet: let go at the deadline
-    RADIO_MUX_C6_HOLD_JOB,  // a job began inside the hold: its end lets go
-} radio_mux_c6_hold_state_t;
-
-typedef struct {
-    radio_mux_c6_hold_state_t state;
-    int64_t since_ms; // when the hold started
-} radio_mux_c6_hold_t;
-
-// The mux starts: the C6 is held from now_ms, waiting for its boot job.
-void radio_mux_c6_hold_start(radio_mux_c6_hold_t *h, int64_t now_ms);
-// A C6 job begins: true when it runs inside the hold (WAIT, which becomes JOB). False otherwise: no hold (the job
-// takes the C6 as usual), or a job already runs inside it (the C6 is busy: the new job is refused).
-bool radio_mux_c6_hold_job_begin(radio_mux_c6_hold_t *h);
-// Whether the mux lets go of a hold no job took: WAIT, and RADIO_MUX_C6_BOOT_HOLD_MS or more since it started (a clock
-// that went backwards counts as passed: the C6 is never held for ever).
-bool radio_mux_c6_hold_expired(const radio_mux_c6_hold_t *h, int64_t now_ms);
-// The hold ends (its job ended, or it expired): NONE.
-void radio_mux_c6_hold_end(radio_mux_c6_hold_t *h);
 
 /* ---- attach handles ---- */
 

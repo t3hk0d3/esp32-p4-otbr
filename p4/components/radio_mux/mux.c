@@ -19,7 +19,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "radio_mux_priv.h"
-#include "rcp_sync.h"
 
 static const char *TAG = "radio_mux";
 
@@ -35,8 +34,9 @@ static const char *TAG = "radio_mux";
 #define EVQ_LEN (RADIO_MUX_POOL_SLOTS + 4) // frames hold a slot each, so control events always fit
 #define DEFAULT_BAUD 460800
 #define EPOCH_VALID 1577836800 // 2020-01-01: an earlier clock was never set
-#define C6_BUSY_REASON "a C6 job holds the radio"
 #define C6_JOB_FAILED_REASON "the last C6 job left the C6 not answering"
+#define BOOT_TASK_STACK 6144 // rcp_sync's probe and ROM recovery ran on net_init's 4 KB before
+#define BOOT_TASK_PRIORITY 5
 
 // At least one tick: at CONFIG_FREERTOS_HZ 100, pdMS_TO_TICKS(10) is 1 and smaller waits would not block.
 #define WAIT_TICKS(ms) (pdMS_TO_TICKS(ms) > 0 ? pdMS_TO_TICKS(ms) : 1)
@@ -73,16 +73,6 @@ void mux_unlock(void)
 uint32_t mux_eff_baud(const struct radio_mux_chan *ch)
 {
     return ch->baud ? ch->baud : DEFAULT_BAUD;
-}
-
-const radio_mux_consumer_t *mux_find_consumer(radio_mux_mode_t mode)
-{
-    for (size_t i = 0; i < g_mux.n_consumers; i++) {
-        if (g_mux.consumers[i].mode == mode) {
-            return &g_mux.consumers[i];
-        }
-    }
-    return NULL;
 }
 
 struct radio_mux_chan *mux_handle_chan(const radio_mux_chan_t *h, mux_port_t **port, uint32_t *gen)
@@ -143,16 +133,66 @@ static bool want_attach(const mux_port_t *p)
     }
     const radio_mux_chan_view_t v = view_of(ch);
 
-    return radio_mux_attach_wanted(&g_mux.rules, &v, mux_find_consumer(ch->mode) != NULL);
+    return radio_mux_attach_wanted(&g_mux.rules, &v, orch_find(ch->mode) != NULL);
 }
 
-// Why the C6 is busy: its boot hold (the boot steps, or the wait for them) or another C6 job.
+// Why the C6 is busy (in reinit): its maintenance, in the texts the API showed before the orchestrator.
 static const char *c6_busy_reason(const mux_port_t *p)
 {
-    return p->hold.state != RADIO_MUX_C6_HOLD_NONE ? RADIO_MUX_C6_BOOT_REASON : C6_BUSY_REASON;
+    return radio_mux_busy_reason(p->work);
 }
 
-// Owner: what the API shows for the channel on port p (mode, state, reason), from the attach state.
+// Whether the C6 is in reinit or about to enter it (its bound instance was asked to let go).
+static bool c6_maintained(const mux_port_t *p)
+{
+    return p->busy || g_mux.reinit.phase != RADIO_MUX_RP_IDLE;
+}
+
+// Owner, under mux_lock: the channel's lifecycle state and reason (design section 4.1), from the port.
+static void set_chan_state(mux_port_t *p, struct radio_mux_chan *ch)
+{
+    radio_mux_chan_state_t cs = RADIO_MUX_CS_READY;
+    radio_mux_fault_kind_t kind = RADIO_MUX_FAULT_NONE;
+    radio_mux_work_t work = RADIO_MUX_WORK_NONE;
+    const char *why = "";
+
+    if (p->kind == RADIO_MUX_KIND_BUILTIN && p->busy) {
+        cs = RADIO_MUX_CS_REINIT;
+        work = p->work;
+    } else if (p->kind == RADIO_MUX_KIND_BUILTIN && !ch->present) {
+        cs = RADIO_MUX_CS_FAULT;
+        kind = RADIO_MUX_FAULT_FIRMWARE;
+        why = p->fault;
+    } else if (!p->leased) {
+        switch (p->att.state) {
+        case RADIO_MUX_AS_PROBING:
+        case RADIO_MUX_AS_REOPENING:
+            cs = RADIO_MUX_CS_REINIT;
+            work = RADIO_MUX_WORK_DETECT;
+            break;
+        case RADIO_MUX_AS_IDLE:
+            if (p->fault[0] != '\0' && p->fault_kind != RADIO_MUX_FAULT_NONE) {
+                cs = RADIO_MUX_CS_FAULT;
+                kind = p->fault_kind;
+                why = p->fault;
+            }
+            break;
+        case RADIO_MUX_AS_ABSENT:
+        case RADIO_MUX_AS_CLOSING:
+            cs = RADIO_MUX_CS_ABSENT;
+            break;
+        case RADIO_MUX_AS_ATTACHED:
+            break;
+        }
+    }
+    ch->chan_state = cs;
+    ch->fault_kind = kind;
+    ch->work = work;
+    snprintf(ch->chan_reason, sizeof(ch->chan_reason), "%s", cs == RADIO_MUX_CS_REINIT ? radio_mux_work_reason(work) :
+             why);
+}
+
+// Owner: what the API shows for the channel on port p (mode, state, reason; channel_state), from the attach state.
 static void refresh(mux_port_t *p)
 {
     struct radio_mux_chan *ch = p->chan;
@@ -161,7 +201,8 @@ static void refresh(mux_port_t *p)
         return;
     }
     mux_lock();
-    if (p->kind == RADIO_MUX_KIND_C6 && (p->busy || !ch->present)) { // a job holds it, or the probe found no RCP
+    set_chan_state(p, ch);
+    if (p->kind == RADIO_MUX_KIND_BUILTIN && (p->busy || !ch->present)) { // in reinit, or the probe found no RCP
         ch->eff_mode = p->busy ? ch->mode : RADIO_MUX_MODE_UNAVAILABLE;
         ch->state = p->busy ? RADIO_MUX_STATE_BUSY : RADIO_MUX_STATE_IDLE;
         snprintf(ch->reason, sizeof(ch->reason), "%s", p->busy ? c6_busy_reason(p) : p->fault);
@@ -199,6 +240,10 @@ static void refresh(mux_port_t *p)
             ch->eff_mode = RADIO_MUX_MODE_OFF;
             ch->state = RADIO_MUX_STATE_IDLE;
             snprintf(ch->reason, sizeof(ch->reason), "%s", why);
+            if (why[0] != '\0') { // the stored mode's instance is not bound: the orchestrator says why
+                snprintf(ch->mode_state, sizeof(ch->mode_state), "no_radio");
+                snprintf(ch->mode_reason, sizeof(ch->mode_reason), "%s", why);
+            }
         } else { // fits, but nothing runs the mode
             ch->eff_mode = m;
             ch->state = RADIO_MUX_STATE_FAULT;
@@ -229,6 +274,7 @@ static bool open_dev(mux_port_t *p, uint32_t baud)
     const bool ok = usb_transport_open(p, &p->dev, baud, p->chan->flow, msg, sizeof(msg)) == ESP_OK;
 
     snprintf(ok ? p->warn : p->fault, RADIO_MUX_REASON_MAX, "%s", msg);
+    p->fault_kind = ok ? RADIO_MUX_FAULT_NONE : RADIO_MUX_FAULT_LINK;
     if (ok) {
         p->fault[0] = '\0';
     }
@@ -245,6 +291,9 @@ static bool line_dev(mux_port_t *p, uint32_t baud)
     const bool ok = usb_transport_line(p, baud, p->chan->flow, msg, sizeof(msg)) == ESP_OK;
 
     snprintf(ok ? p->warn : p->fault, RADIO_MUX_REASON_MAX, "%s", msg);
+    if (!ok) {
+        p->fault_kind = RADIO_MUX_FAULT_LINK;
+    }
     if (msg[0]) {
         ESP_LOGW(TAG, "%s: %s", p->chan->id, msg);
     }
@@ -262,15 +311,17 @@ static void write_dev(mux_port_t *p, const uint8_t *data, size_t n)
 
 /* ---- owner: the attach actions ---- */
 
-// The receive path runs before the consumer's attach, so nothing it asks for in attach is lost: frames that arrive
-// before it binds its queue wait in the channel's queue and move over in radio_mux_bind_queue.
+// The stored mode's instance is bound (BIND, or BACK when it holds the binding) with a new handle. The receive path
+// runs before the input, so nothing the instance asks for is lost: frames that arrive before it binds its queue wait in
+// the channel's queue and move over in radio_mux_bind_queue.
 static void do_attach(mux_port_t *p)
 {
     struct radio_mux_chan *ch = p->chan;
-    const radio_mux_consumer_t *c = mux_find_consumer(ch->mode);
+    orch_inst_t *oi = orch_find(ch->mode);
 
-    if (!c) { // want_attach said yes, so this does not happen; keep the machine consistent anyway
+    if (!oi) { // want_attach said yes, so this does not happen; keep the machine consistent anyway
         snprintf(p->fault, sizeof(p->fault), "no %s consumer", radio_mux_mode_name(ch->mode));
+        p->fault_kind = RADIO_MUX_FAULT_NONE;
         feed(p, RADIO_MUX_AEV_ATTACH_FAILED);
         return;
     }
@@ -279,49 +330,46 @@ static void do_attach(mux_port_t *p)
     xSemaphoreTake(p->rx_lock, portMAX_DELAY);
     radio_mux_reset_count_clear(&p->reset_count); // a new attach starts with no unanswered reset
     xSemaphoreGive(p->rx_lock);
-    p->consumer = c;
-    p->tx_frames = radio_mux_port_frames(p->kind == RADIO_MUX_KIND_C6, c->frames); // the C6 ignores c->frames
+    p->inst = oi;
+    p->tx_frames = radio_mux_port_frames(p->kind == RADIO_MUX_KIND_BUILTIN, oi->inst.frames); // the C6 ignores `frames`
     mux_set_rx(p, p->tx_frames ? MUX_RX_FRAMES : MUX_RX_RAW);
     atomic_store(&p->tx_ok, true);
-    const esp_err_t err = c->attach(h, c->ctx);
-
-    if (err != ESP_OK) {
-        atomic_store(&p->tx_ok, false);
-        mux_set_rx(p, MUX_RX_DISCARD);
-        xSemaphoreTake(p->rx_lock, portMAX_DELAY);
-        p->bound = NULL;
-        xSemaphoreGive(p->rx_lock);
-        mux_drain_evq(p);
-        p->consumer = NULL;
-        snprintf(p->fault, sizeof(p->fault), "%s attach failed: %s", radio_mux_mode_name(ch->mode),
-                 esp_err_to_name(err));
-        ESP_LOGW(TAG, "%s: %s", ch->id, p->fault);
-        feed(p, RADIO_MUX_AEV_ATTACH_FAILED);
-        return;
-    }
     p->fault[0] = '\0';
-    ESP_LOGI(TAG, "%s: %s attached", ch->id, radio_mux_mode_name(ch->mode));
+    orch_bind(p, oi, h);
+    ESP_LOGI(TAG, "%s: %s bound", ch->id, radio_mux_mode_name(ch->mode));
 }
 
-static void do_detach(mux_port_t *p)
+// The bound instance lets go: GONE into its queue, then UNBIND (the binding goes: a mode change) or LOST (it stays:
+// the channel went away or failed, with `kind` and `reason`).
+static void do_detach(mux_port_t *p, radio_mux_input_type_t type, radio_mux_fault_kind_t kind, const char *reason)
 {
-    const radio_mux_consumer_t *c = p->consumer;
+    orch_inst_t *oi = p->inst;
 
     atomic_store(&p->tx_ok, false);
-    taskENTER_CRITICAL(&p->lock); // after tx_ok: a late radio_mux_set_busy_peer(true) is refused (R26)
-    p->busy_peer = false;
-    taskEXIT_CRITICAL(&p->lock);
     mux_set_rx(p, MUX_RX_DISCARD);
-    if (!c) {
+    if (!oi) {
         return;
     }
     mux_post_ctl(p, RADIO_MUX_EV_GONE);
-    c->detach(p->att_handle, c->ctx);
-    p->consumer = NULL;
+    orch_leave(p, oi, type, kind, reason);
+    p->inst = NULL;
     xSemaphoreTake(p->rx_lock, portMAX_DELAY);
     p->bound = NULL;
     xSemaphoreGive(p->rx_lock);
-    ESP_LOGI(TAG, "%s: %s detached", p->chan->id, radio_mux_mode_name(c->mode));
+    ESP_LOGI(TAG, "%s: %s let go (%s)", p->chan->id, radio_mux_mode_name(oi->inst.mode),
+             type == RADIO_MUX_IN_UNBIND ? "unbound" : "lost");
+}
+
+// The bound instance lets go because the channel cannot be used now (closed, failed): UNBIND when the stored mode is
+// no longer its mode (a mode change), else LOST with the port's fault (or "not detected").
+static void detach_for_channel(mux_port_t *p)
+{
+    if (p->inst && p->chan && p->inst->inst.mode != p->chan->mode) {
+        do_detach(p, RADIO_MUX_IN_UNBIND, RADIO_MUX_FAULT_NONE, NULL);
+        return;
+    }
+    do_detach(p, RADIO_MUX_IN_LOST, p->fault[0] ? p->fault_kind : RADIO_MUX_FAULT_NONE,
+              p->fault[0] ? p->fault : "not detected");
 }
 
 // The device leaves the transport: closed once (the only close of this handle), the channel listed as unavailable.
@@ -350,6 +398,10 @@ static void close_device(mux_port_t *p)
     ch->eff_mode = RADIO_MUX_MODE_UNAVAILABLE;
     ch->state = RADIO_MUX_STATE_IDLE;
     snprintf(ch->reason, sizeof(ch->reason), "not detected");
+    ch->chan_state = RADIO_MUX_CS_ABSENT;
+    ch->fault_kind = RADIO_MUX_FAULT_NONE;
+    ch->work = RADIO_MUX_WORK_NONE;
+    ch->chan_reason[0] = '\0';
     p->chan = NULL;
     mux_unlock();
     if (ch->remembered) {
@@ -395,6 +447,7 @@ static struct radio_mux_chan *evict_slot(const char *id, bool for_unsupported)
         ch->used = false;
         mux_unlock();
     }
+    orch_forget_slot((size_t)(ch - g_mux.chans));
     return ch;
 }
 
@@ -557,14 +610,14 @@ static void run(mux_port_t *p, radio_mux_attach_act_t act)
         do_attach(p);
         break;
     case RADIO_MUX_ACT_DETACH:
-        do_detach(p);
+        detach_for_channel(p);
         break;
-    case RADIO_MUX_ACT_REATTACH:
-        do_detach(p);
+    case RADIO_MUX_ACT_REATTACH: // a new mode, or new rcp_proxy settings: a new binding
+        do_detach(p, RADIO_MUX_IN_UNBIND, RADIO_MUX_FAULT_NONE, NULL);
         do_attach(p);
         break;
-    case RADIO_MUX_ACT_GONE_CLOSE:
-        do_detach(p);
+    case RADIO_MUX_ACT_GONE_CLOSE: // unplugged
+        do_detach(p, RADIO_MUX_IN_LOST, RADIO_MUX_FAULT_NONE, "not detected");
         close_device(p);
         feed(p, RADIO_MUX_AEV_CLOSED);
         break;
@@ -589,20 +642,18 @@ static void feed(mux_port_t *p, radio_mux_attach_ev_t ev)
 
 /* ---- owner: the C6 ---- */
 
-// Whether rcp_sync's last probe leaves the C6 listed (radio_mux_c6_present); why not in `why`.
+// Whether the built-in RCP's last probe leaves the C6 listed (its `present` op); why not in `why`. No built-in RCP
+// described: listed (its installed firmware is tried).
 static bool c6_probe_present(char *why, size_t cap)
 {
-    rcp_sync_probe_result_t r;
+    const radio_mux_builtin_t *b = g_mux.builtin;
+    radio_mux_fault_kind_t kind;
 
-    rcp_sync_get_last_probe(&r);
-    const radio_mux_c6_probe_t probe = {
-        .updater_reachable = r.updater_reachable,
-        .installed_valid = r.installed_valid,
-        .esp_hosted = r.esp_hosted,
-        .rom_recovery_failed = r.rom_recovery_failed,
-    };
-
-    return radio_mux_c6_present(&probe, why, cap);
+    if (b == NULL) {
+        snprintf(why, cap, "%s", "");
+        return true;
+    }
+    return b->present(&kind, why, cap);
 }
 
 // Lists c6 present (firmware spinel unless a record says otherwise) or unavailable with `why`. Not while attached.
@@ -622,6 +673,7 @@ static void c6_list(bool present, const char *why)
     }
     mux_unlock();
     snprintf(p->fault, sizeof(p->fault), "%s", present ? "" : why);
+    p->fault_kind = present ? RADIO_MUX_FAULT_NONE : RADIO_MUX_FAULT_FIRMWARE;
     p->att.state = present ? RADIO_MUX_AS_IDLE : RADIO_MUX_AS_ABSENT;
     if (!present) {
         ESP_LOGW(TAG, "%s unavailable: %s", ch->id, why);
@@ -631,7 +683,7 @@ static void c6_list(bool present, const char *why)
 // Owner: the C6 to what its channel wants (R8). Open, with the stored mode's consumer attached, while that consumer is
 // registered and the C6 listed present; else closed: held in reset in mode off, left running otherwise (before an otbr
 // consumer exists, OpenThread's own SPI path uses it). `reattach`: an attached consumer is detached (GONE) and the
-// stored mode's attached again, the C6 staying open. Nothing while a job holds it or it is unavailable.
+// stored mode's attached again, the C6 staying open. Nothing while it is in reinit or unavailable.
 static void c6_apply(bool reattach)
 {
     mux_port_t *p = &g_mux.c6;
@@ -654,12 +706,17 @@ static void c6_apply(bool reattach)
         p->fault[0] = '\0'; // a failed open or attach is tried again (or no longer applies)
     }
     if (p->att.state == RADIO_MUX_AS_ATTACHED && (!want || reattach)) {
-        do_detach(p);
+        if (reattach) {
+            do_detach(p, RADIO_MUX_IN_UNBIND, RADIO_MUX_FAULT_NONE, NULL);
+        } else {
+            detach_for_channel(p);
+        }
         p->att.state = RADIO_MUX_AS_IDLE;
     }
     if (want && p->att.state != RADIO_MUX_AS_ATTACHED) {
         if (c6_transport_open(msg, sizeof(msg)) != ESP_OK) {
             snprintf(p->fault, sizeof(p->fault), "%s", msg);
+            p->fault_kind = RADIO_MUX_FAULT_LINK;
             ESP_LOGW(TAG, "%s: %s", p->chan->id, msg);
         } else {
             p->att.state = RADIO_MUX_AS_ATTACHED;
@@ -676,99 +733,170 @@ static void c6_apply(bool reattach)
     refresh(p);
 }
 
-// Owner task start: c6 listed from rcp_sync's last probe (none yet: present), then held for its boot steps
-// (radio_mux_c6_hold_t): busy, nothing attached, SPI2 and the pins untouched, until the boot job's end attaches the
-// stored mode's consumer once, after the steps (or until the hold expires: c6_hold_check).
+// Owner task start: the C6 starts in reinit for its boot steps (the boot task runs them, then MAINT_DONE): busy,
+// nothing bound, SPI2 and the pins untouched; its stored mode's instance is bound once, after the steps.
 static void c6_init(void)
 {
     mux_port_t *p = &g_mux.c6;
+
     char why[RADIO_MUX_REASON_MAX];
 
     p->chan = &g_mux.chans[0];
-    c6_list(c6_probe_present(why, sizeof(why)), why);
+    c6_list(c6_probe_present(why, sizeof(why)), why); // no probe yet: listed (its steps decide)
     p->busy = true;
+    p->work = RADIO_MUX_WORK_BOOT_STEPS;
     p->att.state = RADIO_MUX_AS_ABSENT;
-    radio_mux_c6_hold_start(&p->hold, now_ms());
+    radio_mux_reinit_ask(&g_mux.reinit, 0, false, now_ms()); // nothing is bound yet: it runs at once
+    atomic_store(&g_mux.maint_running, true);
     refresh(p);
-    ESP_LOGI(TAG, "c6: held for its boot steps");
+    ESP_LOGI(TAG, "%s: reinit: %s", p->chan->id, radio_mux_work_reason(p->work));
 }
 
-// Owner loop: a boot hold no job took within RADIO_MUX_C6_BOOT_HOLD_MS (br_core never ran its boot, or failed before
-// it) is let go: c6 is listed from rcp_sync's last probe and its stored mode attached, without the boot steps.
-static void c6_hold_check(void)
+// The C6 enters reinit for its maintenance: the bound instance let go (or none is bound). Its transport is released
+// (SPI2, INT and the reset GPIO; the C6 left running) for the built-in RCP's ops. What the instance still sends is
+// refused (tx: ESP_ERR_INVALID_STATE, nothing written; a reset is not carried out, nothing being attached) and nothing
+// reaches it (no frames, no RESET). Its binding stays: the end of the reinit binds it again (BACK).
+static void maint_begin(mux_port_t *p, radio_mux_work_t work)
 {
-    mux_port_t *p = &g_mux.c6;
-    char why[RADIO_MUX_REASON_MAX];
-
-    if (!radio_mux_c6_hold_expired(&p->hold, now_ms())) {
-        return;
-    }
-    radio_mux_c6_hold_end(&p->hold);
-    p->busy = false;
-    ESP_LOGW(TAG, "c6: no boot job began within %d s: its stored mode attaches without the boot steps",
-             RADIO_MUX_C6_BOOT_HOLD_MS / 1000);
-    c6_list(c6_probe_present(why, sizeof(why)), why);
-    c6_apply(false);
-}
-
-// A C6 job (push, ROM recovery, probe) takes the C6: refused while rcp-proxy has a peer (409 c6_busy) or another job
-// runs; otherwise GONE to its consumer, SPI2, INT and the reset GPIO released (the C6 left running) for rcp_sync. The
-// first job while the boot hold waits (the boot steps) runs in the hold: nothing was attached or opened.
-static void handle_c6_job_begin(mux_call_t *call)
-{
-    mux_port_t *p = &g_mux.c6;
-    bool peer;
-
-    if (radio_mux_c6_hold_job_begin(&p->hold)) { // the boot job: nothing is attached or opened, it runs in the hold
-        refresh(p);
-        call->err = ESP_OK;
-        ESP_LOGI(TAG, "c6: the boot job runs in the hold");
-        return;
-    }
-    taskENTER_CRITICAL(&p->lock);
-    peer = p->busy_peer;
-    taskEXIT_CRITICAL(&p->lock);
-    if (p->busy || p->leased ||
-            radio_mux_c6_job_refused(p->chan->mode, p->att.state == RADIO_MUX_AS_ATTACHED, peer)) {
-        ESP_LOGW(TAG, "c6: job refused: %s", p->busy ? "another job holds the C6" :
-                 p->leased ? "OpenThread is being moved to it" : "rcp-proxy has a peer");
-        call->err = ESP_ERR_INVALID_STATE;
-        return;
-    }
     if (p->att.state == RADIO_MUX_AS_ATTACHED) {
-        do_detach(p);
+        atomic_store(&p->tx_ok, false);
+        mux_set_rx(p, MUX_RX_DISCARD);
+        xSemaphoreTake(p->rx_lock, portMAX_DELAY);
+        p->bound = NULL;
+        xSemaphoreGive(p->rx_lock);
+        p->inst = NULL;
     }
     c6_transport_release();
     p->busy = true;
+    p->work = work;
     p->att.state = RADIO_MUX_AS_ABSENT;
     refresh(p);
-    call->err = ESP_OK;
-    ESP_LOGI(TAG, "c6: a job holds the radio");
+    ESP_LOGI(TAG, "%s: reinit: %s", p->chan->id, radio_mux_work_reason(work));
 }
 
-// The job's end: c6 listed again from rcp_sync's last probe (unavailable when the job says the C6 does not work),
-// then its consumer attached again (SPI2 opened); the boot job's end lets go of the boot hold, so the stored mode
-// attaches once, after the boot steps. Without a job: the listing is refreshed when nothing is attached.
-static void handle_c6_job_end(mux_call_t *call)
+static void handle_maint_done(mux_call_t *call);
+
+void mux_maint_answer(radio_mux_reinit_act_t act, esp_err_t verdict, const char *reason)
+{
+    mux_call_t *call = g_mux.maint_call;
+
+    if (act != RADIO_MUX_RA_RUN && act != RADIO_MUX_RA_REFUSE) {
+        return;
+    }
+    g_mux.maint_call = NULL;
+    if (act == RADIO_MUX_RA_REFUSE) {
+        atomic_store(&g_mux.maint_running, false);
+        ESP_LOGW(TAG, "%s: reinit (%s) refused: %s", g_mux.c6.chan->id, radio_mux_work_reason(g_mux.maint_work),
+                 reason && reason[0] ? reason : esp_err_to_name(verdict));
+        if (call) {
+            call->err = verdict == ESP_OK ? ESP_ERR_INVALID_STATE : verdict;
+            snprintf(call->reason, sizeof(call->reason), "%s", reason ? reason : "");
+        }
+    } else {
+        int pending = MUX_CALL_PENDING;
+
+        maint_begin(&g_mux.c6, g_mux.maint_work);
+        if (call && !atomic_compare_exchange_strong(&call->claim, &pending, MUX_CALL_TAKEN)) {
+            // The caller gave up waiting: no work runs. The reinit ends at once (the instance gets its channel back).
+            ESP_LOGW(TAG, "%s: maintenance given up by its caller: the reinit ends", g_mux.c6.chan->id);
+            mux_call_t none = {.steps = ESP_OK}; // no work, no steps: only the end (handle_maint_done reads no more)
+
+            handle_maint_done(&none);
+        } else if (call) {
+            call->err = ESP_OK;
+        }
+    }
+    if (call) {
+        xSemaphoreGive(call->done);
+        mux_call_put(call);
+    }
+}
+
+// MAINT_ASK: refused while another maintenance runs or OpenThread is being moved to the C6; otherwise the instance
+// bound to it is asked to let go (REINIT), or, with none bound, the C6 enters reinit at once.
+static void handle_maint_ask(mux_call_t *call)
 {
     mux_port_t *p = &g_mux.c6;
+    const struct radio_mux_chan *ch = find_chan(call->id);
+    const char *why = NULL;
+
+    call->err = ESP_ERR_INVALID_STATE;
+    if (!ch || ch != p->chan) {
+        call->err = ESP_ERR_NOT_FOUND;
+        why = "not the built-in RCP's channel";
+    } else if (c6_maintained(p)) {
+        why = p->work == RADIO_MUX_WORK_BOOT_STEPS ? "the radio is still booting" :
+              "a firmware push or ROM recovery is already running";
+    } else if (p->leased) {
+        why = "OpenThread is being moved to it";
+    }
+    if (why) {
+        snprintf(call->reason, sizeof(call->reason), "%s", why);
+        xSemaphoreGive(call->done);
+        mux_call_put(call);
+        return;
+    }
+    orch_inst_t *oi = p->att.state == RADIO_MUX_AS_ATTACHED ? p->inst : NULL;
+
+    g_mux.maint_call = call; // the owner's reference: answered by mux_maint_answer
+    g_mux.maint_work = call->work;
+    g_mux.maint_inst = oi;
+    atomic_store(&g_mux.maint_running, true);
+    const radio_mux_reinit_act_t act = orch_reinit_ask(p, oi, call->work, now_ms());
+
+    if (act == RADIO_MUX_RA_RUN) {
+        orch_reinit_notice(p, call->work); // an instance stored on it but not bound (the C6 in fault) hears of it
+    }
+    mux_maint_answer(act, ESP_OK, NULL);
+}
+
+// Owner loop: an instance asked to let go that did not answer by its deadline refused.
+static void maint_tick(void)
+{
+    char why[RADIO_MUX_REASON_MAX];
+
+    if (radio_mux_reinit_tick(&g_mux.reinit, now_ms()) != RADIO_MUX_RA_REFUSE) {
+        return;
+    }
+    snprintf(why, sizeof(why), "%s did not let go of the radio in time",
+             g_mux.maint_inst ? radio_mux_mode_name(g_mux.maint_inst->inst.mode) : "its mode");
+    mux_maint_answer(RADIO_MUX_RA_REFUSE, ESP_ERR_INVALID_STATE, why);
+}
+
+// MAINT_DONE: the work and the boot steps ended. The C6 is listed from its last probe (unavailable when it does not
+// work, or when the steps failed); usable, its stored mode's instance is bound again (BACK, or BIND the first time);
+// otherwise that instance gets LOST with the steps' reason.
+static void handle_maint_done(mux_call_t *call)
+{
+    mux_port_t *p = &g_mux.c6;
+    const radio_mux_work_t work = p->work;
     char why[RADIO_MUX_REASON_MAX];
 
     call->err = ESP_OK;
-    if (!p->busy && p->att.state == RADIO_MUX_AS_ATTACHED) {
-        return; // no job ran: what is attached stays
+    if (!p->busy) {
+        return; // no reinit runs
     }
     p->busy = false;
-    radio_mux_c6_hold_end(&p->hold); // the boot job's end lets go of the boot hold
+    p->work = RADIO_MUX_WORK_NONE;
+    radio_mux_reinit_done(&g_mux.reinit);
+    atomic_store(&g_mux.maint_running, false);
     bool present = c6_probe_present(why, sizeof(why));
 
-    if (present && !call->c6_ok) {
+    if (present && call->steps != ESP_OK) {
         present = false;
         snprintf(why, sizeof(why), "%s", C6_JOB_FAILED_REASON);
     }
     c6_list(present, why);
+    g_mux.maint_ending = true;
     c6_apply(false);
-    ESP_LOGI(TAG, "c6: the job ended (%s)", present ? "present" : why);
+    g_mux.maint_ending = false;
+    if (!present) {
+        orch_lost(p->chan, p->att_handle, RADIO_MUX_FAULT_FIRMWARE, call->reason[0] ? call->reason : why);
+    } else if (p->att.state != RADIO_MUX_AS_ATTACHED && p->fault[0] != '\0' && p->fault_kind != RADIO_MUX_FAULT_NONE) {
+        // Listed usable, but the C6 did not open again (a link fault): the instance that let go must hear of it.
+        orch_lost(p->chan, p->att_handle, p->fault_kind, p->fault);
+    }
+    ESP_LOGI(TAG, "%s: reinit (%s) ended: %s", p->chan->id, radio_mux_work_reason(work), present ? "ready" : why);
 }
 
 /* ---- owner: the OTBR lease (a move, R9) ---- */
@@ -790,11 +918,11 @@ static void handle_lease(mux_call_t *call)
     }
     if (p->chan != ch || !ch->present || !ch->supported) {
         why = "not detected";
-    } else if (p->busy) {
-        why = c6_busy_reason(p);
+    } else if (p->kind == RADIO_MUX_KIND_BUILTIN && c6_maintained(p)) {
+        why = p->busy ? c6_busy_reason(p) : "maintenance waits for its instance to let go";
     } else if (p->leased) {
         why = "OpenThread is already being moved to it";
-    } else if (p->att.state == RADIO_MUX_AS_ATTACHED || p->consumer) {
+    } else if (p->att.state == RADIO_MUX_AS_ATTACHED || p->inst) {
         why = ch->mode == RADIO_MUX_MODE_RCP_PROXY ? "rcp-proxy runs on it: set it off first" : "in use";
     } else if (p->att.state != RADIO_MUX_AS_IDLE || (p->kind == RADIO_MUX_KIND_USB && !usb_transport_is_open())) {
         why = p->fault[0] ? p->fault : "not open";
@@ -806,14 +934,14 @@ static void handle_lease(mux_call_t *call)
         snprintf(call->reason, sizeof(call->reason), "%s", why);
         return;
     }
-    if (p->kind == RADIO_MUX_KIND_C6 && c6_transport_open(msg, sizeof(msg)) != ESP_OK) {
+    if (p->kind == RADIO_MUX_KIND_BUILTIN && c6_transport_open(msg, sizeof(msg)) != ESP_OK) {
         call->err = ESP_FAIL;
         snprintf(call->reason, sizeof(call->reason), "%s", msg);
         return;
     }
     radio_mux_chan_t *h = mux_new_attach(p);
 
-    p->consumer = NULL;
+    p->inst = NULL;
     p->tx_frames = true;
     mux_set_rx(p, MUX_RX_FRAMES);
     atomic_store(&p->tx_ok, true);
@@ -829,7 +957,7 @@ static void handle_lease(mux_call_t *call)
 }
 
 // Gives a leased channel back: delivery stops, the C6 returns to what its stored mode wants (off: reset). A fault
-// text stays as the channel's reason (state fault) until its next mode change, plug-in or C6 job.
+// text stays as the channel's reason (state fault) until its next mode change, plug-in or maintenance.
 static void handle_lease_end(mux_call_t *call)
 {
     mux_port_t *p;
@@ -844,16 +972,17 @@ static void handle_lease_end(mux_call_t *call)
     atomic_store(&p->tx_ok, false);
     mux_set_rx(p, MUX_RX_DISCARD);
     mux_drain_evq(p);
-    if (p->kind == RADIO_MUX_KIND_C6) {
+    if (p->kind == RADIO_MUX_KIND_BUILTIN) {
         c6_apply(false);
     }
     snprintf(p->fault, sizeof(p->fault), "%s", call->reason);
+    p->fault_kind = RADIO_MUX_FAULT_NONE; // OpenThread's, not the channel's
     refresh(p);
     ESP_LOGI(TAG, "%s: lease ended%s%s", ch->id, call->reason[0] ? ": " : "", call->reason);
 }
 
-// The end of a move: `to` (leased, OpenThread runs on it) is stored in otbr and `from` in off, in that order of
-// effect: `from`'s consumer is detached (GONE), then the lease becomes the otbr consumer's attach (no GONE, no reopen).
+// The commit of a move: `to` (leased, OpenThread starts on it next) is stored in otbr and `from` in off, in that order
+// of effect: Thread is unbound from `from` (GONE), then the lease becomes its binding on `to` (no GONE, no reopen).
 // The end of a stop: `from` leaves otbr for the mode its PUT asked for (leave_mode), once OpenThread stopped on it;
 // its otbr consumer is detached (GONE) and that mode's attached.
 static void commit_stop(mux_call_t *call, struct radio_mux_chan *from)
@@ -878,7 +1007,7 @@ static void commit_stop(mux_call_t *call, struct radio_mux_chan *from)
     }
     mux_port_t *p = from->port;
 
-    if (p->kind == RADIO_MUX_KIND_C6) {
+    if (p->kind == RADIO_MUX_KIND_BUILTIN) {
         c6_apply(true); // otbr detached (GONE); the new mode's consumer attached, or off: held in reset
     } else if (p->chan == from) {
         feed(p, RADIO_MUX_AEV_MODE_SET);
@@ -895,9 +1024,9 @@ static void handle_commit_otbr(mux_call_t *call)
         return;
     }
     struct radio_mux_chan *to = find_chan(call->id);
-    const radio_mux_consumer_t *c = mux_find_consumer(RADIO_MUX_MODE_OTBR);
+    orch_inst_t *oi = orch_find(RADIO_MUX_MODE_OTBR);
 
-    if (!to || !to->port->leased || to->port->chan != to || !c) {
+    if (!to || !to->port->leased || to->port->chan != to || !oi) {
         call->err = ESP_ERR_INVALID_STATE;
         return;
     }
@@ -925,27 +1054,19 @@ static void handle_commit_otbr(mux_call_t *call)
     if (from && from != to) {
         mux_port_t *fp = from->port;
 
-        if (fp->kind == RADIO_MUX_KIND_C6) {
+        if (fp->kind == RADIO_MUX_KIND_BUILTIN) {
             c6_apply(false); // otbr detached (GONE), the C6 held in reset (off)
         } else if (fp->chan == from) {
             feed(fp, RADIO_MUX_AEV_MODE_SET);
         }
+        orch_release(from, RADIO_MUX_MODE_OTBR); // an absent source: the binding goes all the same
     }
     mux_port_t *p = to->port;
 
     p->leased = false;
-    p->consumer = c;
+    p->inst = oi;
     p->att.state = RADIO_MUX_AS_ATTACHED;
-    const esp_err_t err = c->attach(p->att_handle, c->ctx); // the lease's handle: the same generation goes on
-
-    if (err != ESP_OK) {
-        atomic_store(&p->tx_ok, false);
-        mux_set_rx(p, MUX_RX_DISCARD);
-        mux_drain_evq(p);
-        p->consumer = NULL;
-        snprintf(p->fault, sizeof(p->fault), "otbr attach failed: %s", esp_err_to_name(err));
-        p->att.state = RADIO_MUX_AS_IDLE;
-    }
+    orch_bind(p, oi, p->att_handle); // the lease's handle: the same generation goes on
     refresh(p);
     ESP_LOGI(TAG, "otbr moved%s%s to %s", from ? " from " : "", from ? from->id : "", to->id);
 }
@@ -976,6 +1097,11 @@ static void list_unsupported(const mux_usb_dev_t *dev)
     ch->eff_mode = RADIO_MUX_MODE_UNAVAILABLE;
     ch->state = RADIO_MUX_STATE_IDLE;
     snprintf(ch->reason, sizeof(ch->reason), "no driver for %04x:%04x", dev->vid, dev->pid);
+    // Not on a port, so no attach state sets its lifecycle: a link fault with the reason while it is plugged in.
+    ch->chan_state = RADIO_MUX_CS_FAULT;
+    ch->fault_kind = RADIO_MUX_FAULT_LINK;
+    ch->work = RADIO_MUX_WORK_NONE;
+    snprintf(ch->chan_reason, sizeof(ch->chan_reason), "%s", ch->reason);
     mux_unlock();
     ESP_LOGI(TAG, "%s: %s", ch->id, ch->reason);
 }
@@ -990,6 +1116,9 @@ static void drop_unopened(mux_port_t *p, const mux_usb_dev_t *dev)
             mux_lock();
             ch->present = false;
             ch->used = ch->remembered; // an unsupported device leaves the list
+            ch->chan_state = RADIO_MUX_CS_ABSENT;
+            ch->fault_kind = RADIO_MUX_FAULT_NONE;
+            ch->chan_reason[0] = '\0';
             mux_unlock();
         }
     }
@@ -1057,6 +1186,9 @@ static void check_presence(mux_port_t *p)
             mux_lock();
             ch->present = false;
             ch->used = ch->remembered;
+            ch->chan_state = RADIO_MUX_CS_ABSENT;
+            ch->fault_kind = RADIO_MUX_FAULT_NONE;
+            ch->chan_reason[0] = '\0';
             mux_unlock();
         }
     }
@@ -1073,7 +1205,7 @@ static radio_mux_verdict_t check_req(const struct radio_mux_chan *ch, const radi
             RADIO_MUX_PROXY_CHECK_OK) {
         return RADIO_MUX_REFUSE_BAD_VALUE;
     }
-    if (ch->kind == RADIO_MUX_KIND_C6 && (req->has_baud || req->has_flow)) {
+    if (ch->kind == RADIO_MUX_KIND_BUILTIN && (req->has_baud || req->has_flow)) {
         return RADIO_MUX_REFUSE_BAD_VALUE; // SPI: the C6 has no line settings
     }
     if (req->has_baud && !radio_mux_baud_ok(req->baud)) {
@@ -1097,7 +1229,10 @@ static radio_mux_verdict_t check_mode(struct radio_mux_chan *ch, radio_mux_mode_
             views[n++] = view_of(&g_mux.chans[i]);
         }
     }
-    const radio_mux_verdict_t v = radio_mux_check_set_mode(&g_mux.rules, views, n, target, want, &move_from);
+    // The C6 in reinit (or asked to enter it) refuses every mode change until it is ready again.
+    const bool in_reinit = ch->port->kind == RADIO_MUX_KIND_BUILTIN && c6_maintained(ch->port);
+    const radio_mux_verdict_t v = radio_mux_orch_check_bind(&g_mux.rules, views, n, target, want, in_reinit,
+                                                            &move_from);
 
     *stop = false;
     if (v == RADIO_MUX_MOVE) {
@@ -1170,9 +1305,10 @@ static void handle_set(mux_call_t *call)
     if (v == RADIO_MUX_APPLY_REBOOT) {
         return; // stored: applies after the reboot
     }
-    if (p->kind == RADIO_MUX_KIND_C6) {
+    if (p->kind == RADIO_MUX_KIND_BUILTIN) {
         // As on USB: a new mode or new rcp_proxy settings (in rcp-proxy) re-attach, a PUT of the mode retries a fault.
-        // While a job holds the C6 or it is unavailable, the change is stored and applies at the job's end.
+        // While the C6 is unavailable the change is stored and applies once it is listed again (in reinit a mode change
+        // is refused: check_mode).
         if (mode_changed || (proxy_changed && ch->mode == RADIO_MUX_MODE_RCP_PROXY) || req->has_mode) {
             c6_apply(mode_changed || (proxy_changed && ch->mode == RADIO_MUX_MODE_RCP_PROXY));
         }
@@ -1210,7 +1346,7 @@ static void handle_forget(mux_call_t *call)
         call->err = ESP_ERR_NOT_FOUND;
         return;
     }
-    if (ch->kind == RADIO_MUX_KIND_C6 || ch->present || ch->port->chan == ch) {
+    if (ch->kind == RADIO_MUX_KIND_BUILTIN || ch->present || ch->port->chan == ch) {
         call->err = ESP_ERR_INVALID_STATE;
         return;
     }
@@ -1219,6 +1355,7 @@ static void handle_forget(mux_call_t *call)
         mux_lock();
         ch->used = false;
         mux_unlock();
+        orch_forget_slot((size_t)(ch - g_mux.chans));
         ESP_LOGI(TAG, "%s forgotten", call->id);
     }
 }
@@ -1251,6 +1388,7 @@ static void usb_reset(mux_port_t *p, const char *what)
     usb_transport_close(p);
     if (give_up) {
         snprintf(p->fault, sizeof(p->fault), "%s", RADIO_MUX_USB_DEAD_REASON);
+        p->fault_kind = RADIO_MUX_FAULT_LINK;
         ESP_LOGW(TAG, "%s: %s: closed (unplug it or PUT its mode to open it again)", ch->id, p->fault);
     }
     if (give_up || !open_dev(p, mux_eff_baud(ch))) {
@@ -1282,7 +1420,7 @@ static void handle_reset(radio_mux_chan_t *h)
                                         radio_mux_handle_current(gen, atomic_load(&p->att_gen)))) {
         return; // a channel that is not attached or leased has nobody to tell; an earlier attach's reset is not ours
     }
-    if (p->kind == RADIO_MUX_KIND_C6) { // the reset GPIO pulse; the C6 task posts RESET when the RCP answers
+    if (p->kind == RADIO_MUX_KIND_BUILTIN) { // the reset GPIO pulse; the C6 task posts RESET when the RCP answers
         if (c6_transport_reset() == ESP_OK) {
             taskENTER_CRITICAL(&p->lock);
             p->ctr.resets++;
@@ -1330,6 +1468,7 @@ static void usb_close_check(mux_port_t *p)
 
     if (act == RADIO_MUX_CLOSE_GAVE_UP && p->chan && !usb_transport_is_open()) {
         snprintf(p->fault, sizeof(p->fault), "%s", RADIO_MUX_USB_CLOSE_FAILED_REASON);
+        p->fault_kind = RADIO_MUX_FAULT_LINK;
         if (p->att.state == RADIO_MUX_AS_ATTACHED) {
             feed(p, RADIO_MUX_AEV_MODE_SET); // not open: detached (GONE)
         }
@@ -1372,7 +1511,7 @@ static void handle_note_fw(radio_mux_chan_t *h, const radio_mux_fw_record_t *fw)
     ch->fw.source = RADIO_MUX_FW_SRC_PASSIVE;
     ch->fw.at = mux_now_epoch();
     mux_unlock();
-    if (ch->kind == RADIO_MUX_KIND_C6 || ch->remembered) {
+    if (ch->kind == RADIO_MUX_KIND_BUILTIN || ch->remembered) {
         mux_store_chan(ch);
     }
 }
@@ -1389,6 +1528,14 @@ static void handle(const mux_msg_t *m)
     case MUX_MSG_USB_ERROR: // a wakeup: the flag says what happened
         usb_error_check(&g_mux.usb);
         break;
+    case MUX_MSG_REINIT_REPLY: { // a wakeup: the answer is in the mailbox
+        mux_reply_t r;
+
+        while (mux_take_reply(&r)) {
+            orch_reinit_reply(r.h, r.seq, r.verdict, r.reason);
+        }
+        break;
+    }
     case MUX_MSG_SET:
         handle_set(m->call);
         xSemaphoreGive(m->call->done);
@@ -1420,22 +1567,11 @@ static void handle(const mux_msg_t *m)
     case MUX_MSG_NOTE_FW:
         handle_note_fw(m->note.h, &m->note.fw);
         break;
-    case MUX_MSG_C6_JOB_BEGIN: {
-        int pending = MUX_CALL_PENDING;
-
-        // A caller that timed out marked the call abandoned and returned ESP_ERR_TIMEOUT: nothing may run then, or c6
-        // would stay busy with no job_end to come.
-        if (atomic_compare_exchange_strong(&m->call->claim, &pending, MUX_CALL_TAKEN)) {
-            handle_c6_job_begin(m->call);
-        } else {
-            ESP_LOGW(TAG, "c6: job begin given up by its caller: skipped");
-        }
-        xSemaphoreGive(m->call->done);
-        mux_call_put(m->call);
+    case MUX_MSG_MAINT_ASK:
+        handle_maint_ask(m->call); // answers now or once the instance did (mux_maint_answer)
         break;
-    }
-    case MUX_MSG_C6_JOB_END:
-        handle_c6_job_end(m->call);
+    case MUX_MSG_MAINT_DONE:
+        handle_maint_done(m->call);
         xSemaphoreGive(m->call->done);
         mux_call_put(m->call);
         break;
@@ -1474,8 +1610,8 @@ static void owner_task(void *arg)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "USB host start: %s, no USB radios", esp_err_to_name(err));
     }
-    // R13 at start: every present channel whose stored mode has a consumer: the C6 once its boot steps ended (c6_init
-    // holds it until the boot job's end), USB devices attached at boot through new_dev_cb like any plug-in.
+    // R13 at start: every present channel whose stored mode has an instance: the C6 once its boot steps ended (it starts
+    // in reinit), USB devices attached at boot through new_dev_cb like any plug-in.
     c6_init();
     for (;;) {
         const bool probing = g_mux.usb.att.state == RADIO_MUX_AS_PROBING;
@@ -1494,7 +1630,12 @@ static void owner_task(void *arg)
         check_presence(&g_mux.usb);
         usb_error_check(&g_mux.usb);
         usb_close_check(&g_mux.usb);
-        c6_hold_check();
+        mux_reply_t r;
+
+        while (mux_take_reply(&r)) { // answers whose wakeup did not fit into the queue: before the deadline is checked
+            orch_reinit_reply(r.h, r.seq, r.verdict, r.reason);
+        }
+        maint_tick();
     }
 }
 
@@ -1520,13 +1661,21 @@ static esp_err_t port_init(mux_port_t *p, radio_mux_kind_t kind)
     return ESP_OK;
 }
 
+// The built-in RCP's boot steps, on a task of their own (they run even when the network does not come up, and cost no
+// RAM once done): the C6 is in reinit from the start until they end. Deletes itself.
+static void boot_task(void *arg)
+{
+    mux_maint_finish(RADIO_MUX_BUILTIN_ID);
+    vTaskDelete(NULL);
+}
+
 esp_err_t radio_mux_start(void)
 {
     ESP_RETURN_ON_FALSE(!atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "already started");
     g_mux.lock = xSemaphoreCreateMutex();
     g_mux.queue = xQueueCreate(QUEUE_LEN, sizeof(mux_msg_t));
     ESP_RETURN_ON_FALSE(g_mux.lock && g_mux.queue, ESP_ERR_NO_MEM, TAG, "queue and lock");
-    ESP_RETURN_ON_ERROR(port_init(&g_mux.c6, RADIO_MUX_KIND_C6), TAG, "c6 port");
+    ESP_RETURN_ON_ERROR(port_init(&g_mux.c6, RADIO_MUX_KIND_BUILTIN), TAG, "c6 port");
     ESP_RETURN_ON_ERROR(port_init(&g_mux.usb, RADIO_MUX_KIND_USB), TAG, "USB port");
     mux_load_chans();
     ESP_RETURN_ON_ERROR(c6_transport_start(), TAG, "c6 task");
@@ -1536,12 +1685,30 @@ esp_err_t radio_mux_start(void)
         atomic_store(&g_mux.started, false);
         return ESP_ERR_NO_MEM;
     }
+    if (xTaskCreatePinnedToCore(boot_task, "mux_boot", BOOT_TASK_STACK, NULL, BOOT_TASK_PRIORITY, NULL, MGMT_CORE) !=
+            pdPASS) {
+        // Without its boot steps the C6 is still used: the reinit ends as if they passed (its installed firmware is
+        // tried, as when the probe could not run).
+        ESP_LOGE(TAG, "the boot steps' task could not be created: the C6 is used without them");
+        mux_call_t *call = calloc(1, sizeof(*call));
+
+        if (call) {
+            call->done = xSemaphoreCreateBinary();
+            atomic_store(&call->refs, 1); // the owner's only
+            snprintf(call->id, sizeof(call->id), "%s", RADIO_MUX_BUILTIN_ID);
+            const mux_msg_t m = {.type = MUX_MSG_MAINT_DONE, .call = call};
+
+            if (!call->done || xQueueSend(g_mux.queue, &m, portMAX_DELAY) != pdTRUE) {
+                ESP_LOGE(TAG, "the C6 stays in reinit");
+            }
+        }
+    }
     size_t n = 0;
 
     for (size_t i = 0; i < RADIO_MUX_CHANNELS_MAX; i++) {
         n += g_mux.chans[i].used;
     }
-    ESP_LOGI(TAG, "started: %u channels known, %u consumers", (unsigned)n, (unsigned)g_mux.n_consumers);
+    ESP_LOGI(TAG, "started: %u channels known, %u mode instances", (unsigned)n, (unsigned)g_mux.n_insts);
     return ESP_OK;
 }
 

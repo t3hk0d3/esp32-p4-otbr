@@ -42,8 +42,7 @@ static const radio_mux_rule_t otbr_rule = {
     .mode = RADIO_MUX_MODE_OTBR, .needs = RADIO_MUX_FW_SPINEL, .limit = 1, .reboot_on_change = false,
 };
 
-// The rule of a mode that has one: otbr, or a registered consumer. NULL for off, rcp-proxy and unregistered modes.
-static const radio_mux_rule_t *find_rule(const radio_mux_rules_t *rules, radio_mux_mode_t mode)
+const radio_mux_rule_t *radio_mux_rule_of(const radio_mux_rules_t *rules, radio_mux_mode_t mode)
 {
     if (mode == RADIO_MUX_MODE_OTBR) {
         return &otbr_rule;
@@ -139,91 +138,12 @@ bool radio_mux_fits(const radio_mux_rules_t *rules, radio_mux_mode_t mode, radio
     if (mode == RADIO_MUX_MODE_OFF || mode == RADIO_MUX_MODE_RCP_PROXY) {
         return true;
     }
-    const radio_mux_rule_t *rule = find_rule(rules, mode);
+    const radio_mux_rule_t *rule = radio_mux_rule_of(rules, mode);
 
     if (rule == NULL) {
         return false;
     }
     return rule->needs == RADIO_MUX_FW_UNKNOWN || rule->needs == fw;
-}
-
-static bool mode_used_by_other(const radio_mux_chan_view_t *chans, size_t n, size_t target, radio_mux_mode_t mode,
-                               size_t *first_index, size_t *count)
-{
-    *count = 0;
-    for (size_t i = 0; i < n; i++) {
-        if (i != target && chans[i].mode == mode) {
-            if (*count == 0 && first_index != NULL) {
-                *first_index = i;
-            }
-            (*count)++;
-        }
-    }
-    return *count > 0;
-}
-
-radio_mux_verdict_t radio_mux_check_set_mode(const radio_mux_rules_t *rules, const radio_mux_chan_view_t *chans,
-                                             size_t n, size_t target, radio_mux_mode_t want, size_t *move_from)
-{
-    size_t first = 0, count = 0;
-
-    if (want == RADIO_MUX_MODE_UNAVAILABLE || want == RADIO_MUX_MODE_INVALID) {
-        return RADIO_MUX_REFUSE_BAD_VALUE;
-    }
-    if (target >= n || !chans[target].present || !chans[target].supported) {
-        return RADIO_MUX_REFUSE_UNAVAILABLE;
-    }
-    const radio_mux_rule_t *rule = find_rule(rules, want);
-
-    if (want != RADIO_MUX_MODE_OFF && want != RADIO_MUX_MODE_RCP_PROXY && rule == NULL) {
-        return RADIO_MUX_REFUSE_NOT_AVAILABLE;
-    }
-    if (!radio_mux_fits(rules, want, chans[target].fw)) {
-        return RADIO_MUX_REFUSE_INCOMPATIBLE;
-    }
-    // otbr and a registered ziggurat consumer never run together (a stored ziggurat without its consumer runs nothing).
-    if ((want == RADIO_MUX_MODE_OTBR && find_rule(rules, RADIO_MUX_MODE_ZIGGURAT) != NULL &&
-            mode_used_by_other(chans, n, target, RADIO_MUX_MODE_ZIGGURAT, NULL, &count)) ||
-            (want == RADIO_MUX_MODE_ZIGGURAT &&
-             mode_used_by_other(chans, n, target, RADIO_MUX_MODE_OTBR, NULL, &count))) {
-        return RADIO_MUX_REFUSE_HYBRID;
-    }
-    if (rule != NULL && rule->limit > 0 && mode_used_by_other(chans, n, target, want, &first, &count) &&
-            count >= rule->limit) {
-        if (want == RADIO_MUX_MODE_OTBR) {
-            if (move_from != NULL) {
-                *move_from = first;
-            }
-            return RADIO_MUX_MOVE;
-        }
-        return RADIO_MUX_REFUSE_MODE_TAKEN;
-    }
-    const radio_mux_rule_t *leaving = find_rule(rules, chans[target].mode);
-
-    // otbr on a channel leaving a mode that reboots: the reboot starts OpenThread. A start now would probe a channel
-    // whose consumer still holds it, and fail.
-    if (want == RADIO_MUX_MODE_OTBR && chans[target].mode != want && leaving != NULL && leaving->reboot_on_change) {
-        return RADIO_MUX_APPLY_REBOOT;
-    }
-    // otbr where no channel has it: a start, run like a move from nowhere (probe, start, store once it runs).
-    if (want == RADIO_MUX_MODE_OTBR && chans[target].mode != RADIO_MUX_MODE_OTBR) {
-        if (move_from != NULL) {
-            *move_from = n;
-        }
-        return RADIO_MUX_MOVE;
-    }
-    if (chans[target].mode != want && ((rule != NULL && rule->reboot_on_change) ||
-                                       (leaving != NULL && leaving->reboot_on_change))) {
-        return RADIO_MUX_APPLY_REBOOT;
-    }
-    // The otbr channel leaving otbr: a stop, run like a move to nowhere (drain, stop, store once it stopped).
-    if (chans[target].mode == RADIO_MUX_MODE_OTBR && want != RADIO_MUX_MODE_OTBR) {
-        if (move_from != NULL) {
-            *move_from = target;
-        }
-        return RADIO_MUX_MOVE;
-    }
-    return RADIO_MUX_APPLY;
 }
 
 radio_mux_mode_t radio_mux_after_detect(const radio_mux_rules_t *rules, radio_mux_mode_t stored, radio_mux_fw_t fw,
@@ -239,7 +159,7 @@ radio_mux_mode_t radio_mux_after_detect(const radio_mux_rules_t *rules, radio_mu
         return stored;
     }
     if (reason != NULL && reason_cap > 0) {
-        const radio_mux_rule_t *rule = find_rule(rules, stored);
+        const radio_mux_rule_t *rule = radio_mux_rule_of(rules, stored);
 
         if (rule == NULL) {
             snprintf(reason, reason_cap, "%s is not in this build", radio_mux_mode_name(stored));
@@ -439,12 +359,22 @@ radio_mux_post_t radio_mux_post_rx(bool queue_full, size_t len, radio_mux_counte
 #define FNV_OFFSET 0x811C9DC5u
 #define FNV_PRIME 0x01000193u
 
+bool radio_mux_is_builtin_id(const char *id)
+{
+    return strcmp(id, RADIO_MUX_BUILTIN_ID) == 0 || strcmp(id, RADIO_MUX_BUILTIN_NVS_ID) == 0;
+}
+
+const char *radio_mux_nvs_id(const char *id)
+{
+    return radio_mux_is_builtin_id(id) ? RADIO_MUX_BUILTIN_NVS_ID : id;
+}
+
 void radio_mux_nvs_key(const char *id, char out[16])
 {
     uint32_t h = FNV_OFFSET;
 
-    if (strcmp(id, RADIO_MUX_C6_ID) == 0) {
-        snprintf(out, 16, "%s", RADIO_MUX_C6_ID);
+    if (radio_mux_is_builtin_id(id)) {
+        snprintf(out, 16, "%s", RADIO_MUX_BUILTIN_NVS_ID);
         return;
     }
     for (size_t i = 0; id[i] != '\0'; i++) {
@@ -793,54 +723,6 @@ uint32_t radio_mux_spi_gap_wait_us(int64_t now_us, int64_t last_end_us, uint32_t
     return since >= (int64_t)gap_us ? 0 : (uint32_t)((int64_t)gap_us - since);
 }
 
-bool radio_mux_c6_present(const radio_mux_c6_probe_t *probe, char *reason, size_t cap)
-{
-    const char *why = NULL;
-
-    if (probe->esp_hosted) {
-        why = "the C6 runs its factory ESP-Hosted firmware";
-    } else if (probe->rom_recovery_failed && !probe->updater_reachable) {
-        why = "the ROM recovery of the C6 failed";
-    } else if (probe->updater_reachable && !probe->installed_valid) {
-        why = "no RCP firmware on the C6";
-    }
-    if (reason && cap > 0) {
-        snprintf(reason, cap, "%s", why ? why : "");
-    }
-    return why == NULL;
-}
-
-bool radio_mux_c6_job_refused(radio_mux_mode_t stored_mode, bool attached, bool has_peer)
-{
-    return stored_mode == RADIO_MUX_MODE_RCP_PROXY && attached && has_peer;
-}
-
-void radio_mux_c6_hold_start(radio_mux_c6_hold_t *h, int64_t now_ms)
-{
-    h->state = RADIO_MUX_C6_HOLD_WAIT;
-    h->since_ms = now_ms;
-}
-
-bool radio_mux_c6_hold_job_begin(radio_mux_c6_hold_t *h)
-{
-    if (h->state != RADIO_MUX_C6_HOLD_WAIT) {
-        return false;
-    }
-    h->state = RADIO_MUX_C6_HOLD_JOB;
-    return true;
-}
-
-bool radio_mux_c6_hold_expired(const radio_mux_c6_hold_t *h, int64_t now_ms)
-{
-    return h->state == RADIO_MUX_C6_HOLD_WAIT &&
-           (now_ms < h->since_ms || now_ms - h->since_ms >= RADIO_MUX_C6_BOOT_HOLD_MS);
-}
-
-void radio_mux_c6_hold_end(radio_mux_c6_hold_t *h)
-{
-    h->state = RADIO_MUX_C6_HOLD_NONE;
-}
-
 uint32_t radio_mux_gen_next(uint32_t gen)
 {
     return gen >= RADIO_MUX_GEN_MAX ? 1 : gen + 1;
@@ -935,26 +817,6 @@ size_t radio_mux_evict_pick(const radio_mux_slot_view_t *slots, size_t n, bool f
         }
     }
     return pick;
-}
-
-size_t radio_mux_otbr_dedupe(radio_mux_mode_t *modes, bool *changed, size_t n)
-{
-    bool seen = false;
-    size_t count = 0;
-
-    for (size_t i = 0; i < n; i++) {
-        changed[i] = false;
-        if (modes[i] != RADIO_MUX_MODE_OTBR) {
-            continue;
-        }
-        if (seen) {
-            modes[i] = RADIO_MUX_MODE_OFF;
-            changed[i] = true;
-            count++;
-        }
-        seen = true;
-    }
-    return count;
 }
 
 bool radio_mux_detect_keeps_record(radio_mux_fw_t stored, radio_mux_fw_t detected)

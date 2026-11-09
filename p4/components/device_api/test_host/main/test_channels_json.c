@@ -17,7 +17,7 @@ static char body[DEVICE_API_CHANNELS_BODY_MAX];
 static radio_mux_chan_info_t c6_chan(void)
 {
     radio_mux_chan_info_t c = {
-        .kind = RADIO_MUX_KIND_C6,
+        .kind = RADIO_MUX_KIND_BUILTIN,
         .present = true,
         .supported = true,
         .mode = RADIO_MUX_MODE_OTBR,
@@ -27,9 +27,11 @@ static radio_mux_chan_info_t c6_chan(void)
         .caps = {.firmware_update = true, .hw_reset = true, .flow_control = false},
         .firmware = {.rec = {.type = RADIO_MUX_FW_SPINEL, .baud = 0}, .source = RADIO_MUX_FW_SRC_PASSIVE, .at = 1762430000},
         .counters = {.frames_in = 10, .frames_out = 9, .bytes_in = 1000, .bytes_out = 900, .drops = 1, .resets = 2, .rx_errors = 3, .uart_errors = 4},
+        .chan_state = RADIO_MUX_CS_READY,
     };
 
-    strcpy(c.id, "c6");
+    strcpy(c.id, "builtin-c6");
+    strcpy(c.mode_state, "running");
     strcpy(c.label, "ESP32-C6 (built-in)");
     strcpy(c.firmware.rec.version, "1.4.0");
     strcpy(c.firmware.rec.chip, "esp32c6");
@@ -52,9 +54,11 @@ static radio_mux_chan_info_t usb_chan(void)
         .caps = {.firmware_update = false, .hw_reset = false, .flow_control = true},
         .proxy_state = "connected",
         .firmware = {.rec = {.type = RADIO_MUX_FW_ZNP, .baud = 115200}, .source = RADIO_MUX_FW_SRC_PROBE, .at = 0},
+        .chan_state = RADIO_MUX_CS_READY,
     };
 
     strcpy(c.id, "usb-10c4-ea60-abc123");
+    strcpy(c.mode_state, "connected");
     strcpy(c.label, "Sonoff Zigbee 3.0 USB Dongle Plus");
     strcpy(c.usb.serial, "abc123");
     strcpy(c.firmware.rec.version, "20240710");
@@ -79,6 +83,138 @@ static int render_one(const radio_mux_chan_info_t *c)
     return device_api_channels_json(body, sizeof(body), &s);
 }
 
+/* ---- the orchestrator's view: channel_state, channel_reason, mode_state, mode_reason, modes ---- */
+
+// The four fields of the one channel rendered into `body` (after its counters).
+static const char *orchestrator_fields(void)
+{
+    const char *at = strstr(body, "\"channel_state\":");
+
+    TEST_ASSERT_NOT_NULL(at);
+    return at;
+}
+
+TEST_CASE("On a ready channel whose instance runs: channel_state ready, its mode_state, no reasons", "[device_api]")
+{
+    const radio_mux_chan_info_t c = c6_chan();
+
+    TEST_ASSERT_GREATER_THAN(0, render_one(&c));
+    TEST_ASSERT_EQUAL_STRING("\"channel_state\":\"ready\",\"channel_reason\":null,\"mode_state\":\"running\","
+                             "\"mode_reason\":null}],\"modes\":[]}", orchestrator_fields());
+}
+
+TEST_CASE("On an absent dongle stored in otbr: channel_state absent, Thread's state and reason", "[device_api]")
+{
+    radio_mux_chan_info_t c = usb_chan();
+
+    c.present = false;
+    c.mode = RADIO_MUX_MODE_UNAVAILABLE;
+    c.stored_mode = RADIO_MUX_MODE_OTBR;
+    c.chan_state = RADIO_MUX_CS_ABSENT;
+    strcpy(c.mode_state, "no_radio");
+    strcpy(c.mode_reason, "radio unplugged (usb-10c4-ea60-abc123)");
+    TEST_ASSERT_GREATER_THAN(0, render_one(&c));
+    TEST_ASSERT_EQUAL_STRING("\"channel_state\":\"absent\",\"channel_reason\":null,\"mode_state\":\"no_radio\","
+                             "\"mode_reason\":\"radio unplugged (usb-10c4-ea60-abc123)\"}],\"modes\":[]}",
+                             orchestrator_fields());
+}
+
+TEST_CASE("On the C6 in its boot steps: channel_state reinit with the work, nothing reported yet", "[device_api]")
+{
+    radio_mux_chan_info_t c = c6_chan();
+
+    c.chan_state = RADIO_MUX_CS_REINIT;
+    c.work = RADIO_MUX_WORK_BOOT_STEPS;
+    strcpy(c.chan_reason, "boot steps");
+    c.mode_state[0] = '\0';
+    TEST_ASSERT_GREATER_THAN(0, render_one(&c));
+    TEST_ASSERT_EQUAL_STRING("\"channel_state\":\"reinit\",\"channel_reason\":\"boot steps\",\"mode_state\":null,"
+                             "\"mode_reason\":null}],\"modes\":[]}", orchestrator_fields());
+}
+
+TEST_CASE("On the C6 in a firmware fault: channel_state fault with its reason", "[device_api]")
+{
+    radio_mux_chan_info_t c = c6_chan();
+
+    c.chan_state = RADIO_MUX_CS_FAULT;
+    c.fault_kind = RADIO_MUX_FAULT_FIRMWARE;
+    strcpy(c.chan_reason, "no RCP firmware on the C6");
+    strcpy(c.mode_state, "fault");
+    strcpy(c.mode_reason, "no rcp firmware");
+    TEST_ASSERT_GREATER_THAN(0, render_one(&c));
+    TEST_ASSERT_EQUAL_STRING("\"channel_state\":\"fault\",\"channel_reason\":\"no RCP firmware on the C6\","
+                             "\"mode_state\":\"fault\",\"mode_reason\":\"no rcp firmware\"}],\"modes\":[]}",
+                             orchestrator_fields());
+}
+
+TEST_CASE("On a channel stored off: mode_state and mode_reason null", "[device_api]")
+{
+    radio_mux_chan_info_t c = usb_chan();
+
+    c.mode = RADIO_MUX_MODE_OFF;
+    c.stored_mode = RADIO_MUX_MODE_OFF;
+    strcpy(c.mode_state, "stale");
+    TEST_ASSERT_GREATER_THAN(0, render_one(&c));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"mode_state\":null,\"mode_reason\":null}"));
+}
+
+TEST_CASE("On Thread with no channel stored in otbr: modes lists it with channel null and no_radio", "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+
+    memset(&s, 0, sizeof(s));
+    s.available_modes = MODES_BUILT_IN;
+    s.n_modes = 1;
+    s.modes[0] = (radio_mux_mode_info_t) {
+        .mode = RADIO_MUX_MODE_OTBR, .chan = -1, .reboot_on_change = false,
+    };
+    TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\",\"otbr\",\"rcp-proxy\"],\"channels\":[],\"modes\":["
+                             "{\"mode\":\"otbr\",\"channel\":null,\"state\":\"no_radio\","
+                             "\"reason\":\"no channel in otbr\",\"reboot_on_change\":false}]}", body);
+}
+
+TEST_CASE("On two channels in rcp-proxy: modes lists one proxy instance per channel with its state", "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+
+    memset(&s, 0, sizeof(s));
+    s.available_modes = MODES_BUILT_IN;
+    s.n = 2;
+    s.chans[0] = c6_chan();
+    s.chans[0].stored_mode = RADIO_MUX_MODE_RCP_PROXY;
+    strcpy(s.chans[0].mode_state, "listening");
+    s.chans[1] = usb_chan();
+    strcpy(s.chans[1].mode_reason, "x");
+    s.n_modes = 2;
+    s.modes[0] = (radio_mux_mode_info_t) {
+        .mode = RADIO_MUX_MODE_RCP_PROXY, .chan = 0
+    };
+    s.modes[1] = (radio_mux_mode_info_t) {
+        .mode = RADIO_MUX_MODE_RCP_PROXY, .chan = 1
+    };
+    TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"modes\":["
+                                "{\"mode\":\"rcp-proxy\",\"channel\":\"builtin-c6\",\"state\":\"listening\",\"reason\":null,"
+                                "\"reboot_on_change\":false},"
+                                "{\"mode\":\"rcp-proxy\",\"channel\":\"usb-10c4-ea60-abc123\",\"state\":\"connected\","
+                                "\"reason\":\"x\",\"reboot_on_change\":false}]}"));
+}
+
+TEST_CASE("On Zigbee with no channel stored in ziggurat: modes lists it idle, reboot_on_change true", "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+
+    memset(&s, 0, sizeof(s));
+    s.n_modes = 1;
+    s.modes[0] = (radio_mux_mode_info_t) {
+        .mode = RADIO_MUX_MODE_ZIGGURAT, .chan = -1, .reboot_on_change = true
+    };
+    TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
+    TEST_ASSERT_NOT_NULL(strstr(body, "{\"mode\":\"ziggurat\",\"channel\":null,\"state\":\"idle\","
+                                "\"reason\":\"no channel in ziggurat\",\"reboot_on_change\":true}"));
+}
+
 /* ---- device_api_channels_json ---- */
 
 TEST_CASE("On the registry snapshot: the C6 has the spec's fields in order, usb null", "[device_api]")
@@ -87,7 +223,7 @@ TEST_CASE("On the registry snapshot: the C6 has the spec's fields in order, usb 
 
     TEST_ASSERT_GREATER_THAN(0, render_one(&c));
     TEST_ASSERT_EQUAL_STRING(
-        "{\"available_modes\":[\"off\",\"otbr\",\"rcp-proxy\"],\"channels\":[{\"id\":\"c6\",\"kind\":\"c6\",\"label\":\"ESP32-C6 (built-in)\",\"mode\":\"otbr\","
+        "{\"available_modes\":[\"off\",\"otbr\",\"rcp-proxy\"],\"channels\":[{\"id\":\"builtin-c6\",\"kind\":\"builtin\",\"label\":\"ESP32-C6 (built-in)\",\"mode\":\"otbr\","
         "\"stored_mode\":\"otbr\",\"state\":\"running\",\"error\":null,"
         "\"line\":{\"baud\":460800,\"flow_control\":false},\"usb\":null,"
         "\"caps\":{\"firmware_update\":true,\"hw_reset\":true,\"flow_control\":false},"
@@ -96,7 +232,9 @@ TEST_CASE("On the registry snapshot: the C6 has the spec's fields in order, usb 
         "\"firmware\":{\"type\":\"spinel\",\"version\":\"1.4.0\",\"chip\":\"esp32c6\",\"baud\":null,\"source\":\"passive\","
         "\"at\":1762430000},"
         "\"counters\":{\"frames_in\":10,\"frames_out\":9,\"bytes_in\":1000,\"bytes_out\":900,\"drops\":1,\"resets\":2,"
-        "\"rx_errors\":3,\"uart_errors\":4}}]}",
+        "\"rx_errors\":3,\"uart_errors\":4},"
+        "\"channel_state\":\"ready\",\"channel_reason\":null,\"mode_state\":\"running\",\"mode_reason\":null}],"
+        "\"modes\":[]}",
         body);
 }
 
@@ -115,7 +253,9 @@ TEST_CASE("On the registry snapshot: a dongle in rcp-proxy has usb, the proxy's 
         "\"state\":\"connected\",\"peer\":\"192.168.1.20:9999\",\"last_error\":null},"
         "\"firmware\":{\"type\":\"znp\",\"version\":\"20240710\",\"chip\":null,\"baud\":115200,\"source\":\"probe\",\"at\":null},"
         "\"counters\":{\"frames_in\":0,\"frames_out\":0,\"bytes_in\":0,\"bytes_out\":0,\"drops\":0,\"resets\":0,"
-        "\"rx_errors\":0,\"uart_errors\":0}}]}",
+        "\"rx_errors\":0,\"uart_errors\":0},"
+        "\"channel_state\":\"ready\",\"channel_reason\":null,\"mode_state\":\"connected\",\"mode_reason\":null}],"
+        "\"modes\":[]}",
         body);
 }
 
@@ -128,7 +268,7 @@ TEST_CASE("On the registry snapshot: channels in snapshot order, comma-separated
     s.chans[0] = c6_chan();
     s.chans[1] = usb_chan();
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
-    const char *first = strstr(body, "{\"id\":\"c6\"");
+    const char *first = strstr(body, "{\"id\":\"builtin-c6\"");
     const char *second = strstr(body, ",{\"id\":\"usb-10c4-ea60-abc123\"");
 
     TEST_ASSERT_NOT_NULL(first);
@@ -142,7 +282,7 @@ TEST_CASE("On no channel (before the mux starts): an empty list", "[device_api]"
 
     memset(&s, 0, sizeof(s));
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
-    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[],\"channels\":[]}", body);
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[],\"channels\":[],\"modes\":[]}", body);
 }
 
 TEST_CASE("On a build with every consumer: available_modes lists off, otbr, ziggurat, rcp-proxy in enum order",
@@ -153,7 +293,8 @@ TEST_CASE("On a build with every consumer: available_modes lists off, otbr, zigg
     memset(&s, 0, sizeof(s));
     s.available_modes = MODES_BUILT_IN | RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_ZIGGURAT);
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
-    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\",\"otbr\",\"ziggurat\",\"rcp-proxy\"],\"channels\":[]}", body);
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\",\"otbr\",\"ziggurat\",\"rcp-proxy\"],\"channels\":[],\"modes\":[]}",
+                             body);
 }
 
 TEST_CASE("On only off set: available_modes renders [\"off\"]", "[device_api]")
@@ -163,7 +304,7 @@ TEST_CASE("On only off set: available_modes renders [\"off\"]", "[device_api]")
     memset(&s, 0, sizeof(s));
     s.available_modes = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF);
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
-    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\"],\"channels\":[]}", body);
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\"],\"channels\":[],\"modes\":[]}", body);
 }
 
 TEST_CASE("On unavailable and invalid bits set: they are never listed", "[device_api]")
@@ -174,7 +315,7 @@ TEST_CASE("On unavailable and invalid bits set: they are never listed", "[device
     s.available_modes = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF) | RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_UNAVAILABLE) |
                         RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_INVALID);
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
-    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\"],\"channels\":[]}", body);
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\"],\"channels\":[],\"modes\":[]}", body);
 }
 
 TEST_CASE("On an unplugged dongle: mode unavailable, stored_mode the mode it returns to", "[device_api]")
@@ -322,7 +463,8 @@ TEST_CASE("On a label with quotes: it is escaped", "[device_api]")
     TEST_ASSERT_NOT_NULL(strstr(body, "\"label\":\"a \\\"b\\\"\""));
 }
 
-TEST_CASE("On the largest snapshot (8 channels, every text at its longest): fits DEVICE_API_CHANNELS_BODY_MAX",
+TEST_CASE("On the largest snapshot (8 channels and 12 instances, every text at its longest): fits "
+          "DEVICE_API_CHANNELS_BODY_MAX, one channel DEVICE_API_CHANNEL_BODY_MAX",
           "[device_api]")
 {
     static radio_mux_snapshot_t s;
@@ -361,9 +503,26 @@ TEST_CASE("On the largest snapshot (8 channels, every text at its longest): fits
             UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX,
         };
         c.line.baud = 2000000;
+        c.chan_state = RADIO_MUX_CS_FAULT;
+        memset(c.chan_reason, '"', sizeof(c.chan_reason) - 1);
+        c.chan_reason[sizeof(c.chan_reason) - 1] = '\0';
+        memset(c.mode_state, '"', sizeof(c.mode_state) - 1);
+        c.mode_state[sizeof(c.mode_state) - 1] = '\0';
+        memset(c.mode_reason, '"', sizeof(c.mode_reason) - 1);
+        c.mode_reason[sizeof(c.mode_reason) - 1] = '\0';
         s.chans[i] = c;
     }
+    // Every instance listed: one proxy per channel plus the singletons, each with its channel's longest texts.
+    s.n_modes = RADIO_MUX_RULES_MAX + RADIO_MUX_CHANNELS_MAX;
+    for (size_t i = 0; i < s.n_modes; i++) {
+        s.modes[i] = (radio_mux_mode_info_t) {
+            .mode = RADIO_MUX_MODE_RCP_PROXY, .chan = (int8_t)(i % RADIO_MUX_CHANNELS_MAX), .reboot_on_change = true,
+        };
+    }
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
+    char one[DEVICE_API_CHANNEL_BODY_MAX]; // and one of them as a PUT reply that reboots
+
+    TEST_ASSERT_GREATER_THAN(0, device_api_channel_json(one, sizeof(one), &s.chans[0], true));
 }
 
 TEST_CASE("On a buffer too small for the body: returns -1", "[device_api]")
@@ -385,7 +544,7 @@ TEST_CASE("On an applied PUT: the reply is the channel object", "[device_api]")
     char one[DEVICE_API_CHANNEL_BODY_MAX];
 
     TEST_ASSERT_GREATER_THAN(0, device_api_channel_json(one, sizeof(one), &c, false));
-    TEST_ASSERT_EQUAL(0, strncmp(one, "{\"id\":\"c6\",\"kind\":\"c6\",", strlen("{\"id\":\"c6\",\"kind\":\"c6\",")));
+    TEST_ASSERT_EQUAL(0, strncmp(one, "{\"id\":\"builtin-c6\",\"kind\":\"builtin\",", strlen("{\"id\":\"builtin-c6\",\"kind\":\"builtin\",")));
     TEST_ASSERT_NULL(strstr(one, "reboot"));
     TEST_ASSERT_EQUAL('}', one[strlen(one) - 1]);
 }
@@ -398,16 +557,16 @@ TEST_CASE("On a PUT that reboots: the channel object ends with reboot true", "[d
     TEST_ASSERT_GREATER_THAN(0, device_api_channel_json(one, sizeof(one), &c, true));
     const size_t n = strlen(one);
 
-    TEST_ASSERT_TRUE(n > 16);
-    TEST_ASSERT_EQUAL_STRING("},\"reboot\":true}", one + n - 16);
+    TEST_ASSERT_TRUE(n > 15);
+    TEST_ASSERT_EQUAL_STRING(",\"reboot\":true}", one + n - 15);
 }
 
 TEST_CASE("On a move: the 202 body says moving and where from", "[device_api]")
 {
     char out[96];
 
-    TEST_ASSERT_GREATER_THAN(0, device_api_channel_moving_json(out, sizeof(out), "c6"));
-    TEST_ASSERT_EQUAL_STRING("{\"moving\":true,\"moved_from\":\"c6\"}", out);
+    TEST_ASSERT_GREATER_THAN(0, device_api_channel_moving_json(out, sizeof(out), "builtin-c6"));
+    TEST_ASSERT_EQUAL_STRING("{\"moving\":true,\"moved_from\":\"builtin-c6\"}", out);
     TEST_ASSERT_GREATER_THAN(0, device_api_channel_moving_json(out, sizeof(out), ""));
     TEST_ASSERT_EQUAL_STRING("{\"moving\":true,\"moved_from\":null}", out);
 }
@@ -759,18 +918,18 @@ TEST_CASE("On a verdict out of range: 500 failed", "[device_api]")
 
 TEST_CASE("On a C6 push or recovery while rcp-proxy on the C6 has a peer: 409 c6_busy", "[device_api]")
 {
-    device_api_error_t e = device_api_map_push_error(RCP_SYNC_ERR_C6_BUSY);
+    device_api_error_t e = device_api_map_push_error(RADIO_MUX_ERR_PEER_CONNECTED);
 
     TEST_ASSERT_EQUAL(409, e.http_status);
     TEST_ASSERT_EQUAL_STRING("c6_busy", e.code);
-    e = device_api_map_recover_error(RCP_SYNC_ERR_C6_BUSY);
+    e = device_api_map_recover_error(RADIO_MUX_ERR_PEER_CONNECTED);
     TEST_ASSERT_EQUAL(409, e.http_status);
     TEST_ASSERT_EQUAL_STRING("c6_busy", e.code);
 
     char out[160];
     int status = 0;
 
-    TEST_ASSERT_GREATER_THAN(0, device_api_recover_reply(RCP_SYNC_ERR_C6_BUSY, "c6_busy: rcp-proxy on the C6 has a peer", BR_MODE_BR_RUNNING, true, "", true, "1.0", out, sizeof(out), &status));
+    TEST_ASSERT_GREATER_THAN(0, device_api_recover_reply(RADIO_MUX_ERR_PEER_CONNECTED, "rcp-proxy has a connected peer", BR_MODE_BR_RUNNING, true, "", true, "1.0", out, sizeof(out), &status));
     TEST_ASSERT_EQUAL(409, status);
     TEST_ASSERT_NOT_NULL(strstr(out, "\"error\":\"c6_busy\""));
 }
@@ -828,7 +987,7 @@ TEST_CASE("On a move of Thread that also carries line or proxy settings: 400, no
         const radio_mux_set_req_t req = proxy_req(bodies[i]);
 
         TEST_ASSERT_EQUAL_STRING_MESSAGE("send line or proxy settings in a separate request from starting, moving or stopping Thread",
-                                         device_api_channel_move_refusal(&req, "usb-1", "c6", 0, RADIO_MUX_MODE_OFF), bodies[i]);
+                                         device_api_channel_move_refusal(&req, "usb-1", "builtin-c6", 0, RADIO_MUX_MODE_OFF), bodies[i]);
     }
 }
 
@@ -836,11 +995,11 @@ TEST_CASE("On a move of Thread alone, or settings with otbr that is no move: acc
 {
     radio_mux_set_req_t req = proxy_req("{\"mode\":\"otbr\"}");
 
-    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "c6", 0, RADIO_MUX_MODE_OFF));
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "builtin-c6", 0, RADIO_MUX_MODE_OFF));
     req = proxy_req("{\"mode\":\"otbr\",\"baud\":460800}");
-    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "c6", "c6", 0, RADIO_MUX_MODE_OTBR));  // already there: no move
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "builtin-c6", "builtin-c6", 0, RADIO_MUX_MODE_OTBR));  // already there: no move
     req = proxy_req("{\"mode\":\"rcp-proxy\",\"rcp_proxy\":{\"port\":7000}}");
-    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "c6", 0, RADIO_MUX_MODE_OFF)); // another channel's mode: no move
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "usb-1", "builtin-c6", 0, RADIO_MUX_MODE_OFF)); // another channel's mode: no move
 }
 
 TEST_CASE("On a stop of Thread that also carries line or proxy settings: 400, nothing to claim", "[device_api]")
@@ -911,7 +1070,7 @@ TEST_CASE("On rcp-proxy for a channel that would listen where another channel in
     radio_mux_set_req_t req = proxy_req("{\"mode\":\"rcp-proxy\"}");
 
     port_snapshot(&s);
-    TEST_ASSERT_EQUAL_STRING("c6", device_api_channel_port_conflict(&s, s.chans[1].id, &req));
+    TEST_ASSERT_EQUAL_STRING("builtin-c6", device_api_channel_port_conflict(&s, s.chans[1].id, &req));
 }
 
 TEST_CASE("On a port change of a channel in rcp-proxy to a port another one listens on: names it", "[device_api]")
@@ -922,7 +1081,7 @@ TEST_CASE("On a port change of a channel in rcp-proxy to a port another one list
     port_snapshot(&s);
     s.chans[1].stored_mode = RADIO_MUX_MODE_RCP_PROXY;
     s.chans[1].proxy.port = 7000;
-    TEST_ASSERT_EQUAL_STRING("c6", device_api_channel_port_conflict(&s, s.chans[1].id, &req));
+    TEST_ASSERT_EQUAL_STRING("builtin-c6", device_api_channel_port_conflict(&s, s.chans[1].id, &req));
 }
 
 TEST_CASE("On another port, adapter or direction: no conflict", "[device_api]")
@@ -961,7 +1120,7 @@ TEST_CASE("On an unplugged channel stored in rcp-proxy on the port: a conflict (
     s.chans[1].stored_mode = RADIO_MUX_MODE_RCP_PROXY;
     s.chans[1].mode = RADIO_MUX_MODE_UNAVAILABLE;
     s.chans[1].present = false;
-    TEST_ASSERT_EQUAL_STRING(s.chans[1].id, device_api_channel_port_conflict(&s, "c6", &req));
+    TEST_ASSERT_EQUAL_STRING(s.chans[1].id, device_api_channel_port_conflict(&s, "builtin-c6", &req));
 }
 
 TEST_CASE("On a PUT that leaves rcp-proxy, no change of mode or port, or the channel alone: no conflict",
@@ -978,7 +1137,7 @@ TEST_CASE("On a PUT that leaves rcp-proxy, no change of mode or port, or the cha
     TEST_ASSERT_NULL(device_api_channel_port_conflict(&s, s.chans[1].id, &req)); // stays off
     req = proxy_req("{\"mode\":\"rcp-proxy\"}");
     s.n = 1;
-    TEST_ASSERT_NULL(device_api_channel_port_conflict(&s, "c6", &req)); // itself only
+    TEST_ASSERT_NULL(device_api_channel_port_conflict(&s, "builtin-c6", &req)); // itself only
     TEST_ASSERT_NULL(device_api_channel_port_conflict(&s, "usb-unknown", &req)); // not in the list
 }
 
@@ -988,13 +1147,13 @@ TEST_CASE("On a PUT of otbr while another channel has it: it is a move (the long
 {
     radio_mux_set_req_t req = proxy_req("{\"mode\":\"otbr\"}");
 
-    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "usb-10c4-ea60", "c6", 0, RADIO_MUX_MODE_OFF));
-    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "c6", "c6", 0, RADIO_MUX_MODE_OTBR));    // already there
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "usb-10c4-ea60", "builtin-c6", 0, RADIO_MUX_MODE_OFF));
+    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "builtin-c6", "builtin-c6", 0, RADIO_MUX_MODE_OTBR));    // already there
     req = proxy_req("{\"mode\":\"off\"}");
-    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "usb-10c4-ea60", "c6", 0, RADIO_MUX_MODE_OFF));
+    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "usb-10c4-ea60", "builtin-c6", 0, RADIO_MUX_MODE_OFF));
     req = proxy_req("{\"baud\":115200}");
-    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "usb-10c4-ea60", "c6", 0, RADIO_MUX_MODE_OFF));
-    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "c6", "c6", 0, RADIO_MUX_MODE_OTBR));
+    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "usb-10c4-ea60", "builtin-c6", 0, RADIO_MUX_MODE_OFF));
+    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "builtin-c6", "builtin-c6", 0, RADIO_MUX_MODE_OTBR));
 }
 
 TEST_CASE("On a PUT of otbr while no channel has it: a start, run like a move (the long-operation slot)",
@@ -1002,7 +1161,7 @@ TEST_CASE("On a PUT of otbr while no channel has it: a start, run like a move (t
 {
     const radio_mux_set_req_t req = proxy_req("{\"mode\":\"otbr\"}");
 
-    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", NULL, 0, RADIO_MUX_MODE_OFF));
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "builtin-c6", NULL, 0, RADIO_MUX_MODE_OFF));
 }
 
 TEST_CASE("On a PUT of off or rcp-proxy on the OTBR channel: a stop, run like a move (the long-operation slot)",
@@ -1010,9 +1169,9 @@ TEST_CASE("On a PUT of off or rcp-proxy on the OTBR channel: a stop, run like a 
 {
     radio_mux_set_req_t req = proxy_req("{\"mode\":\"off\"}");
 
-    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", "c6", 0, RADIO_MUX_MODE_OTBR));
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "builtin-c6", "builtin-c6", 0, RADIO_MUX_MODE_OTBR));
     req = proxy_req("{\"mode\":\"rcp-proxy\"}");
-    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", "c6", 0, RADIO_MUX_MODE_OTBR));
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "builtin-c6", "builtin-c6", 0, RADIO_MUX_MODE_OTBR));
 }
 
 TEST_CASE("On a PUT of a rebooting mode (ziggurat) on the OTBR channel: not a stop, as the mux's APPLY_REBOOT comes first",
@@ -1021,12 +1180,12 @@ TEST_CASE("On a PUT of a rebooting mode (ziggurat) on the OTBR channel: not a st
     const uint32_t reboots = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_ZIGGURAT);
     radio_mux_set_req_t req = proxy_req("{\"mode\":\"ziggurat\"}");
 
-    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "c6", "c6", reboots, RADIO_MUX_MODE_OTBR));
-    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", "c6", 0, RADIO_MUX_MODE_OTBR)); // no consumer reboots: a stop
+    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "builtin-c6", "builtin-c6", reboots, RADIO_MUX_MODE_OTBR));
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "builtin-c6", "builtin-c6", 0, RADIO_MUX_MODE_OTBR)); // no consumer reboots: a stop
     req = proxy_req("{\"mode\":\"off\"}");
-    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", "c6", reboots, RADIO_MUX_MODE_OTBR)); // off does not reboot: still a stop
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "builtin-c6", "builtin-c6", reboots, RADIO_MUX_MODE_OTBR)); // off does not reboot: still a stop
     req = proxy_req("{\"mode\":\"otbr\"}");
-    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "usb-1", "c6", reboots, RADIO_MUX_MODE_OFF)); // a move is decided before reboots
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "usb-1", "builtin-c6", reboots, RADIO_MUX_MODE_OFF)); // a move is decided before reboots
 }
 
 TEST_CASE("On a PUT of otbr on a channel leaving a rebooting mode (ziggurat): not a start, as the mux's APPLY_REBOOT "
@@ -1035,11 +1194,11 @@ TEST_CASE("On a PUT of otbr on a channel leaving a rebooting mode (ziggurat): no
     const uint32_t reboots = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_ZIGGURAT);
     radio_mux_set_req_t req = proxy_req("{\"mode\":\"otbr\"}");
 
-    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "c6", NULL, reboots, RADIO_MUX_MODE_ZIGGURAT));
-    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", NULL, 0, RADIO_MUX_MODE_ZIGGURAT)); // no reboot: a start
-    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "c6", NULL, reboots, RADIO_MUX_MODE_OFF)); // from off: a start
+    TEST_ASSERT_FALSE(device_api_channel_is_move(&req, "builtin-c6", NULL, reboots, RADIO_MUX_MODE_ZIGGURAT));
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "builtin-c6", NULL, 0, RADIO_MUX_MODE_ZIGGURAT)); // no reboot: a start
+    TEST_ASSERT_TRUE(device_api_channel_is_move(&req, "builtin-c6", NULL, reboots, RADIO_MUX_MODE_OFF)); // from off: a start
     req = proxy_req("{\"mode\":\"otbr\",\"baud\":460800}");
-    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "c6", NULL, reboots, RADIO_MUX_MODE_ZIGGURAT));
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "builtin-c6", NULL, reboots, RADIO_MUX_MODE_ZIGGURAT));
 }
 
 TEST_CASE("On a PUT of ziggurat with settings on the OTBR channel while ziggurat reboots: the settings are not refused",
@@ -1047,8 +1206,8 @@ TEST_CASE("On a PUT of ziggurat with settings on the OTBR channel while ziggurat
 {
     const radio_mux_set_req_t req = proxy_req("{\"mode\":\"ziggurat\",\"baud\":115200}");
 
-    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "c6", "c6", RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_ZIGGURAT), RADIO_MUX_MODE_OTBR));
-    TEST_ASSERT_NOT_NULL(device_api_channel_move_refusal(&req, "c6", "c6", 0, RADIO_MUX_MODE_OTBR));
+    TEST_ASSERT_NULL(device_api_channel_move_refusal(&req, "builtin-c6", "builtin-c6", RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_ZIGGURAT), RADIO_MUX_MODE_OTBR));
+    TEST_ASSERT_NOT_NULL(device_api_channel_move_refusal(&req, "builtin-c6", "builtin-c6", 0, RADIO_MUX_MODE_OTBR));
 }
 
 TEST_CASE("On a PUT of otbr on the OTBR channel in RADIO_FAULT: OpenThread's start is retried", "[device_api]")
@@ -1082,7 +1241,7 @@ TEST_CASE("On RADIO_FAULT: the running OTBR channel shows fault with the board's
     s.n = 2;
     s.chans[0] = c6_chan();
     s.chans[1] = usb_chan();
-    board_view(&s, "c6", BR_MODE_RADIO_FAULT, "rcp incompatible");
+    board_view(&s, "builtin-c6", BR_MODE_RADIO_FAULT, "rcp incompatible");
     TEST_ASSERT_EQUAL(RADIO_MUX_STATE_FAULT, s.chans[0].state);
     TEST_ASSERT_EQUAL_STRING("rcp incompatible", s.chans[0].reason);
     TEST_ASSERT_EQUAL(RADIO_MUX_STATE_RUNNING, s.chans[1].state); // not the OTBR channel
@@ -1095,14 +1254,14 @@ TEST_CASE("On any other mode or no OTBR channel: the channels are left as the mu
     memset(&s, 0, sizeof(s));
     s.n = 1;
     s.chans[0] = c6_chan();
-    board_view(&s, "c6", BR_MODE_BR_RUNNING, "");
+    board_view(&s, "builtin-c6", BR_MODE_BR_RUNNING, "");
     board_view(&s, NULL, BR_MODE_RADIO_FAULT, "x");
     board_view(&s, NULL, BR_MODE_STARTING, "");
     TEST_ASSERT_EQUAL(RADIO_MUX_STATE_RUNNING, s.chans[0].state);
     TEST_ASSERT_EQUAL_STRING("", s.chans[0].reason);
     s.chans[0].state = RADIO_MUX_STATE_BUSY; // a C6 job: its own state wins
-    board_view(&s, "c6", BR_MODE_RADIO_FAULT, "x");
-    board_view(&s, "c6", BR_MODE_STARTING, "");
+    board_view(&s, "builtin-c6", BR_MODE_RADIO_FAULT, "x");
+    board_view(&s, "builtin-c6", BR_MODE_STARTING, "");
     TEST_ASSERT_EQUAL(RADIO_MUX_STATE_BUSY, s.chans[0].state);
 }
 
@@ -1114,7 +1273,7 @@ TEST_CASE("On STARTING: the running OTBR channel shows starting until OpenThread
     s.n = 2;
     s.chans[0] = c6_chan();
     s.chans[1] = usb_chan();
-    board_view(&s, "c6", BR_MODE_STARTING, "");
+    board_view(&s, "builtin-c6", BR_MODE_STARTING, "");
     TEST_ASSERT_EQUAL(RADIO_MUX_STATE_STARTING, s.chans[0].state);
     TEST_ASSERT_EQUAL(RADIO_MUX_STATE_RUNNING, s.chans[1].state); // not the OTBR channel
 }
@@ -1123,7 +1282,7 @@ TEST_CASE("On STARTING during a move, start or stop: the channels are left as th
 {
     static radio_mux_snapshot_t s;
     const device_api_board_view_t b = {
-        .otbr_id = "c6", .mode = BR_MODE_STARTING, .fault_reason = "", .moving = true,
+        .otbr_id = "builtin-c6", .mode = BR_MODE_STARTING, .fault_reason = "", .moving = true,
     };
 
     memset(&s, 0, sizeof(s));
@@ -1137,8 +1296,8 @@ TEST_CASE("On a refused stop of OpenThread: its running channel shows the reason
 {
     static radio_mux_snapshot_t s;
     const device_api_board_view_t b = {
-        .otbr_id = "c6", .mode = BR_MODE_BR_RUNNING, .fault_reason = "",
-        .refused_id = "c6", .refused_reason = "drain_timeout",
+        .otbr_id = "builtin-c6", .mode = BR_MODE_BR_RUNNING, .fault_reason = "",
+        .refused_id = "builtin-c6", .refused_reason = "drain_timeout",
     };
 
     memset(&s, 0, sizeof(s));
@@ -1156,7 +1315,7 @@ TEST_CASE("On a refused stop of a channel that no longer runs otbr, or has a rea
 {
     static radio_mux_snapshot_t s;
     device_api_board_view_t b = {
-        .otbr_id = "c6", .mode = BR_MODE_BR_RUNNING, .fault_reason = "",
+        .otbr_id = "builtin-c6", .mode = BR_MODE_BR_RUNNING, .fault_reason = "",
         .refused_id = "usb-10c4-ea60-abc123", .refused_reason = "drain_timeout",
     };
 
@@ -1166,7 +1325,7 @@ TEST_CASE("On a refused stop of a channel that no longer runs otbr, or has a rea
     s.chans[1] = usb_chan(); // rcp-proxy now
     device_api_channels_overlay_board(&s, &b);
     TEST_ASSERT_EQUAL_STRING("", s.chans[1].reason);
-    b.refused_id = "c6";
+    b.refused_id = "builtin-c6";
     strcpy(s.chans[0].reason, "flow control not supported");
     device_api_channels_overlay_board(&s, &b);
     TEST_ASSERT_EQUAL_STRING("flow control not supported", s.chans[0].reason);

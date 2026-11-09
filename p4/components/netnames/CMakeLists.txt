@@ -10,4 +10,4 @@ idf_component_register(SRCS "rules.c" "netnames.c"
                        INCLUDE_DIRS "include"
                        PRIV_INCLUDE_DIRS "."
                        REQUIRES netcfg
-                       PRIV_REQUIRES br_core mdns nvs_flash openthread esp_hw_support log)
+                       PRIV_REQUIRES br_core mdns nvs_flash openthread esp_hw_support log radio_mux)

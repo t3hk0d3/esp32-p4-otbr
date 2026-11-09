@@ -1,7 +1,7 @@
 """Zigbee mode: ziggurat on a radio channel, driven by zigpy-ziggurat (the library ZHA uses) over ws://<board>/zigbee.
 Hardware-gated: written for the batched on-board pass, never run where it was written.
 
-Rig: the board on the LAN, the C6 as the radio (`c6`); with `-m usb_dongle` also a CC2652P/EFR32 dongle on the USB-A
+Rig: the board on the LAN, the C6 as the radio (`builtin-c6`); with `-m usb_dongle` also a CC2652P/EFR32 dongle on the USB-A
 port. The tests with the marker `zigbee_device` need the aux C6 running tools/zigbee_test_device
 (`make zigbee-test-device`; env ZIGBEE_DEVICE_PORT; select with `-m zigbee_device`).
 
@@ -15,6 +15,7 @@ to `off`.
 
 import asyncio
 import contextlib
+import os
 import statistics
 import time
 
@@ -32,7 +33,7 @@ from zigpy_ziggurat.zigbee.application import (
     ControllerApplication,
 )
 
-C6 = "c6"
+C6 = "builtin-c6"
 OTBR_MODE = "otbr"
 RESTING_MODE = {C6: OTBR_MODE}  # a dongle rests in `off`
 HELLO_S = 5  # zigpy waits this long for the hello on connect
@@ -55,9 +56,17 @@ HEAP_SETTLE_S = 5
 ON_OFF_CLUSTER_ID = 0x0006
 ATTR_ON_OFF = 0x0000
 ZIGBEE_MODE = "ziggurat"
+TEST_CHANNEL = (
+    20  # never 11 (home Zigbee), 15 (home Thread) or 25 (spinel2quic testbed)
+)
 ENERGY_CHANNELS = 16  # 802.15.4 channels 11..26
 USB_CHANNEL_KIND = "usb"
 EXPECTED_STATE = "running"
+PUSH_TIMEOUT_S = (
+    300  # a full RCP image over the C6's updater, its boot steps, the radio back
+)
+REINIT_SEEN_S = 60  # the push's reinit shows in /device/zigbee within this
+REINIT_REASON = "radio reinit: firmware push"
 
 
 def radio_params():
@@ -214,7 +223,12 @@ def zigbee_mode(dut, base_url, guard_channel):
 @contextlib.asynccontextmanager
 async def zigpy_app(address, auto_form=True):
     """A zigpy coordinator connected to the board's WebSocket, shut down afterwards."""
-    config = {"device": {"path": f"ws://{address}/zigbee"}, "database_path": None}
+    # Formed on TEST_CHANNEL: 11 is the home Zigbee network, 15 the home Thread network, 25 the spinel2quic testbed.
+    config = {
+        "device": {"path": f"ws://{address}/zigbee"},
+        "database_path": None,
+        "network": {"channel": TEST_CHANNEL},
+    }
     app = await ControllerApplication.new(config, auto_form=auto_form, start_radio=True)
     try:
         yield app
@@ -339,7 +353,7 @@ class TestZigbeeMode:
         async def body():
             async with zigpy_app(base_url.removeprefix("http://")) as app:
                 info, node = app.state.network_info, app.state.node_info
-                assert 11 <= info.channel <= 26
+                assert info.channel == TEST_CHANNEL
                 assert info.pan_id != 0
                 assert node.nwk == 0
                 scan = await asyncio.wait_for(
@@ -564,12 +578,72 @@ class TestZigbeeMode:
         run(body())
         assert get_json(base_url, "/device/diag")["uptime_s"] > uptime_before
 
+    def test_push_with_a_client_pauses_and_resumes(self, base_url, zigbee_mode, radio):
+        """A C6 firmware push under a connected client: Zigbee lets go of the radio for the push's reinit (no_radio
+        "radio reinit: firmware push"), the client stays connected, Zigbee runs again once the C6 is back, no reboot,
+        and the stack answers. Needs a good RCP image (env OTBR_RCP_IMAGE, as test_rcp_push)."""
+        if radio != C6:
+            pytest.skip("only the C6 takes a firmware push")
+        path = os.environ.get("OTBR_RCP_IMAGE")
+        if not path or not os.path.isfile(path):
+            pytest.skip("OTBR_RCP_IMAGE does not point to an RCP image")
+        with open(path, "rb") as f:
+            image = f.read()
+        zigbee_mode(radio)
+        address = base_url.removeprefix("http://")
+        uptime_before = get_json(base_url, "/device/diag")["uptime_s"]
+
+        def push():
+            return requests.post(
+                f"{base_url}/device/radio/firmware", data=image, timeout=PUSH_TIMEOUT_S
+            )
+
+        async def body():
+            async with zigpy_app(address) as app:
+                pushing = asyncio.get_running_loop().run_in_executor(None, push)
+                seen = None
+                deadline = time.monotonic() + REINIT_SEEN_S
+                while (
+                    seen is None and time.monotonic() < deadline and not pushing.done()
+                ):
+                    status = zigbee_status(base_url)
+                    if status["state"] == "no_radio":
+                        seen = status
+                    await asyncio.sleep(0.2)
+                assert seen is not None, "Zigbee never let go of the radio for the push"
+                assert seen["reason"] == REINIT_REASON, seen
+                assert seen["client"] is not None, (
+                    seen
+                )  # the client stays while the radio is paused
+                reply = await pushing
+                assert reply.status_code == requests.codes.ok, reply.text
+                deadline = time.monotonic() + RUNNING_TIMEOUT_S
+                now = zigbee_status(base_url)
+                while now["state"] != EXPECTED_STATE and time.monotonic() < deadline:
+                    await asyncio.sleep(1)
+                    now = zigbee_status(base_url)
+                assert now["state"] == EXPECTED_STATE, now
+                assert now["client"] is not None, now
+                scan = await asyncio.wait_for(
+                    app.energy_scan(
+                        channels=zigpy_types.Channels.ALL_CHANNELS,
+                        duration_exp=2,
+                        count=1,
+                    ),
+                    SCAN_TIMEOUT_S,
+                )
+                assert len(scan) == ENERGY_CHANNELS
+
+        run(body())
+        assert get_json(base_url, "/device/diag")["uptime_s"] > uptime_before
+
     def test_radio_gone_and_back(self, base_url, radio):
-        """The radio disappears (GONE): state no_radio, no reboot; after its return the stack answers. On the C6 GONE
-        comes only from a C6 firmware job: test_radio_held_comes_back covers the C6's loss."""
+        """The radio disappears (GONE): state no_radio, no reboot; after its return the stack answers. The C6 never
+        goes away (a push pauses it: test_push_with_a_client_pauses_and_resumes; test_radio_held_comes_back covers
+        its loss)."""
         if radio == C6:
             pytest.skip(
-                "the C6 has no GONE without a firmware job; test_radio_held_comes_back covers its loss"
+                "the C6 never goes away; test_radio_held_comes_back covers its loss"
             )
         pytest.skip(
             "TODO: a dongle needs a person to unplug it (no manual opt-in in conftest yet)"

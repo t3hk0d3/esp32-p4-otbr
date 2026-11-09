@@ -29,12 +29,20 @@ int64_t zigbee_now_epoch(void)
     return t >= EPOCH_VALID ? (int64_t)t : 0;
 }
 
+// The instance's state names in the orchestrator's read API (the same as /device/zigbee's).
+static const char *const state_names[] = {
+    [ZIGBEE_STATE_IDLE] = "idle",         [ZIGBEE_STATE_STARTING] = "starting",
+    [ZIGBEE_STATE_RUNNING] = "running",   [ZIGBEE_STATE_NO_RADIO] = "no_radio",
+    [ZIGBEE_STATE_INCOMPATIBLE] = "incompatible",
+};
+
 void zigbee_status_set_state(zigbee_state_t state, const char *reason)
 {
     taskENTER_CRITICAL(&g_zigbee_status_lock);
     g_zigbee_status.state = state;
     strlcpy(g_zigbee_status.reason, reason ? reason : "", sizeof(g_zigbee_status.reason));
     taskEXIT_CRITICAL(&g_zigbee_status_lock);
+    radio_mux_report(atomic_load(&g_zigbee.ch), state_names[state], reason); // ignored before the first bind
 }
 
 void zigbee_status_note_channel(const char *id)
@@ -131,8 +139,12 @@ void zigbee_get_status(zigbee_status_t *out)
         }
         firmware_text(&c->firmware, out->firmware, sizeof(out->firmware));
         out->counters.rx_dropped = c->counters.drops;
-        // Never attached (or gone): the mux knows why (not present, its firmware does not fit, a fault).
-        if ((out->state == ZIGBEE_STATE_IDLE || out->state == ZIGBEE_STATE_NO_RADIO) && c->reason[0]) {
+        // Never bound (or gone): the channel says why. In reinit (the C6's boot steps before the first bind, a push):
+        // its work; otherwise the mux's reason (not present, its firmware does not fit, a fault).
+        if ((out->state == ZIGBEE_STATE_IDLE || out->state == ZIGBEE_STATE_NO_RADIO) &&
+                c->chan_state == RADIO_MUX_CS_REINIT) {
+            snprintf(out->reason, sizeof(out->reason), "radio reinit: %s", c->chan_reason);
+        } else if ((out->state == ZIGBEE_STATE_IDLE || out->state == ZIGBEE_STATE_NO_RADIO) && c->reason[0]) {
             strlcpy(out->reason, c->reason, sizeof(out->reason));
         } else if (out->state == ZIGBEE_STATE_IDLE && !c->present) {
             strlcpy(out->reason, "radio not present", sizeof(out->reason));

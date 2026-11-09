@@ -29,7 +29,7 @@ import aiohttp
 import pytest
 import python_otbr_api as api
 import requests
-from conftest import BOOT_TIMEOUT_S, ot, wait_ot_state
+from conftest import BOOT_TIMEOUT_S, THREAD_TEST_CHANNEL, ot, wait_ot_state
 
 LEADER_TIMEOUT_S = 90
 REQUEST_TIMEOUT_S = 10
@@ -51,6 +51,9 @@ def other_dataset(dut, stored_dataset):
         rb"br_core: Thread started with the stored dataset", timeout=BOOT_TIMEOUT_S
     )
     ot(dut, "dataset init new")
+    ot(
+        dut, f"dataset channel {THREAD_TEST_CHANNEL}"
+    )  # off the home networks and the testbed
     tlvs = ot(dut, "dataset tlvs")[-1]
     ot(dut, "dataset clear")
     return tlvs
