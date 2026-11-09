@@ -135,6 +135,134 @@ reboot (and `c6_jumper_ignore 0` after an aborted `test_hosted_install.py`). A k
 `curl -X PUT http://<board>/device/routing -H 'Content-Type: application/json' -d @p4/pytest/.routing-restore.json && rm p4/pytest/.routing-restore.json`. A Thread peer that stops answering is fixed by an RTS reset. Test builds add console commands (`p4/main/test_cmds.c`)
 that the on-board tests use; never ship them.
 
+## On-board checks
+
+Checks beyond the automated tests, and what has not been run on hardware yet. The rules they check are in
+[Internals](reference/internals.md).
+
+### Not verified on hardware
+
+- The USB-UART first install ([First install](first-install.md), Path 3, esptool over H7), and recovery of a truly
+  blank C6 (bootloader, partition table and otadata erased).
+- The no-wires first install (Path 1) ran on the board against an ESP-Hosted 0.0.27 stand-in, not yet against an
+  untouched factory C6; nor the case where the installer lands in the slot it must overwrite (a factory C6 updated
+  before) and moves itself first.
+- The `br_core` give-up path after repeated radio failures, and the fall-back to the default network config when the
+  stored config cannot be applied (host-tested only).
+- Several boards on one Thread network.
+- Zigbee mode: built and host-tested; its on-board tests (`p4/pytest/test_zigbee.py`) are written.
+- The CH34x status-packet decoding (`uart_errors`) follows the ch34x driver's own defines
+  (`CH34X_UART_STATE_TRANSIENT_MASK`, byte 0) and is not confirmed against a datasheet.
+
+### Radios
+
+The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/pytest/test_dongle.py` (marker
+`usb_dongle`, needs the OllyZig and a person at the board: run pytest with `-s -m usb_dongle`). Beyond the tests, the checks that need a logic analyser, a test build or long observation:
+
+- **Gap under load** (C6): an RCP-heavy session for 10 minutes (proxy peer streaming, an energy scan) leaves `rx_errors`
+  at or near 0; with a logic analyser on CS and INT, no CS fall comes less than 100 µs after the previous rise (if
+  errors appear, raise `C6_GAP_US`).
+- **Refused connects** (`test_proxy_connect_refused_soak`, 10 minutes by default): afterwards the board still serves three waves
+  of 7 concurrent HTTP requests (every web slot) and the proxy still accepts a client. `/device/diag` has no socket count, so this sees
+  exhaustion, not a slow leak below the socket budget; compare the log's back-off schedule (1 to 30 s) by eye.
+- **Pool exhaustion**: a proxy peer that does not read: drops are counted and the RCP keeps answering.
+- **Reset timing**: from a new peer's connect to the first valid header from the C6 takes 300-500 ms.
+- **Quick replug** (under 1 s): one close, then a normal detection; Thread starts once.
+- **Start failure after a probe** (wrong baud forced through the test build): Thread back on the C6, the dongle in `fault`;
+  with a stuck init, a reboot onto the old radio.
+- **Drain timeout**: hold a REST session for more than 45 s during a move: the target shows `fault` `drain_timeout`, Thread
+  stays on the source.
+- **Silent dongle**: the recovery ladder (reopen, spinel reset), and after three recoveries `RADIO_FAULT` without abort.
+- **Dead dongle after a reset** (the CH340 OllyZig that stops answering after a reopen), OpenThread on it: one reopen,
+  then `RADIO_FAULT` "RCP did not answer its reset", no more reopens in the log; a PUT of `otbr` on the channel starts it
+  again, and an unplug and replug detects it again. The "no answer after 3 resets" give-up is checked only with a
+  consumer that resets on its own timeouts (Zigbee mode, on the merged branch). `uart_errors` counts, and at most one
+  CH34x warning per 10 s, with no "Unsupported notification type" lines.
+- **USB reopen under traffic** (`test_usb_reopen_under_traffic_survives`, test build: the `usb_reopen` console command):
+  120 reopens while the dongle streams answers: no abort (PATCHES.md patch 33) and the radio answers again (the first
+  request after the last reopen may be lost, a cut outgoing frame). Checked 2026-11-07. The CH340 never stayed silent
+  after a reopen on the bench, also after forced overruns (`usb_stall <ms>` masks a core's interrupts) and with spinel
+  resets in between (about 400 reopens); `ch34x diag|init|clear` (test build) read the chip's registers and send the
+  open-time init that ESP-IDF's ch34x driver skips, if it ever does. `usb_reopen` runs the reset path of a consumer's
+  reset (only on an attached or leased dongle; a failed reopen detaches it, and three in a row with nothing received
+  give up with "no answer after 3 resets"), so the test sends a burst the dongle answers between two reopens.
+- **C6 maintenance**: a firmware push with OpenThread on the dongle leaves OpenThread alone, also while the dongle
+  captures or starts (the board mode is the dongle's); unplugging the dongle during it gives `NO_RADIO` at once; with a
+  proxy peer on the C6 it gives 409 `c6_busy`.
+- **Boot**: a stored dongle that is unplugged gives `NO_RADIO` without a fault; plugging it in gives `BR_RUNNING`.
+- **Heap**: about 21 KB of internal DMA RAM is taken at the first C6 open, about 39 KB (pool, buffers, 16 KB ring) at
+  the first dongle open (never on a board without a dongle); a proxy session takes an 8 KB ring (TCP) plus codec
+  buffers. Compare the free and the minimum free internal heap (`GET /device/diag`) after boot with no dongle against
+  v0.4.0 on the same board: at most 72 KB less (the seven new tasks, below, the queues, the C6 buffers and the
+  proxy's resolver). Measured 2026-11-07 (build 2f3b159, 60 s after boot): 284 KB free with no dongle against 350 KB
+  on the v0.4.0-era master test build, 65 KB less; 238 KB with a dongle plugged in. The budget was 40 KB before the
+  first measurement and was raised to the measured figure plus headroom.
+- **Task stacks** (not shrunk: no high-water marks measured yet): `radio_mux` 6144, `usb_lib` 4096, `USB-CDC` 4096,
+  `c6` transport 4096, `rcp_proxy` 6144, `rcp_resolve` 4096, `br_radio` 6144 bytes. Read their high-water marks after
+  the checks below (a C6 move, a dongle detection, a proxy with a `.local` connect host) before shrinking any.
+- **C6 drops under REST load**: with Thread on the C6 and the REST load of `test_unplug_during_rest_load` (without the
+  unplug) for 5 minutes, the C6 channel's `drops` and `rx_errors` stay at or near 0 and pings to a Thread device do not
+  get lost more than without the load (compare v0.4.0's open ping-loss note).
+- **C6 otbr → rcp-proxy → otbr with an otbr-agent peer** (handles of earlier attaches): `RADIO_MUX_AGENT_TEST=1
+  pytest -s -m usb_dongle -k otbr_agent` (on the host network by default: it creates `wpan0` and routes on the host;
+  with `RADIO_MUX_AGENT_NET=otbr-p0 RADIO_MUX_AGENT_BOARD=<the board's fdaa:1:: address>` the container runs on that
+  macvlan network instead and keeps them to itself; either way it advertises a Border Agent on the LAN while it runs.
+  Passed that way 2026-11-07). While the old OpenThread drains, the agent gets its RCP's answers and resets, never the board's,
+  and the board's OpenThread does not log frames it did not ask for; afterwards Thread is back on the C6 with the same
+  network.
+- **Two channels in `rcp-proxy` on the same port**: refused with 409 `port_taken` (`test_proxy_port_taken`); a
+  listener held by another service shows `backoff` with `last_error` "Address already in use" on the page.
+- **Unplug with the console open** running `channel supported` (and `state`) in a loop while the OTBR dongle is
+  unplugged: `NO_RADIO`, never `RADIO_FAULT`, no reboot (uptime keeps growing); the open console's commands get
+  answers or errors, never a hang, until the session closes with the teardown.
+- **Sustained radio -> host stream** (one-MPS IN transfers, PATCHES.md patches 31 and 32: eight transfers in flight;
+  checked 2026-11-07: 44808 of 44808 pipelined spinel replies over the proxy, 0 errors; with one, the CH340 at 460800 under Zigbee load counted `uart_errors` 9 and `rx_errors` 5 in
+  6 minutes): `rcp-proxy` raw, or `otbr`, on the CH340 at 460800 baud with a sustained radio -> host stream (a spinel
+  `PROP_VALUE_GET` flood, or the dongle's own TX burst test) while the REST load of `test_unplug_during_rest_load`
+  (without the unplug) runs for 5 minutes: the channel's `uart_errors`, `drops` and `rx_errors` stay 0. Repeat the
+  Zigbee load that showed the overrun. Repeat on the CP2102N if one is at hand.
+- **HTTP refusal in TCP listen** (port 6638): `curl -X POST http://<board>:6638/ -d x` is refused (`refused` + 1, an RST
+  or FIN for curl) with `to_radio` unchanged; `otbr-agent` through `socat` on the C6 still comes up (the reset replay
+  once its first bytes pass); a kick during the hold (a client connected with `nc` that has not sent yet) drops it and
+  the next client is served; the preconnect case: a client that connects and stays silent stays `listening` (no peer,
+  no C6 reset), a second connection replaces it (the first is closed) and becomes the peer with its first spinel
+  bytes, and a silent client that then sends `POST / HTTP/1.1` is dropped (`refused` + 1) with `to_radio` unchanged.
+- **Stop with an open session**: hold a REST session longer than 45 s while setting the OTBR channel `off`: the PUT
+  answers 202, the channel stays `otbr` running with `error` `drain_timeout`, Thread keeps running.
+### Topology scan latency
+
+Mesh topology requests slow down pings through the border router while they run, because of the Diagnostic Get
+traffic. Measured with `p4/pytest/test_latency.py` (one Thread peer, a ping every 100 ms, the requests repeated back to
+back; 2026-11-03):
+
+- **The page's scan** (`POST /device/topology`) adds about 105–117 ms to the 99th-percentile round trip, and no ping
+  is lost. A scan is one discover, then two unicast mesh-diagnostics queries per router (its child table and its
+  children's addresses), then one query per full-device child that reported no address.
+- **The old `/topology`** (a multicast diagnostic get, no longer used by the page) adds about 77 ms, and 13 of 1000
+  pings were lost.
+- **For comparison,** `/node` requests add about 2 ms.
+
+### Test-build commands
+
+- `update_source <base>` points the update check and install at another releases base:
+  `<base>/latest/download/versions.txt` and `<base>/download/<tag>/<file>`, for example a local HTTP server
+  (`p4/pytest/test_self_update.py` does this). An empty argument restores GitHub. The release link on the Firmware
+  page then points to the same base, and the page shows it only for an `https://` base.
+- `ot trel` prints TREL state and peers.
+- `tools/make_bundle.py --help` shows how to inspect an `otbr.bundle`.
+
+### Known upstream behaviour
+
+- `GET /api/node` and `/api/devices` show `state` `disabled` (name `OpenThread`, rloc16 `0xfffe`) although `GET /node`
+  says `leader`: upstream esp-thread-br builds that collection entry once and never refreshes it (see
+  `p4/components/PATCHES.md`, "Known upstream behaviour"). `/node`, `/node/state` and `/node/dataset/active` (what Home
+  Assistant uses) are live.
+
+### Core dumps
+
+After a supervisor reboot (`supervisor: the OpenThread lock is stuck` or `... the HTTP server task is stuck`), read the
+core dump over USB with `idf.py -C p4 coredump-info`.
+
 ## CI and releases
 
 `.github/workflows/build.yml` runs on every push to `master` and every pull request, in the `espressif/idf` container of
