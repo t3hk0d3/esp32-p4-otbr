@@ -90,7 +90,7 @@ run in OpenThread's own NAT64 translator, which these counters belong to: it is 
 
 ## Routing metrics
 
-See [Routing to the mesh](networking.md#routing-to-the-mesh).
+See [Routing to the mesh](routing.md).
 
 | Metric | Type | Labels |
 | --- | --- | --- |

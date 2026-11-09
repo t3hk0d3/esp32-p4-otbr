@@ -26,7 +26,7 @@ When you plug a dongle in, the board checks its firmware (about 3 s) and shows i
 
 | The dongle runs | Shown as | Modes it can run |
 | --- | --- | --- |
-| OpenThread RCP | `spinel`, with its version | Thread border router, RCP proxy, Off |
+| OpenThread RCP | `spinel`, with its version | Thread border router, Zigbee, RCP proxy, Off |
 | Ziggurat firmware | `ziggurat` | RCP proxy, Off |
 | Z-Stack (TI) | `znp` | RCP proxy, Off |
 | EmberZNet / EZSP (Silicon Labs) | `ezsp` | RCP proxy, Off |

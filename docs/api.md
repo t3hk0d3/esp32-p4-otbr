@@ -139,7 +139,7 @@ While the scan runs, `progress.info` counts the answers.
 
 ### Routing
 
-How the core router learns the route into the mesh (see [Routing to the mesh](networking.md#routing-to-the-mesh)).
+How the core router learns the route into the mesh (see [Routing to the mesh](routing.md)).
 `GET /device/routing` returns this shape; `PUT /device/routing` takes the same body, without `status` (ignored if sent),
 and answers 200 with the new GET shape:
 
