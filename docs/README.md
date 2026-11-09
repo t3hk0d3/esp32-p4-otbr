@@ -14,7 +14,8 @@ Running it:
 - [HTTP API and web UI](api.md): the `/device/*` API, the Thread REST API, the web pages, creating a network.
 - [Network modes, VLANs and prefix delegation](networking.md): single and split mode, confirm-or-revert, DHCPv6-PD.
 - [Sniffer](sniffer.md): 802.15.4 captures into Wireshark.
-- [Radios](radios.md): the C6 and USB dongles as channels, their modes (Thread border router, proxy), detection, moving Thread.
+- [Radios](radios.md): the C6 and USB dongles as channels, their modes (Thread border router, Zigbee, proxy),
+  firmware detection, moving Thread between radios without a reboot, the C6's firmware pushes.
 - [Zigbee coordinator](zigbee.md) (experimental): a radio of the board as a Zigbee coordinator for ZHA.
 - [Maintenance jumper](maintenance-jumper.md): C6 recovery and console capture.
 - [Diagnostics](diagnostics.md): CPU, memory, tasks and OpenThread lock statistics.

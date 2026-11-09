@@ -48,6 +48,14 @@ release's `versions.txt`.
   line.
 - Navigation: Dashboard, Thread (Network, Topology, Routing, Commissioner, Addresses, Tools, Console), Device (Radios,
   Ethernet, Firmware, Diagnostics, Packet capture), About. The Thread menu is hidden when no channel is in `otbr`.
+- The C6's channel id is `builtin-c6` (kind `builtin`; it was `c6`). Channels report `channel_state` (`absent`,
+  `reinit`, `ready`, `fault`) and `mode_state` beside `state`, and `GET /device/channels` lists the modes and where
+  they run (`modes`).
+- A C6 firmware push (`POST /device/radio/firmware`) answers once the mode on the C6 (Thread, Zigbee or the RCP proxy)
+  runs again on the new firmware, up to 180 s; when it does not, 502 `restart_failed` says which mode and why. The
+  push and the ROM recovery moved out of the Thread stack into the built-in radio's own code.
+- Moving Thread to another radio no longer rolls back or reboots: a failed start stays on the new radio with its
+  reason, and the Radios page says where Thread is.
 - OpenThread accepts any RCP with the ot-br-posix capability set (ack timeout, tx retries, CSMA backoff, tx security,
   tx timing), not the fixed set the C6 reports.
 

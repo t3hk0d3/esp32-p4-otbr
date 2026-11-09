@@ -6,6 +6,10 @@ This firmware turns the Waveshare ESP32-P4-WIFI6-POE-ETH into an OpenThread Bord
 border router, the ESP32-C6 on the same board is the 802.15.4 radio, and the board sits on your network over wired
 Ethernet. You don't need a Raspberry Pi, USB dongles or Wi-Fi, and it can be powered over PoE.
 
+Plug a radio dongle into its USB port and the same board becomes a small radio hub: Thread on either radio, a Zigbee
+coordinator for ZHA (experimental), or a radio served to another host over the network, each switched from the
+browser.
+
 Get the board from [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.htm),
 [AliExpress](https://a.aliexpress.com/_Ev2qYJC) or [Amazon](https://a.co/d/0hmmgSAF).
 
@@ -21,8 +25,23 @@ Get the board from [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.
   integration uses: point it at `http://<board>` and it forms or imports the network.
 - **Wired and always on.** It uses Ethernet with IPv4 and IPv6, DHCPv6 prefix delegation, NAT64 and mDNS/SRP service
   advertising. One cable carries power and data.
-- **Updates over the network.** The firmware and the web UI update together with automatic rollback, and the radio
-  firmware updates separately, all from the browser.
+- **Every radio is a channel.** The on-board C6 and a USB dongle (cp210x, CH34x or CDC-ACM bridges; checked with the
+  ZigStar OllyZig) each run in a mode you pick on the Radios page: `otbr`, `ziggurat` (Zigbee), `rcp-proxy` or `off`.
+  The board detects the dongle's firmware when you plug it in (OpenThread RCP, Ziggurat, Z-Stack, EZSP) within 3 s and
+  refuses a mode the firmware can't run. [Radios](docs/radios.md)
+- **Moves Thread between radios live.** Put the border router on the C6 or on a dongle: it moves at runtime with the
+  stored network, without a reboot. Unplug its dongle and the board stays up and waits; plug it back and Thread starts
+  again.
+- **Zigbee coordinator (experimental).** A radio in Zigbee mode runs the Ziggurat stack on the P4 and serves Home
+  Assistant's ZHA over a WebSocket (`ws://<board>/zigbee`), with its own section on the Dashboard and metrics in
+  `/metrics`. [Zigbee](docs/zigbee.md)
+- **Shares a radio over the network.** In `rcp-proxy` mode a channel's bytes go to one peer over TCP or UDP, listening
+  or dialling out, so an OpenThread or Zigbee host elsewhere can use the board's radio.
+- **Updates itself from GitHub.** One click on the Firmware page checks the latest release and installs it: the
+  firmware and the web UI together with automatic rollback, then the radio firmware if it changed, then one reboot.
+  You can still upload images from the browser. [Updates](docs/updates.md)
+- **Radio firmware updates without a reboot.** A push to the C6 restarts whatever runs on it (Thread, Zigbee or the
+  proxy) on the new firmware and only answers once it runs again, or says why it didn't.
 - **Routes the mesh without prefix delegation.** No DHCPv6-PD from your ISP or router? Pick your own OMR prefix (a GUA
   /64 from your space, or the self-generated ULA) and announce it to your core router over **BGP** (iBGP or eBGP, up to
   2 peers) or **RIPng**, so hosts on other subnets reach Thread devices. Set live on the Routing page, no reboot.
@@ -36,8 +55,9 @@ Get the board from [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.
   Console runs OpenThread CLI commands on the board from the browser.
 - **Fixes its own radio.** With three optional jumper wires, the board repairs the C6 radio by itself and captures its
   console.
-- **Shows what it is doing.** The device pages and `/device/diag` report CPU load per core and task, memory and
-  OpenThread lock timings, and `/metrics` exports them with the Thread figures to Prometheus.
+- **Shows what it is doing.** The device pages and `/device/diag` report CPU load per core and task, memory, chip
+  temperature and OpenThread lock timings, and `/metrics` exports them with the Thread and Zigbee figures to
+  Prometheus.
 
 ## Compared with the usual setups
 
@@ -54,6 +74,7 @@ down, the others keep the network reachable.
 | Radio placement | ✅ anywhere with Ethernet | ❌ at the Home Assistant host, on a USB extension cable | ✅ anywhere with Ethernet |
 | Routing to the mesh without DHCPv6-PD | ✅ custom OMR prefix announced over BGP or RIPng | ❌ PD, or a static route on your router | ❌ PD, or a static route on your router |
 | Link between border router and radio | ✅ on-board SPI | ✅ USB serial (passthrough needed in a VM) | ❌ spinel over TCP, sensitive to network delay |
+| Second radio | ✅ a USB dongle for Thread, Zigbee (experimental) or a network RCP proxy; Thread moves between radios live | ❌ one radio per add-on | ❌ one radio per add-on |
 | Packet capture, radio recovery, diagnostics | ✅ built in | ❌ separate tools | ❌ separate tools |
 | Runs without a Home Assistant host | ✅ yes | ❌ no | ❌ no |
 
@@ -97,7 +118,8 @@ jumper, or a USB-UART adapter on the C6 header.
 ## Documentation
 
 Everything is in [`docs/`](docs/README.md), also published as a [documentation site](https://t3hk0d3.github.io/esp32-p4-otbr/): [Home Assistant](docs/home-assistant.md), [building](docs/building.md), [updates](docs/updates.md),
-[API and web UI](docs/api.md), [networking, VLANs, TREL and mesh routing](docs/networking.md), [sniffer](docs/sniffer.md),
+[API and web UI](docs/api.md), [radios and USB dongles](docs/radios.md), [Zigbee coordinator](docs/zigbee.md),
+[networking, VLANs, TREL and mesh routing](docs/networking.md), [sniffer](docs/sniffer.md),
 [maintenance jumper](docs/maintenance-jumper.md), [diagnostics](docs/diagnostics.md), [Prometheus metrics](docs/metrics.md),
 [troubleshooting and limitations](docs/troubleshooting.md) and [development](docs/development.md). Run `make help`
 to list the targets for building, flashing, updating and testing.
