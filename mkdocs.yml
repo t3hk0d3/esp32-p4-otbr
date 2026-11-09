@@ -54,20 +54,31 @@ nav:
   - Home: index.md
   - Overview: overview.md
   - Flash in the browser: flash.md
-  - Setting up:
+  - Get started:
       - First install: first-install.md
-      - Building and flashing: building.md
-  - Running it:
-      - Updates: updates.md
       - Home Assistant: home-assistant.md
-      - HTTP API and web UI: api.md
-      - Networking: networking.md
-      - Sniffer: sniffer.md
-      - Radios: radios.md
+      - Your Thread network: thread-network.md
+  - Using the board:
+      - Web UI tour: web-ui.md
+      - Radios and USB dongles: radios.md
       - Zigbee coordinator: zigbee.md
+      - Networking: networking.md
+      - Routing to the mesh: routing.md
+      - Updates: updates.md
+      - Packet capture: sniffer.md
+      - Topology and console: topology.md
+      - Monitoring: diagnostics.md
       - Maintenance jumper: maintenance-jumper.md
-      - Diagnostics: diagnostics.md
-      - Prometheus metrics: metrics.md
       - Troubleshooting: troubleshooting.md
+      - Glossary: glossary.md
+  - Reference:
+      - HTTP API: api.md
+      - Prometheus metrics: metrics.md
+      - Internals: reference/internals.md
   - Working on it:
+      - Building and flashing: building.md
       - Development: development.md
+
+validation:
+  links:
+    anchors: warn
