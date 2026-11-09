@@ -341,12 +341,9 @@ def test_move_abandoned_start_no_reboot(dut, send, reboot, base_url, dongle):
     # The way out: Thread back on the C6 (its probe and commit work, its start is refused the same way), then a reboot.
     back = put_channel(base_url, {"mode": "otbr"}, "builtin-c6")
     assert back.status_code == 202, back.text
-    # Committed once the C6 is stored otbr (/device/status's otbr_channel names the C6 already while it is leased for
-    # the probe, before the commit).
-    deadline = time.monotonic() + MOVE_TIMEOUT_S
-    while get_channel(base_url, "builtin-c6")["stored_mode"] != "otbr":
-        assert time.monotonic() < deadline, "the move back was never committed"
-        time.sleep(1)
+    # Committed once the mux logs it: the stored modes are saved by then (the read API shows them a moment before the
+    # save ends, and /device/status's otbr_channel names the C6 already while it is leased for the probe).
+    dut.expect(rb"radio_mux: otbr moved from \S+ to builtin-c6", timeout=MOVE_TIMEOUT_S)
     reboot()
     wait_mode(base_url, "BR_RUNNING", THREAD_TIMEOUT_S)
     assert get_status(base_url)["otbr_channel"] == "builtin-c6"

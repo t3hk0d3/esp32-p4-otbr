@@ -20,6 +20,9 @@ from pytest_embedded_serial_esp.serial import EspSerial
 SPIFFSGEN = Path(os.environ.get("IDF_PATH", "")) / "components/spiffs/spiffsgen.py"
 GOT_IP = re.compile(rb"eth: got ip (\d+\.\d+\.\d+\.\d+)")
 BOOT_TIMEOUT_S = 60
+THREAD_TEST_CHANNEL = (
+    26  # a fresh test network: never 11 (home Zigbee), 15 (home Thread) or 25 (testbed)
+)
 REACHABLE_TIMEOUT_S = 20
 BOOT_SLOT_ATTEMPTS = 10
 CLEAR_ATTEMPTS = 3
@@ -324,6 +327,9 @@ def stored_dataset(dut, fresh_nvs, reboot):
         rb"br_core: no stored dataset, Thread stays idle", timeout=BOOT_TIMEOUT_S
     )
     ot(dut, "dataset init new")
+    ot(
+        dut, f"dataset channel {THREAD_TEST_CHANNEL}"
+    )  # off the home networks (11, 15) and the testbed (25)
     ot(dut, "dataset commit active")
     tlvs = ot(dut, "dataset active -x")[-1]
     reboot()

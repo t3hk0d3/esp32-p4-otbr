@@ -56,6 +56,9 @@ HEAP_SETTLE_S = 5
 ON_OFF_CLUSTER_ID = 0x0006
 ATTR_ON_OFF = 0x0000
 ZIGBEE_MODE = "ziggurat"
+TEST_CHANNEL = (
+    20  # never 11 (home Zigbee), 15 (home Thread) or 25 (spinel2quic testbed)
+)
 ENERGY_CHANNELS = 16  # 802.15.4 channels 11..26
 USB_CHANNEL_KIND = "usb"
 EXPECTED_STATE = "running"
@@ -220,7 +223,12 @@ def zigbee_mode(dut, base_url, guard_channel):
 @contextlib.asynccontextmanager
 async def zigpy_app(address, auto_form=True):
     """A zigpy coordinator connected to the board's WebSocket, shut down afterwards."""
-    config = {"device": {"path": f"ws://{address}/zigbee"}, "database_path": None}
+    # Formed on TEST_CHANNEL: 11 is the home Zigbee network, 15 the home Thread network, 25 the spinel2quic testbed.
+    config = {
+        "device": {"path": f"ws://{address}/zigbee"},
+        "database_path": None,
+        "network": {"channel": TEST_CHANNEL},
+    }
     app = await ControllerApplication.new(config, auto_form=auto_form, start_radio=True)
     try:
         yield app
@@ -345,7 +353,7 @@ class TestZigbeeMode:
         async def body():
             async with zigpy_app(base_url.removeprefix("http://")) as app:
                 info, node = app.state.network_info, app.state.node_info
-                assert 11 <= info.channel <= 26
+                assert info.channel == TEST_CHANNEL
                 assert info.pan_id != 0
                 assert node.nwk == 0
                 scan = await asyncio.wait_for(

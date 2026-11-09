@@ -24,7 +24,7 @@ import time
 
 import pytest
 import requests
-from conftest import ot, wait_ot_state
+from conftest import THREAD_TEST_CHANNEL, ot, wait_ot_state
 
 REQUEST_TIMEOUT_S = 10
 # The board formed the network alone. Polled, not read from the log: base_url waits for the boot's address line, which
@@ -316,6 +316,9 @@ def test_peer_of_another_network_is_listed_apart(
     # preference (never a neighbour), and counts it in peers_other.
     wait_ot_state(dut, {"leader"}, LEADER_TIMEOUT_S)
     trel_peer.command("dataset init new")
+    trel_peer.command(
+        f"dataset channel {THREAD_TEST_CHANNEL}"
+    )  # off the home networks and the testbed
     trel_peer.command("dataset commit active")
     trel_peer.command("ifconfig up")
     trel_peer.command("thread start")
