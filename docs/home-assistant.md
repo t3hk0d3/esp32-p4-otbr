@@ -88,7 +88,7 @@ credentials** picks another.
 ## Several boards
 
 Each board adds coverage. Put them all on the same network (**Add to preferred network** for each), and add each one
-as its own integration entry. Copying the dataset by hand works too; see [Adding more border routers](api.md#adding-more-border-routers).
+as its own integration entry. Copying the dataset by hand works too; see [More border routers on one network](thread-network.md#more-border-routers-on-one-network).
 
 ## Troubleshooting
 

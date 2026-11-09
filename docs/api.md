@@ -1,4 +1,7 @@
-# HTTP API and web UI
+# HTTP API
+
+Reference for scripts and integrations. For using the board, start with the [Web UI tour](web-ui.md).
+
 
 Everything is on port 80, no authentication. Errors on `/device/*` are JSON `{"error": "<code>", "detail": "<text>"}`. Besides the errors listed
 below, any of them can answer 500 `internal` or `no_memory`.
@@ -238,15 +241,10 @@ border router while it is used. It is off by default: turn it on with `PUT /devi
 - Every command is logged at INFO by its first word and length only, as the rest can carry keys
   (`console <peer>: dataset (52 bytes)`). The page asks before `factoryreset`, `reset`, `thread stop`, `ifconfig down`
   and `dataset` changes; a raw WebSocket client does not.
-- Test builds: the USB console's `ot` command uses the same CLI. It answers `console in use from <address>` while a
-  session is attached, refuses lines outside `BR_RUNNING` like the WebSocket, and gives up waiting for the prompt
-  after 10 s.
 
 ```
 websocat ws://<board>/device/console/ws
 ```
-
-<img src="images/console.png" width="640" alt="Thread Console page: connected, with the output of state and router table">
 
 ### Radio channels
 
@@ -384,88 +382,7 @@ connects to `http://<board>`: `tools/otbr_compat.py` checks the `python-otbr-api
 (`delete_active_dataset`, its fallback for a router without factory reset, is not used here: the board supports
 `DELETE /node`); see [Home Assistant](home-assistant.md).
 
-## Web UI
+## Web UI and guides
 
-`http://<board>/` serves the upstream pages (Dashboard, Network to form or join, Commissioner, Addresses, Tools, Topology,
-About) and the Thread Console (`/console.html`, under Management). The Topology page runs a mesh scan (`/device/topology`) and shows a map of the routers and their links, a device table with search and filters, and a device dialog with its addresses and a ping; the last result is kept in the browser. The Dashboard (`/`) is the status page, in three sections. **Device and network**: the board's
-status (a board-wide fault such as unavailable settings storage shows here whatever runs Thread), uptime, last reset,
-Reboot, the two radio slots (C6 and USB radio, with their modes or "Not connected"), Ethernet, board firmware, load,
-memory and chip temperature. **Thread**: Thread's status (`mode` in `/device/status`), and while the border router runs
-the Thread network, identifiers, radio co-processor, Home Assistant, prefix delegation, packet capture and Thread
-addresses; its Home Assistant tile shows the URL to enter in the integration (the Thread backbone address in split
-mode) and the mDNS name. **Zigbee**: the coordinator (see [Zigbee](zigbee.md)). A section whose stack is not running
-says so in one line and links the Radios page. The "Device" menu holds `/ethernet.html` (single or split setup,
-VLANs and addresses, with a review step before the reboot), `/routing.html` (route method, OMR prefix, BGP peers and
-sessions, RIPng status; saved live), `/firmware.html` (P4 bundle and C6 radio firmware, radio
-recovery with the jumper), `/capture.html` (packet capture) and `/diagnostics.html`. Every device page shows the trial
-banner with **Keep new settings** while network settings are on trial. They use only `/device/*`, so they also work in
-`RADIO_FAULT` and while sniffing.
-
-<img src="images/dashboard.png" width="640" alt="Dashboard in three sections. Device and network: Board OK, the Radios card (ESP32-C6 (built-in) runs Zigbee, USB radio off), Ethernet, board firmware, load and memory. Thread: not active, with a link to the Radios page. Zigbee: Coordinator running on channel 25 on the ESP32-C6 (built-in), ZHA connected; cards for Connect Home Assistant (the ws:// path and a Copy button), the connected client, the network as ZHA set it, radio traffic, memory and the radio firmware">
-
-## Creating a Thread network
-
-The board never forms or joins a network by itself. Use the Web UI (Network page: form, join a scanned network, or join
-with dataset TLVs), Home Assistant (add the
-OpenThread Border Router integration with the URL `http://<board>`), or the REST API / `python-otbr-api`:
-
-```
-import asyncio, aiohttp, python_otbr_api as api
-
-async def main():
-    async with aiohttp.ClientSession() as session:
-        otbr = api.OTBR("http://<board>", session)
-        await otbr.create_active_dataset(api.models.ActiveDataSet(network_name="MyThread", channel=15))
-        await otbr.set_enabled(True)
-
-asyncio.run(main())
-```
-
-The dataset is stored on the board and used again at every boot. `GET /node/state` returns `leader` (alone) or
-`router`/`child`/`detached`.
-
-### Adding more border routers
-
-Several boards can serve the same Thread network: each one adds coverage, and the others keep the network reachable when
-one goes down. Form the network on the first board, then give every other board the same active dataset, either with the
-Web UI (on the first board open Network > "This board's dataset" and copy the TLVs; on the new board paste them into
-"Join with Dataset") or by copying it over the REST API:
-
-```
-curl -H 'Accept: text/plain' http://<first-board>/node/dataset/active > dataset.tlv
-curl -X PUT -H 'Content-Type: text/plain' --data-binary @dataset.tlv http://<new-board>/node/dataset/active
-curl -X PUT -H 'Content-Type: application/json' -d '"enable"' http://<new-board>/node/state
-```
-
-The last call is only needed when Thread was off on the new board (no dataset before): `GET /node/state` says `disabled`.
-On a board that is already on a network, the `PUT` of the dataset restarts Thread on the new one by itself, and enabling a
-running Thread would start a fresh attach.
-
-#### Choosing the leader
-
-Two boards that join the same network do not trade the leader role by themselves. Both start with the same leader weight
-(65), and a healthy leader is never replaced because of weight: only a partition merge compares weights, and equal
-weights are decided by a random partition ID. So the board that formed the network stays leader.
-
-To make another board the leader, raise its weight above the current leader's. The Leader card on the Network page has
-an adjustment slider (-16 to +16, stored across restarts) that is added to the base weight; `PUT /device/thread` with
-`leader_weight_adjustment` does the same. The adjustment alone changes no role.
-Sent together with `become_leader`, the adjustment is stored first; if the take-over is then refused (409) or fails (503/500), the
-error reply carries the stored `leader_weight_adjustment` and `applied` next to its own `detail`.
-
-<img src="images/leader.png" width="640" alt="Leader card on the Network page: this board 66 (65 base, +1 adjustment) against the current leader 65 (router 0x1000), a 48 to 96 scale with both marks, the verdict Higher than the leader: this board wins the next merge, the weight adjustment slider at +1 with Save, and the Become leader button enabled">
-
-The **Become leader** button (`{"become_leader": true}`) then asks this board to take over. OpenThread only agrees when
-this board's weight is strictly higher than the current leader's, so equal weights refuse with 409 `cannot_take_over`
-and `detail` `weight not higher`. Traffic over the mesh pauses briefly while the role changes; the Thread dataset stays
-the same.
-
-<img src="images/leader-confirm.png" width="640" alt="Become leader? confirmation: this board starts a new partition with itself as leader (weight 66) and router 0x1000 (weight 65) moves over; the dataset, addresses and pairings don't change, mesh traffic can drop for a few seconds, router 0x1000 keeps working as a border router; Cancel and Become leader buttons">
-
-Afterwards, only the weight is stored, not the role. A quick restart of this board keeps the role. If it is offline for
-more than about 2 minutes, another router takes over and keeps the role, even with a lower weight: the weight only counts
-when partitions merge, and a board that comes back joins the existing partition. Press Become leader again then. If the
-weight read times out right after a started take-over, the reply carries `"partial": true`.
-
-In Home Assistant, add each board as its own OpenThread Border Router integration entry. Running several of these boards
-on one network has not been tested on hardware yet.
+The web pages are described in the [Web UI tour](web-ui.md). Creating a network, adding border routers and choosing the
+leader are in [Your Thread network](thread-network.md).

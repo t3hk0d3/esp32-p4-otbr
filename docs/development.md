@@ -248,7 +248,9 @@ back; 2026-11-03):
   `<base>/latest/download/versions.txt` and `<base>/download/<tag>/<file>`, for example a local HTTP server
   (`p4/pytest/test_self_update.py` does this). An empty argument restores GitHub. The release link on the Firmware
   page then points to the same base, and the page shows it only for an `https://` base.
-- `ot trel` prints TREL state and peers.
+- `ot <command>` runs an OpenThread CLI line through the same CLI as the Thread console WebSocket (`ot trel` prints
+  TREL state and peers). It answers `console in use from <address>` while a WebSocket session is attached, refuses lines
+  outside `BR_RUNNING`, and gives up waiting for the prompt after 10 s.
 - `tools/make_bundle.py --help` shows how to inspect an `otbr.bundle`.
 
 ### Known upstream behaviour
