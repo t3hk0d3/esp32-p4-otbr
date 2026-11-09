@@ -73,3 +73,8 @@ runs Zigbee it says so in one line and links the Radios page, and nothing is pol
 - No settings on the board: the network (channel, PAN ID, keys) is ZHA's. Resetting the board forgets the network, so
   keep ZHA's backups.
 - Mode changes into and out of Zigbee reboot the board.
+- Slow pairing of router devices (mains-powered bulbs, plugs, switches): a device that joins as a router often fails
+  the key exchange, leaves and joins again every few seconds, so pairing takes 20 to 60 s and sometimes fails. End
+  devices pair normally. The cause is in Ziggurat's routing: it cannot send to a new router until that router's first
+  link status, about 15 s after joining ([zigpy/ziggurat#88](https://github.com/zigpy/ziggurat/issues/88)). Keep
+  permit-join open and retry the pairing if it fails.
