@@ -75,7 +75,7 @@ see `.pre-commit-config.yaml`).
 - Words: **radio** is a radio on the board (the C6 or a USB dongle, `builtin-c6` / `usb-...` in the API); **Thread
   channel** or **Zigbee channel** is the 802.15.4 channel 11 to 26. Jargon is defined in `docs/glossary.md` and linked
   at its first use on a page.
-- Images live in `docs/images/`. Screenshots are PNG, taken from the preview server (`tools/docs_preview.py`) where it
+- Images live in `docs/images/`. Diagrams come from `tools/docs_diagrams.py docs/images`. Screenshots are PNG, taken from the preview server (`tools/docs_preview.py`) where it
   can show the page, and carry an `alt` text that says what the reader should notice. Diagrams are standalone SVG in
   the style of `docs/images/hero.svg`: their own `<style>` with a light and a dark scheme, teal for radio, copper for
   wire.

@@ -5,6 +5,8 @@ Thread devices get IPv6 addresses from the mesh's **OMR prefix** (off-mesh routa
 Ethernet link as the board reach them through the board's router advertisements. Computers on **other** networks reach
 them only when your main router knows that the prefix lives behind the board. This page is about telling it.
 
+![The board announces the Thread prefix to your router over BGP or RIPng, so other subnets reach Thread devices](images/routing.svg)
+
 **Most homes need nothing here.** If your router hands out IPv6 prefixes by DHCPv6 prefix delegation (most ISP routers
 with IPv6 do), the default, **DHCPv6 PD**, works by itself. Read on if:
 

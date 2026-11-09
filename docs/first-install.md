@@ -18,14 +18,16 @@ How to turn a new Waveshare ESP32-P4-WIFI6-POE-ETH into a working Thread border 
 
 The connectors you need:
 
+![Top view of the board: the 40-pin header along the top, the ESP32-P4 and ESP32-C6 modules, the C6's IPEX antenna connector, and along the bottom edge RESET and BOOT, the stacked USB-A and USB-C ports, Ethernet, the TF card slot and the H7 pads](images/board.svg)
+
 | Part | Where | Used for |
 | --- | --- | --- |
-| P4 USB-C port | board edge | flashing, the console, power without PoE |
+| USB-C port | bottom edge, left, stacked with the USB-A port | flashing, the console, power without PoE |
 | Ethernet (RJ45) | bottom edge, middle | network and PoE power |
-| USB-A port | bottom edge, left | an optional USB radio dongle ([Radios](radios.md)) |
+| USB-A port | bottom edge, left, stacked with the USB-C port | an optional USB radio dongle ([Radios](radios.md)) |
 | C6 antenna connector (IPEX) | corner of the small ESP32-C6 module | the 2.4 GHz antenna |
 | H7 | four pads right of the TF card slot | the optional [maintenance jumper](#maintenance-jumper-wiring) or a USB-UART adapter |
-| RESET and BOOT buttons | left of the USB-A port | forcing the P4 into download mode if flashing fails |
+| RESET and BOOT buttons | left of the USB ports | forcing the P4 into download mode if flashing fails |
 
 ## 1. Flash the P4
 
@@ -52,6 +54,8 @@ A new board's C6 runs Espressif's factory firmware ([ESP-Hosted](glossary.md)), 
 | A and B failed, and you have a 3.3 V USB-UART adapter | [C: USB-UART adapter](#c-usb-uart-adapter) |
 
 Every way ends with [uploading the radio firmware](#upload-the-radio-firmware).
+
+![First install: flash the P4, open the web page, put the radio firmware on the C6 one of three ways, upload c6_rcp.bin, give the board a Thread network](images/install-paths.svg)
 
 ### A: no wires
 

@@ -13,6 +13,8 @@ Everything on **Device > Ethernet**: how the board sits on your network, its nam
   Nothing passes between the two. A request on the wrong one is refused (403). mDNS runs only on the Thread backbone,
   so Home Assistant must be on that network. Your switch port must carry both VLANs (tagged) before you apply.
 
+![Split mode: one tagged cable to a switch; the management VLAN for the browser and Prometheus, the Thread backbone VLAN for Home Assistant and other border routers](images/split-mode.svg)
+
 Change it on the Ethernet page: pick the setup, edit the interfaces (VLAN, DHCP or a static address), review the changes,
 then apply. The board reboots into the new settings on trial.
 
@@ -90,6 +92,8 @@ DHCP and the setting has no effect.
 TREL (Thread Radio Encapsulation Link) carries Thread mesh links over Ethernet, next to the 15.4 radio: border routers of
 the same Thread network on the same link become direct neighbours, so two radio islands joined only by the LAN form one
 Thread network, and the mesh can route around weak radio hops. Thread devices themselves keep using the radio.
+
+![TREL: two boards with separate radio areas joined over an Ethernet switch into one Thread mesh](images/trel.svg)
 
 - On by default. It runs on the backbone interface: `thread_bb` in split mode, the Ethernet port otherwise. Peers are found
   with mDNS (`_trel._udp`) on that link, and only peers of the same Thread network (extended PAN ID) are used.

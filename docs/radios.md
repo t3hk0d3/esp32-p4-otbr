@@ -10,6 +10,8 @@ ZigStar OllyZig. Each radio runs in one **mode** that you pick on the **Radios**
 | **RCP proxy** (`rcp-proxy`) | Hands the radio's serial line to another computer over the network, see [RCP proxy](#rcp-proxy). Works with any dongle firmware. |
 | **Off** (`off`) | Listed, not used. The C6 is held in reset. |
 
+![The C6 and a USB dongle connect to the P4, which runs each radio as Thread, Zigbee, an RCP proxy or off, serving Home Assistant, Matter controllers, ZHA and Zigbee2MQTT](images/radios.svg)
+
 Out of the box the C6 runs the Thread border router and a new dongle is off. Without a dongle nothing changes: you
 don't need this page.
 
@@ -78,6 +80,8 @@ Use it for:
 
 - **Zigbee2MQTT** or another Zigbee host with a dongle running Z-Stack or EZSP firmware.
 - An **OpenThread border router on Linux** (`otbr-agent`) that drives the C6 or a dongle with OpenThread RCP firmware.
+
+![RCP proxy: a radio on the board is served over TCP or UDP to another computer running Zigbee2MQTT, ZHA or otbr-agent](images/rcp-proxy.svg)
 
 Settings in the Configure dialog:
 
