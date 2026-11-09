@@ -337,9 +337,12 @@ settings are stored and applied at once, also for an unplugged radio.
 | 500 `failed` | the mux is not started, storage failed or a probe took too long |
 | 503 `mux_busy` | the radio mux took the change but did not answer within 5 s; a mode, speed or proxy change may still be applied, a start, move or stop will not (read the channel again) |
 
-A move that fails after the 202 (the target does not start, or open Thread sessions do not end within 45 s) leaves
-Thread on the old channel and shows on the target as `"state": "fault"` with the reason in `error` (`drain_timeout`
-among them); a refused stop leaves the channel `running` in `otbr` with `error` `drain_timeout`. Poll
+A move can fail in two ways after the 202. When open Thread sessions do not end within 45 s, nothing is committed:
+Thread keeps running on the old channel, `otbr_channel` still names it, and the target shows `"state": "fault"` with
+`error` `drain_timeout` (send the move again). When the target does not start, the move is already committed: Thread
+stays on the target in `fault` (`RADIO_FAULT`, the reason in `fault_reason` and the target's `error`); there is no
+switch back, a PUT of `otbr` on the target retries and one on another channel moves it. A refused stop leaves the
+channel `running` in `otbr` with `error` `drain_timeout`. Poll
 `GET /device/channels` after a 202. While OpenThread starts on its channel, that channel shows `starting`.
 
 ### Zigbee coordinator (experimental)
