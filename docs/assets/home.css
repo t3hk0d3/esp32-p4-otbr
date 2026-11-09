@@ -95,6 +95,8 @@
 .otbr-home .rd-modes rect { fill: var(--bg); stroke-width: 1; }
 .otbr-home .rd-modes text { font-size: 13px; font-weight: 600; }
 .otbr-home .rd-modes .off { fill: #5b6770; font-size: 12px; font-weight: 400; }
+.otbr-home .rd-ico { fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.otbr-home .rd-ico.thread { stroke: var(--air); } .otbr-home .rd-ico.zigbee { stroke: var(--zig); }
 .otbr-home .rd-board { fill: #0b2627; stroke: var(--air); stroke-width: 1.5; }
 .otbr-home .rd-air { stroke-width: 1.6; stroke-dasharray: 5 6; stroke-linecap: round; }
 .otbr-home .rd-eth path { fill: none; stroke: var(--wire); stroke-width: 3; stroke-linecap: round; }
