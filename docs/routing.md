@@ -35,6 +35,8 @@ are kept across reboots and updates.
 
 The page shows the OMR prefix in use, the board's own ULA and what is announced, and refreshes every 5 seconds.
 
+<img src="images/routing.png" width="640" alt="Routing page: the route methods DHCPv6 PD (in use), RIPng, BGP and Off as cards; the OMR prefix Automatic (in use) or Custom; the box to also announce the board's own ULA; the OMR prefix in use, this router's prefix, the ULA and what is announced">
+
 There is no password on BGP or RIPng. Limit what your router accepts from the board to the board's prefixes, as in the
 examples below.
 

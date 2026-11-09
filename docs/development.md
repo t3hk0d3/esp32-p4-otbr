@@ -307,6 +307,16 @@ to pages and images stay relative, links to anything else in the repository beco
 `nav` of `mkdocs.yml` as well as `docs/README.md`. `make docs` builds it with `--strict` (a broken link fails), `make
 docs-serve` previews it.
 
+Diagrams and screenshots are made by scripts, so they can be retaken after a UI change:
+
+- `python3 tools/docs_diagrams.py docs/images` writes the SVG diagrams.
+- `python3 tools/docs_preview.py` serves this checkout's web UI on `http://localhost:8766/` with the board answers
+  recorded in `tools/docs_preview/recording.json` (`--record http://<board>` records new ones: only GETs reach the
+  board, and network keys and global IPv6 addresses are scrubbed). With it running,
+  `uv run --with playwright tools/docs_screenshots.py [name ...]` takes the screenshots into `docs/images/`, with the
+  board shown as `esp-otbr-a1b2c3.local`. Screenshots that need state the recording doesn't have (a radio fault, a
+  network trial, Home Assistant's own dialogs) are taken by hand.
+
 `.github/workflows/docs.yml` builds the site on pull requests that touch the docs and publishes it from `master` and
 after every successful `v*` build. Before publishing, `make docs-firmware` puts the P4 images of the latest release and
 an [ESP Web Tools](https://esphome.github.io/esp-web-tools/) manifest (`tools/flash_manifest.py`, from `flash_args`)

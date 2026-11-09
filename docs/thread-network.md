@@ -13,7 +13,7 @@ Three ways to give the board a network:
 
 ## On the Network page
 
-<img src="images/network.png" width="640" alt="Network page: a scan lists three nearby Thread networks with a Join button each; Join with Dataset shows pasted dataset TLVs and the preview MyHome, channel 15, PAN 0x1234; Form New Network has name, key, PAN ID and channel">
+<img src="images/network.png" width="640" alt="Network page: the Leader card (this board 65, the current leader 65, weight adjustment slider, Become leader); Discover Thread Networks with Scan; Join with Dataset with a box for the hex TLVs and This board's dataset; Form New Network with name, key, PAN ID and channel">
 
 - **Discover Thread Networks:** press **Scan** to list nearby networks, then **Join** on one. Joining this way asks
   for the network key (or a joiner PSKd); with another border router's network, the dataset is easier.

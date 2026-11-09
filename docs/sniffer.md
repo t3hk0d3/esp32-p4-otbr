@@ -11,6 +11,8 @@ The board can record the 802.15.4 radio traffic of one Thread or Zigbee channel 
 
 **Device > Packet capture**:
 
+<img src="images/capture.png" width="640" alt="Packet capture page: Channel (auto), Length 30 s, 1 min, 10 min or 1 h, Start capture, and Watch live in Wireshark with the curl | wireshark command">
+
 1. **Channel:** 11 to 26. Leave it empty for the Thread network's channel.
 2. **Length:** 30 s, 1 min, 10 min or 1 h. You can stop early.
 3. **Start capture.** Your browser saves `sniffer.pcap` as the frames arrive. Open it in Wireshark.

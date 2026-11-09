@@ -27,6 +27,9 @@ coordinator).
 
 The Dashboard has three sections:
 
+<img src="images/dashboard.png" width="640" alt="Dashboard while the border router runs: Board OK with uptime and Reboot; cards for the radios (ESP32-C6 runs Thread, USB radio off), Ethernet, board firmware, load and memory; Border router running, router of ha-thread-bbc1 on channel 15, with cards for the Thread network, identifiers, the radio co-processor, Home Assistant, prefix delegation, packet capture and the Thread addresses; Zigbee not active">
+
+
 - **Device and network:** the board's status, uptime, last reset and a Reboot button; the two radios and their modes;
   Ethernet addresses; board firmware; CPU load, memory and chip temperature.
 - **Thread:** while the border router runs, the network (name, Thread channel, PAN ID), this board's role, the radio

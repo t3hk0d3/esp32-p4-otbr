@@ -49,6 +49,10 @@ Open **Device > Radios** (`http://<board>/radios.html`).
   (**Baud**) and **Hardware flow control** (CP210x only). **Save** stores the settings, then switches the mode.
 - **Forget this radio** (in the dialog of an unplugged dongle) removes it and its settings.
 
+<img src="images/radios.png" width="640" alt="Radios page: Thread runs on ESP32-C6 (built-in); the table lists the ESP32-C6 with spinel firmware in Thread border router mode, Running, and a USB2.0-Serial dongle (usb-1a86-7523) with spinel 1.4.0 firmware on a CC13XX_CC26XX chip, Off and Idle, each with a Configure button">
+
+<img src="images/radios-configure.png" width="480" alt="Configure dialog of the USB dongle: the mode cards Off (selected), Thread border router, RCP proxy and Zigbee in a carousel, the serial line with Baud 460800 and Hardware flow control (not supported by this USB bridge), Cancel and Save">
+
 ## Moving Thread to another radio
 
 To move the Thread border router from the C6 to a dongle (or back): open **Configure** on the radio that should run it,
@@ -60,6 +64,8 @@ pick **Thread border router** and press **Move Thread here**.
 - The move takes up to about a minute. The page follows it and shows the result. The old radio is set to **Off**.
 - If Thread doesn't start on the new radio, it stays bound there and the board shows a radio fault: try again, or move
   Thread back.
+
+<img src="images/radios-move.png" width="480" alt="Configure dialog of the USB dongle with Thread border router picked: a note says saving moves Thread from ESP32-C6 (built-in) to this radio, devices lose the border router for a few seconds, the network stays; the button reads Move Thread here">
 
 The same way, picking **Thread border router** on a radio while no radio runs it starts Thread there, and picking another
 mode on the Thread radio stops Thread.

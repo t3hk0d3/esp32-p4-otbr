@@ -20,7 +20,7 @@ then apply. The board reboots into the new settings on trial.
 
 <table>
 <tr>
-<td width="33%"><img src="images/ethernet.png" alt="Ethernet page: the Single port and Split management and Thread setup cards, with the live interface and its addresses"></td>
+<td width="33%"><img src="images/ethernet.png" alt="Ethernet page: the Single port and Split management and Thread setup cards, Split in use, and the Management (untagged) and Thread backbone (VLAN 49) interfaces with their addresses"></td>
 <td width="33%"><img src="images/ethernet-edit.png" alt="Ethernet page while editing: Split is picked, VLAN 10 for management and VLAN 20 with a static address for the Thread backbone, and the bar says how many changes are not applied yet"></td>
 <td width="33%"><img src="images/ethernet-review.png" alt="Review of the changes: a table of each setting now and after apply, the steps after the reboot, and the tick that the switch port carries VLAN 10 and 20 tagged"></td>
 </tr>
@@ -118,5 +118,5 @@ Thread network, and the mesh can route around weak radio hops. Thread devices th
   other routers don't show whether they use TREL: Thread doesn't report it.
 - In split mode UDP port 12390 (TREL) is dropped on `mgmt`.
 
-<img src="images/ethernet-trel.png" width="640" alt="Thread over Ethernet card on the Ethernet page: TREL active on the Thread backbone, the Off/On switch on On, 2 peers, sent and received packet counters and the peer table">
+<img src="images/ethernet-trel.png" width="640" alt="TREL card on the Ethernet page: active on the Thread backbone, the Off/On switch on On, 1 peer, sent and received packet counters, and the peer table with its extended address, network (this), preference 15.4 100% and TREL 100%, and address">
 

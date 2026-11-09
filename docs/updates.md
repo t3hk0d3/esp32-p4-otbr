@@ -7,12 +7,14 @@ The board runs two pieces of firmware, both updated over the network on **Device
 
 Keep both from the same release.
 
-<img src="images/firmware.png" width="640" alt="Firmware page: the Border router (ESP32-P4) and Radio (ESP32-C6) cards with the installed versions and an install box each, and the Radio recovery card with the jumper fitted">
+<img src="images/firmware.png" width="640" alt="Firmware page: the Updates from GitHub card, the Border Router and Radio Co-Processor cards with the installed versions and an upload box each, and the Radio recovery card with the jumper fitted">
 
 ## Update from GitHub
 
 The **Updates from GitHub** card checks the [latest release](https://github.com/t3hk0d3/esp32-p4-otbr/releases/latest)
 when you open the page (at most once an hour; **Check again** checks now) and shows what it would install.
+
+<img src="images/firmware-update.png" width="640" alt="Updates from GitHub card on a board with a development build: newer than the release; the latest release's border router and radio firmware versions next to the installed ones, checked just now, and the buttons Install the latest release anyway and Check again">
 
 Press **Install and reboot**. The board downloads the release, installs the board firmware, then the radio firmware when
 it differs, and reboots once. It takes a minute or two.
@@ -21,7 +23,8 @@ it differs, and reboots once. It takes a minute or two.
 - The check needs internet access and DNS on the board.
 - If the radio firmware fails to install after the board firmware, the board still reboots into the new firmware and the
   page says so. Press **Install and reboot** again: only the radio firmware is installed then.
-- A board that runs a newer development build is offered **Install &lt;tag&gt; anyway** to go back to the release.
+- A board that runs a newer development build is offered **Install the latest release anyway** to go back to the
+  release.
 
 API: `GET /device/update` shows the check, `POST /device/update` installs ([HTTP API](api.md#device-api)).
 
