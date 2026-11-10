@@ -22,6 +22,7 @@
 #include "eth.h"
 #include "netcfg.h"
 #include "netnames.h"
+#include "timesync.h"
 #include "reboot_gate.h"
 #include "routing.h"
 #include "storage.h"
@@ -70,6 +71,10 @@ static void net_init_task(void *arg)
         vTaskDelete(NULL);
     }
     netnames_set_mode(netcfg_running_mode());
+    err = timesync_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "timesync_init: %s, the clock is not set", esp_err_to_name(err));
+    }
     br_core_set_trel(netcfg_trel_enabled()); // before the start: applied right after OpenThread is initialised
     err = br_core_start(netcfg_backbone_netif());
     if (err != ESP_OK) {

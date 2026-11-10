@@ -33,6 +33,9 @@
 :   How devices on a local network find each other by name (`esp-otbr-xxxxxx.local`) and by service, without a DNS
     server. Home Assistant finds border routers this way. It does not cross routers or VLANs.
 
+**NTP**
+:   Network Time Protocol: how the board asks a time server for the date. See [Time](networking.md#time).
+
 **OMR prefix**
 :   Off-mesh routable prefix: the IPv6 prefix Thread devices take the address from that the rest of your network can
     reach. See [Routing to the mesh](routing.md).

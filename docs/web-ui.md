@@ -15,7 +15,7 @@ The menu has three parts:
 | | **Commissioner**, **Addresses**, **Tools** | Upstream OpenThread pages: commission a device by joiner credentials, add on-mesh prefixes, ping | |
 | | **Console** | The board's OpenThread command line in the browser | [Topology and console](topology.md#thread-console) |
 | **Device** | **Radios** | What each radio runs: Thread, Zigbee, RCP proxy or off | [Radios](radios.md) |
-| | **Ethernet** | Single or split (VLAN) setup, addresses, names, Thread over Ethernet | [Networking](networking.md) |
+| | **Ethernet** | Single or split (VLAN) setup, addresses, names, time server, Thread over Ethernet | [Networking](networking.md) |
 | | **Firmware** | Updates from GitHub, uploads, radio recovery | [Updates](updates.md) |
 | | **Diagnostics** | CPU, memory, tasks | [Monitoring](diagnostics.md) |
 | | **Packet capture** | Record 802.15.4 traffic for Wireshark | [Packet capture](sniffer.md) |

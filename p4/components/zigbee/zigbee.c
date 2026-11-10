@@ -418,7 +418,7 @@ static void on_connect(const zigbee_msg_t *m)
     const uint32_t old_sid = z->link_sid;
     const bool had_client = zigbee_link_client(&z->link) >= 0;
     const int to_close = zigbee_link_connect(&z->link, m->fd);
-    const int64_t now = zigbee_now_epoch();
+    const int64_t now = esp_timer_get_time();
     char old_addr[ZIGBEE_ADDRESS_MAX];
 
     strlcpy(old_addr, z->link_addr, sizeof(old_addr));
@@ -437,11 +437,11 @@ static void on_connect(const zigbee_msg_t *m)
     if (had_client) {
         g_zigbee_status.has_last_client = true;
         strlcpy(g_zigbee_status.last_client_address, old_addr, sizeof(g_zigbee_status.last_client_address));
-        g_zigbee_status.last_client_left = now;
+        g_zigbee_status_times.last_client_left_us = now;
     }
     g_zigbee_status.has_client = true;
     strlcpy(g_zigbee_status.client_address, z->link_addr, sizeof(g_zigbee_status.client_address));
-    g_zigbee_status.client_since = now;
+    g_zigbee_status_times.client_since_us = now;
     taskEXIT_CRITICAL(&g_zigbee_status_lock);
     if (zigbee_link_take_send_hello(&z->link) && z->hello != NULL) {
         const zigbee_out_t hello = {
@@ -467,7 +467,7 @@ static void on_disconnect(const zigbee_msg_t *m)
     if (m->sid != z->link_sid || !zigbee_link_disconnect(&z->link, m->fd)) {
         return;
     }
-    const int64_t now = zigbee_now_epoch();
+    const int64_t now = esp_timer_get_time();
 
     z->link_sid = 0;
     publish_link(); // the sender now discards the frames still queued for this client, which frees their slots
@@ -476,7 +476,7 @@ static void on_disconnect(const zigbee_msg_t *m)
     g_zigbee_status.has_client = false;
     g_zigbee_status.has_last_client = true;
     strlcpy(g_zigbee_status.last_client_address, z->link_addr, sizeof(g_zigbee_status.last_client_address));
-    g_zigbee_status.last_client_left = now;
+    g_zigbee_status_times.last_client_left_us = now;
     taskEXIT_CRITICAL(&g_zigbee_status_lock);
 }
 
@@ -502,11 +502,11 @@ static void start_if_due(void)
     }
     z->start_due = false;
     z->start_ran = true;
-    const int64_t now = zigbee_now_epoch();
+    const int64_t now = esp_timer_get_time();
 
     taskENTER_CRITICAL(&g_zigbee_status_lock);
     g_zigbee_status.stack_started = true;
-    g_zigbee_status.started = now;
+    g_zigbee_status_times.started_us = now;
     taskEXIT_CRITICAL(&g_zigbee_status_lock);
     ESP_LOGI(TAG, "starting ziggurat");
     ziggurat_start();

@@ -24,6 +24,6 @@ idf_component_register(SRCS ${pure_srcs} "zigbee.c" "platform.c" "ws.c" "status.
                        INCLUDE_DIRS "include"
                        REQUIRES esp_http_server
                        PRIV_REQUIRES radio_mux esp_timer esp_hw_support freertos heap log mbedtls esp_system
-                                     openthread lwip board_cores reboot_gate netcfg)
+                                     openthread lwip board_cores reboot_gate netcfg timesync)
 target_include_directories(${COMPONENT_LIB} PRIVATE "${spinel_dir}")
 include(${CMAKE_CURRENT_LIST_DIR}/build_ziggurat.cmake)

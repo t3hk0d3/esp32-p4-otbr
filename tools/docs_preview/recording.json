@@ -34,6 +34,11 @@
   "status": 200,
   "type": "application/json"
  },
+ "/device/time": {
+  "body": "eyJlbmFibGVkIjogdHJ1ZSwgIm1vZGUiOiAiYXV0byIsICJzZXJ2ZXIiOiAiIiwgInN0YXRlIjogInN5bmNlZCIsICJub3ciOiAxNzk0MjgzMzIwLCAic3luY2VkX2FnZV9zIjogMTQwLCAic291cmNlIjogImRoY3AiLCAic2VydmVycyI6IFt7ImFkZHJlc3MiOiAiMTYyLjE1OS4yMDAuMSIsICJhbnN3ZXJlZCI6IHRydWV9XSwgImRoY3Bfc2VydmVycyI6IFsiMTYyLjE1OS4yMDAuMSJdLCAiZGhjcF9pZmFjZSI6ICJtZ210In0=",
+  "status": 200,
+  "type": "application/json"
+ },
  "/device/update": {
   "body": "eyJzdGF0ZSI6ICJkb25lIiwgImNoZWNrZWRfYWdlX3MiOiAyNSwgImVycm9yIjogbnVsbCwgInJlbGVhc2UiOiB7InRhZyI6IG51bGwsICJhcHAiOiAiMjAyNjExMDVUMTE0OTU1Wi01NmVjYTc5IiwgInJjcCI6ICIyMDI2MTEwNVQxMTQ3MzdaLTU2ZWNhNzkiLCAidXJsIjogImh0dHBzOi8vZ2l0aHViLmNvbS90M2hrMGQzL2VzcDMyLXA0LW90YnIvcmVsZWFzZXMvbGF0ZXN0In0sICJyZXBvX3VybCI6ICJodHRwczovL2dpdGh1Yi5jb20vdDNoazBkMy9lc3AzMi1wNC1vdGJyIiwgInJ1bm5pbmciOiB7ImFwcCI6ICIyMDI2MTEwOVQxNTAyMzBaLTY4YTQyYzgiLCAicmNwIjogIjIwMjYxMTA5VDA4NDM1M1otNGVlOTkxZCJ9LCAiYXBwIjogIm9sZGVyIiwgInJjcF9kaWZmZXJzIjogdHJ1ZSwgImF2YWlsYWJsZSI6IHRydWV9",
   "status": 200,
