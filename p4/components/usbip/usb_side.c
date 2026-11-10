@@ -119,6 +119,12 @@ static usbip_xfer_status_t map_status(usb_transfer_status_t st)
 // Reads the transfer and posts; the transfer is left alone afterwards (the network task may free it at once).
 static void xfer_cb(usb_transfer_t *t)
 {
+    // NO_DEVICE comes only when the root port lost its device (no hubs). esp-usb runs these callbacks before the
+    // client's DEV_GONE message, and the engine ends the session on this completion: mark the device gone first, so
+    // port_power_cycle does not power off a port that is already recovering.
+    if (t->status == USB_TRANSFER_STATUS_NO_DEVICE) {
+        atomic_store(&s_gone, true);
+    }
     const usbip_event_t ev = {
         .type = USBIP_EV_XFER_DONE,
         .x = t->context,
@@ -561,15 +567,18 @@ esp_err_t usbip_usb_open(usbip_dev_rec_t *rec, const uint8_t **cfg, size_t *cfg_
         return ESP_ERR_NOT_FOUND;
     }
     usb_device_handle_t dev = NULL;
+
+    // Before the open: an unplug right after it then sets s_gone and finds the address for DEV_GONE.
+    atomic_store(&s_gone, false);
+    s_dev_addr = addr;
     esp_err_t err = usb_host_device_open(s_client, addr, &dev);
 
     if (err != ESP_OK) {
+        s_dev_addr = 0;
         say(why, cap, "the device failed to open: %s", esp_err_to_name(err));
         return err;
     }
     s_dev = dev;
-    s_dev_addr = addr;
-    atomic_store(&s_gone, false);
     atomic_store(&s_dev_open, true);
 
     const usb_device_desc_t *dd = NULL;
