@@ -98,6 +98,8 @@ the web UI shows times in your browser's time zone.
 The **Time** section at the end of the Ethernet page shows the board time, whether it is synced, when it last synced,
 and which server it asks:
 
+<img src="images/ethernet-time.png" width="640" alt="The Time section of the Ethernet page with a Synced chip: board time, last synced 2 minutes ago, server 162.159.200.1 with an answered chip, from your router (DHCP on Management); Set the clock from the network ticked, Automatic picked, and the Discard and Save buttons">
+
 | Choice | Server used |
 | --- | --- |
 | **Automatic** (default) | the NTP server your router hands out with the DHCP lease (up to two); if it hands out none, `pool.ntp.org` |

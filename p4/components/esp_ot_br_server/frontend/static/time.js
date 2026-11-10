@@ -157,8 +157,10 @@ function renderServers() {
     if (i)
       box.appendChild(el('br'));
     box.appendChild(el('span', s.address, 'mono'));
-    if (s.answered)
+    if (s.answered) {
+      box.appendChild(env.document.createTextNode(' '));
       box.appendChild(el('span', 'answered', 'chip chip-ok'));
+    }
   });
 }
 

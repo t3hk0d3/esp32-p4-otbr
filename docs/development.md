@@ -154,18 +154,27 @@ Checks beyond the automated tests, and what has not been run on hardware yet. Th
 - The CH34x status-packet decoding (`uart_errors`) follows the ch34x driver's own defines
   (`CH34X_UART_STATE_TRANSIENT_MASK`, byte 0) and is not confirmed against a datasheet.
 
-### Time sync (not yet run on hardware)
+### Time sync
 
-Spec `docs/superpowers/specs/2026-11-10-time-sync-design.md` section 8. One batched pass:
+Spec `docs/superpowers/specs/2026-11-10-time-sync-design.md` section 8. Run on 2026-11-10 with `20261110T025922Z-06f7cb5`
+in split mode (management untagged, Thread backbone on VLAN 49):
 
-1. Power-up on the home network: the clock is set within seconds; `source` matches what the router hands out.
-2. Zigbee `started` shows a real date although the stack started before the first sync.
-3. Soft restart: the clock stays valid; Last synced reads "Before the last restart" until the next answer.
+1. Power-up on the home network: the clock is set within seconds; `source` matches what the router hands out. **Passed**:
+   synced about 20 s after the web server came up, to the second; `pool.ntp.org` with no server in the lease, then
+   `source: dhcp`, `dhcp_iface: mgmt` once the management DHCP named one. No "unreachable" right after a sync.
+2. Zigbee `started` shows a real date although the stack started before the first sync. **Not run** (needs Zigbee
+   mode).
+3. Soft restart: the clock stays valid; Last synced reads "Before the last restart" until the next answer. **Passed**
+   (with sync off).
 4. A custom server that does not exist: **Server not answering** after a minute, the clock keeps running. Two quick
-   saves in a row: the last one wins.
-5. Off: no NTP packets on the wire (capture on the switch).
+   saves in a row: the last one wins. **Passed**; a bad server gets a 400.
+5. Off: no NTP packets on the wire (capture on the switch). **Passed at API level only**: a capture on another VLAN saw
+   nothing either way, so the wire proof is still open.
 6. Split mode with servers on both leases: which lease wins, and whether `dhcp_iface` names it. A DHCP renewal does not
-   restart the sync (`synced` stays).
+   restart the sync (`synced` stays). **Not run.**
+
+The timesync task's stack peaked at 1260 of 3072 bytes. Known: the reply to a `PUT` shows the old `servers` and
+`source` until the task applies the change (the page corrects it on its next poll).
 
 ### Radios
 

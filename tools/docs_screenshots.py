@@ -77,6 +77,7 @@ SHOTS = {
     "diagnostics.png": page_shot("/diagnostics.html"),
     "ethernet.png": page_shot("/ethernet.html", 900),
     "ethernet-trel.png": element_shot("/ethernet.html", "#trel"),
+    "ethernet-time.png": element_shot("/ethernet.html", "#timeSection"),
 }
 
 

@@ -165,6 +165,15 @@ class TestTimePage:
             True,
         ]
 
+    def test_answered_chip_is_spaced_from_the_address(self):
+        # On a server that answered: a space between its address and the "answered" chip.
+        r = scenario(
+            page("time", routes())
+            + START
+            + "return t.el('tm-servers').children.map((c) => c.textContent);"
+        )
+        assert r[:3] == ["10.0.10.1", " ", "answered"]
+
     def test_clock_not_set_shows_not_set(self):
         # On now null: board time "Not set" and the Clock not set chip.
         r = scenario(
