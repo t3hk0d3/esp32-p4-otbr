@@ -33,6 +33,7 @@ extern "C" {
 
 // Linux errno values. The client is Linux, so these are fixed here and not taken from the host libc, whose numbers
 // differ for some of them.
+#define USBIP_ENOMEM 12
 #define USBIP_ENODEV 19
 #define USBIP_EINVAL 22
 #define USBIP_EPIPE 32

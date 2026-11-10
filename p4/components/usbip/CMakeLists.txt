@@ -1,4 +1,4 @@
-set(pure_srcs "proto.c" "core.c" "budget.c")
+set(pure_srcs "proto.c" "core.c" "budget.c" "engine.c")
 
 if(IDF_TARGET STREQUAL "linux")
     # Host tests cover the pure sources.
