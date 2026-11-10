@@ -83,7 +83,7 @@ down, the others keep the network reachable.
 
 <table>
   <tr>
-    <td width="25%"><img src="docs/images/dashboard.png" alt="Dashboard in three sections. Device and network: Board OK, the Radios card (ESP32-C6 (built-in) runs Zigbee, USB radio off), Ethernet, board firmware, load and memory. Thread: not active, with a link to the Radios page. Zigbee: Coordinator running on channel 25 on the ESP32-C6 (built-in), ZHA connected; cards for Connect Home Assistant (the ws:// path and a Copy button), the connected client, the network as ZHA set it, radio traffic, memory and the radio firmware"></td>
+    <td width="25%"><img src="docs/images/dashboard.png" alt="Dashboard while the border router runs: Board OK with uptime and Reboot; cards for the radios (ESP32-C6 runs Thread, USB radio off), Ethernet, board firmware, load and memory; Border router running, router of ha-thread-bbc1 on channel 15, with cards for the Thread network, identifiers, the radio co-processor, Home Assistant, prefix delegation, packet capture and the Thread addresses; Zigbee not active"></td>
     <td width="25%"><img src="docs/images/topology.png" alt="Topology page: the Thread mesh with its leader and routers"></td>
     <td width="25%"><img src="docs/images/diagnostics.png" alt="Diagnostics: CPU load per core, memory, OpenThread lock timings and tasks"></td>
     <td width="25%"><img src="docs/images/capture.png" alt="Packet capture page: channel, length and a curl-to-Wireshark command"></td>
@@ -98,34 +98,29 @@ down, the others keep the network reachable.
 
 ## Get started
 
-You need [the board](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.htm), a 2.4 GHz antenna on the C6 antenna connector, a USB-C cable for the first flash, and Ethernet.
+You need [the board](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.htm), a 2.4 GHz antenna on the C6's antenna
+connector, a USB-C cable for the first flash, and Ethernet.
 
-1. Download `p4-flash.zip`, `c6_installer.bin` and `c6_rcp.bin` from the
-   [latest release](https://github.com/t3hk0d3/esp32-p4-otbr/releases), or build them yourself with `make build`. Take
-   all three from the same release or build: the installer must match the P4 firmware.
-2. Flash the P4 over USB-C: in Chrome or Edge with the [browser flasher](https://t3hk0d3.github.io/esp32-p4-otbr/flash/)
-   (no download needed), or unpack `p4-flash.zip` and run `esptool --chip esp32p4 write-flash @flash_args` in it, or run
-   `make flash` from a checkout.
-3. A new board's C6 still runs its factory firmware (Espressif ESP-Hosted). Upload `c6_installer.bin` once on the
-   Firmware page at `http://<board>/firmware.html`: the P4 sends it through ESP-Hosted's own update, and it installs
-   what the radio updates need. Skip this step if the maintenance jumper is fitted (the P4 then replaces the factory
-   firmware by itself) or if the C6 already runs this project's firmware.
-4. Upload the radio firmware `c6_rcp.bin` on the same page.
-5. Add the board to Home Assistant ([how](docs/home-assistant.md)), or form a network in its web UI.
+1. Flash the board over USB-C from Chrome or Edge with the
+   [browser flasher](https://t3hk0d3.github.io/esp32-p4-otbr/flash/): nothing to install.
+2. Open the board's web page (`http://esp-otbr-<last six hex digits of the MAC>.local/`, or its IP address) and, on
+   the Firmware page, upload the radio firmware from the
+   [latest release](https://github.com/t3hk0d3/esp32-p4-otbr/releases/latest): `c6_installer.bin` once on a new
+   board, then `c6_rcp.bin`.
+3. Add the board to Home Assistant's OpenThread Border Router integration ([how](docs/home-assistant.md)), or form a
+   network on its Network page.
 
-[First install](docs/first-install.md) walks through all three ways to bring up a new board: no wires, the maintenance
-jumper, or a USB-UART adapter on the C6 header.
+[First install](docs/first-install.md) walks through every step, including the other ways to set up the radio (the
+maintenance jumper, or a USB-UART adapter).
 
 ## Documentation
 
 **Read it online at [t3hk0d3.github.io/esp32-p4-otbr](https://t3hk0d3.github.io/esp32-p4-otbr/).**
 
-The same pages are in [`docs/`](docs/README.md): [Home Assistant](docs/home-assistant.md), [building](docs/building.md),
-[updates](docs/updates.md), [API and web UI](docs/api.md), [radios and USB dongles](docs/radios.md),
-[Zigbee coordinator](docs/zigbee.md), [networking, VLANs, TREL and mesh routing](docs/networking.md),
-[sniffer](docs/sniffer.md), [maintenance jumper](docs/maintenance-jumper.md), [diagnostics](docs/diagnostics.md),
-[Prometheus metrics](docs/metrics.md), [troubleshooting and limitations](docs/troubleshooting.md) and
-[development](docs/development.md). Run `make help` to list the targets for building, flashing, updating and testing.
+The same pages are in [`docs/`](docs/README.md): start with [First install](docs/first-install.md),
+[Home Assistant](docs/home-assistant.md) and the [Web UI tour](docs/web-ui.md); [Troubleshooting](docs/troubleshooting.md)
+when something is red on the Dashboard. To build the firmware yourself, see [Building and flashing](docs/building.md)
+(`make help` lists the targets).
 
 > There is no authentication: anyone on the network can reconfigure or update the board. Put it on a trusted network.
 

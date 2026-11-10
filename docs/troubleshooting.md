@@ -1,69 +1,64 @@
-# Troubleshooting and limitations
+# Troubleshooting
 
-## Fault reasons
-
-`GET /device/status` (`make status BOARD=<board>`) shows `mode` and `fault_reason`. In `RADIO_FAULT` the Thread API
-answers 503; `/device/*`, the device pages and OTA keep working.
-
-The Dashboard shows the fault in red, with what to do and a link to the page that fixes it. A fault that concerns
-the whole board (`storage unavailable`, `esp-hosted firmware`, `no rcp firmware`) shows on the Device and network
-line; the others show in the Thread section, as here with the C6 held in reset:
+Start at the Dashboard. A problem shows in red, with what to do and a link to the page that fixes it. A problem of the
+whole board shows on the **Device and network** line; a radio problem of Thread shows in the **Thread** section:
 
 <img src="images/dashboard-radio-fault.png" width="640" alt="Dashboard in RADIO_FAULT with fault_reason rcp incompatible: Device and network still says Board OK and the Radios card lists the ESP32-C6 (built-in) as Unavailable; the Thread section shows Radio fault in red, the radio firmware does not match this build, install the c6_rcp.bin of the same release, with a link to the Firmware page; the Thread cards are empty">
 
-| `fault_reason` | Meaning and fix |
-| --- | --- |
-| `no rcp firmware` | The C6 has no valid RCP image (new board, erased slots). Upload `c6_rcp.bin`. Not retried automatically. |
-| `esp-hosted firmware` | The C6 still runs its factory ESP-Hosted firmware and no jumper was seen. Upload `c6_installer.bin` of the same release (its C6 base version must match), then `c6_rcp.bin` ([First install](first-install.md), Path 1). OpenThread is not started. |
-| `rcp incompatible` | OpenThread rejected the RCP, or it did not answer (its reset, or the probe before OpenThread starts on the C6; the log names what failed). Upload the `c6_rcp.bin` of the same release. |
-| `storage unavailable` | NVS did not initialise (for example no free pages), `storage_ok` is `false`. The board booted degraded instead of boot-looping: HTTP, OTA and `/device/*` work, OpenThread does not start. NVS is never erased automatically because it holds the Thread credentials. Update to a firmware that fixes it, or erase NVS by hand (`esptool --chip esp32p4 -p /dev/ttyACM0 erase-region 0x9000 0x10000`; the Thread network has to be set up again) and reboot. |
-| `rom recovery failed` | The updater was silent and the jumper recovery failed. Check the jumper wires and `GET /device/radio/log`; try `make recover`; without a jumper use Path 3 of [First install](first-install.md) (USB-UART on H7). |
-| `resetting the RCP failed`, `radio boot timed out`, `OpenThread main loop ended` | Radio did not come up. The board retries (at most three automatic recoveries per 10 minutes), then waits: reboot, or upload firmware. Check the antenna and the C6 console log. |
+The Device pages (Radios, Ethernet, Firmware, Diagnostics) keep working in every fault, so you can always update or
+repair the board from the browser.
 
-## Other problems
+## Radio faults
 
-- Board unreachable after a network change: wait 5 minutes for the revert, or use the console `net reset` (`make monitor`).
-- No IP address: check the cable and the switch port (VLAN setup), `net show` on the console.
-- `GET /api/node` / `/api/devices` show `state` `disabled` (name `OpenThread`, rloc16 `0xfffe`) although `GET /node` says
-  `leader`: upstream esp-thread-br builds that collection entry once and never refreshes it (see
-  `p4/components/PATCHES.md`, "Known upstream behaviour"). Use `/node`, `/node/state` or `/node/dataset/active` (what Home
-  Assistant uses) for the live state.
-- Thread REST answers 503 `radio not available`: see `mode` above; 409 `sniffer active`: a capture is running
-  (`DELETE /device/sniffer`).
-- The board boots in `RADIO_FAULT` after an on-board test: see [Development](development.md#testing) (`c6_hold 0`).
-- The board rebooted by itself and the console showed `supervisor: the OpenThread lock is stuck` or `... the HTTP
-  server task is stuck`: a deadlock was caught (the OpenThread lock not free for 2 minutes, or the HTTP server task not
-  answering for 2 minutes). The core dump is in the `coredump` partition (`idf.py -C p4 coredump-info`); please report it.
-- Recovery from a bad P4 flash: reflash over USB (`make erase flash`). See [First install](first-install.md#recovery-procedures)
-  for the C6.
+The Dashboard names the reason (`fault_reason` in `GET /device/status`):
 
-## Known limitations and non-goals
+| Reason | What it means | What to do |
+| --- | --- | --- |
+| **no rcp firmware** | The C6 has no radio firmware (new board, or after a repair). | Upload `c6_rcp.bin` on the Firmware page. |
+| **esp-hosted firmware** | The C6 still runs its factory firmware. | Upload `c6_installer.bin`, then `c6_rcp.bin`, both from the board's release ([First install](first-install.md#a-no-wires)). |
+| **rcp incompatible** | The radio firmware doesn't match the board's firmware, or the radio doesn't answer. | Upload `c6_rcp.bin` from the same release as the board's firmware. |
+| **rom recovery failed** | The C6 didn't answer and the repair over the maintenance jumper failed. | Check the jumper wires, then **Recover radio** on the Firmware page. Without a jumper: [First install](first-install.md#c-usb-uart-adapter), way C. |
+| **resetting the RCP failed** | The radio stopped answering and the board's automatic recovery failed. It tries up to three times in 10 minutes, then waits. | Check the antenna. Reboot the board, or upload `c6_rcp.bin` again. |
+| **radio boot timed out**, **OpenThread main loop ended** | The radio didn't come up, or Thread stopped. The board does not retry these by itself. | Check the antenna, then reboot the board. If it comes back, upload `c6_rcp.bin` again. |
+| **storage unavailable** | The board's settings storage didn't start. The board runs without Thread rather than restart in a loop. | Update the firmware. If that doesn't help, erase the settings: `esptool --chip esp32p4 -p /dev/ttyACM0 erase-region 0x9000 0x10000` over USB-C, then reboot; the Thread network and network settings have to be set up again. |
 
-- No authentication or TLS anywhere: anybody on the network can reconfigure the board, read the Thread dataset with
-  `GET /node/dataset/active` (also from the `mgmt` VLAN: read-only `GET /node/*` is served there by design) or update its
-  firmware. Put it on a trusted network. `https://` URLs are not supported for downloads.
-- DHCPv6-PD makes Thread devices globally addressable; rely on the upstream router's firewall.
-- Mesh topology requests slow down pings through the border router while they run, because of the Diagnostic Get
-  traffic. Measured with `p4/pytest/test_latency.py` (one Thread peer, a ping every 100 ms, the requests repeated
-  back to back; 2026-11-03):
-  - **The page's scan** (`POST /device/topology`) adds about 105–117 ms to the 99th-percentile round trip, and no ping
-    is lost. A scan is one discover, then two unicast mesh-diagnostics queries per router (its child table and its
-    children's addresses), then one query per full-device child that reported no address. Only one scan runs at a time.
-  - **The old `/topology`** (a multicast diagnostic get, no longer used by the page) adds about 77 ms, and 13 of 1000
-    pings were lost.
-  - **For comparison,** `/node` requests add about 2 ms.
+With a dongle running Thread, **No radio** means it is unplugged: plug it back in, or move Thread to another radio
+([Radios](radios.md#unplugging-the-thread-dongle)).
 
-  The page only scans when someone clicks Load, so in normal use this is a short, occasional delay.
-- Flash writes (OTA) use XIP from PSRAM so traffic keeps flowing, but the P4 reboots after an update.
-- The `-dirty` flag of the app version stamp is as of the last configure (see [Building](building.md#versions)); a new commit
-  refreshes the stamp.
-- Untested on hardware: the USB-UART first install ([First install](first-install.md), Path 3, esptool over H7).
-- Untested on hardware: recovery of a truly blank C6 (bootloader, partition table and otadata erased).
-- The no-wires first install ([First install](first-install.md), Path 1) ran on the board against an ESP-Hosted 0.0.27
-  stand-in, not yet against an untouched factory C6; nor the case where the installer lands in the slot it must overwrite
-  (a factory C6 updated before) and moves itself first.
-- A mDNS reflector between the two VLANs is tolerated, but a host that claims the board's mDNS name with different addresses
-  can rename it (standard mDNS behaviour).
-- Radio firmware updates interrupt the border router for a few seconds; seamless updates are not implemented.
-- Not verified on hardware: the `br_core` give-up path after repeated radio failures, and the fall-back to default network
-  config when the stored config cannot be applied (host-tested only).
+## Common problems
+
+- **The board is unreachable after a network change.** Wait 5 minutes: unconfirmed network settings go back by
+  themselves. Or connect USB-C, open the console at 115200 baud (`make monitor` from a checkout) and type `net reset`:
+  the board goes back to one port with DHCP and reboots.
+- **No IP address.** Check the cable and the switch port (and its VLANs in split mode). The console command `net show`
+  prints the interfaces and their addresses.
+- **Home Assistant can't connect, or doesn't list the board.** See [Home Assistant](home-assistant.md#troubleshooting).
+- **The Thread pages say "radio not available"** (or Home Assistant gets 503): the radio is in fault, see above.
+  **"sniffer active"**: a packet capture is running; stop it on the Packet capture page.
+- **The board rebooted by itself** and the console showed `supervisor: ... is stuck`: the board caught a hang and
+  restarted. Please [report it](https://github.com/t3hk0d3/esp32-p4-otbr/issues), with the console log if you have it.
+- **Pings through the board are slower while the Topology page loads.** Expected: a scan asks every router and adds about
+  0.1 s to the slowest replies while it runs.
+
+## Repairing the board
+
+- **The C6 is broken** (its firmware or base image damaged): with the [maintenance jumper](maintenance-jumper.md), press
+  **Recover radio** on the Firmware page (the board also tries by itself at boot), then upload `c6_rcp.bin` if the
+  Dashboard asks for it. Without the jumper: [First install](first-install.md#c-usb-uart-adapter), way C.
+- **The P4 is broken** (a bad update that didn't roll back): flash it again over USB-C with the
+  [browser flasher](flash.md), letting it erase first. This deletes the stored Thread network and network settings. If
+  the P4 won't enter download mode, hold BOOT while you press RESET.
+- **Back to the factory firmware:** the original firmware is not part of this project; get it from Waveshare or
+  Espressif.
+
+## Known limitations
+
+- **No login and no encryption.** Anyone on the network can reconfigure the board, read the Thread network key or update
+  its firmware. Put it on a network you trust; in [split mode](networking.md) keep the management VLAN private.
+- **Prefix delegation makes Thread devices reachable from the internet** unless your router's IPv6 firewall blocks it.
+- **Updates interrupt Thread.** A radio firmware update stops this border router for a few seconds, a board update
+  reboots it. Other border routers keep the network up meanwhile.
+- **Not yet run on hardware:** way C of the first install, and way A against an untouched factory C6 (it ran against a
+  stand-in). Several boards on one network have not been tested together.
+- **mDNS names:** another device that claims the board's `.local` name can make it rename itself (standard mDNS); see
+  [Networking](networking.md#mdns).

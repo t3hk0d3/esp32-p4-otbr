@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1050 580" width="1050" height="580" role="img"
+     aria-label="Top view of the Waveshare ESP32-P4-WIFI6-POE-ETH: the 40-pin header along the top edge, the ESP32-P4 module, the ESP32-C6 module with its IPEX antenna connector, and along the bottom edge RESET and BOOT buttons, the stacked USB-A and USB-C ports, the RJ45 Ethernet port, the TF card slot and the four H7 pads">
+  <!-- Generated for the documentation. Teal is radio (Thread), yellow Zigbee, copper wire. -->
+  <style>
+    :root { --bg: #eef2f4; --box: #ffffff; --line: #c3ced6; --ink: #17222c; --quiet: #5d6b77;
+            --air: #12968f; --zig: #a8850f; --wire: #b8732e; --pcb: #0e3b43; --silk: #e9e4d4; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0f1a24; --box: #16242f; --line: #2d3d4a; --ink: #e7ecef; --quiet: #91a0ab;
+              --air: #3cc7bb; --zig: #e6c84f; --wire: #d9944a; --pcb: #0b2c33; --silk: #e9e4d4; }
+    }
+    text { font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif; fill: var(--ink); }
+    .t1 { font-size: 16px; font-weight: 650; }
+    .t2 { font-size: 13px; fill: var(--quiet); }
+    .t3 { font-size: 12.5px; font-weight: 600; }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
+    .silk { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; fill: var(--silk); }
+    .box { fill: var(--box); stroke: var(--line); stroke-width: 1.5; }
+    .box.b-air { stroke: var(--air); } .box.b-zig { stroke: var(--zig); } .box.b-wire { stroke: var(--wire); }
+    .pcb { fill: var(--pcb); stroke: var(--air); stroke-width: 1.5; }
+    .chip { fill: #c9ced2; stroke: #8e979f; stroke-width: 1; }
+    .wire { fill: none; stroke: var(--wire); stroke-width: 3; stroke-linecap: round; }
+    .wire.thin { stroke-width: 2; }
+    .air { fill: none; stroke: var(--air); stroke-width: 1.8; stroke-dasharray: 5 6; stroke-linecap: round; }
+    .airs { fill: none; stroke: var(--air); stroke-width: 1.8; stroke-linecap: round; }
+    .zigl { fill: none; stroke: var(--zig); stroke-width: 1.8; stroke-dasharray: 5 6; stroke-linecap: round; }
+    .lead { fill: none; stroke: var(--quiet); stroke-width: 1; }
+    .arrow { fill: none; stroke: var(--ink); stroke-width: 1.6; marker-end: url(#ah); }
+    .node { fill: var(--air); } .end { fill: var(--box); stroke: var(--air); stroke-width: 2; }
+    .ca { fill: var(--air); } .cz { fill: var(--zig); } .cw { fill: var(--wire); } .cq { fill: var(--quiet); }
+  </style>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0 0L10 5L0 10z" fill="var(--ink)"/></marker></defs>
+  <rect width="1050" height="580" rx="18" fill="var(--bg)"/>
+  <g transform="translate(90 0)">
+  <rect class="pcb" x="200" y="40" width="400" height="460" rx="16"/>
+  <rect x="214" y="54" width="372" height="40" rx="4" fill="#0a2c32" stroke="var(--silk)" stroke-opacity="0.3"/>
+  <rect x="222" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="222" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="240" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="240" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="258" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="258" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="276" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="276" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="294" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="294" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="312" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="312" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="330" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="330" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="348" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="348" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="366" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="366" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="384" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="384" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="402" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="402" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="420" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="420" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="438" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="438" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="456" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="456" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="474" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="474" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="492" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="492" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="510" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="510" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="528" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="528" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="546" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="546" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect x="564" y="60" width="10" height="10" fill="#c9a46a"/>
+  <rect x="564" y="76" width="10" height="10" fill="#c9a46a"/>
+  <rect class="chip" x="300" y="120" width="150" height="170" rx="6"/>
+  <text class="t3" x="375" y="205" text-anchor="middle" style="fill:#17222c">ESP32-P4</text>
+  <rect class="chip" x="320" y="305" width="100" height="95" rx="5"/>
+  <text class="t3" x="370" y="350" text-anchor="middle" style="fill:#17222c">ESP32-C6</text>
+  <circle cx="412" cy="392" r="6" fill="#c9a46a" stroke="#8e979f"/>
+  <rect x="230" y="120" width="22" height="160" rx="3" fill="#0a2c32" stroke="var(--silk)" stroke-opacity="0.3"/>
+  <rect x="262" y="120" width="22" height="160" rx="3" fill="#0a2c32" stroke="var(--silk)" stroke-opacity="0.3"/>
+  <rect x="214" y="400" width="22" height="22" rx="4" fill="#2b3742"/><rect x="214" y="440" width="22" height="22" rx="4" fill="#2b3742"/>
+  <text class="silk" x="214" y="434">RST</text><text class="silk" x="214" y="474">BOOT</text>
+  <rect x="250" y="410" width="86" height="100" rx="4" fill="#b8bfc5" stroke="#7d868d"/>
+  <text class="t3" x="293" y="455" text-anchor="middle" style="fill:#17222c">USB-A</text><text class="t3" x="293" y="473" text-anchor="middle" style="fill:#17222c">USB-C</text>
+  <rect x="350" y="420" width="110" height="90" rx="4" fill="#b8bfc5" stroke="#7d868d"/>
+  <text class="t3" x="405" y="470" text-anchor="middle" style="fill:#17222c">RJ45</text>
+  <rect x="480" y="420" width="80" height="70" rx="4" fill="#b8bfc5" stroke="#7d868d"/>
+  <text class="t3" x="520" y="460" text-anchor="middle" style="fill:#17222c">TF card</text>
+  <circle cx="578" cy="428" r="6" fill="#c9a46a" stroke="#0a2c32" stroke-width="2"/>
+  <circle cx="578" cy="446" r="6" fill="#c9a46a" stroke="#0a2c32" stroke-width="2"/>
+  <circle cx="578" cy="464" r="6" fill="#c9a46a" stroke="#0a2c32" stroke-width="2"/>
+  <circle cx="578" cy="482" r="6" fill="#c9a46a" stroke="#0a2c32" stroke-width="2"/>
+  <text class="silk" x="560" y="418">H7</text>
+  <path class="lead" d="M214 74 L196 69"/>
+  <circle cx="214" cy="74" r="3" fill="var(--quiet)"/>
+  <text class="t3" x="190" y="74" text-anchor="end">40-pin header</text>
+  <text class="t2" x="190" y="91" text-anchor="end">maintenance jumper: pins 12, 16, 18</text>
+  <path class="lead" d="M412 392 L634 295"/>
+  <circle cx="412" cy="392" r="3" fill="var(--quiet)"/>
+  <text class="t3" x="640" y="300" text-anchor="start">C6 antenna connector (IPEX)</text>
+  <text class="t2" x="640" y="317" text-anchor="start">fit a 2.4 GHz antenna here</text>
+  <path class="lead" d="M370 340 L634 225"/>
+  <circle cx="370" cy="340" r="3" fill="var(--quiet)"/>
+  <text class="t3" x="640" y="230" text-anchor="start">ESP32-C6: the built-in radio</text>
+  <text class="t2" x="640" y="247" text-anchor="start">Thread or Zigbee</text>
+  <path class="lead" d="M375 160 L634 135"/>
+  <circle cx="375" cy="160" r="3" fill="var(--quiet)"/>
+  <text class="t3" x="640" y="140" text-anchor="start">ESP32-P4: runs the firmware</text>
+  <text class="t2" x="640" y="157" text-anchor="start">border router, web UI</text>
+  <path class="lead" d="M584 455 L634 425"/>
+  <circle cx="584" cy="455" r="3" fill="var(--quiet)"/>
+  <text class="t3" x="640" y="430" text-anchor="start">H7: C6 UART pads</text>
+  <text class="t2" x="640" y="447" text-anchor="start">TXD, RXD, GND, IO9 (pin 1 at top)</text>
+  <path class="lead" d="M405 510 L634 515"/>
+  <circle cx="405" cy="510" r="3" fill="var(--quiet)"/>
+  <text class="t3" x="640" y="520" text-anchor="start">Ethernet (RJ45), PoE</text>
+  <text class="t2" x="640" y="537" text-anchor="start">network and power</text>
+  <path class="lead" d="M293 510 L196 540"/>
+  <circle cx="293" cy="510" r="3" fill="var(--quiet)"/>
+  <text class="t3" x="190" y="545" text-anchor="end">USB-A above USB-C</text>
+  <text class="t2" x="190" y="562" text-anchor="end">A: USB radio dongle · C: flashing, console</text>
+  <path class="lead" d="M214 450 L196 415"/>
+  <circle cx="214" cy="450" r="3" fill="var(--quiet)"/>
+  <text class="t3" x="190" y="420" text-anchor="end">RESET and BOOT</text>
+  <text class="t2" x="190" y="437" text-anchor="end">hold BOOT, press RESET: download mode</text>
+  </g>
+</svg>

@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 250" width="1120" height="250" role="img"
+     aria-label="RCP proxy: a radio on the board, the C6 or a USB dongle, is served over TCP or UDP on Ethernet to another computer running Zigbee2MQTT, ZHA or otbr-agent. The computer connects to the board on port 6638, or the board dials the computer.">
+  <!-- Generated for the documentation. Teal is radio (Thread), yellow Zigbee, copper wire. -->
+  <style>
+    :root { --bg: #eef2f4; --box: #ffffff; --line: #c3ced6; --ink: #17222c; --quiet: #5d6b77;
+            --air: #12968f; --zig: #a8850f; --wire: #b8732e; --pcb: #0e3b43; --silk: #e9e4d4; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0f1a24; --box: #16242f; --line: #2d3d4a; --ink: #e7ecef; --quiet: #91a0ab;
+              --air: #3cc7bb; --zig: #e6c84f; --wire: #d9944a; --pcb: #0b2c33; --silk: #e9e4d4; }
+    }
+    text { font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif; fill: var(--ink); }
+    .t1 { font-size: 16px; font-weight: 650; }
+    .t2 { font-size: 13px; fill: var(--quiet); }
+    .t3 { font-size: 12.5px; font-weight: 600; }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
+    .silk { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; fill: var(--silk); }
+    .box { fill: var(--box); stroke: var(--line); stroke-width: 1.5; }
+    .box.b-air { stroke: var(--air); } .box.b-zig { stroke: var(--zig); } .box.b-wire { stroke: var(--wire); }
+    .pcb { fill: var(--pcb); stroke: var(--air); stroke-width: 1.5; }
+    .chip { fill: #c9ced2; stroke: #8e979f; stroke-width: 1; }
+    .wire { fill: none; stroke: var(--wire); stroke-width: 3; stroke-linecap: round; }
+    .wire.thin { stroke-width: 2; }
+    .air { fill: none; stroke: var(--air); stroke-width: 1.8; stroke-dasharray: 5 6; stroke-linecap: round; }
+    .airs { fill: none; stroke: var(--air); stroke-width: 1.8; stroke-linecap: round; }
+    .zigl { fill: none; stroke: var(--zig); stroke-width: 1.8; stroke-dasharray: 5 6; stroke-linecap: round; }
+    .lead { fill: none; stroke: var(--quiet); stroke-width: 1; }
+    .arrow { fill: none; stroke: var(--ink); stroke-width: 1.6; marker-end: url(#ah); }
+    .node { fill: var(--air); } .end { fill: var(--box); stroke: var(--air); stroke-width: 2; }
+    .ca { fill: var(--air); } .cz { fill: var(--zig); } .cw { fill: var(--wire); } .cq { fill: var(--quiet); }
+  </style>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0 0L10 5L0 10z" fill="var(--ink)"/></marker></defs>
+  <rect width="1120" height="250" rx="18" fill="var(--bg)"/>
+  <rect class="box b-zig" x="30" y="80" width="230" height="84" rx="12"/>
+  <text class="t1" x="46" y="118.0" text-anchor="start">Radio</text>
+  <text class="t2" x="46" y="138.0" text-anchor="start">the C6, or a USB dongle</text>
+  <line class="zigl" x1="260" y1="122" x2="330" y2="122"/>
+  <rect class="pcb" x="330" y="80" width="190" height="84" rx="12"/>
+  <rect x="344" y="46" width="8" height="40" rx="4" fill="var(--quiet)"/>
+  <text class="t1" x="425.0" y="122.0" text-anchor="middle" style="fill:#e7ecef">This board</text>
+  <text class="t2" x="425.0" y="142.0" text-anchor="middle" style="fill:#a9c3c6">radio in RCP proxy mode</text>
+  <path class="wire" d="M520 122 H800"/>
+  <text class="t3" x="660" y="104" text-anchor="middle">TCP or UDP over Ethernet</text>
+  <text class="t2" x="660" y="148" text-anchor="middle">Listen: it connects to board:6638</text>
+  <text class="t2" x="660" y="166" text-anchor="middle">Connect: the board dials it</text>
+  <rect class="box b-wire" x="800" y="70" width="290" height="104" rx="12"/>
+  <text class="t1" x="816" y="118.0" text-anchor="start">Another computer</text>
+  <text class="t2" x="816" y="138.0" text-anchor="start">Zigbee2MQTT or ZHA (Z-Stack, EZSP)</text>
+  <text class="t2" x="816" y="156.0" text-anchor="start">otbr-agent (OpenThread RCP)</text>
+  <text class="t2" x="560" y="225" text-anchor="middle">The computer drives the radio as if it were plugged into it. One computer at a time; no login.</text>
+</svg>

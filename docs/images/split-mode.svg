@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 400" width="1060" height="400" role="img"
+     aria-label="Split mode: the board on one tagged cable to a switch trunk port. The management VLAN carries the web UI, device API and metrics for your browser and Prometheus; the Thread backbone VLAN carries the Thread REST API, mDNS, TREL and routing for Home Assistant and other border routers. Nothing passes between the two on the board.">
+  <!-- Generated for the documentation. Teal is radio (Thread), yellow Zigbee, copper wire. -->
+  <style>
+    :root { --bg: #eef2f4; --box: #ffffff; --line: #c3ced6; --ink: #17222c; --quiet: #5d6b77;
+            --air: #12968f; --zig: #a8850f; --wire: #b8732e; --pcb: #0e3b43; --silk: #e9e4d4; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0f1a24; --box: #16242f; --line: #2d3d4a; --ink: #e7ecef; --quiet: #91a0ab;
+              --air: #3cc7bb; --zig: #e6c84f; --wire: #d9944a; --pcb: #0b2c33; --silk: #e9e4d4; }
+    }
+    text { font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif; fill: var(--ink); }
+    .t1 { font-size: 16px; font-weight: 650; }
+    .t2 { font-size: 13px; fill: var(--quiet); }
+    .t3 { font-size: 12.5px; font-weight: 600; }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
+    .silk { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; fill: var(--silk); }
+    .box { fill: var(--box); stroke: var(--line); stroke-width: 1.5; }
+    .box.b-air { stroke: var(--air); } .box.b-zig { stroke: var(--zig); } .box.b-wire { stroke: var(--wire); }
+    .pcb { fill: var(--pcb); stroke: var(--air); stroke-width: 1.5; }
+    .chip { fill: #c9ced2; stroke: #8e979f; stroke-width: 1; }
+    .wire { fill: none; stroke: var(--wire); stroke-width: 3; stroke-linecap: round; }
+    .wire.thin { stroke-width: 2; }
+    .air { fill: none; stroke: var(--air); stroke-width: 1.8; stroke-dasharray: 5 6; stroke-linecap: round; }
+    .airs { fill: none; stroke: var(--air); stroke-width: 1.8; stroke-linecap: round; }
+    .zigl { fill: none; stroke: var(--zig); stroke-width: 1.8; stroke-dasharray: 5 6; stroke-linecap: round; }
+    .lead { fill: none; stroke: var(--quiet); stroke-width: 1; }
+    .arrow { fill: none; stroke: var(--ink); stroke-width: 1.6; marker-end: url(#ah); }
+    .node { fill: var(--air); } .end { fill: var(--box); stroke: var(--air); stroke-width: 2; }
+    .ca { fill: var(--air); } .cz { fill: var(--zig); } .cw { fill: var(--wire); } .cq { fill: var(--quiet); }
+  </style>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0 0L10 5L0 10z" fill="var(--ink)"/></marker></defs>
+  <rect width="1060" height="400" rx="18" fill="var(--bg)"/>
+  <rect class="pcb" x="40" y="150" width="170" height="90" rx="12"/>
+  <rect x="54" y="116" width="8" height="40" rx="4" fill="var(--quiet)"/>
+  <text class="t1" x="125.0" y="195.0" text-anchor="middle" style="fill:#e7ecef">This board</text>
+  <text class="t2" x="125.0" y="215.0" text-anchor="middle" style="fill:#a9c3c6">one cable, two VLANs</text>
+  <path class="wire" d="M210 195 H330"/>
+  <text class="t2" x="270" y="180" text-anchor="middle">tagged</text>
+  <rect class="box b-wire" x="330" y="160" width="150" height="70" rx="12"/>
+  <text class="t1" x="346" y="191.0" text-anchor="start">Switch</text>
+  <text class="t2" x="346" y="211.0" text-anchor="start">trunk port</text>
+  <path class="wire thin" d="M480 180 C 540 180, 540 95, 600 95"/>
+  <path class="wire thin" d="M480 210 C 540 210, 540 295, 600 295"/>
+  <rect class="box" x="600" y="30" width="420" height="130" rx="14"/>
+  <text class="t1" x="616" y="56" text-anchor="start">Management VLAN (mgmt)</text>
+  <text class="t2" x="616" y="76" text-anchor="start">web UI, /device API, metrics, firmware updates</text>
+  <rect class="box " x="616" y="92" width="180" height="52" rx="12"/>
+  <text class="t1" x="632" y="123.0" text-anchor="start">Your browser</text>
+  <rect class="box " x="812" y="92" width="192" height="52" rx="12"/>
+  <text class="t1" x="828" y="123.0" text-anchor="start">Prometheus</text>
+  <rect class="box b-air" x="600" y="220" width="420" height="160" rx="14"/>
+  <text class="t1" x="616" y="246" text-anchor="start">Thread backbone VLAN (thread_bb)</text>
+  <text class="t2" x="616" y="266" text-anchor="start">Thread REST API, mDNS, TREL, routing</text>
+  <rect class="box " x="616" y="282" width="180" height="52" rx="12"/>
+  <text class="t1" x="632" y="313.0" text-anchor="start">Home Assistant</text>
+  <rect class="box " x="812" y="282" width="192" height="52" rx="12"/>
+  <text class="t1" x="828" y="313.0" text-anchor="start">Other border routers</text>
+  <text class="t2" x="810" y="362" text-anchor="middle">Home Assistant must be here: mDNS stays on this VLAN</text>
+  <text class="t2" x="270" y="290" text-anchor="middle">Nothing passes between</text>
+  <text class="t2" x="270" y="307" text-anchor="middle">the two VLANs on the board</text>
+</svg>

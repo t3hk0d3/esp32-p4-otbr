@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" width="900" height="560" role="img"
+     aria-label="First install: flash the P4 over USB-C, open the web page, then put the radio firmware on the C6 one of three ways (A: upload c6_installer.bin with no wires, B: the maintenance jumper rewrites the C6 by itself, C: a USB-UART adapter), upload c6_rcp.bin, and give the board a Thread network">
+  <!-- Generated for the documentation. Teal is radio (Thread), yellow Zigbee, copper wire. -->
+  <style>
+    :root { --bg: #eef2f4; --box: #ffffff; --line: #c3ced6; --ink: #17222c; --quiet: #5d6b77;
+            --air: #12968f; --zig: #a8850f; --wire: #b8732e; --pcb: #0e3b43; --silk: #e9e4d4; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0f1a24; --box: #16242f; --line: #2d3d4a; --ink: #e7ecef; --quiet: #91a0ab;
+              --air: #3cc7bb; --zig: #e6c84f; --wire: #d9944a; --pcb: #0b2c33; --silk: #e9e4d4; }
+    }
+    text { font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif; fill: var(--ink); }
+    .t1 { font-size: 16px; font-weight: 650; }
+    .t2 { font-size: 13px; fill: var(--quiet); }
+    .t3 { font-size: 12.5px; font-weight: 600; }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
+    .silk { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; fill: var(--silk); }
+    .box { fill: var(--box); stroke: var(--line); stroke-width: 1.5; }
+    .box.b-air { stroke: var(--air); } .box.b-zig { stroke: var(--zig); } .box.b-wire { stroke: var(--wire); }
+    .pcb { fill: var(--pcb); stroke: var(--air); stroke-width: 1.5; }
+    .chip { fill: #c9ced2; stroke: #8e979f; stroke-width: 1; }
+    .wire { fill: none; stroke: var(--wire); stroke-width: 3; stroke-linecap: round; }
+    .wire.thin { stroke-width: 2; }
+    .air { fill: none; stroke: var(--air); stroke-width: 1.8; stroke-dasharray: 5 6; stroke-linecap: round; }
+    .airs { fill: none; stroke: var(--air); stroke-width: 1.8; stroke-linecap: round; }
+    .zigl { fill: none; stroke: var(--zig); stroke-width: 1.8; stroke-dasharray: 5 6; stroke-linecap: round; }
+    .lead { fill: none; stroke: var(--quiet); stroke-width: 1; }
+    .arrow { fill: none; stroke: var(--ink); stroke-width: 1.6; marker-end: url(#ah); }
+    .node { fill: var(--air); } .end { fill: var(--box); stroke: var(--air); stroke-width: 2; }
+    .ca { fill: var(--air); } .cz { fill: var(--zig); } .cw { fill: var(--wire); } .cq { fill: var(--quiet); }
+  </style>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0 0L10 5L0 10z" fill="var(--ink)"/></marker></defs>
+  <rect width="900" height="560" rx="18" fill="var(--bg)"/>
+  <rect class="box b-air" x="30" y="40" width="230" height="70" rx="12"/>
+  <text class="t1" x="46" y="71.0" text-anchor="start">1. Flash the P4</text>
+  <text class="t2" x="46" y="91.0" text-anchor="start">browser flasher, over USB-C</text>
+  <path class="arrow" d="M260 75 H300"/>
+  <rect class="box " x="300" y="40" width="260" height="70" rx="12"/>
+  <text class="t1" x="316" y="71.0" text-anchor="start">Open the board's web page</text>
+  <text class="t2" x="316" y="91.0" text-anchor="start">the Dashboard says what's missing</text>
+  <path class="arrow" d="M430 110 V150"/>
+  <text class="t3" x="430" y="172" text-anchor="middle">2. Put the radio firmware on the C6: pick one way</text>
+  <path class="arrow" d="M430 182 C 430 200, 165 190, 165 210"/>
+  <rect class="box" x="40" y="210" width="250" height="110" rx="12"/>
+  <text class="t1" x="56" y="238" text-anchor="start">A: no wires</text>
+  <text class="t3 cq" x="56" y="258" text-anchor="start">most new boards</text>
+  <text class="t2" x="56" y="286" text-anchor="start">upload c6_installer.bin</text>
+  <text class="t2" x="56" y="303" text-anchor="start">on the Firmware page, wait ~1 min</text>
+  <path class="arrow" d="M165 320 C 165 345, 430 340, 430 360"/>
+  <path class="arrow" d="M430 182 C 430 200, 455 190, 455 210"/>
+  <rect class="box" x="330" y="210" width="250" height="110" rx="12"/>
+  <text class="t1" x="346" y="238" text-anchor="start">B: maintenance jumper</text>
+  <text class="t3 cq" x="346" y="258" text-anchor="start">three wires fitted</text>
+  <text class="t2" x="346" y="286" text-anchor="start">the board rewrites</text>
+  <text class="t2" x="346" y="303" text-anchor="start">the C6 by itself at boot</text>
+  <path class="arrow" d="M455 320 C 455 345, 430 340, 430 360"/>
+  <path class="arrow" d="M430 182 C 430 200, 745 190, 745 210"/>
+  <rect class="box" x="620" y="210" width="250" height="110" rx="12"/>
+  <text class="t1" x="636" y="238" text-anchor="start">C: USB-UART adapter</text>
+  <text class="t3 cq" x="636" y="258" text-anchor="start">if A and B failed</text>
+  <text class="t2" x="636" y="286" text-anchor="start">esptool writes the</text>
+  <text class="t2" x="636" y="303" text-anchor="start">C6 base image over H7</text>
+  <path class="arrow" d="M745 320 C 745 345, 430 340, 430 360"/>
+  <rect class="box b-air" x="290" y="360" width="280" height="70" rx="12"/>
+  <text class="t1" x="306" y="391.0" text-anchor="start">Upload c6_rcp.bin</text>
+  <text class="t2" x="306" y="411.0" text-anchor="start">the radio firmware, a few seconds</text>
+  <path class="arrow" d="M430 430 V460"/>
+  <rect class="box b-air" x="250" y="460" width="360" height="70" rx="12"/>
+  <text class="t1" x="266" y="491.0" text-anchor="start">3. Give the board a Thread network</text>
+  <text class="t2" x="266" y="511.0" text-anchor="start">Home Assistant, or the Network page</text>
+</svg>

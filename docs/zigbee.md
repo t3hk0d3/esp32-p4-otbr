@@ -1,22 +1,20 @@
 # Zigbee coordinator (experimental)
 
 !!! warning "Experimental"
-    The Ziggurat stack ran on a board in a spike. This feature on the board's firmware has been built and host-tested,
-    and its on-board tests are written but have not yet been run on a board. Expect rough edges, and do not rely on it
-    for a network you cannot afford to lose.
+    Zigbee mode is new and not yet tested much on real boards. Expect rough edges, and don't rely on it for a network
+    you can't afford to lose. Keep ZHA's backups.
 
-In Zigbee mode the board is a Zigbee coordinator instead of a Thread border router. A radio of the board runs
-Ziggurat (a Zigbee stack written in Rust) and Home Assistant's ZHA integration
-talks to it over a WebSocket. The radio is the C6 or a supported USB dongle; the board's own Zigbee stack runs on
-the P4. Nothing else changes: Ethernet, the web UI, updates and the diagnostics work as before.
+In Zigbee mode the board is a Zigbee coordinator for Home Assistant's ZHA integration, instead of a Thread border
+router. The Zigbee stack (Ziggurat) runs on the board itself; ZHA talks to it over the network. The radio is the C6 or a
+USB dongle with OpenThread RCP firmware: the same radio hardware serves both Thread and Zigbee. Ethernet, the web UI,
+updates and the diagnostics work as before.
 
 
 ## Choosing it
 
 On the **Radios** page set the mode of the radio to **Zigbee** (`ziggurat`), or `PUT /device/channels/<id>` with
 `{"mode": "ziggurat"}` (the C6 is `builtin-c6`, a USB dongle `usb-<vid>-<pid>[-<serial>]`). Changing into or out of Zigbee
-mode reboots the board, and the answer says `"reboot": true`. When the board is back, `GET /device/zigbee` shows
-`running` and the **Zigbee** page appears in the menu.
+mode reboots the board. When the board is back, the Dashboard's **Zigbee** section shows the coordinator running.
 
 A radio in Zigbee mode is not a Thread radio. If the C6 is the Zigbee radio, Thread does not run on the board (the
 Thread menu entries are hidden and the Thread REST API does not serve a network); Home Assistant's OpenThread Border
@@ -35,8 +33,8 @@ Other zigpy-based software works the same way if it has the Ziggurat adapter. Zi
 Ziggurat adapter: give it a USB dongle with Z-Stack or EZSP firmware in `rcp-proxy` mode instead (see
 [RCP proxy](radios.md#rcp-proxy)).
 
-One client at a time. A second client that connects takes the connection over: the first one is dropped. The Zigbee
-page and `GET /device/zigbee` show the current client and the last one.
+One client at a time. A second client that connects takes the connection over: the first one is dropped. The Dashboard
+shows the current client and the last one.
 
 !!! warning "No login"
     Like the rest of the board's HTTP API, the WebSocket needs no password. Anyone who can reach the board can control
@@ -46,13 +44,11 @@ page and `GET /device/zigbee` show the current client and the last one.
 
 ## The Dashboard's Zigbee section
 
-The Dashboard (`/`) has three sections: Device and network, Thread and Zigbee. While a radio runs Zigbee, the Zigbee
-section shows the state (`starting`, `running`, `no_radio`, `incompatible`, `idle`), the Home Assistant connection
-path with a Copy button, the connected or last client, the network (channel, PAN ID, addresses, TX power), the radio
-traffic counters, the memory the stack uses and the radio firmware; it polls `GET /device/zigbee`. While no radio
-runs Zigbee it says so in one line and links the Radios page, and nothing is polled.
+While a radio runs Zigbee, the Dashboard's Zigbee section shows the state (starting, running, no radio, incompatible),
+the address for ZHA with a Copy button, the connected or last client, the network ZHA formed (Zigbee channel, PAN ID,
+transmit power), radio traffic, the memory the stack uses and the radio firmware. API: `GET /device/zigbee`.
 
-<img src="images/dashboard.png" width="640" alt="Dashboard in three sections. Device and network: Board OK, the Radios card (ESP32-C6 (built-in) runs Zigbee, USB radio off), Ethernet, board firmware, load and memory. Thread: not active, with a link to the Radios page. Zigbee: Coordinator running on channel 25 on the ESP32-C6 (built-in), ZHA connected; cards for Connect Home Assistant (the ws:// path and a Copy button), the connected client, the network as ZHA set it, radio traffic, memory and the radio firmware">
+<img src="images/dashboard-zigbee.png" width="640" alt="Dashboard in three sections. Device and network: Board OK, the Radios card (ESP32-C6 (built-in) runs Zigbee, USB radio off), Ethernet, board firmware, load and memory. Thread: not active, with a link to the Radios page. Zigbee: Coordinator running on channel 25 on the ESP32-C6 (built-in), ZHA connected; cards for Connect Home Assistant (the ws:// path and a Copy button), the connected client, the network as ZHA set it, radio traffic, memory and the radio firmware">
 
 ## Radio resets and loss
 
@@ -69,15 +65,14 @@ runs Zigbee it says so in one line and links the Radios page, and nothing is pol
 
 ## Limits
 
-- Experimental; the on-board checks are listed in the tests (`p4/pytest/test_zigbee.py`).
 - No hybrid: Thread and the Zigbee coordinator never run at once on the board, even on separate radios (409
-  `hybrid_not_supported`). A channel in `rcp-proxy` mode can run beside either.
-- One Zigbee radio at a time; a second channel in Zigbee mode is refused.
-- No settings on the board: the network (channel, PAN ID, keys) is ZHA's. Resetting the board forgets the network, so
+  `hybrid_not_supported`). A radio in RCP proxy mode can run beside either.
+- One Zigbee radio at a time; a second radio in Zigbee mode is refused.
+- No settings on the board: the network (Zigbee channel, PAN ID, keys) is ZHA's. Resetting the board forgets the network, so
   keep ZHA's backups.
 - Mode changes into and out of Zigbee reboot the board.
 - Slow pairing of router devices (mains-powered bulbs, plugs, switches): a device that joins as a router often fails
   the key exchange, leaves and joins again every few seconds, so pairing takes 20 to 60 s and sometimes fails. End
-  devices pair normally. The cause is in Ziggurat's routing: it cannot send to a new router until that router's first
-  link status, about 15 s after joining ([zigpy/ziggurat#88](https://github.com/zigpy/ziggurat/issues/88)). Keep
+  devices pair normally. Tracked upstream in
+  [zigpy/ziggurat#88](https://github.com/zigpy/ziggurat/issues/88). Keep
   permit-join open and retry the pairing if it fails.
