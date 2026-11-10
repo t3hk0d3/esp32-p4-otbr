@@ -31,7 +31,8 @@
 #include "openthread/thread.h"
 #include "publisher.h"
 #include "routing_util.h"
-#include "rcp_proxy.h" // RCP_PROXY_SOCKETS
+#include "rcp_proxy.h" // RCP_PROXY_CHANNEL_SOCKETS
+#include "usbip.h"     // USBIP_SOCKETS
 
 static const char *TAG = "routing";
 
@@ -60,17 +61,20 @@ static const char *TAG = "routing";
 /*
  * lwIP sockets the image needs at once (see p4/sdkconfig.defaults): the web server (its max_open_sockets plus its
  * listener and two control sockets, esp_br_web.c), routing at worst (BGP: the listener and every connection slot;
- * RIPng is one socket and never runs with BGP), one HTTP client (OTA or a radio firmware URL), the RCP proxy
- * (two channels at once, each a listener, its client and one connection being refused, rcp_proxy.h) and the logging
- * component's syslog UDP socket (logging.h).
+ * RIPng is one socket and never runs with BGP), one HTTP client (OTA or a radio firmware URL), the RCP proxy's C6
+ * channel (a listener, its client and one connection being refused, rcp_proxy.h), the USB port: either the RCP
+ * proxy's USB channel or USB/IP (usbip.h), never both, as USB/IP takes the port from the radio mux for the whole boot,
+ * and the logging component's syslog UDP socket (logging.h).
  */
 #define WEB_SERVER_SOCKETS (ESP_BR_WEB_MAX_OPEN_SOCKETS + 3)
 #define ROUTING_SOCKETS (1 + MAX_CONNS)
 #define HTTP_CLIENT_SOCKETS 1
-#define SOCKETS_NEEDED \
-    (WEB_SERVER_SOCKETS + ROUTING_SOCKETS + HTTP_CLIENT_SOCKETS + RCP_PROXY_SOCKETS + LOGGING_SOCKETS)
+#define USB_PORT_SOCKETS MAX(RCP_PROXY_CHANNEL_SOCKETS, USBIP_SOCKETS)
+#define SOCKETS_NEEDED                                                                                                 \
+    (WEB_SERVER_SOCKETS + ROUTING_SOCKETS + HTTP_CLIENT_SOCKETS + RCP_PROXY_CHANNEL_SOCKETS + USB_PORT_SOCKETS +       \
+     LOGGING_SOCKETS)
 #if CONFIG_LWIP_MAX_SOCKETS < SOCKETS_NEEDED
-#error "CONFIG_LWIP_MAX_SOCKETS is below what the web server, routing, the RCP proxy and syslog need: raise it in p4/sdkconfig.defaults if ESP_BR_WEB_MAX_OPEN_SOCKETS, the routing sockets, RCP_PROXY_SOCKETS or LOGGING_SOCKETS grew; else p4/sdkconfig predates p4/sdkconfig.defaults (an existing sdkconfig keeps its values): delete p4/sdkconfig and build again (docs/development.md)."
+#error "CONFIG_LWIP_MAX_SOCKETS is below what the web server, routing, the RCP proxy, USB/IP and syslog need: raise it in p4/sdkconfig.defaults if ESP_BR_WEB_MAX_OPEN_SOCKETS, the routing sockets, RCP_PROXY_CHANNEL_SOCKETS, USBIP_SOCKETS or LOGGING_SOCKETS grew"
 #endif
 
 typedef struct {

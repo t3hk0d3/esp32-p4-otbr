@@ -16,6 +16,10 @@ extern "C" {
 
 // Eventfds the module creates: add to the eventfd VFS max_fds before usbip_boot.
 #define USBIP_EVENTFDS 1
+// lwIP sockets the module holds at most: the listener, the session, the pending connections (net.c PENDING_MAX, 2)
+// and one just accepted while the oldest pending one is being evicted. While USB/IP is active the RCP proxy has no
+// USB channel (radio_mux treats the USB port as external), so the two never hold sockets at once.
+#define USBIP_SOCKETS 5
 
 // Reads the stored flag (NVS namespace "usbip", key "enabled"; missing means off) and decides who owns the USB port.
 // Enabled and no USB channel stored in otbr or ziggurat: marks the radio mux's USB transport external

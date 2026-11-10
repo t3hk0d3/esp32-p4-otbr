@@ -60,17 +60,21 @@ CONFIG_LWIP_NUM_NETIF_CLIENT_DATA=0
 
 # Sockets: web server 10 (max_open_sockets 7 + listener + 2 control sockets) + mesh routing up to 7 (BGP: a listener,
 # a current and a pending connection per peer, and 2 closing after a NOTIFICATION; RIPng: one, never both methods at
-# once) + 1 HTTP client (OTA, a radio firmware URL or the update check, which share it) + 6 RCP proxy (two channels in rcp-proxy at once, the C6 and the
-# one open USB device, each a listener, its client and one connection being refused) + 1 syslog (UDP) = 25. mDNS,
-# OpenThread, DNS and SNTP use lwIP raw PCBs, not sockets. routing/task.c fails the build below that. An existing
-# p4/sdkconfig keeps its old value: delete it after pulling (docs/development.md).
-CONFIG_LWIP_MAX_SOCKETS=25
+# once) + 1 HTTP client (OTA, a radio firmware URL or the update check, which share it) + 3 RCP proxy C6 channel (a
+# listener, its client and one connection being refused) + 5 USB port: the RCP proxy's USB channel (3, as the C6's) or
+# USB/IP (a listener, the session, 2 pending connections and one accepted while the oldest pending one is evicted;
+# usbip.h USBIP_SOCKETS), never both in one boot + 1 syslog (UDP) = 27. mDNS, OpenThread, DNS and SNTP use lwIP raw PCBs,
+# not sockets.
+# routing/task.c fails the build below that. An existing p4/sdkconfig keeps its old value: delete it after pulling
+# (docs/development.md).
+CONFIG_LWIP_MAX_SOCKETS=27
 # Active TCP PCBs: the 16 of before were used up by the same sockets; the RCP proxy adds per channel its client and a
-# refused connection, plus headroom for PCBs still closing (TIME_WAIT) = 22. A refused proxy client is closed with a FIN
-# (an RST only when its bytes were still unread: lwIP's SO_LINGER {1, 0} resets only a connection with unsent data), so
-# its PCB lingers in FIN_WAIT or TIME_WAIT; its socket is free at once, and lwIP takes such PCBs back, oldest first,
-# when a new connection needs one (tcp_alloc).
-CONFIG_LWIP_MAX_ACTIVE_TCP=22
+# refused connection, plus headroom for PCBs still closing (TIME_WAIT) = 22; USB/IP holds 4 connections (all its
+# sockets but the listener, usbip.h USBIP_SOCKETS) where the RCP proxy's USB channel held 2, so 2 more = 24. A refused
+# proxy client is closed with a FIN (an RST only when its bytes were still unread: lwIP's SO_LINGER {1, 0} resets only
+# a connection with unsent data), so its PCB lingers in FIN_WAIT or TIME_WAIT; its socket is free at once, and lwIP
+# takes such PCBs back, oldest first, when a new connection needs one (tcp_alloc).
+CONFIG_LWIP_MAX_ACTIVE_TCP=24
 # UDP PCBs (every UDP socket holds one too), the most open at once: lwIP's DNS client 4 (a random source port per
 # request, DNS_TABLE_SIZE) + DHCP client 1 (shared by the netifs) + mDNS 1 (one PCB for both interfaces) + TREL 1 +
 # OpenThread's platform UDP 5 (DNS-SD server, Border Agent, its ephemeral-key agent, backbone TMF, DNS client) + the

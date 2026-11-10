@@ -42,6 +42,7 @@
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "netcfg.h"
+#include "usbip.h" // USBIP_SOCKETS
 #include "usbip_priv.h"
 
 static const char *TAG = "usbip";
@@ -52,6 +53,7 @@ static const char *TAG = "usbip";
 #define LISTEN_BACKLOG 2
 // Connections that have not sent their OP request yet; a new one takes the oldest one's place when all are used.
 #define PENDING_MAX 2
+_Static_assert(1 + 1 + PENDING_MAX + 1 <= USBIP_SOCKETS, "USBIP_SOCKETS (usbip.h) counts the sockets net.c holds");
 #define OP_REQ_MAX (USBIP_OP_HDR_LEN + USBIP_BUSID_LEN) // OP_REQ_IMPORT: the header and the bus id
 #define DEVLIST_REPLY_MAX (12 + USBIP_DEV_REC_LEN + USBIP_IFACES_MAX * USBIP_IFACE_REC_LEN)
 #define IMPORT_REPLY_MAX (8 + USBIP_DEV_REC_LEN)
