@@ -100,44 +100,53 @@ typedef struct {
 
 /* ---- state (network task only, unless noted) ---- */
 
+#define STR_LEN sizeof(((usbip_status_t *)0)->manufacturer) // also the product's and the serial's
+
+// What usbip_net_start allocates (PSRAM): with USB/IP off none of it takes internal RAM.
+typedef struct {
+    usbip_engine_t engine;
+    usbip_engine_ops_t ops;
+    pending_t pending[PENDING_MAX];
+    session_t sess;
+    uint8_t skip_buf[SKIP_CHUNK];
+    uint8_t reply[DEVLIST_REPLY_MAX];
+    // The device: opened (exportable or attached), unsupported, or none (see the flags below).
+    usbip_dev_rec_t dev;
+    usbip_dev_rec_t rec; // on_dev_new's open
+    char reason[WHY_LEN];
+    char end_why[WHY_LEN];
+    char manufacturer[STR_LEN], product[STR_LEN], serial[STR_LEN]; // publish's read of the strings
+    // What usbip_net_snapshot reads: written by the network task under s_lock.
+    usbip_status_t pub;
+} net_t;
+
+static net_t *s_net; // set by usbip_net_start, never freed
 static bool s_started; // usbip_net_start's caller
 static QueueHandle_t s_events;
 static int s_efd = -1;
 static atomic_bool s_kick;
-static usbip_engine_t s_engine; // zeroed (static) before its first start
-static usbip_engine_ops_t s_ops;
 
 static int s_lfd = -1;
 static int64_t s_listen_retry_ms;
 static int64_t s_accept_rest_ms;
-static pending_t s_pending[PENDING_MAX];
-static session_t s_sess = {.fd = -1};
 static uint8_t *s_rx_data; // USBIP_XFER_MAX, PSRAM
-static uint8_t s_skip_buf[SKIP_CHUNK];
-static uint8_t s_reply[DEVLIST_REPLY_MAX];
 
 static uint8_t *s_tx; // TX_RING_LEN, PSRAM
 static size_t s_tx_head, s_tx_len;
 static int64_t s_tx_progress_ms; // the last byte sent, or the ring's first byte queued
 
-// The device: opened (exportable or attached), unsupported, or none.
 static bool s_has_dev;
-static usbip_dev_rec_t s_dev;
 static const uint8_t *s_cfg;
 static size_t s_cfg_len;
 static bool s_unsupported;
-static char s_reason[WHY_LEN];
 static int64_t s_reset_until_ms; // > 0: a session ended, the device's power-cycle is awaited (not offered)
 static bool s_close_pending;
 static int64_t s_close_retry_ms;
 
 static uint32_t s_sessions, s_refused;
 static int64_t s_refuse_log_ms = -REFUSE_LOG_MS;
-static char s_end_why[WHY_LEN];
 
-// What usbip_net_snapshot reads: written by the network task under s_lock.
-static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
-static usbip_status_t s_pub = {.state = USBIP_STATE_NO_DEVICE};
+static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED; // s_net->pub
 static bool s_dirty; // the device or client part changed: copy it at the next publish
 
 static int64_t now_ms(void)
@@ -147,8 +156,11 @@ static int64_t now_ms(void)
 
 static void note_error(const char *why)
 {
+    if (s_net == NULL) {
+        return;
+    }
     taskENTER_CRITICAL(&s_lock);
-    strlcpy(s_pub.last_error, why, sizeof(s_pub.last_error));
+    strlcpy(s_net->pub.last_error, why, sizeof(s_net->pub.last_error));
     taskEXIT_CRITICAL(&s_lock);
 }
 
@@ -191,7 +203,7 @@ static void peer_str(const struct sockaddr_storage *sa, char *out, size_t cap)
 
 static usbip_state_t state_now(void)
 {
-    if (s_sess.fd >= 0) {
+    if (s_net->sess.fd >= 0) {
         return USBIP_STATE_ATTACHED;
     }
     if (s_has_dev && s_reset_until_ms == 0) {
@@ -223,39 +235,38 @@ static void publish(void)
     usbip_counters_t c;
     usbip_mem_stats_t m;
 
-    usbip_engine_counters(&s_engine, &c);
-    usbip_engine_mem(&s_engine, &m);
+    usbip_engine_counters(&s_net->engine, &c);
+    usbip_engine_mem(&s_net->engine, &m);
     taskENTER_CRITICAL(&s_lock);
-    s_pub.state = state_now();
-    s_pub.counters = c;
-    s_pub.mem = m;
-    s_pub.sessions = s_sessions;
-    s_pub.refused = s_refused;
+    s_net->pub.state = state_now();
+    s_net->pub.counters = c;
+    s_net->pub.mem = m;
+    s_net->pub.sessions = s_sessions;
+    s_net->pub.refused = s_refused;
     taskEXIT_CRITICAL(&s_lock);
     if (!s_dirty) {
         return;
     }
     s_dirty = false;
     // The strings come from esp-usb's device info: read here, on the network task, not under the lock.
-    static char manufacturer[64], product[64], serial[64];
     const bool dev = s_has_dev && s_reset_until_ms == 0;
 
     if (dev) {
-        usbip_usb_strings(manufacturer, product, serial, sizeof(manufacturer));
+        usbip_usb_strings(s_net->manufacturer, s_net->product, s_net->serial, sizeof(s_net->manufacturer));
     }
     const uint8_t endpoints = dev ? count_endpoints(s_cfg, s_cfg_len) : 0;
 
     taskENTER_CRITICAL(&s_lock);
-    s_pub.has_device = dev;
+    s_net->pub.has_device = dev;
     if (dev) {
-        s_pub.dev = s_dev;
-        memcpy(s_pub.manufacturer, manufacturer, sizeof(manufacturer));
-        memcpy(s_pub.product, product, sizeof(product));
-        memcpy(s_pub.serial, serial, sizeof(serial));
+        s_net->pub.dev = s_net->dev;
+        memcpy(s_net->pub.manufacturer, s_net->manufacturer, sizeof(s_net->pub.manufacturer));
+        memcpy(s_net->pub.product, s_net->product, sizeof(s_net->pub.product));
+        memcpy(s_net->pub.serial, s_net->serial, sizeof(s_net->pub.serial));
     }
-    s_pub.endpoints = endpoints;
-    strlcpy(s_pub.reason, s_unsupported && !s_has_dev ? s_reason : "", sizeof(s_pub.reason));
-    s_pub.has_client = s_sess.fd >= 0;
+    s_net->pub.endpoints = endpoints;
+    strlcpy(s_net->pub.reason, s_unsupported && !s_has_dev ? s_net->reason : "", sizeof(s_net->pub.reason));
+    s_net->pub.has_client = s_net->sess.fd >= 0;
     taskEXIT_CRITICAL(&s_lock);
 }
 
@@ -264,23 +275,27 @@ void usbip_net_snapshot(usbip_status_t *out)
     if (out == NULL) {
         return;
     }
+    if (s_net == NULL) {
+        out->state = USBIP_STATE_NO_DEVICE;
+        return;
+    }
     taskENTER_CRITICAL(&s_lock);
-    out->state = s_pub.state;
-    memcpy(out->reason, s_pub.reason, sizeof(out->reason));
-    out->has_device = s_pub.has_device;
-    out->dev = s_pub.dev;
-    memcpy(out->manufacturer, s_pub.manufacturer, sizeof(out->manufacturer));
-    memcpy(out->product, s_pub.product, sizeof(out->product));
-    memcpy(out->serial, s_pub.serial, sizeof(out->serial));
-    out->endpoints = s_pub.endpoints;
-    out->has_client = s_pub.has_client;
-    memcpy(out->client, s_pub.client, sizeof(out->client));
-    out->client_since = s_pub.client_since;
-    out->counters = s_pub.counters;
-    out->sessions = s_pub.sessions;
-    out->refused = s_pub.refused;
-    out->mem = s_pub.mem;
-    memcpy(out->last_error, s_pub.last_error, sizeof(out->last_error));
+    out->state = s_net->pub.state;
+    memcpy(out->reason, s_net->pub.reason, sizeof(out->reason));
+    out->has_device = s_net->pub.has_device;
+    out->dev = s_net->pub.dev;
+    memcpy(out->manufacturer, s_net->pub.manufacturer, sizeof(out->manufacturer));
+    memcpy(out->product, s_net->pub.product, sizeof(out->product));
+    memcpy(out->serial, s_net->pub.serial, sizeof(out->serial));
+    out->endpoints = s_net->pub.endpoints;
+    out->has_client = s_net->pub.has_client;
+    memcpy(out->client, s_net->pub.client, sizeof(out->client));
+    out->client_since = s_net->pub.client_since;
+    out->counters = s_net->pub.counters;
+    out->sessions = s_net->pub.sessions;
+    out->refused = s_net->pub.refused;
+    out->mem = s_net->pub.mem;
+    memcpy(out->last_error, s_net->pub.last_error, sizeof(out->last_error));
     taskEXIT_CRITICAL(&s_lock);
 }
 
@@ -290,31 +305,31 @@ void usbip_net_snapshot(usbip_status_t *out)
 // stopped by after_engine, or by the engine itself after its end_session. error: why goes to last_error.
 static void session_close(const char *why, bool error)
 {
-    if (s_sess.fd < 0) {
+    if (s_net->sess.fd < 0) {
         return;
     }
-    close(s_sess.fd);
-    s_sess.fd = -1;
+    close(s_net->sess.fd);
+    s_net->sess.fd = -1;
     s_tx_head = 0;
     s_tx_len = 0;
-    strlcpy(s_end_why, why, sizeof(s_end_why));
+    strlcpy(s_net->end_why, why, sizeof(s_net->end_why));
     // The engine's stop power-cycles the root port: the device is offered again once it has gone and come back.
     s_reset_until_ms = now_ms() + RESET_WAIT_MS;
     s_dirty = true;
     // The engine's stop logs "session ended" with the same reason.
     if (error) {
-        ESP_LOGW(TAG, "connection of %s closed: %s", s_pub.client, why);
+        ESP_LOGW(TAG, "connection of %s closed: %s", s_net->pub.client, why);
         note_error(why);
     } else {
-        ESP_LOGI(TAG, "connection of %s closed: %s", s_pub.client, why);
+        ESP_LOGI(TAG, "connection of %s closed: %s", s_net->pub.client, why);
     }
 }
 
 // After any engine call (and any session_close): a session whose connection is gone is stopped.
 static void after_engine(void)
 {
-    if (s_sess.fd < 0 && usbip_engine_active(&s_engine)) {
-        usbip_engine_stop(&s_engine, s_end_why);
+    if (s_net->sess.fd < 0 && usbip_engine_active(&s_net->engine)) {
+        usbip_engine_stop(&s_net->engine, s_net->end_why);
     }
 }
 
@@ -342,14 +357,14 @@ static void tx_push(const uint8_t *d, size_t n)
 // Sends what the ring holds without blocking; what the socket does not take stays at the ring's head.
 static void tx_flush(void)
 {
-    while (s_sess.fd >= 0 && s_tx_len > 0) {
+    while (s_net->sess.fd >= 0 && s_tx_len > 0) {
         const size_t first = TX_RING_LEN - s_tx_head < s_tx_len ? TX_RING_LEN - s_tx_head : s_tx_len;
         struct iovec iov[2] = {
             {.iov_base = s_tx + s_tx_head, .iov_len = first},
             {.iov_base = s_tx, .iov_len = s_tx_len - first},
         };
         struct msghdr m = {.msg_iov = iov, .msg_iovlen = s_tx_len > first ? 2 : 1};
-        const ssize_t r = sendmsg(s_sess.fd, &m, MSG_DONTWAIT);
+        const ssize_t r = sendmsg(s_net->sess.fd, &m, MSG_DONTWAIT);
 
         if (r < 0) {
             if (!would_block()) {
@@ -375,13 +390,13 @@ static void tx_write(const uint8_t *a, size_t an, const uint8_t *b, size_t bn)
 {
     size_t sent = 0;
 
-    if (s_sess.fd < 0) {
+    if (s_net->sess.fd < 0) {
         return;
     }
     if (s_tx_len == 0) {
         struct iovec iov[2] = {{.iov_base = (void *)a, .iov_len = an}, {.iov_base = (void *)b, .iov_len = bn}};
         struct msghdr m = {.msg_iov = iov, .msg_iovlen = bn > 0 ? 2 : 1};
-        const ssize_t r = sendmsg(s_sess.fd, &m, MSG_DONTWAIT);
+        const ssize_t r = sendmsg(s_net->sess.fd, &m, MSG_DONTWAIT);
 
         if (r < 0 && !would_block()) {
             char why[WHY_LEN];
@@ -432,18 +447,18 @@ static int64_t op_now_ms(void *ctx)
 
 static void rx_reset(void)
 {
-    s_sess.phase = RX_HDR;
-    s_sess.have = 0;
-    s_sess.data_len = 0;
-    s_sess.skip = 0;
-    s_sess.data_dropped = false;
+    s_net->sess.phase = RX_HDR;
+    s_net->sess.have = 0;
+    s_net->sess.data_len = 0;
+    s_net->sess.skip = 0;
+    s_net->sess.data_dropped = false;
 }
 
 static void dispatch(void)
 {
-    const uint8_t *out = s_sess.data_len > 0 && !s_sess.data_dropped ? s_rx_data : NULL;
+    const uint8_t *out = s_net->sess.data_len > 0 && !s_net->sess.data_dropped ? s_rx_data : NULL;
 
-    usbip_engine_on_cmd(&s_engine, &s_sess.cmd, out);
+    usbip_engine_on_cmd(&s_net->engine, &s_net->sess.cmd, out);
     after_engine();
     rx_reset();
 }
@@ -452,16 +467,16 @@ static void dispatch(void)
 // on a protocol error.
 static bool rx_header_done(void)
 {
-    if (usbip_proto_parse_cmd(s_sess.hdr, &s_sess.cmd) != ESP_OK) {
+    if (usbip_proto_parse_cmd(s_net->sess.hdr, &s_net->sess.cmd) != ESP_OK) {
         return false;
     }
-    if (s_sess.cmd.command != USBIP_CMD_SUBMIT) {
+    if (s_net->sess.cmd.command != USBIP_CMD_SUBMIT) {
         dispatch();
         return true;
     }
-    const int32_t len = s_sess.cmd.submit.length;
-    const int32_t packets = s_sess.cmd.submit.num_packets;
-    const bool out = s_sess.cmd.direction == USBIP_DIR_OUT;
+    const int32_t len = s_net->sess.cmd.submit.length;
+    const int32_t packets = s_net->sess.cmd.submit.num_packets;
+    const bool out = s_net->sess.cmd.direction == USBIP_DIR_OUT;
 
     if ((out && len < 0) || packets > ISO_PACKETS_MAX) {
         return false; // the stream's length is unknown
@@ -469,19 +484,19 @@ static bool rx_header_done(void)
     const size_t data = out && len > 0 ? (size_t)len : 0;
     const size_t iso = packets > 0 ? (size_t)packets * ISO_DESC_LEN : 0; // -1 (0xffffffff): not isochronous
 
-    s_sess.have = 0;
+    s_net->sess.have = 0;
     if (data > USBIP_XFER_MAX) { // dropped: the engine answers -EINVAL from the length alone
-        s_sess.data_dropped = true;
-        s_sess.data_len = data;
-        s_sess.skip = data + iso;
-        s_sess.phase = RX_SKIP;
+        s_net->sess.data_dropped = true;
+        s_net->sess.data_len = data;
+        s_net->sess.skip = data + iso;
+        s_net->sess.phase = RX_SKIP;
     } else if (data > 0) {
-        s_sess.data_len = data;
-        s_sess.skip = iso;
-        s_sess.phase = RX_DATA;
+        s_net->sess.data_len = data;
+        s_net->sess.skip = iso;
+        s_net->sess.phase = RX_DATA;
     } else if (iso > 0) {
-        s_sess.skip = iso;
-        s_sess.phase = RX_SKIP;
+        s_net->sess.skip = iso;
+        s_net->sess.phase = RX_SKIP;
     } else {
         dispatch();
     }
@@ -491,23 +506,23 @@ static bool rx_header_done(void)
 // n bytes arrived into the current phase.
 static bool rx_advance(size_t n)
 {
-    switch (s_sess.phase) {
+    switch (s_net->sess.phase) {
     case RX_HDR:
-        s_sess.have += n;
-        return s_sess.have < USBIP_CMD_HDR_LEN ? true : rx_header_done();
+        s_net->sess.have += n;
+        return s_net->sess.have < USBIP_CMD_HDR_LEN ? true : rx_header_done();
     case RX_DATA:
-        s_sess.have += n;
-        if (s_sess.have == s_sess.data_len) {
-            if (s_sess.skip > 0) {
-                s_sess.phase = RX_SKIP;
+        s_net->sess.have += n;
+        if (s_net->sess.have == s_net->sess.data_len) {
+            if (s_net->sess.skip > 0) {
+                s_net->sess.phase = RX_SKIP;
             } else {
                 dispatch();
             }
         }
         return true;
     case RX_SKIP:
-        s_sess.skip -= n;
-        if (s_sess.skip == 0) {
+        s_net->sess.skip -= n;
+        if (s_net->sess.skip == 0) {
             dispatch();
         }
         return true;
@@ -519,25 +534,25 @@ static void read_session(void)
 {
     size_t round = 0;
 
-    while (s_sess.fd >= 0 && round < RX_ROUND_MAX) {
+    while (s_net->sess.fd >= 0 && round < RX_ROUND_MAX) {
         uint8_t *dst;
         size_t room;
 
-        switch (s_sess.phase) {
+        switch (s_net->sess.phase) {
         case RX_HDR:
-            dst = s_sess.hdr + s_sess.have;
-            room = USBIP_CMD_HDR_LEN - s_sess.have;
+            dst = s_net->sess.hdr + s_net->sess.have;
+            room = USBIP_CMD_HDR_LEN - s_net->sess.have;
             break;
         case RX_DATA:
-            dst = s_rx_data + s_sess.have;
-            room = s_sess.data_len - s_sess.have;
+            dst = s_rx_data + s_net->sess.have;
+            room = s_net->sess.data_len - s_net->sess.have;
             break;
         default:
-            dst = s_skip_buf;
-            room = s_sess.skip < SKIP_CHUNK ? s_sess.skip : SKIP_CHUNK;
+            dst = s_net->skip_buf;
+            room = s_net->sess.skip < SKIP_CHUNK ? s_net->sess.skip : SKIP_CHUNK;
             break;
         }
-        const ssize_t n = recv(s_sess.fd, dst, room, MSG_DONTWAIT);
+        const ssize_t n = recv(s_net->sess.fd, dst, room, MSG_DONTWAIT);
 
         if (n == 0) {
             session_end("the client closed the connection", false);
@@ -597,7 +612,7 @@ static void pending_close(pending_t *p, bool refused, const char *why)
 // A short reply on a fresh connection: it fits the empty send buffer; a partial send is not retried (closed anyway).
 static void reply_and_close(pending_t *p, size_t n, const char *what)
 {
-    if (n == 0 || send(p->fd, s_reply, n, MSG_DONTWAIT) != (ssize_t)n) {
+    if (n == 0 || send(p->fd, s_net->reply, n, MSG_DONTWAIT) != (ssize_t)n) {
         ESP_LOGW(TAG, "%s: the reply could not be sent", what);
     }
     pending_close(p, false, what);
@@ -627,31 +642,31 @@ static void answer_import(pending_t *p)
 
     memcpy(busid, p->buf + USBIP_OP_HDR_LEN, USBIP_BUSID_LEN);
     busid[USBIP_BUSID_LEN] = '\0';
-    if (strcmp(busid, USBIP_BUSID) != 0 || (s_sess.fd < 0 && state_now() != USBIP_STATE_EXPORTABLE)) {
-        reply_and_close(p, usbip_proto_encode_import_reply(USBIP_ST_NODEV, NULL, s_reply, sizeof(s_reply)),
+    if (strcmp(busid, USBIP_BUSID) != 0 || (s_net->sess.fd < 0 && state_now() != USBIP_STATE_EXPORTABLE)) {
+        reply_and_close(p, usbip_proto_encode_import_reply(USBIP_ST_NODEV, NULL, s_net->reply, sizeof(s_net->reply)),
                         "import refused: no exportable device by that bus id");
         return;
     }
-    if (s_sess.fd >= 0 || usbip_engine_active(&s_engine)) {
-        reply_and_close(p, usbip_proto_encode_import_reply(USBIP_ST_DEV_BUSY, NULL, s_reply, sizeof(s_reply)),
+    if (s_net->sess.fd >= 0 || usbip_engine_active(&s_net->engine)) {
+        reply_and_close(p, usbip_proto_encode_import_reply(USBIP_ST_DEV_BUSY, NULL, s_net->reply, sizeof(s_net->reply)),
                         "import refused: the device is in use");
         return;
     }
-    const esp_err_t err = usbip_engine_start(&s_engine, &s_ops, NULL, &s_dev, s_cfg, s_cfg_len);
+    const esp_err_t err = usbip_engine_start(&s_net->engine, &s_net->ops, NULL, &s_net->dev, s_cfg, s_cfg_len);
 
     if (err != ESP_OK) {
         char why[WHY_LEN];
 
         snprintf(why, sizeof(why), "import failed: the interfaces could not be claimed (%s)", esp_err_to_name(err));
         note_error(why);
-        reply_and_close(p, usbip_proto_encode_import_reply(USBIP_ST_NODEV, NULL, s_reply, sizeof(s_reply)), why);
+        reply_and_close(p, usbip_proto_encode_import_reply(USBIP_ST_NODEV, NULL, s_net->reply, sizeof(s_net->reply)), why);
         return;
     }
     char client[48];
 
     peer_str(&p->peer, client, sizeof(client));
     session_setup(p->fd);
-    s_sess.fd = p->fd;
+    s_net->sess.fd = p->fd;
     p->fd = -1;
     rx_reset();
     s_tx_head = 0;
@@ -659,16 +674,16 @@ static void answer_import(pending_t *p)
     s_sessions++;
     s_dirty = true;
     taskENTER_CRITICAL(&s_lock);
-    strlcpy(s_pub.client, client, sizeof(s_pub.client));
+    strlcpy(s_net->pub.client, client, sizeof(s_net->pub.client));
     // 0 while the clock is unset (before 2020-01-01), as zigbee reports it.
     const time_t now = time(NULL);
-    s_pub.client_since = now < 1577836800 ? 0 : (int64_t)now;
+    s_net->pub.client_since = now < 1577836800 ? 0 : (int64_t)now;
     taskEXIT_CRITICAL(&s_lock);
     ESP_LOGI(TAG, "session %lu: %s imported %s (%04x:%04x)", (unsigned long)s_sessions, client, USBIP_BUSID,
-             s_dev.vid, s_dev.pid);
-    const size_t n = usbip_proto_encode_import_reply(USBIP_ST_OK, &s_dev, s_reply, sizeof(s_reply));
+             s_net->dev.vid, s_net->dev.pid);
+    const size_t n = usbip_proto_encode_import_reply(USBIP_ST_OK, &s_net->dev, s_net->reply, sizeof(s_net->reply));
 
-    tx_write(s_reply, n, NULL, 0);
+    tx_write(s_net->reply, n, NULL, 0);
     after_engine();
 }
 
@@ -703,9 +718,9 @@ static void pending_read(pending_t *p)
         return;
     }
     if (code == USBIP_OP_REQ_DEVLIST) {
-        const bool listed = s_has_dev && (s_sess.fd >= 0 || s_reset_until_ms == 0);
+        const bool listed = s_has_dev && (s_net->sess.fd >= 0 || s_reset_until_ms == 0);
 
-        reply_and_close(p, usbip_proto_encode_devlist(listed ? &s_dev : NULL, s_reply, sizeof(s_reply)),
+        reply_and_close(p, usbip_proto_encode_devlist(listed ? &s_net->dev : NULL, s_net->reply, sizeof(s_net->reply)),
                         "device list sent");
         return;
     }
@@ -743,12 +758,12 @@ static void accept_one(void)
     pending_t *slot = NULL;
 
     for (int i = 0; i < PENDING_MAX; i++) {
-        if (s_pending[i].fd < 0) {
-            slot = &s_pending[i];
+        if (s_net->pending[i].fd < 0) {
+            slot = &s_net->pending[i];
             break;
         }
-        if (slot == NULL || s_pending[i].deadline_ms < slot->deadline_ms) {
-            slot = &s_pending[i];
+        if (slot == NULL || s_net->pending[i].deadline_ms < slot->deadline_ms) {
+            slot = &s_net->pending[i];
         }
     }
     if (slot->fd >= 0) {
@@ -803,7 +818,6 @@ static void device_close(void)
 
 static void on_dev_new(void)
 {
-    static usbip_dev_rec_t rec;
     const uint8_t *cfg = NULL;
     size_t cfg_len = 0;
     char why[WHY_LEN];
@@ -811,7 +825,7 @@ static void on_dev_new(void)
     if (s_close_pending) {
         device_close();
     }
-    const esp_err_t err = usbip_usb_open(&rec, &cfg, &cfg_len, why, sizeof(why));
+    const esp_err_t err = usbip_usb_open(&s_net->rec, &cfg, &cfg_len, why, sizeof(why));
 
     if (err == ESP_ERR_INVALID_STATE) {
         ESP_LOGD(TAG, "new device: %s", why); // reported twice at start, or the old one is not closed yet
@@ -825,26 +839,26 @@ static void on_dev_new(void)
     if (err != ESP_OK) {
         s_has_dev = false;
         s_unsupported = true;
-        strlcpy(s_reason, why[0] != '\0' ? why : esp_err_to_name(err), sizeof(s_reason));
-        ESP_LOGW(TAG, "device not exportable: %s", s_reason);
+        strlcpy(s_net->reason, why[0] != '\0' ? why : esp_err_to_name(err), sizeof(s_net->reason));
+        ESP_LOGW(TAG, "device not exportable: %s", s_net->reason);
         return;
     }
-    s_dev = rec;
+    s_net->dev = s_net->rec;
     s_cfg = cfg;
     s_cfg_len = cfg_len;
     s_has_dev = true;
     s_unsupported = false;
-    s_reason[0] = '\0';
+    s_net->reason[0] = '\0';
     s_reset_until_ms = 0;
-    ESP_LOGI(TAG, "device %04x:%04x exportable as %s", s_dev.vid, s_dev.pid, USBIP_BUSID);
+    ESP_LOGI(TAG, "device %04x:%04x exportable as %s", s_net->dev.vid, s_net->dev.pid, USBIP_BUSID);
 }
 
 static void on_dev_gone(void)
 {
-    if (s_sess.fd >= 0) {
+    if (s_net->sess.fd >= 0) {
         session_close("the device went away", true);
     }
-    usbip_engine_stop(&s_engine, "the device went away"); // no power-cycle: esp-usb recovers the port itself
+    usbip_engine_stop(&s_net->engine, "the device went away"); // no power-cycle: esp-usb recovers the port itself
     if (s_has_dev || s_unsupported) {
         ESP_LOGI(TAG, "device gone");
     }
@@ -852,7 +866,7 @@ static void on_dev_gone(void)
     s_cfg = NULL;
     s_cfg_len = 0;
     s_unsupported = false;
-    s_reason[0] = '\0';
+    s_net->reason[0] = '\0';
     s_reset_until_ms = 0;
     s_dirty = true;
     device_close();
@@ -872,7 +886,7 @@ static void drain_events(void)
             on_dev_gone();
             break;
         case USBIP_EV_XFER_DONE:
-            usbip_engine_on_complete(&s_engine, ev.x, ev.st, ev.actual);
+            usbip_engine_on_complete(&s_net->engine, ev.x, ev.st, ev.actual);
             after_engine();
             break;
         }
@@ -892,13 +906,13 @@ static void timers(void)
 {
     const int64_t now = now_ms();
 
-    usbip_engine_tick(&s_engine);
+    usbip_engine_tick(&s_net->engine);
     after_engine();
-    if (s_sess.fd >= 0 && s_tx_len > 0 && now - s_tx_progress_ms >= TX_STALL_MS) {
+    if (s_net->sess.fd >= 0 && s_tx_len > 0 && now - s_tx_progress_ms >= TX_STALL_MS) {
         session_end("the client has not read its replies for 30 s", true);
     }
     for (int i = 0; i < PENDING_MAX; i++) {
-        pending_t *p = &s_pending[i];
+        pending_t *p = &s_net->pending[i];
 
         if (p->fd >= 0 && now >= p->deadline_ms) {
             pending_close(p, p->len == 0, p->len == 0 ? "sent nothing within 10 s" : "incomplete request in 10 s");
@@ -936,15 +950,15 @@ static void net_task(void *arg)
         if (s_lfd >= 0 && now >= s_accept_rest_ms) {
             maxfd = fd_add(s_lfd, &rd, maxfd);
         }
-        if (s_sess.fd >= 0) {
-            maxfd = fd_add(s_sess.fd, &rd, maxfd);
+        if (s_net->sess.fd >= 0) {
+            maxfd = fd_add(s_net->sess.fd, &rd, maxfd);
             if (s_tx_len > 0) {
-                maxfd = fd_add(s_sess.fd, &wr, maxfd);
+                maxfd = fd_add(s_net->sess.fd, &wr, maxfd);
             }
         }
         for (int i = 0; i < PENDING_MAX; i++) {
-            if (s_pending[i].fd >= 0) {
-                maxfd = fd_add(s_pending[i].fd, &rd, maxfd);
+            if (s_net->pending[i].fd >= 0) {
+                maxfd = fd_add(s_net->pending[i].fd, &rd, maxfd);
             }
         }
         const int wait_ms = uxQueueMessagesWaiting(s_events) > 0 ? 0 : WAIT_MAX_MS;
@@ -973,22 +987,22 @@ static void net_task(void *arg)
             }
         }
         drain_events();
-        if (atomic_exchange(&s_kick, false) && s_sess.fd >= 0) {
+        if (atomic_exchange(&s_kick, false) && s_net->sess.fd >= 0) {
             session_end("kicked", false);
         }
         // The session before the listener: a client that closes and imports again at once is seen closing first.
-        const int sfd = s_sess.fd;
+        const int sfd = s_net->sess.fd;
 
         if (sfd >= 0 && FD_ISSET(sfd, &wr)) {
             tx_flush();
             after_engine();
         }
-        if (sfd >= 0 && s_sess.fd == sfd && FD_ISSET(sfd, &rd)) {
+        if (sfd >= 0 && s_net->sess.fd == sfd && FD_ISSET(sfd, &rd)) {
             read_session();
         }
         for (int i = 0; i < PENDING_MAX; i++) {
-            if (s_pending[i].fd >= 0 && FD_ISSET(s_pending[i].fd, &rd)) {
-                pending_read(&s_pending[i]);
+            if (s_net->pending[i].fd >= 0 && FD_ISSET(s_net->pending[i].fd, &rd)) {
+                pending_read(&s_net->pending[i]);
             }
         }
         if (s_lfd >= 0 && FD_ISSET(s_lfd, &rd)) {
@@ -1011,9 +1025,15 @@ static void wake(void)
 esp_err_t usbip_net_start(void)
 {
     ESP_RETURN_ON_FALSE(!s_started, ESP_ERR_INVALID_STATE, TAG, "net start: already started");
-    for (int i = 0; i < PENDING_MAX; i++) {
-        s_pending[i].fd = -1;
+    if (s_net == NULL) { // kept from a start that failed later on
+        s_net = heap_caps_calloc(1, sizeof(*s_net), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        ESP_RETURN_ON_FALSE(s_net != NULL, ESP_ERR_NO_MEM, TAG, "net start: no memory for the state");
     }
+    for (int i = 0; i < PENDING_MAX; i++) {
+        s_net->pending[i].fd = -1;
+    }
+    s_net->sess.fd = -1;
+    s_net->pub.state = USBIP_STATE_NO_DEVICE;
     s_rx_data = heap_caps_malloc(USBIP_XFER_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     s_tx = heap_caps_malloc(TX_RING_LEN, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     s_events = xQueueCreate(USBIP_USB_EVENTS_LEN, sizeof(usbip_event_t));
@@ -1034,10 +1054,10 @@ esp_err_t usbip_net_start(void)
         }
         return ESP_ERR_NO_MEM;
     }
-    s_ops = *usbip_usb_ops();
-    s_ops.emit = op_emit;
-    s_ops.end_session = op_end_session;
-    s_ops.now_ms = op_now_ms;
+    s_net->ops = *usbip_usb_ops();
+    s_net->ops.emit = op_emit;
+    s_net->ops.end_session = op_end_session;
+    s_net->ops.now_ms = op_now_ms;
     s_started = true; // the queue and the eventfd stay: the USB side may hold them from here on
     usbip_usb_set_wake(wake);
     ESP_RETURN_ON_ERROR(usbip_usb_start(s_events), TAG, "usb start");

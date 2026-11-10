@@ -67,8 +67,9 @@ static atomic_bool s_dev_open; // read by the USB task (root port power-on)
 static atomic_bool s_gone;
 
 // Network task only: the live DMA transfers, found by their data buffer (alloc returns the buffer, free and submit get
-// it back). Bounded, so the events queue can always take every completion.
-static usb_transfer_t *s_xfers[USBIP_USB_XFERS_MAX];
+// it back). Bounded, so the events queue can always take every completion. USBIP_USB_XFERS_MAX entries, allocated
+// (PSRAM) by usbip_usb_start: with USB/IP off they take no internal RAM.
+static usb_transfer_t **s_xfers;
 
 // Root port power (spec 5): turned off by the network task, on again by the USB task once the device is freed.
 static SemaphoreHandle_t s_power_lock;
@@ -268,6 +269,10 @@ esp_err_t usbip_usb_start(QueueHandle_t events)
 {
     ESP_RETURN_ON_FALSE(events != NULL, ESP_ERR_INVALID_ARG, TAG, "usb start: no events queue");
     ESP_RETURN_ON_FALSE(!s_started, ESP_ERR_INVALID_STATE, TAG, "usb start: already started");
+    if (s_xfers == NULL) {
+        s_xfers = heap_caps_calloc(USBIP_USB_XFERS_MAX, sizeof(*s_xfers), MALLOC_CAP_SPIRAM);
+        ESP_RETURN_ON_FALSE(s_xfers != NULL, ESP_ERR_NO_MEM, TAG, "usb start: no memory for the transfer table");
+    }
     s_events = events;
     s_power_lock = xSemaphoreCreateMutex();
     ESP_RETURN_ON_FALSE(s_power_lock != NULL, ESP_ERR_NO_MEM, TAG, "power lock");

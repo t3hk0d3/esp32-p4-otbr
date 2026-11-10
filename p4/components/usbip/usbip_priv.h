@@ -95,7 +95,7 @@ esp_err_t usbip_net_start(void);
 void usbip_net_kick(void);
 
 // Fills the device, client, state, reason, counters, sessions, refused, memory and last_error fields of out under the
-// module's lock; leaves the other fields alone. Before usbip_net_start: no device, no client, zeros.
+// module's lock; leaves the other fields alone. Before usbip_net_start: state no_device, the rest left alone.
 void usbip_net_snapshot(usbip_status_t *out);
 
 #ifdef __cplusplus
