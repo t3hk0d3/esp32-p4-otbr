@@ -253,7 +253,8 @@ websocat ws://<board>/device/console/ws
 
 ### Logging
 
-Concepts, channels and levels are in [Logging](logging.md). `GET /device/logging` answers
+Concepts, channels and levels are in [Logging](logging.md), the internals in
+[Internals](reference/internals.md#logging). `GET /device/logging` answers
 
 ```json
 {
@@ -270,10 +271,13 @@ Concepts, channels and levels are in [Logging](logging.md). `GET /device/logging
 }
 ```
 
-Levels are `off`, `error`, `warning`, `info`, `debug`, `verbose`. `syslog.state` is `off`, `resolving`, `sending` or
-`unresolved`. `target` is `host[:port]` (port 514 when omitted; `[fd00::1]:514` for IPv6). `components` holds one level
-per tag plus `"*"`; a `PUT` with `components` replaces the whole override set, so leaving a tag out removes its override.
-The syslog level cannot be raised above `off` while the target is empty (400 `channels.syslog.target`).
+Levels are `off`, `error`, `warning`, `info`, `debug`, `verbose`. `syslog.state` is `off`, `resolving`, `sending`,
+`unresolved` (the name does not resolve) or `no_socket` (resolved, but no UDP socket was free; tried again like a
+failed lookup). `jtag.host` is whether a USB host is connected; while none is, JTAG lines are neither sent nor counted.
+`target` is `host[:port]` (port 514 when omitted; `[fd00::1]:514` for IPv6). `components` holds one level per tag plus
+`"*"`; a tag is 1 to 23 bytes of printable ASCII without spaces, quotes or backslashes (else 400
+`components.<tag>`). A `PUT` with `components` replaces the whole override set, so leaving a tag out removes its
+override. The syslog level cannot be raised above `off` while the target is empty (400 `channels.syslog.target`).
 
 ### Live log
 
@@ -282,7 +286,8 @@ The syslog level cannot be raised above `off` while the target is empty (400 `ch
 frame `{"level":"<level>"}` changes the level of this viewer only (anything else is answered with a `# ignored` notice).
 Board notices start with `# `: `# dropped <n> lines` (this viewer lost lines; shown whatever its level). At most two
 viewers: a third is refused with 503 before the upgrade. The board pings every 10 s and closes with 1001 `no answer` a
-client silent for 30 s. Viewers get no `debug` or `verbose` lines of the `httpd*` tags.
+client silent for 30 s. Frames are valid UTF-8: ill-formed bytes in a line are replaced by U+FFFD. Viewers (and syslog)
+get no `debug` or `verbose` lines of the network-path tags (`httpd*`, `esp.emac*`, `esp_eth*`, `esp_netif*`, `lwip*`).
 
 ```
 websocat 'ws://<board>/device/logging/ws?level=debug'

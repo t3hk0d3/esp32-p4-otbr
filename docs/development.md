@@ -41,7 +41,9 @@ applies the defaults only to options the existing `sdkconfig` does not set, so `
 delete a project's `sdkconfig` when one of its `sdkconfig.defaults*` files is newer and let ESP-IDF generate it again.
 Local `menuconfig` changes are lost then; keep them in the defaults. A plain `idf.py build` does not do this: after
 pulling a change to the defaults, delete `sdkconfig` yourself. `routing/task.c` stops the build with an `#error` when
-the socket limit (`CONFIG_LWIP_MAX_SOCKETS`) is below what the image needs.
+the socket limit (`CONFIG_LWIP_MAX_SOCKETS`) is below what the image needs, and `logging/logging_capture.c` does the
+same for a stale `sdkconfig` that still has the secondary console on USB-Serial-JTAG, debug and verbose compiled out
+(`CONFIG_LOG_MAXIMUM_LEVEL` below 5), log version 2 or fewer than 32 UDP PCBs.
 
 ## Testing
 
@@ -251,6 +253,25 @@ The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/py
   bytes, and a silent client that then sends `POST / HTTP/1.1` is dropped (`refused` + 1) with `to_radio` unchanged.
 - **Stop with an open session**: hold a REST session longer than 45 s while setting the OTBR channel `off`: the PUT
   answers 202, the channel stays `otbr` running with `error` `drain_timeout`, Thread keeps running.
+### Logging
+
+The on-board tests are in `p4/pytest/test_logging.py` (the board alone, as a border router with a stored dataset; the
+syslog test needs the test host reachable from the board over UDP, the `403` test the VLAN rig, `-m vlan_switch`). They
+put the logging settings and the Thread console's setting back as they found them and never erase NVS. The host tests
+are in `p4/components/logging/test_host/` and `p4/components/device_api/test_host/` (`test_logging_json.c`); the
+Logs page's in `tools/tests/test_logs_page.py`. The rules they check are in
+[Internals](reference/internals.md#logging). Not run on hardware yet; beyond the tests, check on the board:
+
+- `stack_free_min_bytes` of `log_out` (5120) and of the short-lived `log_dns` (4096) in `/device/diag` after a syslog
+  name lookup and a debug-level session; trim both.
+- A syslog name whose DNS server does not answer: USB-JTAG and the live log keep flowing while `log_dns` waits.
+- `*` at `debug` with a debug live viewer open and syslog at `debug` to a closed port: the line rate settles (no
+  `esp.emac` or `httpd*` debug lines on the viewer or in syslog), and the UART still shows them.
+- With a USB breakout: lines on USB-JTAG with a host, none counted as dropped without one, `jtag.host` following the
+  cable.
+- `log tag OPENTHREAD debug` takes effect at once, and again after the OpenThread lock was busy (the retry timer).
+- Ziggurat logging under load does not stall (its ring is in PSRAM), and `log tag ziggurat <level>` is followed.
+
 ### Topology scan latency
 
 Mesh topology requests slow down pings through the border router while they run, because of the Diagnostic Get

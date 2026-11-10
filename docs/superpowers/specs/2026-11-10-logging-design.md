@@ -149,7 +149,8 @@ REST, under the device API:
 
 - `GET /device/logging` →
   `{"channels": {"uart": {"level": "info"}, "jtag": {"level": "info", "host": bool},
-  "syslog": {"level": "off", "target": "" | "host[:port]", "state": "off" | "resolving" | "sending" | "unresolved"}},
+  "syslog": {"level": "off", "target": "" | "host[:port]", "state": "off" | "resolving" | "sending" | "unresolved" |
+  "no_socket"}},
   "components": {"*": "info", "<tag>": "<level>", ...}, "known_tags": ["..."], "viewers": <n>,
   "counters": {"<channel>": {"sent": n, "dropped": n}, "live": {"dropped": n}}}`.
   Levels: `off`, `error`, `warning`, `info`, `debug`, `verbose`.

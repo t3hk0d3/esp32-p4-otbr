@@ -134,8 +134,9 @@ See [Logging](logging.md).
 | `br_log_lines_dropped_total` | counter | `channel` = uart, jtag, syslog, live |
 | `br_log_viewers` | gauge | |
 
-`dropped` counts lines a channel wanted but could not take: a full transit ring or viewer queue, no USB-JTAG host, a
-syslog send error or an unresolved target. The counters start again from 0 when the board reboots.
+`dropped` counts lines a channel wanted but could not take: a full transit ring or viewer queue, a USB-JTAG host that
+does not read, a syslog send error, or a syslog target that is not resolved or has no socket. Without a USB-JTAG host
+nothing is counted for USB-JTAG. The counters start again from 0 when the board reboots.
 
 ## Example alerts
 

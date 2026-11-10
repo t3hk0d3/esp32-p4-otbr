@@ -27,6 +27,14 @@ release's `versions.txt`.
   compiled out; levels default to what they were. The secondary console on USB-JTAG is off. The USB-JTAG channel is
   not checked on hardware (no breakout). See `docs/logging.md`. On-board tests are written, not yet run.
 
+### Changed
+
+- OpenThread's lines on the UART now have the format of every other tag: `I (123) OPENTHREAD: ...` instead of
+  `I(123) OPENTHREAD:...`. Scripts that match the old form need the new one.
+- lwIP UDP PCBs 16 → 32 (the sum of their users is in `p4/sdkconfig.defaults`), lwIP sockets 24 → 25 (syslog). An
+  existing `p4/sdkconfig` keeps the old values and the build stops with an `#error`: delete `p4/sdkconfig` after
+  pulling and build again (`make build` does it by itself).
+
 ## [0.5.0] - 2026-11-10
 
 ### Added

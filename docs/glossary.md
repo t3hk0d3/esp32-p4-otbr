@@ -65,6 +65,10 @@
 :   Service Registration Protocol: how Thread devices (Matter, HomeKit, ESPHome) register their services with a border
     router, which then announces them over mDNS.
 
+**Syslog**
+:   The standard way for devices to send their log lines over the network to a log server (rsyslog, syslog-ng,
+    Graylog, ...), one UDP message per line. See [Logging](logging.md#syslog).
+
 **Thread**
 :   A low-power IPv6 mesh network for smart home devices, used by Matter.
 
