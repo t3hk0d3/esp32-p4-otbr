@@ -230,7 +230,9 @@ int device_api_channels_json(char *buf, size_t cap, const radio_mux_snapshot_t *
         channel_fields(&w, &s->chans[i]);
         json_out_raw(&w, "}");
     }
-    json_out_raw(&w, "],\"modes\":[");
+    json_out_raw(&w, "],\"usbip\":");
+    json_out_bool(&w, s->usb_external);
+    json_out_raw(&w, ",\"modes\":[");
     for (size_t i = 0; i < s->n_modes && i < RADIO_MUX_RULES_MAX + RADIO_MUX_CHANNELS_MAX; i++) {
         json_out_raw(&w, i > 0 ? "," : "");
         mode_json(&w, s, &s->modes[i]);
@@ -536,6 +538,10 @@ static verdict_reply_t verdict_reply(radio_mux_verdict_t v)
     case RADIO_MUX_REFUSE_PENDING:
         return (verdict_reply_t) {
             503, "mux_busy", MUX_BUSY_DETAIL
+        };
+    case RADIO_MUX_REFUSE_USB_EXTERNAL:
+        return (verdict_reply_t) {
+            409, "usbip_enabled", "the USB port is exported over USB/IP"
         };
     case RADIO_MUX_REFUSE_FAILED:
     default:

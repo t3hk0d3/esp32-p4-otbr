@@ -113,6 +113,12 @@ static struct radio_mux_chan *find_chan(const char *id)
     return NULL;
 }
 
+// Why a channel that is not open is unavailable: the USB port's owner for a USB channel while the port is external.
+static const char *absent_reason(const struct radio_mux_chan *ch)
+{
+    return ch->kind == RADIO_MUX_KIND_USB && atomic_load(&g_mux.usb_external) ? g_mux.usb_ext_reason : "not detected";
+}
+
 /* ---- the channel view ---- */
 
 static radio_mux_chan_view_t view_of(const struct radio_mux_chan *ch)
@@ -255,7 +261,7 @@ static void refresh(mux_port_t *p)
     case RADIO_MUX_AS_CLOSING:
         ch->eff_mode = RADIO_MUX_MODE_UNAVAILABLE;
         ch->state = RADIO_MUX_STATE_IDLE;
-        snprintf(ch->reason, sizeof(ch->reason), "not detected");
+        snprintf(ch->reason, sizeof(ch->reason), "%s", absent_reason(ch));
         break;
     }
     if (ch->det_failed && ch->reason[0] == '\0' && ch->state != RADIO_MUX_STATE_STARTING) {
@@ -397,7 +403,7 @@ static void close_device(mux_port_t *p)
     ch->last_seen = mux_now_epoch();
     ch->eff_mode = RADIO_MUX_MODE_UNAVAILABLE;
     ch->state = RADIO_MUX_STATE_IDLE;
-    snprintf(ch->reason, sizeof(ch->reason), "not detected");
+    snprintf(ch->reason, sizeof(ch->reason), "%s", absent_reason(ch));
     ch->chan_state = RADIO_MUX_CS_ABSENT;
     ch->fault_kind = RADIO_MUX_FAULT_NONE;
     ch->work = RADIO_MUX_WORK_NONE;
@@ -1633,10 +1639,14 @@ static void handle(const mux_msg_t *m)
 static void owner_task(void *arg)
 {
     mux_msg_t m;
-    const esp_err_t err = usb_transport_start();
+    if (atomic_load(&g_mux.usb_external)) {
+        ESP_LOGI(TAG, "USB port belongs to USB/IP");
+    } else {
+        const esp_err_t err = usb_transport_start();
 
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "USB host start: %s, no USB radios", esp_err_to_name(err));
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "USB host start: %s, no USB radios", esp_err_to_name(err));
+        }
     }
     // R13 at start: every present channel whose stored mode has an instance: the C6 once its boot steps ended (it starts
     // in reinit), USB devices attached at boot through new_dev_cb like any plug-in.

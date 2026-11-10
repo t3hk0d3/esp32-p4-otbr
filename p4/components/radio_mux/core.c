@@ -359,6 +359,11 @@ radio_mux_post_t radio_mux_post_rx(bool queue_full, size_t len, radio_mux_counte
 #define FNV_OFFSET 0x811C9DC5u
 #define FNV_PRIME 0x01000193u
 
+bool radio_mux_usb_external_refuses(bool external, radio_mux_kind_t kind, bool mode_change)
+{
+    return external && kind == RADIO_MUX_KIND_USB && mode_change;
+}
+
 bool radio_mux_is_builtin_id(const char *id)
 {
     return strcmp(id, RADIO_MUX_BUILTIN_ID) == 0 || strcmp(id, RADIO_MUX_BUILTIN_NVS_ID) == 0;

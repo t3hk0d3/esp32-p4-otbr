@@ -205,7 +205,8 @@ void mux_chan_defaults(struct radio_mux_chan *ch, const char *id, radio_mux_kind
     radio_mux_proxy_defaults(&ch->proxy);
     ch->eff_mode = RADIO_MUX_MODE_UNAVAILABLE;
     ch->supported = true;
-    snprintf(ch->reason, sizeof(ch->reason), "not detected");
+    snprintf(ch->reason, sizeof(ch->reason), "%s",
+             kind == RADIO_MUX_KIND_USB && atomic_load(&g_mux.usb_external) ? g_mux.usb_ext_reason : "not detected");
 }
 
 // At load: a singleton (otbr, ziggurat) stored on more than one channel (a move's stores cut apart) keeps the first in
@@ -282,4 +283,46 @@ void mux_load_chans(void)
     }
     nvs_close(nvs);
     dedupe_singletons();
+}
+
+// Any task, before or after the start: reads the stored blobs itself (the loaded records are not there before the start).
+bool radio_mux_stored_usb_stack(char *id, size_t cap, radio_mux_mode_t *mode)
+{
+    char ids[RADIO_MUX_CHANNELS_MAX][RADIO_MUX_ID_MAX];
+    size_t len = sizeof(ids);
+    nvs_handle_t nvs;
+    bool found = false;
+
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        return false;
+    }
+    if (nvs_get_blob(nvs, NVS_INDEX, ids, &len) != ESP_OK) {
+        len = 0;
+    }
+    for (size_t i = 0; i < len / RADIO_MUX_ID_MAX && !found; i++) {
+        char key[16];
+        chan_blob_t b;
+        size_t blen = sizeof(b);
+
+        ids[i][RADIO_MUX_ID_MAX - 1] = '\0';
+        if (radio_mux_is_builtin_id(ids[i])) {
+            continue;
+        }
+        radio_mux_nvs_key(ids[i], key);
+        if (nvs_get_blob(nvs, key, &b, &blen) != ESP_OK || blen != sizeof(b) || b.version != BLOB_VERSION ||
+                strncmp(b.id, ids[i], RADIO_MUX_ID_MAX) != 0) {
+            continue;
+        }
+        if (b.mode == RADIO_MUX_MODE_OTBR || b.mode == RADIO_MUX_MODE_ZIGGURAT) {
+            if (id && cap > 0) {
+                snprintf(id, cap, "%s", ids[i]);
+            }
+            if (mode) {
+                *mode = (radio_mux_mode_t)b.mode;
+            }
+            found = true;
+        }
+    }
+    nvs_close(nvs);
+    return found;
 }
