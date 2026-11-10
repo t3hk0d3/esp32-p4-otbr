@@ -72,7 +72,8 @@ esp_log_level_t logging_core_nonuart_max(logging_levels_t lv);
 #define LOGGING_ROUTE_RING (1u << 1) /**< Format the line into the transit ring for the other channels. */
 
 /**
- * Where a captured log line goes. `in_isr` (also passed before logging_start) hands every line to ESP-IDF unchanged.
+ * Where a captured log line goes. `in_isr` (a constrained context: ISR, cache off, scheduler not running; or before
+ * logging_start) hands every line to ESP-IDF unchanged; the target wrapper makes that test itself, in IRAM.
  * Otherwise UART when `level` is at or below `uart_level`; ring when no sink guard is held, `level` is at or below
  * `nonuart_max` and the tag's ESP-IDF level `tag_level` (the gate: the component level capped by the channels) lets
  * it through. A line at ESP_LOG_NONE goes nowhere. Returns LOGGING_ROUTE_* bits.
@@ -94,10 +95,13 @@ typedef struct {
     char tags[LOGGING_KNOWN_TAGS_MAX][LOGGING_TAG_MAX];
 } logging_tagset_t;
 
-/** Remember a tag. True only when it was newly added; false when known, invalid (empty, 24+ bytes) or the set is full. */
+/**
+ * Remember a tag. True only when it was newly added; false when known, invalid (empty, 24+ bytes) or the set is full.
+ * One writer at a time; the new entry is written before `count` publishes it (release), so readers need no lock.
+ */
 bool logging_tagset_add(logging_tagset_t *set, const char *tag);
 
-/** Copy up to `cap` pointers (into the set) in insertion order; returns how many. */
+/** Copy up to `cap` pointers (into the set) in insertion order; returns how many. Safe beside a concurrent add. */
 size_t logging_tagset_list(const logging_tagset_t *set, const char **out, size_t cap);
 
 #ifdef __cplusplus

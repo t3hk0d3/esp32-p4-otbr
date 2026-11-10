@@ -29,6 +29,9 @@ static struct {
     char datagram[1024];
     size_t datagram_len;
     uint16_t sent_port;
+    uint8_t sent_octet; /**< Last byte of the address the last datagram went to. */
+    uint8_t addr_octet; /**< Last byte of the address the resolver answers (192.168.1.x). */
+    int connected_calls;
     int closes;
     int closed_fd;
     bool clock_valid;
@@ -36,6 +39,7 @@ static struct {
 
 static bool fake_jtag_connected(void)
 {
+    s_fake.connected_calls++;
     return s_fake.connected;
 }
 
@@ -63,7 +67,7 @@ static esp_err_t fake_resolve(const char *host, uint16_t port, struct sockaddr_s
     memset(addr, 0, sizeof(*addr));
     in->sin_family = AF_INET;
     in->sin_port = htons(port);
-    in->sin_addr.s_addr = htonl(0xc0a8010a);
+    in->sin_addr.s_addr = htonl(0xc0a80100 | s_fake.addr_octet);
     *addr_len = sizeof(*in);
     return ESP_OK;
 }
@@ -87,6 +91,7 @@ static int fake_udp_send(int fd, const void *buf, size_t len, const struct socka
     memcpy(s_fake.datagram, buf, s_fake.datagram_len);
     s_fake.datagram[s_fake.datagram_len] = '\0';
     s_fake.sent_port = ntohs(((const struct sockaddr_in *) to)->sin_port);
+    s_fake.sent_octet = (uint8_t)(ntohl(((const struct sockaddr_in *) to)->sin_addr.s_addr) & 0xff);
     return (int) len;
 }
 
@@ -118,6 +123,17 @@ static const logging_drain_ops_t FAKE_OPS = {
     .hostname = fake_hostname,
 };
 
+/** The JTAG driver failed to install: no write op. */
+static const logging_drain_ops_t NO_JTAG_OPS = {
+    .jtag_connected = fake_jtag_connected,
+    .jtag_write = NULL,
+    .resolve = fake_resolve,
+    .udp_open = fake_udp_open,
+    .udp_send = fake_udp_send,
+    .udp_close = fake_udp_close,
+    .hostname = fake_hostname,
+};
+
 /* ---- Log output capture: the sinks must never log ---- */
 
 static int s_log_lines;
@@ -138,6 +154,7 @@ static void setup(void)
     logging_drain_reset(); // closes the last test's socket: before the fakes are cleared
     memset(&s_fake, 0, sizeof(s_fake));
     s_fake.connected = true;
+    s_fake.addr_octet = 10;
     logging_set_clock(NULL);
     s_log_lines = 0;
     s_prev_vprintf = esp_log_set_vprintf(count_lines);
@@ -239,6 +256,21 @@ TEST_CASE("JTAG with a host that does not read (TX buffer full): dropped[JTAG] +
     teardown();
 }
 
+TEST_CASE("JTAG without a driver: dropped[JTAG] + 1, nothing formatted or written, host not asked", "[logging]")
+{
+    setup();
+    logging_drain_set_ops(&NO_JTAG_OPS);
+    s_fake.connected_calls = 0;
+    logging_line_t l = line(ESP_LOG_INFO, "eth", 5, "link up");
+
+    logging_drain_line(&l, levels(ESP_LOG_INFO, ESP_LOG_NONE));
+    TEST_ASSERT_EQUAL(0, s_fake.jtag_writes);
+    TEST_ASSERT_EQUAL(0, s_fake.connected_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, status().dropped[LOGGING_CH_JTAG]);
+    TEST_ASSERT_FALSE(status().jtag_host);
+    teardown();
+}
+
 /* ---- syslog sink ---- */
 
 TEST_CASE("syslog new target: state resolving, then sending once resolved", "[logging]")
@@ -320,35 +352,110 @@ TEST_CASE("syslog on an unresolvable name: state unresolved", "[logging]")
     teardown();
 }
 
-TEST_CASE("syslog on an unresolvable name: retried every 60 s", "[logging]")
+TEST_CASE("syslog on an unresolvable name: retried after 5, 10, 20, 40, then every 60 s", "[logging]")
 {
+    static const uint32_t tries_at[] = {5000, 15000, 35000, 75000, 135000, 195000};
+
     setup();
     s_fake.resolve_result = ESP_FAIL;
     syslog_on(ESP_LOG_WARN, "nowhere.lan");
-    logging_drain_tick(59999);
     TEST_ASSERT_EQUAL(1, s_fake.resolves);
-    logging_drain_tick(60000);
-    TEST_ASSERT_EQUAL(2, s_fake.resolves);
-    logging_drain_tick(119999);
-    TEST_ASSERT_EQUAL(2, s_fake.resolves);
+    for (int i = 0; i < 6; i++) {
+        logging_drain_tick(tries_at[i] - 1);
+        TEST_ASSERT_EQUAL(1 + i, s_fake.resolves);
+        logging_drain_tick(tries_at[i]);
+        TEST_ASSERT_EQUAL(2 + i, s_fake.resolves);
+    }
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_UNRESOLVED, status().syslog);
 
     s_fake.resolve_result = ESP_OK;
-    logging_drain_tick(120000);
-    TEST_ASSERT_EQUAL(3, s_fake.resolves);
+    logging_drain_tick(255000);
+    TEST_ASSERT_EQUAL(8, s_fake.resolves);
     TEST_ASSERT_EQUAL(LOGGING_SYSLOG_SENDING, status().syslog);
     teardown();
 }
 
-TEST_CASE("syslog retry across the uptime counter wrap: still every 60 s", "[logging]")
+TEST_CASE("syslog retry across the uptime counter wrap: still after 5 s", "[logging]")
 {
     setup();
     s_fake.resolve_result = ESP_FAIL;
     logging_drain_configure(ESP_LOG_WARN, "nowhere.lan");
     logging_drain_tick(UINT32_MAX - 1000);
-    logging_drain_tick(1000);
+    logging_drain_tick(3000);
     TEST_ASSERT_EQUAL(1, s_fake.resolves);
-    logging_drain_tick(58999);
+    logging_drain_tick(3999);
     TEST_ASSERT_EQUAL(2, s_fake.resolves);
+    teardown();
+}
+
+TEST_CASE("syslog name target sending: looked up again every 10 min, the new address used", "[logging]")
+{
+    setup();
+    syslog_on(ESP_LOG_WARN, "logs.lan");
+    logging_line_t l = line(ESP_LOG_ERROR, "zigbee", 1, "boom");
+
+    logging_drain_tick(599999);
+    TEST_ASSERT_EQUAL(1, s_fake.resolves);
+    s_fake.addr_octet = 11;
+    logging_drain_tick(600000);
+    TEST_ASSERT_EQUAL(2, s_fake.resolves);
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_SENDING, status().syslog);
+    logging_drain_line(&l, levels(ESP_LOG_NONE, ESP_LOG_WARN));
+    TEST_ASSERT_EQUAL(11, s_fake.sent_octet);
+    TEST_ASSERT_EQUAL(0, s_fake.closes); // same family: socket kept
+    logging_drain_tick(1199999);
+    TEST_ASSERT_EQUAL(2, s_fake.resolves);
+    logging_drain_tick(1200000);
+    TEST_ASSERT_EQUAL(3, s_fake.resolves);
+    teardown();
+}
+
+TEST_CASE("syslog name target, failed refresh: keeps the last address, retried after 5 s", "[logging]")
+{
+    setup();
+    syslog_on(ESP_LOG_WARN, "logs.lan");
+    logging_line_t l = line(ESP_LOG_ERROR, "zigbee", 1, "boom");
+
+    s_fake.resolve_result = ESP_FAIL;
+    logging_drain_tick(600000);
+    TEST_ASSERT_EQUAL(2, s_fake.resolves);
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_SENDING, status().syslog);
+    logging_drain_line(&l, levels(ESP_LOG_NONE, ESP_LOG_WARN));
+    TEST_ASSERT_EQUAL(10, s_fake.sent_octet);
+    logging_drain_tick(604999);
+    TEST_ASSERT_EQUAL(2, s_fake.resolves);
+    s_fake.resolve_result = ESP_OK;
+    s_fake.addr_octet = 12;
+    logging_drain_tick(605000);
+    TEST_ASSERT_EQUAL(3, s_fake.resolves);
+    logging_drain_line(&l, levels(ESP_LOG_NONE, ESP_LOG_WARN));
+    TEST_ASSERT_EQUAL(12, s_fake.sent_octet);
+    teardown();
+}
+
+TEST_CASE("syslog IP literal target: never looked up again", "[logging]")
+{
+    setup();
+    syslog_on(ESP_LOG_WARN, "192.168.1.10");
+    logging_drain_tick(600000);
+    logging_drain_tick(36000000);
+    logging_drain_configure(ESP_LOG_WARN, "192.168.1.10");
+    logging_drain_tick(36000001);
+    TEST_ASSERT_EQUAL(1, s_fake.resolves);
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_SENDING, status().syslog);
+    teardown();
+}
+
+TEST_CASE("syslog apply with the same name target: socket kept, looked up again at the next tick", "[logging]")
+{
+    setup();
+    syslog_on(ESP_LOG_WARN, "logs.lan");
+    logging_drain_configure(ESP_LOG_DEBUG, "logs.lan");
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_SENDING, status().syslog);
+    logging_drain_tick(10);
+    TEST_ASSERT_EQUAL(2, s_fake.resolves);
+    TEST_ASSERT_EQUAL(0, s_fake.closes);
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_SENDING, status().syslog);
     teardown();
 }
 

@@ -167,21 +167,26 @@ esp_err_t logging_core_validate(const logging_settings_t *s, const char **field)
 
 bool logging_tagset_add(logging_tagset_t *set, const char *tag)
 {
-    if (!tag_ok(tag) || set->count >= LOGGING_KNOWN_TAGS_MAX) {
+    size_t count = set->count; // only the writer changes it
+
+    if (!tag_ok(tag) || count >= LOGGING_KNOWN_TAGS_MAX) {
         return false;
     }
-    for (size_t i = 0; i < set->count; i++) {
+    for (size_t i = 0; i < count; i++) {
         if (strcmp(set->tags[i], tag) == 0) {
             return false;
         }
     }
-    strlcpy(set->tags[set->count++], tag, LOGGING_TAG_MAX);
+    strlcpy(set->tags[count], tag, LOGGING_TAG_MAX);
+    // Publishes the entry above to lock-free readers (logging_tagset_list).
+    __atomic_store_n(&set->count, count + 1, __ATOMIC_RELEASE);
     return true;
 }
 
 size_t logging_tagset_list(const logging_tagset_t *set, const char **out, size_t cap)
 {
-    size_t n = set->count < cap ? set->count : cap;
+    size_t count = __atomic_load_n(&set->count, __ATOMIC_ACQUIRE);
+    size_t n = count < cap ? count : cap;
 
     for (size_t i = 0; i < n; i++) {
         out[i] = set->tags[i];

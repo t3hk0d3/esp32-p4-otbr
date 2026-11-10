@@ -59,13 +59,19 @@ logging_levels_t logging_levels(void);
 /** Goes up by one on every successful logging_apply: the drain task re-reads the settings when it changes. */
 uint32_t logging_settings_generation(void);
 
-/** An unresolved syslog target is looked up again this long after the last try. */
-#define LOGGING_SYSLOG_RETRY_MS 60000
+/** A failed syslog lookup is tried again after 5 s, the wait doubling with each failure up to 60 s. */
+#define LOGGING_SYSLOG_RETRY_MIN_MS 5000
+#define LOGGING_SYSLOG_RETRY_MAX_MS 60000
+/** A syslog name target that resolved is looked up again this often (an IP address never is). */
+#define LOGGING_SYSLOG_REFRESH_MS 600000
 
 /** Sink seam of the drain: the target defaults use the USB-Serial-JTAG driver, lwIP and netnames. */
 typedef struct {
     bool (*jtag_connected)(void);
-    /** Queue `len` bytes for USB-JTAG without waiting: returns `len`, or 0 when it took nothing (never a part). */
+    /**
+     * Queue `len` bytes for USB-JTAG without waiting: returns `len`, or 0 when it took nothing (never a part). NULL
+     * when the driver is not installed: the JTAG channel then drops every line without asking for a host.
+     */
     int (*jtag_write)(const void *buf, size_t len);
     /** Look `host` up (may block); `addr` gets its address with `port`. */
     esp_err_t (*resolve)(const char *host, uint16_t port, struct sockaddr_storage *addr, socklen_t *addr_len);
@@ -86,11 +92,16 @@ void logging_drain_reset(void);
 
 /**
  * Syslog settings in force: off (level ESP_LOG_NONE or no target) closes the socket; a new target closes it and
- * resolves the target at the next logging_drain_tick; the same target keeps the socket. Drain task only.
+ * resolves the target at the next logging_drain_tick; the same target keeps the socket, and a name target is looked
+ * up again at the next tick. Drain task only.
  */
 void logging_drain_configure(esp_log_level_t syslog_level, const char *target);
 
-/** Resolve the syslog target when due (blocks while it looks it up) and open the socket. Drain task only. */
+/**
+ * Look the syslog target up when due (blocks while it does) and open the socket: right after a configure, after a
+ * failure 5 s later doubling up to 60 s, and while sending to a name every LOGGING_SYSLOG_REFRESH_MS (a failed
+ * refresh keeps the last address). Drain task only.
+ */
 void logging_drain_tick(uint32_t now_ms);
 
 /** Write one record to each sink whose level it passes in `lv`, counting it sent or dropped. Drain task only. */

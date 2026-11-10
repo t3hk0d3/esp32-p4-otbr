@@ -1,9 +1,11 @@
-// Drain of the logging component: the sinks behind the transit ring. Each record goes to USB-Serial-JTAG (when a host
-// is there and its TX buffer has room, else it is dropped) and to syslog over UDP (when the target is resolved, else it
-// is dropped), counted per channel. Nothing here logs: the drain task is a sink (logging_sink_enter), and the sinks
+// Drain of the logging component: the sinks behind the transit ring. Each record goes to USB-Serial-JTAG (when its
+// driver is installed, a host is there and its TX buffer has room, else it is dropped) and to syslog over UDP (when the
+// target is resolved, else it is dropped), counted per channel. A syslog name target is looked up again every 10 min
+// and on every settings apply; a failed lookup is retried after 5 s, doubling up to 60 s. Nothing here logs: the drain task is a sink (logging_sink_enter), and the sinks
 // count their errors instead. The sink logic is host-tested through the ops seam; the task, the ESP-IDF ops and
 // logging_drain_start are target-only.
 
+#include <arpa/inet.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
@@ -22,12 +24,17 @@ static const char LEVEL_LETTERS[] = "NEWIDV"; // indexed by esp_log_level_t
 typedef struct {
     uint32_t state; /**< logging_syslog_state_t; atomic: read by logging_drain_status on any task. */
     char target[LOGGING_TARGET_MAX];
+    char host[LOGGING_TARGET_MAX]; /**< `target` parsed; IPv6 without brackets. */
+    uint16_t port;
+    bool literal; /**< `host` is an IP address: looked up once, never again. */
     int fd;
     int family;
     struct sockaddr_storage addr;
     socklen_t addr_len;
-    bool tried;        /**< A lookup of `target` was made; `last_try_ms` holds when. */
-    uint32_t last_try_ms;
+    bool due;              /**< Look up at the next tick, whatever the time. */
+    uint32_t last_try_ms;  /**< When the last lookup was made. */
+    uint32_t interval_ms;  /**< Time from `last_try_ms` to the next lookup. */
+    uint32_t backoff_ms;   /**< Interval after the next failed lookup. */
 } syslog_sink_t;
 
 static const logging_drain_ops_t *s_ops;
@@ -35,8 +42,7 @@ static syslog_sink_t s_syslog = {.fd = -1};
 static uint32_t s_sent[LOGGING_CH_COUNT];    // atomic: written by the drain task, read by any task
 static uint32_t s_dropped[LOGGING_CH_COUNT]; // idem
 static bool (*s_clock)(struct timeval *out); // atomic pointer
-static logging_tagset_t s_tags;              // grown by the drain task under s_tags_lock
-static portMUX_TYPE s_tags_lock = portMUX_INITIALIZER_UNLOCKED;
+static logging_tagset_t s_tags;              // grown by the drain task only; read lock-free (logging_tagset_add)
 // Drain task only: kept off its stack.
 static char s_jtag_line[JTAG_LINE_MAX];
 static char s_dgram[SYSLOG_DGRAM_MAX];
@@ -73,14 +79,20 @@ void logging_drain_reset(void)
     s_syslog.fd = -1;
     memset(s_sent, 0, sizeof(s_sent));
     memset(s_dropped, 0, sizeof(s_dropped));
-    portENTER_CRITICAL(&s_tags_lock);
     memset(&s_tags, 0, sizeof(s_tags));
-    portEXIT_CRITICAL(&s_tags_lock);
 }
 
 void logging_set_clock(bool (*now)(struct timeval *out))
 {
     __atomic_store_n(&s_clock, now, __ATOMIC_RELEASE);
+}
+
+static bool is_ip_literal(const char *host)
+{
+    struct in6_addr a6;
+    struct in_addr a4;
+
+    return inet_pton(AF_INET, host, &a4) == 1 || inet_pton(AF_INET6, host, &a6) == 1;
 }
 
 void logging_drain_configure(esp_log_level_t syslog_level, const char *target)
@@ -94,45 +106,75 @@ void logging_drain_configure(esp_log_level_t syslog_level, const char *target)
         return;
     }
     if (state != LOGGING_SYSLOG_OFF && strcmp(target, s_syslog.target) == 0) {
-        return; // same target: keep the socket (or the retry schedule)
+        // Same target: keep the socket. A name is looked up again (an apply is how a user says "the address moved").
+        if (!s_syslog.literal) {
+            s_syslog.due = true;
+            s_syslog.backoff_ms = LOGGING_SYSLOG_RETRY_MIN_MS;
+        }
+        return;
     }
     syslog_close();
     strlcpy(s_syslog.target, target, sizeof(s_syslog.target));
-    s_syslog.tried = false;
+    if (logging_target_parse(target, s_syslog.host, sizeof(s_syslog.host), &s_syslog.port) != ESP_OK) {
+        s_syslog.host[0] = '\0'; // validated settings never get here; the lookup then fails and is retried
+    }
+    s_syslog.literal = s_syslog.host[0] != '\0' && is_ip_literal(s_syslog.host);
+    s_syslog.due = true;
+    s_syslog.backoff_ms = LOGGING_SYSLOG_RETRY_MIN_MS;
     syslog_set_state(LOGGING_SYSLOG_RESOLVING);
 }
 
-/** Look the target up and open a socket of its family; the state says how it went. */
+/**
+ * Look the target up. Success: (re)open a socket when the family changed, state sending, next lookup in 10 min (a
+ * name) or never (an IP address). Failure: unresolved, or still sending to the last address when there is one; the
+ * next try follows the back-off.
+ */
 static void syslog_resolve(void)
 {
-    char host[LOGGING_TARGET_MAX];
-    uint16_t port;
+    struct sockaddr_storage addr;
+    socklen_t addr_len = 0;
+    bool sending = __atomic_load_n(&s_syslog.state, __ATOMIC_RELAXED) == LOGGING_SYSLOG_SENDING;
 
-    if (logging_target_parse(s_syslog.target, host, sizeof(host), &port) != ESP_OK ||
-            s_ops->resolve(host, port, &s_syslog.addr, &s_syslog.addr_len) != ESP_OK) {
+    if (s_syslog.host[0] == '\0' || s_ops->resolve(s_syslog.host, s_syslog.port, &addr, &addr_len) != ESP_OK) {
+        s_syslog.interval_ms = s_syslog.backoff_ms;
+        s_syslog.backoff_ms = s_syslog.backoff_ms * 2 < LOGGING_SYSLOG_RETRY_MAX_MS ? s_syslog.backoff_ms * 2 :
+                              LOGGING_SYSLOG_RETRY_MAX_MS;
+        if (!sending) {
+            syslog_set_state(LOGGING_SYSLOG_UNRESOLVED);
+        }
+        return;
+    }
+    s_syslog.addr = addr;
+    s_syslog.addr_len = addr_len;
+    if (s_syslog.fd < 0 || s_syslog.family != addr.ss_family) {
+        syslog_close();
+        s_syslog.family = addr.ss_family;
+        s_syslog.fd = s_ops->udp_open(s_syslog.family);
+    }
+    if (s_syslog.fd < 0) {
+        s_syslog.interval_ms = s_syslog.backoff_ms;
+        s_syslog.backoff_ms = s_syslog.backoff_ms * 2 < LOGGING_SYSLOG_RETRY_MAX_MS ? s_syslog.backoff_ms * 2 :
+                              LOGGING_SYSLOG_RETRY_MAX_MS;
         syslog_set_state(LOGGING_SYSLOG_UNRESOLVED);
         return;
     }
-    if (s_syslog.fd < 0 || s_syslog.family != s_syslog.addr.ss_family) {
-        syslog_close();
-        s_syslog.family = s_syslog.addr.ss_family;
-        s_syslog.fd = s_ops->udp_open(s_syslog.family);
-    }
-    syslog_set_state(s_syslog.fd >= 0 ? LOGGING_SYSLOG_SENDING : LOGGING_SYSLOG_UNRESOLVED);
+    s_syslog.backoff_ms = LOGGING_SYSLOG_RETRY_MIN_MS;
+    s_syslog.interval_ms = LOGGING_SYSLOG_REFRESH_MS;
+    syslog_set_state(LOGGING_SYSLOG_SENDING);
 }
 
 void logging_drain_tick(uint32_t now_ms)
 {
     logging_syslog_state_t state = (logging_syslog_state_t) __atomic_load_n(&s_syslog.state, __ATOMIC_RELAXED);
 
-    if (state != LOGGING_SYSLOG_RESOLVING && state != LOGGING_SYSLOG_UNRESOLVED) {
+    if (state == LOGGING_SYSLOG_OFF || (state == LOGGING_SYSLOG_SENDING && s_syslog.literal && !s_syslog.due)) {
         return;
     }
     // Unsigned difference: still right when the millisecond uptime wraps.
-    if (s_syslog.tried && now_ms - s_syslog.last_try_ms < LOGGING_SYSLOG_RETRY_MS) {
+    if (!s_syslog.due && now_ms - s_syslog.last_try_ms < s_syslog.interval_ms) {
         return;
     }
-    s_syslog.tried = true;
+    s_syslog.due = false;
     s_syslog.last_try_ms = now_ms;
     syslog_resolve();
 }
@@ -141,7 +183,8 @@ static void sink_jtag(const logging_line_t *line)
 {
     int n;
 
-    if (!s_ops->jtag_connected()) {
+    // No driver (its install failed, logged once at boot) or no host: dropped, nothing formatted.
+    if (!s_ops->jtag_write || !s_ops->jtag_connected()) {
         count(&s_dropped[LOGGING_CH_JTAG]);
         return;
     }
@@ -184,9 +227,7 @@ void logging_drain_line(const logging_line_t *line, logging_levels_t lv)
     if (line->level <= ESP_LOG_NONE || line->level > ESP_LOG_VERBOSE) {
         return;
     }
-    portENTER_CRITICAL(&s_tags_lock);
-    logging_tagset_add(&s_tags, line->tag);
-    portEXIT_CRITICAL(&s_tags_lock);
+    logging_tagset_add(&s_tags, line->tag); // no lock: the drain is the only writer, readers need none
     if (line->level <= lv.channel[LOGGING_CH_JTAG]) {
         sink_jtag(line);
     }
@@ -197,7 +238,7 @@ void logging_drain_line(const logging_line_t *line, logging_levels_t lv)
 
 void logging_drain_status(logging_status_t *out)
 {
-    out->jtag_host = s_ops && s_ops->jtag_connected();
+    out->jtag_host = s_ops && s_ops->jtag_write && s_ops->jtag_connected();
     out->syslog = (logging_syslog_state_t) __atomic_load_n(&s_syslog.state, __ATOMIC_RELAXED);
     for (int ch = 0; ch < LOGGING_CH_COUNT; ch++) {
         if (ch != LOGGING_CH_UART) {
@@ -209,13 +250,9 @@ void logging_drain_status(logging_status_t *out)
 
 size_t logging_known_tags(const char **out, size_t cap)
 {
-    size_t n;
-
-    // The set only grows and an entry never changes once added, so the pointers stay valid after the lock.
-    portENTER_CRITICAL(&s_tags_lock);
-    n = logging_tagset_list(&s_tags, out, cap);
-    portEXIT_CRITICAL(&s_tags_lock);
-    return n;
+    // Lock-free: the set only grows, an entry is written before the count that publishes it (logging_tagset_add) and
+    // never changes after, so the pointers stay valid.
+    return logging_tagset_list(&s_tags, out, cap);
 }
 
 #if !CONFIG_IDF_TARGET_LINUX
@@ -233,7 +270,7 @@ size_t logging_known_tags(const char **out, size_t cap)
 static const char *TAG = "logging";
 
 #define JTAG_TX_BUFFER 1024 /**< Two long lines; a host that does not read makes the rest drop. */
-#define JTAG_RX_BUFFER 64   /**< Unused (nothing reads), but the driver wants one. */
+#define JTAG_RX_BUFFER 128  /**< Unused (nothing reads), but the driver wants one above its 64-byte endpoint. */
 /**
  * The drain task's stack: the sinks' buffers are static, the deepest paths are logging_syslog_format (~400 B),
  * snprintf, getaddrinfo, and the UART write of a line the task itself logs (ESP-IDF's vprintf). Check
@@ -296,7 +333,7 @@ static void udp_close(int fd)
     close(fd);
 }
 
-static const logging_drain_ops_t TARGET_OPS = {
+static logging_drain_ops_t s_target_ops = {
     .jtag_connected = jtag_connected,
     .jtag_write = jtag_write,
     .resolve = resolve,
@@ -347,9 +384,13 @@ esp_err_t logging_drain_start(logging_ring_t *ring, TaskHandle_t *task)
 
     s_jtag_installed = err == ESP_OK;
     if (!s_jtag_installed) {
-        ESP_LOGW(TAG, "USB-Serial-JTAG driver: %s, USB-JTAG stays silent", esp_err_to_name(err));
+        // Once, at boot, before the capture starts (UART only). The JTAG channel then counts every line as dropped
+        // and reports no host; this line is what tells the two apart.
+        ESP_LOGE(TAG, "USB-Serial-JTAG driver install failed (%s): USB-JTAG gets no lines this boot",
+                 esp_err_to_name(err));
+        s_target_ops.jtag_write = NULL;
     }
-    logging_drain_set_ops(&TARGET_OPS);
+    logging_drain_set_ops(&s_target_ops);
     if (xTaskCreatePinnedToCore(drain_task, "log_out", DRAIN_STACK, ring, DRAIN_PRIORITY, task, MGMT_CORE) !=
             pdPASS) {
         if (s_jtag_installed) {

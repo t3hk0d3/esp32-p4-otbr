@@ -339,6 +339,25 @@ TEST_CASE("65th tag: ignored, returns false", "[logging]")
     TEST_ASSERT_EQUAL(LOGGING_KNOWN_TAGS_MAX, logging_tagset_list(&set, out, LOGGING_KNOWN_TAGS_MAX + 1));
 }
 
+TEST_CASE("listed tags: pointers and text unchanged by later adds (lock-free readers)", "[logging]")
+{
+    logging_tagset_t set = {0};
+    const char *before[2];
+    const char *after[3];
+
+    TEST_ASSERT_TRUE(logging_tagset_add(&set, "wifi"));
+    TEST_ASSERT_TRUE(logging_tagset_add(&set, "eth"));
+    TEST_ASSERT_EQUAL(2, logging_tagset_list(&set, before, 2));
+    TEST_ASSERT_TRUE(logging_tagset_add(&set, "zigbee"));
+    TEST_ASSERT_FALSE(logging_tagset_add(&set, "wifi"));
+    TEST_ASSERT_EQUAL(3, logging_tagset_list(&set, after, 3));
+    TEST_ASSERT_EQUAL_PTR(before[0], after[0]);
+    TEST_ASSERT_EQUAL_PTR(before[1], after[1]);
+    TEST_ASSERT_EQUAL_STRING("wifi", before[0]);
+    TEST_ASSERT_EQUAL_STRING("eth", before[1]);
+    TEST_ASSERT_EQUAL_STRING("zigbee", after[2]);
+}
+
 TEST_CASE("empty or 24-byte tag: ignored, returns false", "[logging]")
 {
     logging_tagset_t set = {0};

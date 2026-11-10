@@ -8,17 +8,24 @@
 // bytes as before. A line some other channel wants (logging_capture_route) is formatted into the transit ring and the
 // drain task is notified. Never blocks beyond what ESP-IDF's own path does (its tag-level lookup waits at most 10 ms
 // for the log mutex); never takes the settings mutex (lines are logged while it is held): the levels come from
-// logging_levels(), one atomic load. ISRs and the time before logging_start pass straight through.
+// logging_levels(), one atomic load.
+//
+// Constrained contexts pass straight through to ESP-IDF, as does the time before logging_start: an ISR, the flash
+// cache disabled, the scheduler not running or suspended (esp_log_util_is_constrained, ESP-IDF's own test). With
+// CONFIG_LOG_IN_IRAM ESP-IDF's log path lives in IRAM, so the two wrappers do too (IRAM_ATTR) and touch nothing
+// outside IRAM/DRAM before that test: a disabled ESP_LOGx in IRAM-safe code keeps working while the cache is off.
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_attr.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_private/log_level.h" // esp_log_level_get_timeout: the bounded lookup esp_log_va itself uses
+#include "esp_private/log_util.h"  // esp_log_util_is_constrained: ISR, cache off, scheduler not running
 #include "logging_core.h"
 #include "logging_priv.h"
 #include "logging_ring.h"
@@ -44,7 +51,7 @@ static guard_t s_guards[GUARDS_MAX];
 static logging_ring_t s_ring;
 static uint8_t *s_ring_buf;
 static TaskHandle_t s_drain;
-static bool s_ready; // atomic: s_ring and s_drain are set up (release / acquire)
+static bool s_ready; // atomic: s_ring and s_drain are set up (release / acquire); DRAM, read with the cache off
 // Atomic counters: lines ESP-IDF wrote to the UART (as far as the capture can tell), and lines the full ring refused,
 // per channel that wanted them.
 static uint32_t s_uart_sent;
@@ -146,10 +153,11 @@ static void capture(esp_log_level_t level, const char *tag, const char *format, 
     xTaskNotifyGive(s_drain);
 }
 
-void __wrap_esp_log_va(esp_log_config_t config, const char *tag, const char *format, va_list args)
+/** The unconstrained path (flash code): route the line to the UART and/or the ring. */
+static __attribute__((noinline)) void route_line(esp_log_config_t config, const char *tag, const char *format,
+                                                 va_list args)
 {
     esp_log_level_t level = config.opts.log_level;
-    bool passthrough = !__atomic_load_n(&s_ready, __ATOMIC_ACQUIRE) || xPortInIsrContext();
     logging_levels_t lv = logging_levels();
     esp_log_level_t uart = (esp_log_level_t) lv.channel[LOGGING_CH_UART];
     esp_log_level_t nonuart = logging_core_nonuart_max(lv);
@@ -157,18 +165,18 @@ void __wrap_esp_log_va(esp_log_config_t config, const char *tag, const char *for
     bool guard = false;
     unsigned route;
 
-    if (!passthrough && level != ESP_LOG_NONE && (level <= uart || level <= nonuart)) {
+    if (level != ESP_LOG_NONE && (level <= uart || level <= nonuart)) {
         guard = level <= nonuart && find_guard(xTaskGetCurrentTaskHandle()) != NULL;
         tag_level = esp_log_level_get_timeout(tag);
     }
-    route = logging_capture_route(level, uart, nonuart, tag_level, guard, passthrough);
+    route = logging_capture_route(level, uart, nonuart, tag_level, guard, false);
     if (route & LOGGING_ROUTE_UART) {
         va_list ap;
 
         va_copy(ap, args);
         __real_esp_log_va(config, tag, format, ap);
         va_end(ap);
-        if (!passthrough && level <= tag_level) {
+        if (level <= tag_level) {
             __atomic_fetch_add(&s_uart_sent, 1, __ATOMIC_RELAXED);
         }
     }
@@ -177,7 +185,17 @@ void __wrap_esp_log_va(esp_log_config_t config, const char *tag, const char *for
     }
 }
 
-void __wrap_esp_log(esp_log_config_t config, const char *tag, const char *format, ...)
+void IRAM_ATTR __wrap_esp_log_va(esp_log_config_t config, const char *tag, const char *format, va_list args)
+{
+    // Nothing outside IRAM/DRAM before this test (see the top of the file).
+    if (!__atomic_load_n(&s_ready, __ATOMIC_ACQUIRE) || esp_log_util_is_constrained()) {
+        __real_esp_log_va(config, tag, format, args);
+        return;
+    }
+    route_line(config, tag, format, args);
+}
+
+void IRAM_ATTR __wrap_esp_log(esp_log_config_t config, const char *tag, const char *format, ...)
 {
     va_list args;
 
