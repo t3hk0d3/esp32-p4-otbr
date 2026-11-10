@@ -378,6 +378,9 @@ New endpoint, in `device_api` (`/device/*`, so it follows the same access rules 
 - `enabled` is the stored value; `active` whether USB/IP owns the port this boot; `pending_reboot` when they differ.
 - `device` is `null` without a device; `client` is `null` without a session. `reason` explains `blocked` and
   `unsupported`. `interface` is `single` or `mgmt`.
+- A start that failed at boot *(review fix)*: `state` `off`, `reason` and `last_error`
+  `"USB/IP failed to start: <error>"`, `pending_reboot` `false` while it stays on (the port stays taken from the radio
+  mux until the next reboot).
 - Counters reset at boot.
 
 `PUT /device/usbip {"enabled": bool}`: section 4. A client can be dropped with

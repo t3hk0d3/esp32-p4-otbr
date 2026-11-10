@@ -628,6 +628,23 @@ esp_err_t usbip_usb_open(usbip_dev_rec_t *rec, const uint8_t **cfg, size_t *cfg_
     return ESP_OK;
 }
 
+bool usbip_usb_port_off(void)
+{
+    if (s_power_lock == NULL) {
+        return false;
+    }
+    xSemaphoreTake(s_power_lock, portMAX_DELAY);
+    const bool off = s_power_off;
+
+    xSemaphoreGive(s_power_lock);
+    return off;
+}
+
+bool usbip_usb_new_pending(void)
+{
+    return s_dev == NULL && atomic_load(&s_new_addr) != 0;
+}
+
 esp_err_t usbip_usb_close(void)
 {
     if (s_dev == NULL) {

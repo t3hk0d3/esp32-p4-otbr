@@ -920,11 +920,24 @@ static void timers(void)
     }
     if (s_close_pending && now >= s_close_retry_ms) {
         device_close();
+        // A DEV_NEW that came while the close was still refused found no room (on_dev_new): open it now.
+        if (!s_close_pending && !usbip_usb_port_off() && usbip_usb_new_pending()) {
+            on_dev_new();
+        }
     }
     if (s_reset_until_ms > 0 && now >= s_reset_until_ms) {
         s_reset_until_ms = 0;
         s_dirty = true;
-        if (s_has_dev) {
+        if (s_has_dev && usbip_usb_port_off()) {
+            // The port went off but the device never went away: never offer it on an unpowered port. Closing it lets
+            // the USB task power the port on once esp-usb frees it; it comes back as a new device.
+            ESP_LOGW(TAG, "the device did not reset after the session and the root port is still off: closing it");
+            note_error("the device did not reset after the session: closed until the root port is on again");
+            s_has_dev = false;
+            s_cfg = NULL;
+            s_cfg_len = 0;
+            device_close();
+        } else if (s_has_dev) {
             ESP_LOGW(TAG, "the device did not reset after the session: offered again as it is");
         }
     }

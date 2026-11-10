@@ -52,6 +52,9 @@ function windowsCommands(host, busid) {
   ].join('\n');
 }
 
+/* On, but its start failed at boot: state off with the failure as the reason and no reboot pending. */
+function startFailed(s) { return !!s && !!s.enabled && s.state === 'off' && !s.pending_reboot && !!s.reason; }
+
 /*
  * What the page shows for a /device/usbip body and the address the page was opened at:
  * {chip: {text, cls}, show: {device, client, stats, attach}, commands: {linux, windows}}.
@@ -64,6 +67,8 @@ function view(status, host) {
     chip = {text : '-', cls : ''};
   else if (st)
     chip = {text : st.text, cls : st.cls};
+  else if (startFailed(s))
+    chip = {text : 'Not running', cls : 'chip-bad'};
   else if (s.enabled)
     chip = {text : 'Reboot pending', cls : 'chip-warn'}; // stored on, the port is not owned yet
   else
@@ -157,6 +162,7 @@ function statFigures(s) {
 
 return {
   view : view,
+  startFailed : startFailed,
   hostOnly : hostOnly,
   sinceText : sinceText,
   sizeText : sizeText,
@@ -253,8 +259,13 @@ function render() {
     setText('blockedText', 'USB/IP is on but did not start at boot: ' + (s.reason || 'a radio on the USB port holds it') +
                                '. Thread and Zigbee win over USB/IP: move that radio off the USB port or switch it off on the ' +
                                'Radios page, then reboot.');
-  showIf('pendingNote', !!s.pending_reboot);
-  if (s.pending_reboot)
+  showIf('failedNote', L.startFailed(s));
+  if (L.startFailed(s))
+    setText('failedText', s.reason + '. Reboot the board to try again.');
+  // Blocked says what to do already; a pending change applies only once the block is gone.
+  var pending = !!s.pending_reboot && s.state !== 'blocked';
+  showIf('pendingNote', pending);
+  if (pending)
     setText('pendingText', 'USB/IP was turned ' + (s.enabled ? 'on' : 'off') +
                                ' but the board has not rebooted yet: the change applies after the next reboot.');
   setText('ifaceName', L.interfaceName(s));

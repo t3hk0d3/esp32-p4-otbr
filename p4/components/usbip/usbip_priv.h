@@ -75,6 +75,14 @@ esp_err_t usbip_usb_open(usbip_dev_rec_t *rec, const uint8_t **cfg, size_t *cfg_
 // error; calling it again retries.
 esp_err_t usbip_usb_close(void);
 
+// Whether the root port is off after a session's power-cycle and not on again yet (the USB task powers it on once the
+// device is closed and freed). Network task.
+bool usbip_usb_port_off(void);
+
+// Whether no device is open and an enumerated one waits to be opened (its USBIP_EV_DEV_NEW may have found the old one
+// still open). Network task.
+bool usbip_usb_new_pending(void);
+
 // The open device's manufacturer, product and serial strings (ASCII; other characters as '?'), each into a buffer of
 // cap bytes; empty strings without a device or a descriptor.
 void usbip_usb_strings(char *manufacturer, char *product, char *serial, size_t cap);

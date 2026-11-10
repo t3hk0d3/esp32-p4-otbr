@@ -22,7 +22,10 @@ _Static_assert(USBIP_EVENTFDS == USBIP_EVENTFD_COUNT, "usbip.h and usbip_priv.h 
 
 static atomic_bool s_enabled; // the stored flag (as read at boot, updated by usbip_set_enabled)
 static atomic_bool s_active;  // USB/IP owns the port this boot
+// Why USB/IP is enabled but not running: "<channel id> runs <mode>" (blocked) or, with s_start_failed,
+// "USB/IP failed to start: <error>" (usbip_net_start failed at boot).
 static char s_blocked_reason[96];
+static bool s_start_failed;
 
 // The stored flag; missing (or unreadable) means off.
 static bool load_enabled(void)
@@ -88,7 +91,15 @@ esp_err_t usbip_boot(void)
         return ESP_OK;
     }
     ESP_RETURN_ON_ERROR(radio_mux_set_usb_external(RADIO_MUX_USB_EXTERNAL_REASON), TAG, "radio_mux_set_usb_external");
-    ESP_RETURN_ON_ERROR(usbip_net_start(), TAG, "usbip_net_start");
+    const esp_err_t err = usbip_net_start();
+
+    if (err != ESP_OK) {
+        // The radio mux was told the port is external: it stays so this boot, and the status says why nothing runs.
+        snprintf(s_blocked_reason, sizeof(s_blocked_reason), "USB/IP failed to start: %s", esp_err_to_name(err));
+        s_start_failed = true;
+        ESP_LOGE(TAG, "%s", s_blocked_reason);
+        return err;
+    }
     atomic_store(&s_active, true);
     ESP_LOGI(TAG, "the USB port is exported over USB/IP on TCP %u", (unsigned)USBIP_PORT);
     return ESP_OK;
@@ -136,17 +147,25 @@ void usbip_get_status(usbip_status_t *out)
     memset(out, 0, sizeof(*out));
     out->enabled = atomic_load(&s_enabled);
     out->active = atomic_load(&s_active);
-    out->pending_reboot = out->enabled != out->active;
+    // After a failed start the port is still taken from the radio mux this boot: only turning USB/IP off waits for a
+    // reboot. Staying on is not a pending change (the reason and last_error say what failed).
+    const bool failed = s_start_failed;
+
+    out->pending_reboot = failed ? !out->enabled : out->enabled != out->active;
     out->port = USBIP_PORT;
     out->iface = netcfg_running_mode() == NETCFG_MODE_SPLIT ? "mgmt" : "single";
     if (out->active) {
         usbip_net_snapshot(out);
         return;
     }
-    if (out->enabled && s_blocked_reason[0] != '\0') {
+    if (out->enabled && s_blocked_reason[0] != '\0' && !failed) {
         out->state = USBIP_STATE_BLOCKED;
         strlcpy(out->reason, s_blocked_reason, sizeof(out->reason));
     } else {
-        out->state = USBIP_STATE_OFF; // off, or enabled since boot (pending_reboot)
+        out->state = USBIP_STATE_OFF; // off, enabled since boot (pending_reboot), or a failed start
+        if (failed) {
+            strlcpy(out->reason, s_blocked_reason, sizeof(out->reason));
+            strlcpy(out->last_error, s_blocked_reason, sizeof(out->last_error));
+        }
     }
 }

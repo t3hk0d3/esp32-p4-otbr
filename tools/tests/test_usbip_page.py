@@ -100,6 +100,12 @@ BLOCKED = {
     "reason": "usb-10c4-ea60-abc123 runs otbr",
 }
 PENDING_ON = {**OFF, "enabled": True, "pending_reboot": True}
+START_FAILED = {
+    **OFF,
+    "enabled": True,
+    "reason": "USB/IP failed to start: ESP_ERR_NO_MEM",
+    "last_error": "USB/IP failed to start: ESP_ERR_NO_MEM",
+}
 PENDING_OFF = {**ATTACHED, "enabled": False, "pending_reboot": True}
 
 EVIL = "<img src=x onerror=alert(1)>"
@@ -146,6 +152,12 @@ class TestView:
     def test_blocked_shows_no_box(self):
         # On state blocked: chip "Not running" in red; no box shows.
         v = view(BLOCKED)
+        assert v["chip"] == {"text": "Not running", "cls": "chip-bad"}
+        assert v["show"] == NONE_SHOWN
+
+    def test_failed_start_shows_no_box(self):
+        # On enabled, state off, a reason and no reboot pending (the start failed): chip "Not running" in red; no box.
+        v = view(START_FAILED)
         assert v["chip"] == {"text": "Not running", "cls": "chip-bad"}
         assert v["show"] == NONE_SHOWN
 
@@ -256,6 +268,25 @@ class TestPageShows:
         assert r[0] is False
         assert "usb-10c4-ea60-abc123 runs otbr" in r[1]
 
+    def test_blocked_hides_the_reboot_note(self):
+        # On blocked (enabled, not active, so pending_reboot): only the blocked note shows, not "after the next reboot".
+        r = scenario(
+            setup({**BLOCKED, "pending_reboot": True})
+            + "return [t.el('blockedNote').hidden(), t.el('pendingNote').hidden()];"
+        )
+        assert r == [False, True]
+
+    def test_failed_start_says_why(self):
+        # On a failed start: the failure note shows the reason; the blocked and reboot notes hide.
+        r = scenario(
+            setup(START_FAILED)
+            + "return [t.el('failedNote').hidden(), t.el('failedText').textContent,"
+            + " t.el('blockedNote').hidden(), t.el('pendingNote').hidden()];"
+        )
+        assert r[0] is False
+        assert "USB/IP failed to start: ESP_ERR_NO_MEM" in r[1] and "Reboot" in r[1]
+        assert r[2:] == [True, True]
+
     def test_pending_reboot_is_said(self):
         # On pending_reboot: the reboot note shows; without it, it is hidden.
         r = scenario(
@@ -328,6 +359,15 @@ class TestPageShows:
         r = scenario(
             setup({**BLOCKED, "reason": EVIL})
             + "return [t.el('blockedText').textContent, t.doc.markupWrites];"
+        )
+        assert EVIL in r[0]
+        assert r[1] == []
+
+    def test_failed_start_reason_stays_text(self):
+        # On markup in a failed start's reason: the note holds it as text.
+        r = scenario(
+            setup({**START_FAILED, "reason": EVIL})
+            + "return [t.el('failedText').textContent, t.doc.markupWrites];"
         )
         assert EVIL in r[0]
         assert r[1] == []

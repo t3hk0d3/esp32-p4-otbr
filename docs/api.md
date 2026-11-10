@@ -416,9 +416,11 @@ The board can export the device on its USB-A port with USB/IP (TCP 3240); see [U
  "last_error": null}
 ```
 
-- `enabled` is the stored value, `active` whether USB/IP owns the port this boot, `pending_reboot` when they differ.
+- `enabled` is the stored value, `active` whether USB/IP owns the port this boot, `pending_reboot` when they differ
+  (except after a failed start, below).
 - `state` is `off`, `blocked`, `no_device`, `unsupported`, `exportable` or `attached`; `reason` explains `blocked` and
-  `unsupported` and is `null` otherwise.
+  `unsupported` and is `null` otherwise. When USB/IP is on but failed to start at boot, `state` is `off`, `reason` and
+  `last_error` are `"USB/IP failed to start: <error>"` and `pending_reboot` is `false` (`true` once it is turned off).
 - `interface` is `single` or `mgmt`. `device` is `null` without a device, `client` without a session (`since` in
   epoch seconds, 0 when the clock is not set). `speed` is `low`, `full`, `high` or `unknown`.
 - `counters` and `memory` (bytes) count since boot.
