@@ -396,6 +396,11 @@ reason, spec reference.
    `static/status.js` calls with the Thread cards' channel (null while Thread is off), so the Zigbee section warns when
    Thread and Zigbee share an 802.15.4 channel. Page tests: `tools/tests/test_radios_page.py`,
    `tools/tests/test_zigbee_page.py`. (docs/superpowers/specs/2026-11-10-hybrid-mode-design.md)
+38. Applied (logging, Task 7). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 36 -> 39 (on top of patch
+   34). `device_api` adds `GET`/`PUT /device/logging` and the live log WebSocket `GET /device/logging/ws`: 35 routes
+   (both WebSockets included) plus `/zigbee` and the catch-all, two slots of headroom kept. Live log clients use the web
+   server's sockets (`ESP_BR_WEB_MAX_OPEN_SOCKETS`, 7, unchanged), so the lwIP socket sum does not change.
+   (docs/superpowers/specs/2026-11-10-logging-design.md)
 
 ### REST guard classification (patches 2 and 9)
 
