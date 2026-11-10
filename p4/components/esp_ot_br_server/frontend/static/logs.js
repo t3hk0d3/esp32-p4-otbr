@@ -112,11 +112,14 @@ function classify(frame) {
   return {notice : false, level : LETTERS[m[1]], tag : m[3], text : text, body : m[4], head : m[1] + ' (' + m[2] + ') '};
 }
 
+/* Notices always show; a line shows when its text holds `needle` (lower case; empty matches all). */
+function matches(l, needle) { return !needle || l.notice === true || l.text.toLowerCase().indexOf(needle) >= 0; }
+
 function filter(lines, text) {
   var needle = String(text).toLowerCase();
   if (!needle)
     return lines;
-  return lines.filter(function(l) { return l.text.toLowerCase().indexOf(needle) >= 0; });
+  return lines.filter(function(l) { return matches(l, needle); });
 }
 
 /* [text, pill class] of a channel's status pill from the GET reply. */
@@ -142,7 +145,7 @@ function putError(status, body, errorMessage) {
 
 return {LEVELS : LEVELS, levelName : levelName, targetParse : targetParse, targetValid : targetValid,
         summaryChannels : summaryChannels, summaryComponents : summaryComponents, withComponent : withComponent,
-        withoutComponent : withoutComponent, tagValid : tagValid, classify : classify, filter : filter,
+        withoutComponent : withoutComponent, tagValid : tagValid, classify : classify, filter : filter, matches : matches,
         channelStatus : channelStatus, putError : putError, TARGET_HELP : TARGET_HELP};
 })();
 
@@ -156,6 +159,8 @@ var MAX_VIEWERS = 2; // LOGGING_VIEWERS_MAX on the board
 var RESOLVE_POLL_MS = 2000;
 var RESOLVE_POLLS = 10;
 var COPY_RESET_MS = 2000;
+var FLUSH_MS = 50;
+var FILTER_MS = 150;
 var TARGET_HINT = 'UDP, port 514 if omitted. IPv6: [fd00::1]:514';
 var current = null; // the last reply of GET/PUT /device/logging
 var queue = Promise.resolve(); // one PUT at a time, so a second change builds on the first one's reply
@@ -165,6 +170,10 @@ var opened = false;
 var lines = []; // everything received, oldest first, at most MAX_LINES
 var paused = false;
 var filterText = '';
+var shown = 0; // lines that pass the filter
+var fresh = []; // received since the last flush
+var flushTimer = null;
+var filterTimer = null;
 
 function option(value, label) {
   var o = el('option', label);
@@ -205,7 +214,10 @@ function componentRow(tag, level) {
   sel.setAttribute('aria-label', tag === '*' ? 'Level of everything else' : 'Level of ' + tag);
   fillLevels(sel, true);
   sel.value = level;
-  sel.addEventListener('change', function() { putComponents(L.withComponent(current.components, tag, sel.value)); });
+  sel.addEventListener('change', function() {
+    var level = sel.value;
+    putComponents(function(set) { return L.withComponent(set, tag, level); });
+  });
   var lv = el('td');
   lv.appendChild(sel);
   var last = el('td');
@@ -215,7 +227,7 @@ function componentRow(tag, level) {
     del.type = 'button';
     del.title = 'Back to everything else';
     del.setAttribute('aria-label', 'Remove ' + tag);
-    del.addEventListener('click', function() { putComponents(L.withoutComponent(current.components, tag)); });
+    del.addEventListener('click', function() { putComponents(function(set) { return L.withoutComponent(set, tag); }); });
     last.appendChild(del);
   }
   [ name, lv, last ].forEach(function(td) { tr.appendChild(td); });
@@ -309,7 +321,8 @@ function putChannel(name, field, value) {
   return put(function() { return {channels : ch}; });
 }
 
-function putComponents(set) { return put(function() { return {components : set}; }); }
+/* `change(set)` gets the override set of the last reply when the PUT is due, so queued edits build on each other. */
+function putComponents(change) { return put(function() { return {components : change(current.components)}; }); }
 
 function checkTarget() {
   var input = $('sys-target');
@@ -332,7 +345,8 @@ function addComponent() {
   }
   say('', false);
   $('cp-new').value = '';
-  putComponents(L.withComponent(current.components, tag, $('cp-new-lv').value));
+  var level = $('cp-new-lv').value;
+  putComponents(function(set) { return L.withComponent(set, tag, level); });
 }
 
 function fold(cardId, buttonId) {
@@ -360,10 +374,10 @@ function lineRow(l) {
   return row;
 }
 
+/* Frames are collected and put on screen once per FLUSH_MS: one DOM pass, one count, one scroll per flush. */
 function count() {
-  var shown = L.filter(lines, filterText).length;
   $('live-count').textContent =
-      (filterText ? shown + ' of ' + lines.length : String(lines.length)) + ' lines' + (paused ? ' · paused' : '');
+      (filterText ? shown + ' of ' + lines.length : String(lines.length)) + ' lines' + (paused ? ' \u00b7 paused' : '');
 }
 
 function scrollDown() {
@@ -371,15 +385,42 @@ function scrollDown() {
   out.scrollTop = out.scrollHeight;
 }
 
-/* The view again from `lines` (the filter changed). */
+function needle() { return filterText.toLowerCase(); }
+
+/* The view again from `lines` (the filter changed, or Clear). */
 function renderAll() {
   var out = $('live-out');
+  var n = needle();
+  fresh = [];
   kit.clear(out);
-  lines.forEach(function(l) { l.row = null; });
-  L.filter(lines, filterText).forEach(function(l) {
-    l.row = lineRow(l);
-    out.appendChild(l.row);
+  shown = 0;
+  lines.forEach(function(l) {
+    l.row = null;
+    l.match = L.matches(l, n);
+    if (l.match) {
+      shown++;
+      l.row = lineRow(l);
+      out.appendChild(l.row);
+    }
   });
+  count();
+  if (!paused)
+    scrollDown();
+}
+
+function flush() {
+  if (flushTimer !== null) {
+    env.clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  var out = $('live-out');
+  fresh.forEach(function(l) {
+    if (!l.gone && l.match) {
+      l.row = lineRow(l);
+      out.appendChild(l.row);
+    }
+  });
+  fresh = [];
   count();
   if (!paused)
     scrollDown();
@@ -387,20 +428,21 @@ function renderAll() {
 
 function addLine(frame) {
   var l = L.classify(frame);
-  var out = $('live-out');
+  l.match = L.matches(l, needle());
   lines.push(l);
-  if (L.filter([ l ], filterText).length) {
-    l.row = lineRow(l);
-    out.appendChild(l.row);
-  }
+  fresh.push(l);
+  if (l.match)
+    shown++;
   if (lines.length > MAX_LINES) {
     var old = lines.shift();
+    old.gone = true;
+    if (old.match)
+      shown--;
     if (old.row)
-      out.removeChild(old.row);
+      $('live-out').removeChild(old.row);
   }
-  count();
-  if (!paused)
-    scrollDown();
+  if (flushTimer === null)
+    flushTimer = env.setTimeout(flush, FLUSH_MS);
 }
 
 function notice(text) { addLine('# ' + text); }
@@ -457,7 +499,10 @@ function connect() {
       return;
     opened = true;
     livePill('Connected', 'con-ok');
-    notice('Connected to ' + env.location.host + ' at level ' + level + '. Lines from now on.');
+    var now = $('live-lv').value;
+    if (now !== level)
+      sock.send(JSON.stringify({level : now})); // changed while connecting
+    notice('Connected to ' + env.location.host + ' at level ' + now + '. Lines from now on.');
   };
   sock.onmessage = function(ev) {
     if (sock === ws)
@@ -529,8 +574,13 @@ function init() {
         .then(function() { env.setTimeout(function() { b.textContent = label; }, COPY_RESET_MS); });
   });
   $('live-filter').addEventListener('input', function() {
-    filterText = $('live-filter').value;
-    renderAll();
+    if (filterTimer !== null)
+      env.clearTimeout(filterTimer);
+    filterTimer = env.setTimeout(function() {
+      filterTimer = null;
+      filterText = $('live-filter').value;
+      renderAll();
+    }, FILTER_MS);
   });
   $('live-fs').addEventListener('click', function() { fullscreen(!$('live').classList.contains('lg-fs')); });
   env.document.addEventListener('keydown', function(ev) {
@@ -542,7 +592,7 @@ function init() {
   return load();
 }
 
-return {init : init, load : load};
+return {init : init, load : load, flush : flush};
 }
 
 if (typeof module !== 'undefined' && module.exports) {

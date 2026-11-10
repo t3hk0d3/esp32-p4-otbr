@@ -97,6 +97,10 @@ class TestLogsLogic:
         lines = [{"text": "I (1) Zigbee: up"}, {"text": "I (2) netcfg: up"}]
         assert lg(f"L.filter({json.dumps(lines)}, 'ZIG')") == [lines[0]]
 
+    def test_filter_keeps_notices_whatever_the_text(self):
+        lines = [{"text": "# Connected", "notice": True}, {"text": "I (1) a: b"}]
+        assert lg(f"L.filter({json.dumps(lines)}, 'zzz')") == [lines[0]]
+
     def test_filter_with_no_text_keeps_every_line(self):
         lines = [{"text": "a"}, {"text": "b"}]
         assert lg(f"L.filter({json.dumps(lines)}, '')") == lines
@@ -433,7 +437,7 @@ class TestLogsPage:
 
     def test_connected_shows_the_pill_the_button_and_a_notice_line(self):
         r = run(
-            "t.el('live-toggle').click(); t.sockets[0].open();"
+            "t.el('live-toggle').click(); t.sockets[0].open(); t.page.flush();"
             " return [t.el('live-pill').textContent, t.el('live-pill').classList.contains('con-ok'),"
             " t.el('live-toggle').textContent, txt(t.el('live-out'))];"
         )
@@ -469,7 +473,7 @@ class TestLogsPage:
     # --- Live: viewer limit
     def test_a_close_with_1013_says_there_are_too_many_viewers(self):
         r = run(
-            "t.el('live-toggle').click(); t.sockets[0].open(); t.sockets[0].drop(1013);"
+            "t.el('live-toggle').click(); t.sockets[0].open(); t.sockets[0].drop(1013); t.page.flush();"
             " return [t.el('live-pill').textContent, txt(t.el('live-out'))];"
         )
         assert r[0] == "Disconnected"
@@ -508,7 +512,7 @@ class TestLogsPage:
         r = run(
             "t.el('live-toggle').click(); t.sockets[0].open(); t.sockets[0].recv("
             + json.dumps(frame)
-            + "); const rows = t.el('live-out').children; return [rows[rows.length - 1].className, txt(rows[rows.length - 1])];"
+            + "); t.page.flush(); const rows = t.el('live-out').children; return [rows[rows.length - 1].className, txt(rows[rows.length - 1])];"
         )
         assert r[0] == cls
         assert frame in r[1]
@@ -536,16 +540,27 @@ class TestLogsPage:
         assert r[0] == 0
         assert r[1].startswith("0 lines")
 
-    def test_filter_shows_only_matching_lines_without_case_and_restores_them(self):
+    def test_filter_shows_only_matching_lines_and_every_notice_and_restores_them(self):
         r = run(
             "t.el('live-toggle').click(); const ws = t.sockets[0]; ws.open(); ws.recv('I (1) zigbee: up'); ws.recv('I (2) netcfg: up');"
-            " t.el('live-filter').type('ZIG'); const a = t.el('live-out').children.map(txt);"
-            " ws.recv('W (3) netcfg: down'); ws.recv('W (4) zigbee: down'); const b = t.el('live-out').children.length;"
-            " t.el('live-filter').type(''); return [a, b, t.el('live-out').children.length];"
+            " t.el('live-filter').type('ZIG'); await t.advance(200); const a = t.el('live-out').children.map(txt);"
+            " ws.recv('W (3) netcfg: down'); ws.recv('W (4) zigbee: down'); t.page.flush();"
+            " const b = t.el('live-out').children.length; const count = t.el('live-count').textContent;"
+            " t.el('live-filter').type(''); await t.advance(200); return [a, b, t.el('live-out').children.length, count];"
         )
-        assert len(r[0]) == 1 and "zigbee: up" in r[0][0]
-        assert r[1] == 2
+        assert len(r[0]) == 2 and "# Connected" in r[0][0] and "zigbee: up" in r[0][1]
+        assert r[1] == 3  # the notice and the two zigbee lines
         assert r[2] == 5  # connect notice + 4 lines
+        assert r[3] == "3 of 5 lines"
+
+    def test_filter_typing_is_applied_once_after_a_pause_in_typing(self):
+        r = run(
+            "t.el('live-toggle').click(); const ws = t.sockets[0]; ws.open(); ws.recv('I (1) zigbee: up'); ws.recv('I (2) netcfg: up'); t.page.flush();"
+            " t.el('live-filter').type('z'); await t.advance(100); t.el('live-filter').type('zig'); await t.advance(100);"
+            " const early = t.el('live-out').children.length; await t.advance(100);"
+            " return [early, t.el('live-out').children.length];"
+        )
+        assert r == [3, 2]
 
     def test_copy_all_copies_every_line_in_order_even_those_a_filter_hides(self):
         r = run(
@@ -559,8 +574,8 @@ class TestLogsPage:
     def test_pause_stops_scrolling_while_lines_keep_arriving(self):
         r = run(
             "const out = t.el('live-out'); out.scrollHeight = 500; t.el('live-toggle').click(); const ws = t.sockets[0]; ws.open();"
-            " ws.recv('I (1) a: x'); const before = out.scrollTop; t.el('live-pause').click(); out.scrollHeight = 900;"
-            " ws.recv('I (2) a: y'); ws.recv('I (3) a: z');"
+            " ws.recv('I (1) a: x'); t.page.flush(); const before = out.scrollTop; t.el('live-pause').click(); out.scrollHeight = 900;"
+            " ws.recv('I (2) a: y'); ws.recv('I (3) a: z'); t.page.flush();"
             " const paused = [out.scrollTop, out.children.length, t.el('live-pause').textContent];"
             " t.el('live-pause').click();"
             " return [before, paused, out.scrollTop, t.el('live-pause').textContent];"
@@ -571,12 +586,42 @@ class TestLogsPage:
         r = run(
             "t.el('live-toggle').click(); const ws = t.sockets[0]; ws.open(); t.el('live-pause').click();"
             " for (let i = 0; i < 5010; i++) ws.recv('I (' + i + ') a: n' + i);"
-            " const rows = t.el('live-out').children;"
+            " t.page.flush(); const rows = t.el('live-out').children;"
             " return [rows.length, txt(rows[0]), txt(rows[rows.length - 1])];"
         )
         assert r[0] == 5000
         assert "n10" in r[1]
         assert "n5009" in r[2]
+
+    def test_many_frames_in_one_tick_are_put_on_screen_by_one_flush(self):
+        r = run(
+            "const out = t.el('live-out'); let sets = 0; let top = 0; out.scrollHeight = 700;"
+            " Object.defineProperty(out, 'scrollTop', {get: () => top, set: (v) => { sets++; top = v; }});"
+            " t.el('live-toggle').click(); const ws = t.sockets[0]; ws.open();"
+            " for (let i = 0; i < 200; i++) ws.recv('I (' + i + ') a: n' + i);"
+            " const early = [out.children.length, sets]; await t.advance(100);"
+            " return [early, out.children.length, sets, t.el('live-count').textContent];"
+        )
+        assert r == [[0, 0], 201, 1, "201 lines"]
+
+    def test_an_edit_of_two_components_before_the_first_reply_keeps_both(self):
+        r = run(
+            "t.el('cp-lv-ziggurat').value = 'verbose'; t.el('cp-lv-ziggurat').fire('change');"
+            " t.el('cp-lv-*').value = 'warning'; t.el('cp-lv-*').fire('change'); await t.advance(200);"
+            " return [globalThis.puts, globalThis.rep.components];"
+        )
+        assert r[0][1] == {"components": {"*": "warning", "ziggurat": "verbose"}}
+        assert r[1] == {"*": "warning", "ziggurat": "verbose"}
+
+    def test_a_level_picked_while_connecting_is_sent_once_the_socket_opens(self):
+        r = run(
+            "t.el('live-toggle').click(); const ws = t.sockets[0];"
+            " t.el('live-lv').value = 'debug'; t.el('live-lv').fire('change'); const early = ws.sent.slice();"
+            " ws.open(); t.page.flush(); return [early, ws.sent, txt(t.el('live-out'))];"
+        )
+        assert r[0] == []
+        assert r[1] == ['{"level":"debug"}']
+        assert "at level debug" in r[2]
 
     # --- Live: fullscreen
     def test_fullscreen_fills_the_viewport_and_the_button_leaves_it(self):
