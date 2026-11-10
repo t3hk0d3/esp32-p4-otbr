@@ -451,3 +451,55 @@ class TestZigbeePageGone:
         files = list(FRONTEND.glob("*.html")) + list(STATIC.glob("*.js"))
         assert files
         assert [f.name for f in files if "zigbee.html" in f.read_text()] == []
+
+
+SHARED_15 = (
+    "Thread and Zigbee both use channel 15. They share the air, so each slows the other under load: "
+    "move one of them to another channel."
+)
+
+
+@needs_node
+class TestSharedChannel:
+    """ZigbeeLogic.sharedChannelText"""
+
+    def test_same_channel_gives_the_warning(self):
+        # On Thread on "15" and Zigbee's radio on 15: the warning with the channel number.
+        assert z("L.sharedChannelText('15', {radio: {channel: 15}})") == SHARED_15
+
+    def test_different_channels_give_nothing(self):
+        # On Thread on "20" and Zigbee on 15: "".
+        assert z("L.sharedChannelText('20', {radio: {channel: 15}})") == ""
+
+    def test_unknown_channels_give_nothing(self):
+        # On Thread's channel unknown ("-", null) or Zigbee without a radio yet: "", never "channel undefined".
+        assert z(
+            "[L.sharedChannelText('-', {radio: {channel: 15}}), L.sharedChannelText(null, {radio: {channel: 15}}),"
+            " L.sharedChannelText('15', {radio: null}), L.sharedChannelText('15', null)]"
+        ) == ["", "", "", ""]
+
+
+@needs_node
+class TestSharedChannelSection:
+    """Dashboard Zigbee section: #zg-shared"""
+
+    def test_same_channel_shows_the_warning_and_the_radios_link(self):
+        # On Thread (/get_properties, channel 15) and Zigbee on channel 15: #zg-shared shown with the text and a link.
+        r = run(
+            body(),
+            "await t.page.refreshThread();"
+            " return [t.el('zg-shared').hidden(), t.el('zg-shared-text').textContent];",
+        )
+        assert r == [False, SHARED_15]
+        html = (FRONTEND / "index.html").read_text()
+        block = html[html.index('id="zg-shared"') :]
+        assert 'href="/radios.html"' in block[: block.index("</div>")]
+
+    def test_different_channels_hide_the_warning(self):
+        # On Zigbee on channel 20 and Thread on 15: #zg-shared hidden.
+        radio = {**RUNNING["radio"], "channel": 20}
+        r = run(
+            body(radio=radio),
+            "await t.page.refreshThread(); return t.el('zg-shared').hidden();",
+        )
+        assert r is True

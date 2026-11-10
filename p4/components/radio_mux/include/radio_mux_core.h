@@ -73,7 +73,6 @@ typedef enum {
     RADIO_MUX_REFUSE_NOT_AVAILABLE,
     RADIO_MUX_REFUSE_INCOMPATIBLE,
     RADIO_MUX_REFUSE_MODE_TAKEN,
-    RADIO_MUX_REFUSE_HYBRID,
     // radio_mux_set only, never from radio_mux_orch_check_bind (BUSY: only for a channel in reinit):
     RADIO_MUX_REFUSE_UNKNOWN_CHANNEL, // no channel with that id (404)
     RADIO_MUX_REFUSE_FAILED,          // the mux could not store or apply the change (not started, NVS, timeout: 500)

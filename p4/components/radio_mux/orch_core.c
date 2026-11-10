@@ -62,6 +62,9 @@ radio_mux_verdict_t radio_mux_orch_check_bind(const radio_mux_rules_t *rules, co
 {
     size_t first = 0, count = 0;
 
+    if (move_from != NULL) {
+        *move_from = n; // every verdict that does not move Thread names no channel
+    }
     if (want == RADIO_MUX_MODE_UNAVAILABLE || want == RADIO_MUX_MODE_INVALID) {
         return RADIO_MUX_REFUSE_BAD_VALUE;
     }
@@ -79,12 +82,16 @@ radio_mux_verdict_t radio_mux_orch_check_bind(const radio_mux_rules_t *rules, co
     if (!radio_mux_fits(rules, want, chans[target].fw)) {
         return RADIO_MUX_REFUSE_INCOMPATIBLE;
     }
-    // otbr and a registered ziggurat consumer never run together (a stored ziggurat without its consumer runs nothing).
-    if ((want == RADIO_MUX_MODE_OTBR && radio_mux_rule_of(rules, RADIO_MUX_MODE_ZIGGURAT) != NULL &&
-            mode_used_by_other(chans, n, target, RADIO_MUX_MODE_ZIGGURAT, NULL, &count)) ||
-            (want == RADIO_MUX_MODE_ZIGGURAT &&
-             mode_used_by_other(chans, n, target, RADIO_MUX_MODE_OTBR, NULL, &count))) {
-        return RADIO_MUX_REFUSE_HYBRID;
+    const radio_mux_rule_t *leaving = radio_mux_rule_of(rules, chans[target].mode);
+
+    // otbr on a channel leaving a mode that reboots (Zigbee): the reboot starts OpenThread there, also when Thread runs
+    // on another channel (*move_from; n when none), which the reboot's store turns off. A live start or move now would
+    // probe a channel whose instance still holds it, and fail.
+    if (want == RADIO_MUX_MODE_OTBR && chans[target].mode != want && leaving != NULL && leaving->reboot_on_change) {
+        if (move_from != NULL) {
+            *move_from = mode_used_by_other(chans, n, target, RADIO_MUX_MODE_OTBR, &first, &count) ? first : n;
+        }
+        return RADIO_MUX_APPLY_REBOOT;
     }
     if (rule != NULL && rule->limit > 0 && mode_used_by_other(chans, n, target, want, &first, &count) &&
             count >= rule->limit) {
@@ -95,13 +102,6 @@ radio_mux_verdict_t radio_mux_orch_check_bind(const radio_mux_rules_t *rules, co
             return RADIO_MUX_MOVE;
         }
         return RADIO_MUX_REFUSE_MODE_TAKEN;
-    }
-    const radio_mux_rule_t *leaving = radio_mux_rule_of(rules, chans[target].mode);
-
-    // otbr on a channel leaving a mode that reboots: the reboot starts OpenThread. A start now would probe a channel
-    // whose consumer still holds it, and fail.
-    if (want == RADIO_MUX_MODE_OTBR && chans[target].mode != want && leaving != NULL && leaving->reboot_on_change) {
-        return RADIO_MUX_APPLY_REBOOT;
     }
     // otbr where no channel has it: a start, run like a move from nowhere (probe, start, store once it runs).
     if (want == RADIO_MUX_MODE_OTBR && chans[target].mode != RADIO_MUX_MODE_OTBR) {
@@ -122,6 +122,20 @@ radio_mux_verdict_t radio_mux_orch_check_bind(const radio_mux_rules_t *rules, co
         return RADIO_MUX_MOVE;
     }
     return RADIO_MUX_APPLY;
+}
+
+void radio_mux_orch_modes_after(const radio_mux_chan_view_t *chans, size_t n, size_t target, radio_mux_mode_t want,
+                                size_t move_from, radio_mux_mode_t *out)
+{
+    for (size_t i = 0; i < n; i++) {
+        out[i] = chans[i].mode;
+    }
+    if (move_from < n && move_from != target) {
+        out[move_from] = RADIO_MUX_MODE_OFF;
+    }
+    if (target < n) {
+        out[target] = want;
+    }
 }
 
 bool radio_mux_orch_should_bind(radio_mux_chan_state_t cs, bool fits, bool bound)

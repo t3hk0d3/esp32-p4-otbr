@@ -388,6 +388,14 @@ reason, spec reference.
    "Time server" row (`if-<iface>-ntprow`) on each interface card; new `static/time.js` (`TimeLogic`, `TimePage`) fills
    both from `GET /device/time` and saves with `PUT /device/time`. Page tests: `tools/tests/test_time_page.py`.
    (docs/superpowers/specs/2026-11-10-time-sync-design.md)
+37. Applied (hybrid mode, Tasks 3 and 4). Frontend: `radios.html` gains `#zigbeeNote` under the otbr panel;
+   `static/radios.js` gains `RadiosLogic.rebootNote` (a save that enters or leaves Zigbee reboots the board and Thread
+   with it), shown in `#zigbeeNote`, or in `#otbrNote` when otbr is picked on the radio that runs Zigbee; the
+   `hybrid_not_supported` text is gone. `index.html` gains `#zg-shared` (with a link to the Radios page) above
+   `#zg-note`; `static/zigbee.js` gains `ZigbeeLogic.sharedChannelText` and the section's `setThreadChannel`, which
+   `static/status.js` calls with the Thread cards' channel (null while Thread is off), so the Zigbee section warns when
+   Thread and Zigbee share an 802.15.4 channel. Page tests: `tools/tests/test_radios_page.py`,
+   `tools/tests/test_zigbee_page.py`. (docs/superpowers/specs/2026-11-10-hybrid-mode-design.md)
 
 ### REST guard classification (patches 2 and 9)
 

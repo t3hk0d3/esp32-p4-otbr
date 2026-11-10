@@ -81,6 +81,30 @@ function threadElsewhere(snapshot, ch, status) {
   return null;
 }
 
+/*
+ * What a save that enters or leaves Zigbee does: Zigbee's (re)start reboots the board, and Thread running on another
+ * radio with it. otbr picked on the radio that runs Zigbee moves (or starts) Thread there through that reboot; Zigbee
+ * picked on the radio that runs Thread stops Thread. With Thread off it says only the reboot. '' when the pick does
+ * not enter or leave ziggurat, or the radio is unplugged (the page sends no mode change then).
+ */
+function rebootNote(snapshot, ch, pick, status) {
+  if (!present(ch) || (pick === 'ziggurat') === (ch.mode === 'ziggurat'))
+    return '';
+  var running = status ? status.otbr_channel : null;
+  var threadHere = typeof running === 'string' ? running === ch.id : ch.stored_mode === 'otbr';
+  if (pick === 'ziggurat' && threadHere)
+    return 'Saving reboots the board and starts Zigbee on this radio. Thread stops: no other radio runs it, so its ' +
+           'devices lose the border router until you set another radio to Thread.';
+  var from = threadElsewhere(snapshot, ch, status);
+  if (!from)
+    return pick === 'otbr' ? 'Saving reboots the board and starts Thread on this radio; Zigbee stops.'
+                           : 'Saving reboots the board.';
+  if (pick === 'otbr')
+    return 'Saving reboots the board and moves Thread from ' + from.label + ' to this radio; Zigbee stops. ' +
+           'Thread devices lose the border router for about 20 s.';
+  return 'Saving reboots the board. Thread restarts with it: its devices lose the border router for about 20 s.';
+}
+
 /* Why a mode card of this channel can't be picked ('' when it can). */
 function cardWhy(mode, ch, snapshot) {
   if (!modeAvailable(mode, snapshot))
@@ -228,7 +252,6 @@ var CODE_TEXT = {
   incompatible : 'The radio\'s firmware does not fit this mode.',
   unavailable : 'The radio is not plugged in or has no driver.',
   not_available : 'This mode is not in this build.',
-  hybrid_not_supported : 'Thread and Zigbee cannot run at once.',
   c6_busy : 'The on-board radio is busy: a firmware job runs, or a client is connected to its proxy.',
   drain_timeout : 'The previous radio did not stop in time, so Thread did not move.',
   port_taken : 'Another radio\'s proxy already listens on this port.',
@@ -290,6 +313,7 @@ return {
   findChannel : findChannel,
   labelOf : labelOf,
   threadElsewhere : threadElsewhere,
+  rebootNote : rebootNote,
   cardWhy : cardWhy,
   rowView : rowView,
   subtitle : subtitle,
@@ -540,9 +564,12 @@ function renderDialog() {
     return;
   renderCards(ch);
   var moveHere = draft.pick === 'otbr' && ch.mode !== 'otbr';
+  var reboot = L.rebootNote(snap, ch, draft.pick, status);
   show('panelOtbr', moveHere);
   if (moveHere)
-    setText('otbrNote', moveText(ch));
+    setText('otbrNote', reboot || moveText(ch));
+  show('zigbeeNote', !!reboot && !moveHere);
+  setText('zigbeeNote', moveHere ? '' : reboot);
   show('panelProxy', draft.pick === 'rcp-proxy');
   setSeg('dir', [ 'listen', 'connect' ], draft.direction);
   setSeg('ad', [ 'tcp', 'udp' ], draft.adapter);

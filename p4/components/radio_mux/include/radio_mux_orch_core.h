@@ -54,16 +54,23 @@ const char *radio_mux_busy_reason(radio_mux_work_t w);
 
 // Decision for setting channel `target` (index into chans[0..n)) to `want`: the former radio_mux_check_set_mode, plus
 // a channel in reinit (in_reinit) refusing every change with RADIO_MUX_REFUSE_BUSY. Checks run in this order: bad
-// value, reinit, unavailable channel, mode not registered, firmware fit, hybrid (otbr next to a stored ziggurat only
-// while a ziggurat consumer is registered), move or limit, start, reboot, stop.
+// value, reinit, unavailable channel, mode not registered, firmware fit, otbr onto a channel leaving a reboot mode,
+// move or limit, start, reboot, stop. Thread and Zigbee may run at once on different channels (hybrid).
 //
 // RADIO_MUX_MOVE is every change of where OpenThread runs, each run by br_core as a long operation: otbr while another
 // channel has it (a move; *move_from is that channel's index), otbr while no channel has it (a start; *move_from is
 // n), and the otbr channel leaving otbr for another mode without a reboot (a stop; *move_from is target). move_from may
-// be NULL. RADIO_MUX_APPLY_REBOOT: entering or leaving a mode whose rule has reboot_on_change.
+// be NULL. RADIO_MUX_APPLY_REBOOT: entering or leaving a mode whose rule has reboot_on_change; for otbr onto a channel
+// leaving such a mode, *move_from is the channel that runs otbr now (turned off by the same store), or n. Every other
+// verdict sets *move_from to n.
 radio_mux_verdict_t radio_mux_orch_check_bind(const radio_mux_rules_t *rules, const radio_mux_chan_view_t *chans,
                                               size_t n, size_t target, radio_mux_mode_t want, bool in_reinit,
                                               size_t *move_from);
+
+// The stored mode of every channel after setting `target` to `want` (out[0..n)): `want` on the target, and, when
+// move_from < n (a reboot that moves Thread, from radio_mux_orch_check_bind), off on move_from; others as stored.
+void radio_mux_orch_modes_after(const radio_mux_chan_view_t *chans, size_t n, size_t target, radio_mux_mode_t want,
+                                size_t move_from, radio_mux_mode_t *out);
 
 // Whether the orchestrator binds a channel's configured instance now: the channel is ready, its firmware fits the
 // instance's mode, and the instance is not bound to it yet.

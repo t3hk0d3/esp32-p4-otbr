@@ -521,10 +521,6 @@ static verdict_reply_t verdict_reply(radio_mux_verdict_t v)
         return (verdict_reply_t) {
             409, "mode_taken", "another radio runs this mode"
         };
-    case RADIO_MUX_REFUSE_HYBRID:
-        return (verdict_reply_t) {
-            409, "hybrid_not_supported", "Thread and Zigbee cannot run at once"
-        };
     case RADIO_MUX_REFUSE_UNKNOWN_CHANNEL:
         return (verdict_reply_t) {
             404, "unknown_channel", "no radio with this id"
