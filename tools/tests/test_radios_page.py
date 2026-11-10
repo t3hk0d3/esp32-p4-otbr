@@ -1483,6 +1483,13 @@ class TestRebootNote:
         snap = {**SNAP_ZIG, "channels": [c6_off, OLLY, SLZB, ezsp_off]}
         assert self.note(snap, OLLY, "ziggurat", NO_RADIO) == ""
 
+    def test_zigbee_on_the_radio_thread_runs_on_says_thread_stops(self):
+        # On ziggurat picked on the C6 while Thread runs on the C6: Thread stops for good (no other radio runs it).
+        assert self.note(SNAP_ZIG, C6, "ziggurat", RUNNING) == (
+            "Saving reboots the board and starts Zigbee on this radio. Thread stops: no other radio runs it, so its "
+            "devices lose the border router until you set another radio to Thread."
+        )
+
     def test_a_change_that_does_not_touch_zigbee_says_nothing(self):
         # On rcp-proxy picked on the OllyZig (off) while Thread runs on the C6: "".
         assert self.note(SNAP_ZIG, OLLY, "rcp-proxy", RUNNING) == ""

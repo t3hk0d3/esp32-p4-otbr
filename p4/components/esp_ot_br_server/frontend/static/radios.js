@@ -83,10 +83,16 @@ function threadElsewhere(snapshot, ch, status) {
 
 /*
  * What a save that enters or leaves Zigbee does to Thread running on another radio: Zigbee's (re)start reboots the
- * board, and Thread with it. otbr picked on the radio that runs Zigbee moves Thread there through that reboot. ''
- * when Thread runs on no other radio, or the pick does not enter or leave ziggurat.
+ * board, and Thread with it. otbr picked on the radio that runs Zigbee moves Thread there through that reboot; Zigbee
+ * picked on the radio that runs Thread stops Thread. '' when Thread runs on no radio, or the pick does not enter or
+ * leave ziggurat.
  */
 function rebootNote(snapshot, ch, pick, status) {
+  var running = status ? status.otbr_channel : null;
+  var threadHere = typeof running === 'string' ? running === ch.id : ch.stored_mode === 'otbr';
+  if (pick === 'ziggurat' && ch.mode !== 'ziggurat' && threadHere)
+    return 'Saving reboots the board and starts Zigbee on this radio. Thread stops: no other radio runs it, so its ' +
+           'devices lose the border router until you set another radio to Thread.';
   var from = threadElsewhere(snapshot, ch, status);
   if (!from || (pick === 'ziggurat') === (ch.mode === 'ziggurat'))
     return '';
