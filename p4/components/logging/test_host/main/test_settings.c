@@ -74,9 +74,13 @@ static esp_err_t fake_blob_set(const char *ns, const char *key, const void *buf,
     return ESP_OK;
 }
 
+/** Like ESP-IDF v6.1's esp_log_level_set: "*" sets the default and forgets every per-tag level. */
 static void fake_level_set(const char *tag, esp_log_level_t level)
 {
     s_fake.level_calls++;
+    if (strcmp(tag, "*") == 0) {
+        s_fake.n_levels = 0;
+    }
     for (int i = 0; i < s_fake.n_levels; i++) {
         if (strcmp(s_fake.levels[i].tag, tag) == 0) {
             s_fake.levels[i].level = level;
@@ -88,15 +92,28 @@ static void fake_level_set(const char *tag, esp_log_level_t level)
     s_fake.levels[s_fake.n_levels++].level = level;
 }
 
-/** Last level set for `tag`, -1 when never set. */
+/** Level ESP-IDF would filter `tag` at: its own level, else the "*" level; -1 when neither was set. */
 static int level_of(const char *tag)
 {
-    for (int i = 0; i < s_fake.n_levels; i++) {
-        if (strcmp(s_fake.levels[i].tag, tag) == 0) {
-            return s_fake.levels[i].level;
+    for (int pass = 0; pass < 2; pass++) {
+        for (int i = 0; i < s_fake.n_levels; i++) {
+            if (strcmp(s_fake.levels[i].tag, pass == 0 ? tag : "*") == 0) {
+                return s_fake.levels[i].level;
+            }
         }
     }
     return -1;
+}
+
+/** Whether `tag` has a level of its own (not just the "*" fallback). */
+static bool has_own_level(const char *tag)
+{
+    for (int i = 0; i < s_fake.n_levels; i++) {
+        if (strcmp(s_fake.levels[i].tag, tag) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void forget_level_calls(void)
@@ -234,7 +251,8 @@ TEST_CASE("apply valid settings: each listener of a changed tag is called with i
     memset(&s_ot, 0, sizeof(s_ot));
     TEST_ASSERT_EQUAL(ESP_OK, logging_level_listener_add("ziggurat", on_zig));
     TEST_ASSERT_EQUAL(ESP_OK, logging_level_listener_add("OPENTHREAD", on_ot));
-    TEST_ASSERT_EQUAL(0, s_zig.calls);
+    s_zig.calls = 0; // the call on add is covered by its own test
+    s_ot.calls = 0;
     logging_settings_t s = defaults();
 
     s.channel[LOGGING_CH_JTAG] = ESP_LOG_DEBUG;
@@ -248,6 +266,63 @@ TEST_CASE("apply valid settings: each listener of a changed tag is called with i
     TEST_ASSERT_EQUAL(0, s_ot.calls); // OPENTHREAD stays at info
 
     TEST_ASSERT_EQUAL(ESP_OK, logging_apply(&s, NULL)); // same settings again: nothing changed
+    TEST_ASSERT_EQUAL(1, s_zig.calls);
+}
+
+TEST_CASE("apply and viewers change: overrides keep their own level after ESP-IDF's \"*\" call", "[logging]")
+{
+    setup();
+    TEST_ASSERT_EQUAL(ESP_OK, logging_init());
+    logging_settings_t s = defaults();
+
+    s.default_level = ESP_LOG_WARN;
+    logging_core_set_component(&s, "ziggurat", ESP_LOG_ERROR);
+    logging_core_set_component(&s, "wifi", ESP_LOG_NONE);
+    TEST_ASSERT_EQUAL(ESP_OK, logging_apply(&s, NULL));
+    TEST_ASSERT_TRUE(has_own_level("ziggurat"));
+    TEST_ASSERT_EQUAL(ESP_LOG_ERROR, level_of("ziggurat"));
+    TEST_ASSERT_EQUAL(ESP_LOG_NONE, level_of("wifi"));
+    TEST_ASSERT_EQUAL(ESP_LOG_WARN, level_of("*"));
+
+    logging_viewers_max_changed(ESP_LOG_DEBUG);
+    TEST_ASSERT_TRUE(has_own_level("ziggurat"));
+    TEST_ASSERT_EQUAL(ESP_LOG_ERROR, level_of("ziggurat"));
+    TEST_ASSERT_EQUAL(ESP_LOG_NONE, level_of("wifi"));
+    TEST_ASSERT_EQUAL(ESP_LOG_WARN, level_of("*"));
+}
+
+/* ---- logging_level_listener_add ---- */
+
+TEST_CASE("listener added: called once at once with the tag's current effective level", "[logging]")
+{
+    setup();
+    TEST_ASSERT_EQUAL(ESP_OK, logging_init());
+    logging_settings_t s = defaults();
+
+    s.channel[LOGGING_CH_UART] = ESP_LOG_DEBUG;
+    logging_core_set_component(&s, "ziggurat", ESP_LOG_VERBOSE);
+    TEST_ASSERT_EQUAL(ESP_OK, logging_apply(&s, NULL));
+    memset(&s_zig, 0, sizeof(s_zig));
+    TEST_ASSERT_EQUAL(ESP_OK, logging_level_listener_add("ziggurat", on_zig));
+    TEST_ASSERT_EQUAL(1, s_zig.calls);
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, s_zig.level); // verbose capped by the highest channel
+    TEST_ASSERT_EQUAL_PTR(xTaskGetCurrentTaskHandle(), s_zig.task);
+    TEST_ASSERT_EQUAL(ESP_OK, s_zig.get_result); // called outside the lock
+}
+
+TEST_CASE("listener added: not called again by an apply that leaves its level unchanged", "[logging]")
+{
+    setup();
+    TEST_ASSERT_EQUAL(ESP_OK, logging_init());
+    memset(&s_zig, 0, sizeof(s_zig));
+    TEST_ASSERT_EQUAL(ESP_OK, logging_level_listener_add("ziggurat", on_zig));
+    TEST_ASSERT_EQUAL(1, s_zig.calls);
+    logging_settings_t s = defaults();
+
+    s.channel[LOGGING_CH_SYSLOG] = ESP_LOG_WARN; // changes the settings, not ziggurat's info
+    strcpy(s.syslog_target, "192.168.1.10");
+    logging_core_set_component(&s, "wifi", ESP_LOG_ERROR);
+    TEST_ASSERT_EQUAL(ESP_OK, logging_apply(&s, NULL));
     TEST_ASSERT_EQUAL(1, s_zig.calls);
 }
 
@@ -480,7 +555,7 @@ TEST_CASE("first debug viewer: gates recomputed with viewers_max debug", "[loggi
     logging_viewers_max_changed(ESP_LOG_DEBUG);
     TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, level_of("ziggurat"));
     TEST_ASSERT_EQUAL(ESP_LOG_INFO, level_of("*"));
-    TEST_ASSERT_EQUAL(1, s_zig.calls);
+    TEST_ASSERT_EQUAL(2, s_zig.calls); // once on add, once for the change
     TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, s_zig.level);
 }
 

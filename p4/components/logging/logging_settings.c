@@ -99,6 +99,7 @@ void logging_reset(void)
 
 /**
  * Hand every gate to ESP-IDF: the default first (ESP-IDF's "*" also forgets every per-tag level), then each override.
+ * Between the two, a line from an override tag on another task is briefly filtered at the default's gate.
  * Under s_lock (or before it exists).
  */
 static void set_levels(void)
@@ -228,18 +229,8 @@ esp_err_t logging_apply(const logging_settings_t *settings, const char **bad_fie
         xSemaphoreGive(s_lock);
         return ESP_ERR_INVALID_ARG;
     }
-    // An override that goes away falls back to the default's gate (ESP-IDF keeps a tag's level until told).
-    for (int i = 0; i < s_settings.n_components; i++) {
-        const char *tag = s_settings.components[i].tag;
-        bool kept = false;
-
-        for (int j = 0; j < settings->n_components && !kept; j++) {
-            kept = strcmp(settings->components[j].tag, tag) == 0;
-        }
-        if (!kept) {
-            s_ops->level_set(tag, logging_core_gate(settings, tag, s_viewers_max));
-        }
-    }
+    // A removed override needs no call of its own: set_levels() starts with "*", which in ESP-IDF v6.1 forgets every
+    // per-tag level, so the tag follows the default again.
     memcpy(&s_settings, settings, sizeof(s_settings));
     set_levels();
 
@@ -254,7 +245,7 @@ esp_err_t logging_apply(const logging_settings_t *settings, const char **bad_fie
 
 esp_err_t logging_level_listener_add(const char *tag, logging_level_cb_t cb)
 {
-    esp_err_t err = ESP_OK;
+    esp_log_level_t level;
 
     if (!tag || !cb || tag[0] == '\0' || strlen(tag) >= LOGGING_TAG_MAX) {
         return ESP_ERR_INVALID_ARG;
@@ -262,18 +253,24 @@ esp_err_t logging_level_listener_add(const char *tag, logging_level_cb_t cb)
     if (!s_lock) {
         return ESP_ERR_INVALID_STATE;
     }
+    // Under s_notify_lock, so a concurrent change cannot deliver a newer level before this first call.
+    xSemaphoreTake(s_notify_lock, portMAX_DELAY);
     xSemaphoreTake(s_lock, portMAX_DELAY);
     if (s_n_listeners >= LOGGING_LISTENERS_MAX) {
-        err = ESP_ERR_NO_MEM;
-    } else {
-        listener_t *l = &s_listeners[s_n_listeners++];
-
-        strlcpy(l->tag, tag, sizeof(l->tag));
-        l->cb = cb;
-        l->delivered = logging_core_gate(&s_settings, tag, s_viewers_max);
+        xSemaphoreGive(s_lock);
+        xSemaphoreGive(s_notify_lock);
+        return ESP_ERR_NO_MEM;
     }
+    listener_t *l = &s_listeners[s_n_listeners++];
+
+    strlcpy(l->tag, tag, sizeof(l->tag));
+    l->cb = cb;
+    level = logging_core_gate(&s_settings, tag, s_viewers_max);
+    l->delivered = level;
     xSemaphoreGive(s_lock);
-    return err;
+    cb(level);
+    xSemaphoreGive(s_notify_lock);
+    return ESP_OK;
 }
 
 void logging_viewers_max_changed(esp_log_level_t viewers_max)

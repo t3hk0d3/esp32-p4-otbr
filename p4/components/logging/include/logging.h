@@ -87,8 +87,9 @@ esp_err_t logging_get_settings(logging_settings_t *out);
 esp_err_t logging_apply(const logging_settings_t *settings, const char **bad_field);
 
 /**
- * Call `cb` whenever the effective level of `tag` changes (up to 4 listeners). Not called at registration: the
- * baseline is the level in force then. ESP_ERR_NO_MEM when full, ESP_ERR_INVALID_STATE before logging_init.
+ * Call `cb` once now, on the calling task, with the effective level of `tag`, then whenever that level changes (up
+ * to 4 listeners). Callbacks run outside the settings lock and may call logging_get_settings, but not logging_apply
+ * or logging_level_listener_add. ESP_ERR_NO_MEM when full, ESP_ERR_INVALID_STATE before logging_init.
  */
 esp_err_t logging_level_listener_add(const char *tag, logging_level_cb_t cb);
 
