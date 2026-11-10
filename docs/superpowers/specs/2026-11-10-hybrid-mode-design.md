@@ -1,6 +1,6 @@
 # Hybrid mode: Thread and Zigbee at once, on separate radios: design
 
-Status: draft for the user's review, 2026-11-10. The user asked for hybrid mode on 2026-11-09 and for this design after
+Status: approved by the user, 2026-11-10, with the three decisions of section 9 as recommended. The user asked for hybrid mode on 2026-11-09 and for this design after
 PR #42 (channel/mode orchestrator) merged. A spike on 2026-11-10 (section 2) ran both stacks together on the board.
 Branch `feat/hybrid-mode`, one PR. It changes one rule of `2026-11-08-channel-mode-orchestrator-design.md` (section
 4.3: "Thread and Zigbee never both bound") and the "No hybrid" limit of `docs/zigbee.md`. Everything else in those
@@ -95,7 +95,7 @@ other radios, a proxy change) behave as today and do not reboot.
 
 Thread's channel is the board's active dataset; Zigbee's is the one ZHA formed on (`/device/zigbee` `radio.channel`).
 When both are equal, both networks share the air: it works, but each slows the other under load. The board shows this
-(the form is open decision 1). It never changes either channel itself.
+(decision 1). It never changes either channel itself.
 
 ### 5.4 Loss and maintenance
 
@@ -122,7 +122,7 @@ No new record: the per-channel stored modes already hold both bindings. A downgr
 exclusion: its load rules keep duplicates of one mode only, not the hybrid pair, so it would boot with both bound,
 which that build never tested. Builder's call: either accept it (documented in CHANGELOG as "downgrade with Zigbee
 off"), or have the old build's load path unbind Zigbee when Thread is also stored, which needs a change released before
-hybrid. Open decision 3.
+hybrid. Decided in section 9, item 3.
 
 ## 7. API
 
@@ -149,14 +149,13 @@ On the board (batched pass, RF rule):
 - A C6 firmware push with Thread on the C6 and Zigbee on the dongle: Zigbee keeps running.
 - `test_zigbee.py` and `test_channels.py` with hybrid cases added; the existing suites as regression.
 
-## 9. Open decisions (the user's)
+## 9. Decisions (the user's, 2026-11-10)
 
-1. Same-channel notice (5.3): a warning in the Zigbee section of the Dashboard (my recommendation); or a warning and a
-   refusal of Zigbee start (not possible to enforce: ZHA picks the channel after the bind); or nothing.
-2. Both assignments supported (my recommendation, both tested), or only Thread on the C6 with Zigbee on the dongle.
-   Thread on a dongle showed ping loss in earlier tests (2026-11-06), unrelated to hybrid.
-3. Downgrade (section 6): document "turn Zigbee off before downgrading" (my recommendation), or ship a load-path guard
-   in a release before hybrid.
+1. Same-channel notice (5.3): a warning in the Zigbee section of the Dashboard, linking the Radios page. No refusal: ZHA
+   picks the Zigbee channel after the bind.
+2. Both assignments are supported and tested: Thread on the C6 with Zigbee on the dongle, and the reverse.
+3. Downgrade (section 6): documented in CHANGELOG and  as "turn Zigbee off before going back to an older
+   firmware"; no load-path guard.
 
 ## 10. Left to the builder
 
