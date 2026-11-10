@@ -489,12 +489,13 @@ class TestPageToggle:
         r = scenario(
             setup(OFF) + "t.put = () => ({status: 200, body: {reboot: true}});"
             "t.el('toggle').click(); t.el('saveBtn').click(); await t.advance(1000);"
-            + f"const a = [{puts()}, t.el('toggleMsg').textContent, t.reloads()];"
+            + f"const a = [{puts()}, t.el('toggleMsg').textContent, t.reloads(), t.el('saveRow').hidden()];"
             "await t.advance(20000); return [a, t.reloads()];"
         )
         assert r[0][0] == [{"enabled": True}]
         assert "rebooting" in r[0][1]
         assert r[0][2] == 0
+        assert r[0][3] is True  # "Not saved yet" hides once saved
         assert r[1] == 1
 
     def test_turning_off_puts_enabled_false(self):

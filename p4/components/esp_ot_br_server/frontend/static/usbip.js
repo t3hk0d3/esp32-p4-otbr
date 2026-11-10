@@ -345,6 +345,7 @@ function apply() {
     note('toggleMsg', '', false);
     return put({enabled : value}).then(function(r) {
       if (r.status === 200 && r.body && r.body.reboot) {
+        showIf('saveRow', false); // saved: "Not saved yet" no longer holds
         note('toggleMsg', 'Saved. The board is rebooting (about 30 s); this page reloads when it is back.', false);
         kit.waitForBoard('toggleMsg');
         return {handoff : true};
