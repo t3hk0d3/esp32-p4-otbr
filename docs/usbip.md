@@ -126,9 +126,11 @@ device stays out of reach of any other computer.
 - A device with more than 15 endpoints, counting alternate setting 0 of every interface, is not exported.
 - One device and one client at a time.
 
-Memory: the transfers in flight use internal RAM, at most 32 KB plus, in the worst case, one transfer of up to 16 KB
-per endpoint. Requests that wait for the device queue in PSRAM, up to 1 MB per session; beyond that the session ends
-(counter `sessions_ended_overload`).
+Memory: the transfers in flight use internal RAM, at most 80 KB in all. Reads (IN) share 32 KB; every endpoint can
+always have one transfer of up to 2 KB in flight, and a larger first transfer (a 16 KB write, for example) goes when it
+fits under the 80 KB. A transfer is also refused (`-ENOMEM`) when it would leave less than 48 KB of internal DMA memory
+free. Requests that wait for the device queue in PSRAM, up to 1 MB per session; beyond that the session ends (counter
+`sessions_ended_overload`).
 
 Devices that stall or never answer a control transfer end the session, and the board resets them.
 

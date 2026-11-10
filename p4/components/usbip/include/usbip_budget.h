@@ -3,13 +3,23 @@
 //
 // Endpoint index: 0 = EP0, 1..USBIP_EP_MAX = the claimed non-control endpoints (the engine maps addresses to indices).
 //
-// Grant rule: an endpoint with nothing in flight is always granted (its reserve), even when the shared bytes or the
-// transfer count are used up. Otherwise only an IN endpoint is granted, while in-flight bytes + n <= USBIP_INFLIGHT_BYTES
-// and in-flight transfers < USBIP_INFLIGHT_XFERS. OUT endpoints and EP0 have at most one transfer in flight. Reserve
-// grants count toward the in-flight bytes and transfers, so the shared check sees them.
+// Grant rule, in order:
+// - small reserve: an endpoint with nothing in flight always gets a transfer of up to USBIP_RESERVE_SMALL (2 KB), even
+//   when the shared bytes or the transfer count are used up (HCI commands, EP0, always-pending HID/HCI reads);
+// - shared: an IN endpoint (not EP0) with transfers in flight gets one more while in-flight bytes + n <=
+//   USBIP_INFLIGHT_BYTES (32 KB) and in-flight transfers < USBIP_INFLIGHT_XFERS (32);
+// - large reserve: an endpoint with nothing in flight gets a larger first transfer (OUT, EP0, or an IN whose shared
+//   check fails) while the charged bytes after the grant stay <= USBIP_INFLIGHT_HARD (80 KB);
+// - otherwise the transfer waits in its FIFO. OUT endpoints and EP0 have at most one transfer in flight.
+// Every grant counts toward the in-flight bytes and transfers, so the shared check sees reserve grants too.
 //
-// Internal RAM worst case: USBIP_INFLIGHT_BYTES (32 KB) plus one transfer per endpoint (at most USBIP_XFER_MAX, 16 KB,
-// each).
+// Charged bytes: the sum over all USBIP_EP_MAX + 1 endpoint indices of max(the endpoint's in-flight bytes,
+// USBIP_RESERVE_SMALL). An idle endpoint is charged the 2 KB its small reserve may take at any moment, so a large
+// grant leaves room for every small reserve still to come. Small grants and releases never raise the charge.
+//
+// Internal RAM worst case: in-flight bytes <= charged bytes <= USBIP_INFLIGHT_HARD (80 KB): 32 KB IN shared, one 16 KB
+// large transfer and the 16 x 2 KB small reserves. Shared and small grants alone stay at or below 64 KB, so one 16 KB
+// OUT or EP0 transfer always fits once no other large transfer is in flight.
 #pragma once
 
 #include <stdbool.h>
@@ -31,7 +41,9 @@ typedef struct {
 
 typedef struct {
     uint16_t ep_inflight[USBIP_EP_MAX + 1];  // transfers in flight per endpoint index
+    size_t ep_bytes[USBIP_EP_MAX + 1];       // bytes in flight per endpoint index
     size_t inflight_bytes;
+    size_t charged;                          // sum of max(ep_bytes, USBIP_RESERVE_SMALL), see above
     size_t inflight_xfers;
     usbip_mem_stats_t stats;
 } usbip_budget_t;

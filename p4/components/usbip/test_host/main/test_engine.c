@@ -553,6 +553,28 @@ TEST_CASE("endpoint with nothing in flight: grants it a slot even when the share
     finish();
 }
 
+TEST_CASE("budget pressure: a large first OUT over the hard cap waits and goes out when a large transfer frees",
+          "[usbip]")
+{
+    start(cfg_bt, sizeof(cfg_bt));
+    for (uint32_t s = 1; s <= USBIP_INFLIGHT_XFERS; s++) {
+        submit(s, 0x81, 1024);  // IN shared: 32 KB
+    }
+    submit(40, 0x82, USBIP_XFER_MAX);  // large reserve of 0x82: charged 76 KB
+    submit(41, 0x02, USBIP_XFER_MAX);  // would be 90 KB: waits
+    TEST_ASSERT_NOT_NULL(pending(40));
+    TEST_ASSERT_NULL(pending(41));
+    control(42, 0x20, 0, 0, 0, 3);  // EP0's small reserve still goes
+    TEST_ASSERT_NOT_NULL(pending(42));
+    complete(40, USBIP_XS_COMPLETED, 0);
+    TEST_ASSERT_NOT_NULL(pending(41));
+    usbip_mem_stats_t m;
+
+    usbip_engine_mem(&eng, &m);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(USBIP_INFLIGHT_HARD, m.inflight_peak);
+    finish();
+}
+
 TEST_CASE("Budget full of IN reads on 0x81: a bulk OUT on 0x02 is still submitted", "[usbip]")
 {
     start(cfg_bt, sizeof(cfg_bt));

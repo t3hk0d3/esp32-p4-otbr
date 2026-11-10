@@ -5,7 +5,7 @@
 
 static usbip_budget_t b;
 
-TEST_CASE("endpoint with nothing in flight: grants, also with the shared budget used up", "[usbip]")
+TEST_CASE("endpoint with nothing in flight: grants under the hard cap, also with the shared budget used up", "[usbip]")
 {
     usbip_budget_init(&b);
     // Eight IN endpoints fill the shared 32 KB with 4 KB each.
@@ -21,7 +21,7 @@ TEST_CASE("endpoint with nothing in flight: grants, also with the shared budget 
     TEST_ASSERT_EQUAL_UINT32(8 * 4096 + 4096 + USBIP_XFER_MAX + 64, s.inflight);
 }
 
-TEST_CASE("endpoint with nothing in flight: grants also with the 32 transfers used up", "[usbip]")
+TEST_CASE("endpoint with nothing in flight: grants a small reserve also with the 32 transfers used up", "[usbip]")
 {
     usbip_budget_init(&b);
     for (int i = 0; i < USBIP_INFLIGHT_XFERS; i++) {
@@ -29,6 +29,92 @@ TEST_CASE("endpoint with nothing in flight: grants also with the 32 transfers us
     }
     TEST_ASSERT_FALSE(usbip_budget_grant(&b, 1, true, 1));
     TEST_ASSERT_TRUE(usbip_budget_grant(&b, 2, true, 1));
+}
+
+TEST_CASE("small first transfer: is always granted, also at the hard cap", "[usbip]")
+{
+    usbip_budget_init(&b);
+    TEST_ASSERT_TRUE(usbip_budget_grant(&b, 1, true, USBIP_INFLIGHT_BYTES));  // IN shared full
+    TEST_ASSERT_TRUE(usbip_budget_grant(&b, 2, false, USBIP_XFER_MAX));       // one large OUT
+    // Charged: 32 KB + 16 KB + 14 idle x 2 KB = 76 KB; a second large one is refused.
+    TEST_ASSERT_FALSE(usbip_budget_grant(&b, 3, false, USBIP_XFER_MAX));
+    // Every other endpoint, EP0 included, still gets a 2 KB transfer.
+    TEST_ASSERT_TRUE(usbip_budget_grant(&b, 0, true, USBIP_RESERVE_SMALL));
+    for (uint8_t ep = 3; ep <= USBIP_EP_MAX; ep++) {
+        TEST_ASSERT_TRUE(usbip_budget_grant(&b, ep, ep % 2 == 0, USBIP_RESERVE_SMALL));
+    }
+    usbip_mem_stats_t s;
+    usbip_budget_stats(&b, &s);
+    TEST_ASSERT_EQUAL_UINT32(USBIP_INFLIGHT_BYTES + USBIP_XFER_MAX + 14 * USBIP_RESERVE_SMALL, s.inflight);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(USBIP_INFLIGHT_HARD, s.inflight);
+}
+
+TEST_CASE("large first transfer: is refused over the hard cap and granted under it", "[usbip]")
+{
+    usbip_budget_init(&b);
+    TEST_ASSERT_TRUE(usbip_budget_grant(&b, 1, true, USBIP_INFLIGHT_BYTES));
+    TEST_ASSERT_TRUE(usbip_budget_grant(&b, 2, false, USBIP_XFER_MAX));  // charged 76 KB
+    TEST_ASSERT_FALSE(usbip_budget_grant(&b, 3, false, USBIP_XFER_MAX));  // would be 90 KB
+    TEST_ASSERT_FALSE(usbip_budget_grant(&b, 0, false, 6 * 1024 + 1));  // EP0: one byte over 80 KB
+    TEST_ASSERT_TRUE(usbip_budget_grant(&b, 0, false, 6 * 1024));       // exactly 80 KB
+    usbip_budget_release(&b, 0, 6 * 1024);
+    usbip_budget_release(&b, 2, USBIP_XFER_MAX);
+    // The bytes are free again: the waiting large transfer now fits.
+    TEST_ASSERT_TRUE(usbip_budget_grant(&b, 3, false, USBIP_XFER_MAX));
+}
+
+TEST_CASE("large first OUT transfer: always fits while IN uses only its shared 32 KB", "[usbip]")
+{
+    usbip_budget_init(&b);
+    // Eight IN endpoints hold the shared bytes, EP0 and six more endpoints hold small reserves.
+    for (uint8_t ep = 1; ep <= 8; ep++) {
+        TEST_ASSERT_TRUE(usbip_budget_grant(&b, ep, true, 4096));
+    }
+    TEST_ASSERT_TRUE(usbip_budget_grant(&b, 0, true, USBIP_RESERVE_SMALL));
+    for (uint8_t ep = 9; ep < USBIP_EP_MAX; ep++) {
+        TEST_ASSERT_TRUE(usbip_budget_grant(&b, ep, true, USBIP_RESERVE_SMALL));
+    }
+    TEST_ASSERT_TRUE(usbip_budget_grant(&b, USBIP_EP_MAX, false, USBIP_XFER_MAX));
+}
+
+TEST_CASE("large first IN transfer: takes the shared bytes when they fit, the hard cap when not", "[usbip]")
+{
+    usbip_budget_init(&b);
+    TEST_ASSERT_TRUE(usbip_budget_grant(&b, 1, true, USBIP_XFER_MAX));  // shared: 16 KB
+    TEST_ASSERT_TRUE(usbip_budget_grant(&b, 2, true, USBIP_XFER_MAX));  // shared: 32 KB
+    TEST_ASSERT_TRUE(usbip_budget_grant(&b, 3, true, USBIP_XFER_MAX));  // large: charged 32 + 16 + 26 = 74 KB
+    TEST_ASSERT_FALSE(usbip_budget_grant(&b, 4, true, USBIP_XFER_MAX));  // large: 88 KB, refused
+    TEST_ASSERT_FALSE(usbip_budget_grant(&b, 1, true, 1));  // shared still full
+}
+
+TEST_CASE("any sequence of grants and releases: in-flight bytes never exceed 80 KB", "[usbip]")
+{
+    static const size_t sizes[] = {8, 64, 512, USBIP_RESERVE_SMALL, USBIP_RESERVE_SMALL + 1, 4096, 8192,
+                                   USBIP_XFER_MAX
+                                  };
+    size_t held[USBIP_EP_MAX + 1][USBIP_INFLIGHT_XFERS + 1] = {0};
+    size_t count[USBIP_EP_MAX + 1] = {0};
+    uint32_t seed = 12345;
+    size_t peak = 0;
+
+    usbip_budget_init(&b);
+    for (int step = 0; step < 200000; step++) {
+        seed = seed * 1103515245u + 12345u;
+        uint8_t ep = (uint8_t)((seed >> 8) % (USBIP_EP_MAX + 1));
+        bool in = ep != 0 && ((seed >> 4) & 1);
+        size_t n = sizes[(seed >> 16) % (sizeof(sizes) / sizeof(sizes[0]))];
+
+        if (((seed >> 24) % 3) == 0 && count[ep] > 0) {
+            usbip_budget_release(&b, ep, held[ep][--count[ep]]);
+        } else if (count[ep] <= USBIP_INFLIGHT_XFERS && usbip_budget_grant(&b, ep, in, n)) {
+            held[ep][count[ep]++] = n;
+        }
+        usbip_mem_stats_t s;
+        usbip_budget_stats(&b, &s);
+        TEST_ASSERT_LESS_OR_EQUAL_UINT32(USBIP_INFLIGHT_HARD, s.inflight);
+        peak = s.inflight > peak ? s.inflight : peak;
+    }
+    TEST_ASSERT_GREATER_THAN_UINT32(USBIP_INFLIGHT_BYTES, peak);  // the sequence did go past the shared bytes
 }
 
 TEST_CASE("IN endpoint with transfers in flight: grants while bytes and count fit", "[usbip]")

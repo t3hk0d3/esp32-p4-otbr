@@ -13,7 +13,8 @@
 var UsbipLogic = (function() {
 var C = typeof DeviceCommon !== 'undefined' ? DeviceCommon : require('./device_common.js');
 var BUSID = '1-1';
-var INFLIGHT_MAX_BYTES = 32768; // USBIP_INFLIGHT_BYTES (usbip_core.h): the buffer budget the peak is shown against
+var INFLIGHT_SHARED_BYTES = 32768; // USBIP_INFLIGHT_BYTES (usbip_core.h): what IN reads share
+var INFLIGHT_HARD_BYTES = 81920;   // USBIP_INFLIGHT_HARD (usbip_core.h): the cap on all buffers in flight
 var SPEEDS = {low : 'low (1.5 Mbit/s)', full : 'full (12 Mbit/s)', high : 'high (480 Mbit/s)'};
 
 /* The chip of the page head, by state (spec section 5); `live`: the boxes about the port show. */
@@ -148,8 +149,8 @@ function statFigures(s) {
     },
     {value : sizeText(c.bytes_in), sub : 'to device ' + sizeText(c.bytes_out)}, {
       value : sizeText(m.inflight_bytes),
-      sub : 'peak ' + sizeText(m.inflight_peak) + ' of ' + sizeText(INFLIGHT_MAX_BYTES) + ' · queue peak ' +
-                sizeText(m.waiting_peak)
+      sub : 'peak ' + sizeText(m.inflight_peak) + ' of ' + sizeText(INFLIGHT_HARD_BYTES) + ' (reads ' +
+                sizeText(INFLIGHT_SHARED_BYTES) + ') · queue peak ' + sizeText(m.waiting_peak)
     }
   ];
 }

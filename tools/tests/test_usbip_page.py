@@ -388,7 +388,7 @@ class TestPageShows:
         assert r[4] == "1 MB"
         assert "64 KB" in r[5]
         assert r[6] == "4 KB"
-        assert "peak 16 KB of 32 KB" in r[7]
+        assert "peak 16 KB of 80 KB (reads 32 KB)" in r[7]
 
     def test_attach_box_carries_the_address(self):
         # On host board.lan: both command boxes hold the commands with board.lan; Linux shows first.
