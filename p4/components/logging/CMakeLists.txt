@@ -11,10 +11,10 @@ if(IDF_TARGET STREQUAL "linux")
 endif()
 
 idf_component_register(SRCS "logging_core.c" "logging_text.c" "logging_ring.c" "logging_settings.c"
-                            "logging_drain.c" "logging_viewers.c" "logging_capture.c"
+                            "logging_drain.c" "logging_viewers.c" "logging_capture.c" "logging_console.c"
                        INCLUDE_DIRS "include" "."
                        REQUIRES freertos log
-                       PRIV_REQUIRES nvs_flash esp_driver_usb_serial_jtag lwip netnames esp_timer board_cores)
+                       PRIV_REQUIRES console nvs_flash esp_driver_usb_serial_jtag lwip netnames esp_timer board_cores)
 
 # Every ESP-IDF log call goes through logging_capture.c: the ESP_LOGx macros and esp_log_buffer_* call esp_log,
 # esp_log_write/esp_log_writev call esp_log_va from another translation unit. Linking the component in (main REQUIRES

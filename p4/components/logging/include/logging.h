@@ -156,6 +156,9 @@ bool logging_viewer_read(logging_viewer_t *viewer, logging_line_t *out, uint32_t
 /** Close a viewer (NULL is ignored): no more lines, the queue is freed, the gate is recomputed. */
 void logging_viewer_close(logging_viewer_t *viewer);
 
+/** Register the console command `log` (show and set the settings from the UART). Call before esp_console_start_repl. */
+esp_err_t logging_console_register(void);
+
 #ifdef __cplusplus
 }
 #endif

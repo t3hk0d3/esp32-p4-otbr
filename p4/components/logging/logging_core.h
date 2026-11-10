@@ -97,6 +97,17 @@ unsigned logging_capture_route(esp_log_level_t level, esp_log_level_t uart_level
  */
 unsigned logging_core_wanting(esp_log_level_t level, logging_levels_t lv);
 
+/**
+ * Parse the arguments of the console command `log` (argv[0] is "log") and apply them to `inout`:
+ *   log level <uart|jtag|syslog> <level>      set a channel level
+ *   log tag <tag|*> <level|default>           set an override; `*` sets the default level, `default` removes an override
+ *   log syslog <host[:port]|off>              set the target (the level stays as it is); `off` clears it and the level
+ * `argc == 1` (plain `log`, the display) is not an assignment and is refused too. On error `*err` (may be NULL) points
+ * to a static message, `inout` is untouched, and the result is ESP_ERR_INVALID_ARG, or ESP_ERR_NO_MEM when the
+ * override set is full. The result is not validated as a whole (logging_apply does that).
+ */
+esp_err_t logging_console_parse(int argc, char **argv, logging_settings_t *inout, const char **err);
+
 /** Tags seen since boot, in insertion order. */
 typedef struct {
     size_t count;

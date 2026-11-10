@@ -259,3 +259,119 @@ unsigned logging_core_wanting(esp_log_level_t level, logging_levels_t lv)
     }
     return want;
 }
+
+/* ---- console command ---- */
+
+static esp_err_t console_fail(const char **err, const char *message, esp_err_t code)
+{
+    if (err) {
+        *err = message;
+    }
+    return code;
+}
+
+static esp_err_t console_level(int argc, char **argv, logging_settings_t *s, const char **err)
+{
+    esp_log_level_t level;
+    int ch = -1;
+
+    if (argc != 4) {
+        return console_fail(err, "usage: log level <uart|jtag|syslog> <level>", ESP_ERR_INVALID_ARG);
+    }
+    for (int i = 0; i < LOGGING_CH_COUNT; i++) {
+        if (strcmp(argv[2], CHANNEL_NAMES[i]) == 0) {
+            ch = i;
+        }
+    }
+    if (ch < 0) {
+        return console_fail(err, "unknown channel (uart, jtag or syslog)", ESP_ERR_INVALID_ARG);
+    }
+    if (logging_level_parse(argv[3], &level) != ESP_OK) {
+        return console_fail(err, "unknown level (off, error, warning, info, debug or verbose)", ESP_ERR_INVALID_ARG);
+    }
+    s->channel[ch] = level;
+    return ESP_OK;
+}
+
+static esp_err_t console_tag(int argc, char **argv, logging_settings_t *s, const char **err)
+{
+    const char *tag = argv[2];
+    esp_log_level_t level;
+    bool is_default;
+    esp_err_t ret;
+
+    if (argc != 4) {
+        return console_fail(err, "usage: log tag <tag|*> <level|default>", ESP_ERR_INVALID_ARG);
+    }
+    is_default = strcmp(argv[3], "default") == 0;
+    if (!is_default && logging_level_parse(argv[3], &level) != ESP_OK) {
+        return console_fail(err, "unknown level (off, error, warning, info, debug, verbose or default)",
+                            ESP_ERR_INVALID_ARG);
+    }
+    if (strcmp(tag, "*") == 0) {
+        if (is_default) {
+            return console_fail(err, "* is the default for everything else; give it a level",
+                                ESP_ERR_INVALID_ARG);
+        }
+        s->default_level = level;
+        return ESP_OK;
+    }
+    if (is_default) {
+        if (logging_core_remove_component(s, tag) != ESP_OK) {
+            return console_fail(err, "that tag has no override", ESP_ERR_INVALID_ARG);
+        }
+        return ESP_OK;
+    }
+    ret = logging_core_set_component(s, tag, level);
+    if (ret == ESP_ERR_NO_MEM) {
+        return console_fail(err, "too many overrides (32); remove one with: log tag <tag> default", ret);
+    }
+    if (ret != ESP_OK) {
+        return console_fail(err, "bad tag (1 to 23 bytes, not *)", ESP_ERR_INVALID_ARG);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t console_syslog(int argc, char **argv, logging_settings_t *s, const char **err)
+{
+    char host[LOGGING_TARGET_MAX];
+    uint16_t port;
+
+    if (argc != 3) {
+        return console_fail(err, "usage: log syslog <host[:port]|off>", ESP_ERR_INVALID_ARG);
+    }
+    if (strcmp(argv[2], "off") == 0) {
+        s->syslog_target[0] = '\0';
+        s->channel[LOGGING_CH_SYSLOG] = ESP_LOG_NONE;
+        return ESP_OK;
+    }
+    if (strlen(argv[2]) >= sizeof(s->syslog_target) ||
+            logging_target_parse(argv[2], host, sizeof(host), &port) != ESP_OK) {
+        return console_fail(err, "bad target (host, host:port, [ipv6] or [ipv6]:port)", ESP_ERR_INVALID_ARG);
+    }
+    strcpy(s->syslog_target, argv[2]);
+    return ESP_OK;
+}
+
+esp_err_t logging_console_parse(int argc, char **argv, logging_settings_t *inout, const char **err)
+{
+    logging_settings_t work = *inout; // the caller's struct changes only when the whole command is good
+    esp_err_t ret;
+
+    if (argc < 2) {
+        return console_fail(err, "usage: log [level|tag|syslog] ...", ESP_ERR_INVALID_ARG);
+    }
+    if (strcmp(argv[1], "level") == 0) {
+        ret = console_level(argc, argv, &work, err);
+    } else if (strcmp(argv[1], "tag") == 0) {
+        ret = console_tag(argc, argv, &work, err);
+    } else if (strcmp(argv[1], "syslog") == 0) {
+        ret = console_syslog(argc, argv, &work, err);
+    } else {
+        return console_fail(err, "unknown subcommand (level, tag or syslog)", ESP_ERR_INVALID_ARG);
+    }
+    if (ret == ESP_OK) {
+        *inout = work;
+    }
+    return ret;
+}
