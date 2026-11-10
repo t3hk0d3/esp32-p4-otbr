@@ -79,7 +79,7 @@ static void setup_with_default(esp_log_level_t def)
 
 static void setup(void)
 {
-    setup_with_default(ESP_LOG_VERBOSE);
+    setup_with_default(ESP_LOG_DEBUG);
 }
 
 static void teardown(void)
@@ -334,7 +334,7 @@ TEST_CASE("open and close many times: each close frees the slot and the queue", 
 
 TEST_CASE("first debug viewer opens: viewers level debug published, gate raised to debug", "[logging]")
 {
-    setup_with_default(ESP_LOG_VERBOSE);
+    setup_with_default(ESP_LOG_DEBUG);
     TEST_ASSERT_EQUAL(ESP_LOG_INFO, s_star_level); // UART and JTAG info: nothing wants more
     logging_viewer_t *v = logging_viewer_open(ESP_LOG_DEBUG, wake, NULL);
 
@@ -356,7 +356,7 @@ TEST_CASE("viewer level change: viewers level is the highest open level", "[logg
     TEST_ASSERT_EQUAL(ESP_LOG_INFO, s_star_level);
     logging_viewer_set_level(b, ESP_LOG_VERBOSE);
     TEST_ASSERT_EQUAL(ESP_LOG_VERBOSE, logging_levels().viewers);
-    TEST_ASSERT_EQUAL(ESP_LOG_VERBOSE, s_star_level);
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, s_star_level); // the default is at debug: the gate follows it
     logging_viewer_set_level(b, (esp_log_level_t) 9); // ignored
     TEST_ASSERT_EQUAL(ESP_LOG_VERBOSE, logging_levels().viewers);
     teardown();
@@ -394,7 +394,7 @@ TEST_CASE("last viewer closes: viewers level off, gate back to the channels", "[
     setup();
     logging_viewer_t *a = logging_viewer_open(ESP_LOG_VERBOSE, wake, NULL);
 
-    TEST_ASSERT_EQUAL(ESP_LOG_VERBOSE, s_star_level);
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, s_star_level); // the default (debug) caps the gate
     logging_viewer_close(a);
     TEST_ASSERT_EQUAL(ESP_LOG_NONE, logging_levels().viewers);
     TEST_ASSERT_EQUAL(ESP_LOG_INFO, s_star_level);

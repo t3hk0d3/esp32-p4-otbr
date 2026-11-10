@@ -169,6 +169,24 @@ class TestLogsLogic:
     def test_levels_up_to_stops_at_the_boards_max_level(self, max_level, levels):
         assert lg(f"L.levelsUpTo({json.dumps(max_level)})") == levels
 
+    @pytest.mark.parametrize(
+        "tag, max_level, levels",
+        [
+            ("*", "verbose", ["off", "error", "warning", "info", "debug"]),
+            ("*", "info", ["off", "error", "warning", "info"]),
+            (
+                "ziggurat",
+                "verbose",
+                ["off", "error", "warning", "info", "debug", "verbose"],
+            ),
+        ],
+    )
+    def test_component_levels_stop_the_default_at_debug(self, tag, max_level, levels):
+        assert (
+            lg(f"L.componentLevels({json.dumps(tag)}, {json.dumps(max_level)})")
+            == levels
+        )
+
 
 REPLY = {
     "channels": {

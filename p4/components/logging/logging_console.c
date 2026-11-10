@@ -80,9 +80,10 @@ static int cmd_set(int argc, char **argv)
     case ESP_OK:
         break;
     case ESP_ERR_INVALID_ARG:
-        printf("log: refused, %s is invalid (at most %s in this build; syslog needs a target before its level can be "
-               "raised)\n",
-               field ? field : "a field", logging_level_name(logging_level_ceiling()));
+        printf("log: refused, %s is invalid (at most %s in this build, %s for *; syslog needs a target before its level "
+               "can be raised)\n",
+               field ? field : "a field", logging_level_name(logging_level_ceiling()),
+               logging_level_name(logging_core_default_max(logging_level_ceiling())));
         return 1;
     default:
         printf("log: in force, but not stored (lost at reboot)\n");

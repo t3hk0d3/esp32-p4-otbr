@@ -335,6 +335,10 @@ The guide is [Logging](../logging.md); the API is in [HTTP API](../api.md#loggin
   OpenThread's lines are formatted whole and handed to the same path (tag `OPENTHREAD`), as are Ziggurat's (`ziggurat`).
 - ESP-IDF's per-tag level is the **gate**: a tag's component level, capped by the highest level any channel or viewer
   wants. A line above it is not formatted at all, which is why `debug` and `verbose` cost nothing while nobody asks.
+- The default (`*`) stops at Debug (`LOGGING_DEFAULT_MAX`): ESP-IDF's `ESP_EARLY_LOGx`/`ESP_DRAM_LOGx` bypass
+  `esp_log` and print through `esp_rom_printf` whenever ESP-IDF's default level allows them, and at Verbose the
+  Ethernet DMA's cache syncs (`cache`) print one on every frame. On the board that took 98% of core 0 in `emac_rx` and
+  stopped HTTP. A named component can still be Verbose: early logs only look at the default level.
 - Above the gate sits the build's **ceiling** (`CONFIG_LOG_MAXIMUM_LEVEL`): Info in a release build, so `debug` and
   `verbose` calls are compiled out; Verbose in a test build (`p4/sdkconfig.defaults.test`). `logging_level_ceiling()`
   reports it, `logging_apply` and the live viewers refuse levels above it, and `logging_init` lowers stored ones to it

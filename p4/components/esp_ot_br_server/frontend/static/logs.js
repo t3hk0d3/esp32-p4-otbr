@@ -29,6 +29,12 @@ function levelsUpTo(max) {
   return i < 0 ? LEVELS.slice() : LEVELS.slice(0, i + 1);
 }
 
+/* The levels of a component: "*" (everything else) stops at debug, as on the board (LOGGING_DEFAULT_MAX). */
+function componentLevels(tag, max) {
+  var all = levelsUpTo(max);
+  return tag === '*' ? all.slice(0, Math.min(all.length, LEVELS.indexOf('debug') + 1)) : all;
+}
+
 function parsePort(text) {
   if (!/^[0-9]+$/.test(text))
     return null;
@@ -152,7 +158,7 @@ function putError(status, body, errorMessage) {
   return errorMessage(status, body);
 }
 
-return {LEVELS : LEVELS, levelName : levelName, levelsUpTo : levelsUpTo, targetParse : targetParse, targetValid : targetValid,
+return {LEVELS : LEVELS, levelName : levelName, levelsUpTo : levelsUpTo, componentLevels : componentLevels, targetParse : targetParse, targetValid : targetValid,
         summaryChannels : summaryChannels, summaryComponents : summaryComponents, withComponent : withComponent,
         withoutComponent : withoutComponent, tagValid : tagValid, classify : classify, filter : filter, matches : matches,
         channelStatus : channelStatus, putError : putError, TARGET_HELP : TARGET_HELP};
@@ -238,7 +244,7 @@ function componentRow(tag, level) {
   var sel = el('select', null, 'form-select');
   sel.id = 'cp-lv-' + tag;
   sel.setAttribute('aria-label', tag === '*' ? 'Level of everything else' : 'Level of ' + tag);
-  fillLevels(sel, true);
+  L.componentLevels(tag, maxLevel).forEach(function(l) { sel.appendChild(option(l, L.levelName(l))); });
   sel.value = level;
   sel.addEventListener('change', function() {
     var level = sel.value;

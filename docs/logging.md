@@ -28,6 +28,9 @@ while a live viewer at `debug` sees all of ziggurat's debug lines.
 - Up to 32 components can have their own level. A tag is up to 23 characters, without spaces or quotes. The Logs page
   suggests the tags the board has seen since it started.
 - The live log has no setting of its own: each viewer picks its own level (`info` unless it asks for another).
+- `*` (everything else) goes up to `debug`; give a component its own level to get its `verbose` lines. ESP-IDF's
+  early-log calls skip the logger and print on the UART whenever the default level allows them, and at `verbose`
+  the Ethernet driver's DMA makes one for every frame, enough to stall the board.
 - `debug` and `verbose` exist only in a test build (`make build-test`). A release build compiles log calls in up to
   `info`, so a level above that is refused (the Logs page doesn't offer it, `GET /device/logging` reports `max_level`).
   Levels a test build stored are lowered to `info` when a release build starts.

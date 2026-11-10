@@ -25,7 +25,8 @@ release's `versions.txt`.
   `GET /device/logging/ws`, the **Device → Logs** page, the console command `log`, and the metrics
   `br_log_lines_sent_total`, `br_log_lines_dropped_total` and `br_log_viewers`. Debug and verbose levels exist in
   test builds only (`make build-test`, its own `p4/sdkconfig.test`); a release build stays at Info and reports it as
-  `max_level`. Levels default to what they were. The secondary console on USB-JTAG is off. The USB-JTAG channel is
+  `max_level`. `*` (everything else) goes up to Debug; a named component can go to Verbose. Levels default to what
+  they were. The secondary console on USB-JTAG is off. The USB-JTAG channel is
   not checked on hardware (no breakout). See `docs/logging.md`. On-board tests are written, not yet run.
 
 ### Changed

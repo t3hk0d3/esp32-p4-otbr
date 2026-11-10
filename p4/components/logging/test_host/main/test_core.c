@@ -683,3 +683,29 @@ TEST_CASE("pass-through line once published with the UART off: dropped", "[loggi
 
     TEST_ASSERT_FALSE(logging_core_passthrough_uart(ESP_LOG_ERROR, lv, true));
 }
+
+/* ---- the default (`*`) at most Debug ---- */
+
+TEST_CASE("default at verbose in a test build (ceiling verbose): above names components.*, clamp lowers it to debug",
+          "[logging]")
+{
+    logging_settings_t s;
+    const char *field = NULL;
+
+    logging_core_defaults(&s);
+    s.default_level = ESP_LOG_VERBOSE;
+    logging_core_set_component(&s, "ziggurat", ESP_LOG_VERBOSE);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, logging_core_above(&s, ESP_LOG_VERBOSE, &field));
+    TEST_ASSERT_EQUAL_STRING("components.*", field);
+    TEST_ASSERT_TRUE(logging_core_clamp(&s, ESP_LOG_VERBOSE));
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, s.default_level);
+    TEST_ASSERT_EQUAL(ESP_LOG_VERBOSE, s.components[0].level); // a named component keeps verbose
+    TEST_ASSERT_EQUAL(ESP_OK, logging_core_above(&s, ESP_LOG_VERBOSE, NULL));
+}
+
+TEST_CASE("default's highest level: debug under a verbose ceiling, the ceiling below it", "[logging]")
+{
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, logging_core_default_max(ESP_LOG_VERBOSE));
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, logging_core_default_max(ESP_LOG_DEBUG));
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, logging_core_default_max(ESP_LOG_INFO));
+}

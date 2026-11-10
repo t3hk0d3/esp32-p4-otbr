@@ -52,13 +52,26 @@ esp_err_t logging_core_remove_component(logging_settings_t *s, const char *tag);
 esp_err_t logging_core_validate(const logging_settings_t *s, const char **field);
 
 /**
- * Whether any level in `s` is above `ceiling` (the highest level the build compiles in, logging_level_ceiling()).
- * INVALID_ARG names the first one in `*field` (may be NULL), as logging_core_validate does: "channels.<name>.level",
+ * Highest level of the default (`*`, everything else): Debug. ESP-IDF's ESP_EARLY_LOGx and ESP_DRAM_LOGx (log v1)
+ * bypass esp_log, so the capture never sees them: they go to the UART through esp_rom_printf whenever ESP-IDF's
+ * default level allows them, whatever the UART level. A default gate at Verbose let the Ethernet DMA's cache syncs
+ * (ESP_EARLY_LOGV, tag "cache", every frame) write to the UART synchronously, which starved the Ethernet receive task
+ * on the board. A named component can still go to Verbose: early logs look at the default level only.
+ */
+#define LOGGING_DEFAULT_MAX ESP_LOG_DEBUG
+
+/** The default's highest level under `ceiling`: the lower of the two. */
+esp_log_level_t logging_core_default_max(esp_log_level_t ceiling);
+
+/**
+ * Whether any level in `s` is above `ceiling` (the highest level the build compiles in, logging_level_ceiling()), or
+ * the default above logging_core_default_max(ceiling). INVALID_ARG names the first one in `*field` (may be NULL), as logging_core_validate does: "channels.<name>.level",
  * "components.*" or "components.<tag>"; the string is static and rewritten by the next call.
  */
 esp_err_t logging_core_above(const logging_settings_t *s, esp_log_level_t ceiling, const char **field);
 
-/** Lower every level in `s` above `ceiling` to `ceiling`. True when one was lowered. */
+/** Lower every level in `s` above `ceiling` to `ceiling`, and the default to logging_core_default_max(ceiling). True
+ * when one was lowered. */
 bool logging_core_clamp(logging_settings_t *s, esp_log_level_t ceiling);
 
 /**

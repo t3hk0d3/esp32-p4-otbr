@@ -623,12 +623,12 @@ TEST_CASE("last viewer closing: gates recomputed with viewers_max off", "[loggin
     TEST_ASSERT_EQUAL(ESP_OK, logging_init());
     logging_settings_t s = defaults();
 
-    s.default_level = ESP_LOG_VERBOSE;
-    logging_core_set_component(&s, "ziggurat", ESP_LOG_DEBUG);
+    s.default_level = ESP_LOG_DEBUG;
+    logging_core_set_component(&s, "ziggurat", ESP_LOG_VERBOSE);
     TEST_ASSERT_EQUAL(ESP_OK, logging_apply(&s, NULL));
     logging_viewers_max_changed(ESP_LOG_VERBOSE);
-    TEST_ASSERT_EQUAL(ESP_LOG_VERBOSE, level_of("*"));
-    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, level_of("ziggurat"));
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, level_of("*"));
+    TEST_ASSERT_EQUAL(ESP_LOG_VERBOSE, level_of("ziggurat"));
 
     logging_viewers_max_changed(ESP_LOG_NONE);
     TEST_ASSERT_EQUAL(ESP_LOG_INFO, level_of("*"));

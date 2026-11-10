@@ -189,6 +189,11 @@ esp_err_t logging_core_validate(const logging_settings_t *s, const char **field)
     return ESP_OK;
 }
 
+esp_log_level_t logging_core_default_max(esp_log_level_t ceiling)
+{
+    return ceiling < LOGGING_DEFAULT_MAX ? ceiling : LOGGING_DEFAULT_MAX;
+}
+
 esp_err_t logging_core_above(const logging_settings_t *s, esp_log_level_t ceiling, const char **field)
 {
     static char component_field[sizeof("components.") + LOGGING_TAG_MAX];
@@ -201,7 +206,7 @@ esp_err_t logging_core_above(const logging_settings_t *s, esp_log_level_t ceilin
             bad = channel_field;
         }
     }
-    if (!bad && s->default_level > ceiling) {
+    if (!bad && s->default_level > logging_core_default_max(ceiling)) {
         bad = "components.*";
     }
     for (int i = 0; i < s->n_components && !bad; i++) {
@@ -230,8 +235,8 @@ bool logging_core_clamp(logging_settings_t *s, esp_log_level_t ceiling)
             changed = true;
         }
     }
-    if (s->default_level > ceiling) {
-        s->default_level = ceiling;
+    if (s->default_level > logging_core_default_max(ceiling)) {
+        s->default_level = logging_core_default_max(ceiling);
         changed = true;
     }
     for (int i = 0; i < s->n_components; i++) {
