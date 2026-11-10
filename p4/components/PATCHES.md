@@ -408,8 +408,8 @@ reason, spec reference.
    `tools/tests/test_logs_page.py`, `tools/tests/test_device_pages.py`. (docs/superpowers/specs/2026-11-10-logging-design.md,
    Web UI)
 40. Applied (USB/IP, Task 10). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 41 -> 43 (on top of patch
-   38). `device_api` adds `GET`/`PUT /device/usbip`: 39 routes (both WebSockets included) plus `/zigbee` and the
-   catch-all, two slots of headroom kept. (docs/superpowers/specs/2026-11-10-usbip-design.md)
+   38). `device_api` adds `GET`/`PUT /device/usbip`: its routes table has 36 entries, 38 registrations with both WebSockets,
+   plus `/zigbee` and the catch-all, three slots of headroom. (docs/superpowers/specs/2026-11-10-usbip-design.md)
 41. Applied (USB/IP, Task 11). `esp_ot_br_server` frontend: new page `frontend/usbip.html` with `static/usbip.js` (on/off
    switch that stages the change and a Save and Reboot button, device and client cards, counters, attach commands); `static/api.js` adds
    `USB/IP` to the Device menu after Radios; `static/style.css` appends the `u-*` classes; `frontend/radios.html` gets
