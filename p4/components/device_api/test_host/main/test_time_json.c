@@ -120,7 +120,7 @@ TEST_CASE("Time PUT parse, a valid body: fills the config", "[device_api]")
     const char *field = NULL;
 
     TEST_ASSERT_EQUAL(ESP_OK, device_api_time_parse("{\"enabled\":true,\"mode\":\"custom\",\"server\":\"ntp.home.lan\"}",
-                      &out, &field));
+                                                    &out, &field));
     TEST_ASSERT_TRUE(out.enabled);
     TEST_ASSERT_EQUAL(TIMESYNC_MODE_CUSTOM, out.mode);
     TEST_ASSERT_EQUAL_STRING("ntp.home.lan", out.server);
