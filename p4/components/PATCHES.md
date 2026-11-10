@@ -384,6 +384,10 @@ reason, spec reference.
    docs/superpowers/specs/2026-11-07-unified-dashboard-design.md)
 35. Applied (time sync, Task 4). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 36 -> 38 (`GET` and `PUT
    /device/time`, two slots of headroom kept). (docs/superpowers/specs/2026-11-10-time-sync-design.md)
+36. Applied (time sync, Task 5). Frontend: `ethernet.html` gains the Time section after Hostname and a hidden
+   "Time server" row (`if-<iface>-ntprow`) on each interface card; new `static/time.js` (`TimeLogic`, `TimePage`) fills
+   both from `GET /device/time` and saves with `PUT /device/time`. Page tests: `tools/tests/test_time_page.py`.
+   (docs/superpowers/specs/2026-11-10-time-sync-design.md)
 
 ### REST guard classification (patches 2 and 9)
 
