@@ -43,6 +43,7 @@
 #include "update_json.h"
 #include "netcfg.h"
 #include "names_json.h"
+#include "time_json.h"
 #include "console_json.h"
 #include "console_ws.h"
 #include "ot_console.h"
@@ -1937,6 +1938,68 @@ static esp_err_t routing_put_handler(httpd_req_t *req)
 
 /* ---- /device/thread ---- */
 
+/* ---- /device/time ---- */
+
+#define TIME_BODY_MAX 256
+
+static esp_err_t send_time(httpd_req_t *req)
+{
+    timesync_status_t st;
+    char body[DEVICE_API_TIME_JSON_MAX];
+
+    timesync_get_status(&st);
+    if (device_api_time_json(body, sizeof(body), &st) < 0) {
+        return send_error(req, 500, "internal", "the time status does not fit the reply", false);
+    }
+    return send_json(req, body);
+}
+
+static esp_err_t time_get_handler(httpd_req_t *req)
+{
+    return send_time(req);
+}
+
+static esp_err_t time_put_handler(httpd_req_t *req)
+{
+    const int length_status = device_api_length_check(req->content_len, TIME_BODY_MAX);
+
+    if (length_status != 0) {
+        return send_error(req, length_status, length_status == 413 ? "payload_too_large" : "length_required",
+                          "send the time settings as a JSON body", true);
+    }
+    char *body = read_small_body(req);
+
+    if (!body) {
+        return send_error(req, 400, "invalid_request", "the body could not be read", true);
+    }
+    timesync_config_t config;
+    const char *field = NULL, *reason = NULL;
+    esp_err_t err = device_api_time_parse(body, &config, &field);
+
+    free(body);
+    if (err != ESP_OK) {
+        reason = strcmp(field, "body") == 0 ? "a JSON object with enabled, mode and server"
+                 : strcmp(field, "enabled") == 0 ? "true or false"
+                 : strcmp(field, "mode") == 0 ? "auto or custom"
+                 : "missing, not a string or longer than 63 bytes";
+    } else {
+        err = timesync_set_config(&config, &field, &reason);
+    }
+    if (err == ESP_ERR_INVALID_ARG) {
+        char error[256];
+
+        if (device_api_names_error_json(error, sizeof(error), field, reason) < 0) {
+            return send_error(req, 400, "invalid_config", field, false);
+        }
+        httpd_resp_set_status(req, device_api_status_line(400));
+        return send_json(req, error);
+    }
+    if (err != ESP_OK) {
+        return send_error(req, 500, "storage_failed", "the time settings could not be stored", false);
+    }
+    return send_time(req);
+}
+
 #define THREAD_BODY_MAX 256
 #define THREAD_JSON_MAX 256
 
@@ -2388,6 +2451,8 @@ esp_err_t device_api_register(httpd_handle_t server)
         {"/device/zigbee", HTTP_GET, zigbee_get_handler},
         {"/device/names", HTTP_GET, names_get_handler},
         {"/device/names", HTTP_PUT, names_put_handler},
+        {"/device/time", HTTP_GET, time_get_handler},
+        {"/device/time", HTTP_PUT, time_put_handler},
         {"/device/thread", HTTP_GET, thread_get_handler},
         {"/device/thread", HTTP_PUT, thread_put_handler},
         {"/device/topology", HTTP_POST, topology_post_handler},

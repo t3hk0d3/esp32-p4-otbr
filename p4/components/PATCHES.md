@@ -382,6 +382,8 @@ reason, spec reference.
    `.dash-*` classes and styles `.tile-head h3`. Page tests: `tools/tests/test_status_page.py`,
    `tools/tests/test_zigbee_page.py`. (docs/superpowers/specs/2026-11-06-zigbee-mode-design.md,
    docs/superpowers/specs/2026-11-07-unified-dashboard-design.md)
+35. Applied (time sync, Task 4). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 36 -> 38 (`GET` and `PUT
+   /device/time`, two slots of headroom kept). (docs/superpowers/specs/2026-11-10-time-sync-design.md)
 
 ### REST guard classification (patches 2 and 9)
 
