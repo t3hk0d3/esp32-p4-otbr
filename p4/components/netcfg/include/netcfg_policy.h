@@ -21,11 +21,12 @@ typedef enum {
     NETCFG_SVC_REST_READ,   /**< Thread REST GET / HEAD */
     NETCFG_SVC_REST_WRITE,  /**< every other Thread REST method */
     NETCFG_SVC_RCP_PROXY,   /**< the RCP proxy's listen sockets and UDP sources (netcfg_socket_allowed, netcfg_peer_allowed) */
+    NETCFG_SVC_USBIP,       /**< the USB/IP server's listen socket and its clients (netcfg_socket_allowed, netcfg_peer_allowed_as) */
 } netcfg_service_t;
 
 /**
- * Single mode allows everything. Split mode: mgmt allows GUI, DEVICE_API, REST_READ, RCP_PROXY; thread allows REST_READ,
- * REST_WRITE, RCP_PROXY.
+ * Single mode allows everything. Split mode: mgmt allows GUI, DEVICE_API, REST_READ, RCP_PROXY, USBIP; thread
+ * allows REST_READ, REST_WRITE, RCP_PROXY.
  */
 bool netcfg_policy_allows(netcfg_mode_t mode, netcfg_side_t side, netcfg_service_t svc);
 
