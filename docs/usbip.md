@@ -148,8 +148,8 @@ Devices that stall or never answer a control transfer end the session, and the b
 ## USB flash drives
 
 Not a target use, but they work: transfers of up to 120 KB cover what Linux reads at a time, so no client setup is
-needed. Expect a few MB/s: every transfer costs network round trips (2.7 MB/s measured with 16 KB transfers, before the
-limit was raised).
+needed. Expect a few MB/s: every transfer costs network round trips (about 4 MB/s read from a high-speed 16 GB
+JetFlash, 2026-11-10; writes not tried).
 
 ## The USB/IP page
 

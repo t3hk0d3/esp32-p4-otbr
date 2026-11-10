@@ -16,7 +16,7 @@ release's `versions.txt`.
   one configuration, no authentication or encryption. New `GET`/`PUT /device/usbip`, a USB/IP page and the `usbip`
   flag in `GET /device/channels`. Transfers of up to 120 KB, with USB transfer buffers in PSRAM
   (`CONFIG_USB_HOST_DWC_DMA_CAP_MEMORY_IN_PSRAM`, which also moves the USB radio channels' buffers), so USB flash
-  drives work. See `docs/usbip.md`. Checked on a board with a USB serial radio dongle.
+  drives work. See `docs/usbip.md`. Checked on a board with a USB serial radio dongle and a USB flash drive (read).
 - Logging: one log stream (ESP-IDF components, OpenThread and Ziggurat) out on four channels with their own levels:
   UART (as before), USB-JTAG (header pins 27/28, needs a USB breakout), syslog over UDP (RFC 5424, `host[:port]`, a
   hostname is looked up again) and a live log in the browser (at most 2 viewers, each with its own level). Per-component
