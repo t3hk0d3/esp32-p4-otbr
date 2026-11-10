@@ -14,4 +14,5 @@ idf_component_register(SRCS ${pure_srcs} "ot_ops.c" "task.c" "console.c"
                        INCLUDE_DIRS "include" "."
                        REQUIRES openthread
                        PRIV_REQUIRES nvs_flash log lwip esp_netif esp_timer freertos console board_cores br_core
-                                     netcfg esp_ot_br_server rcp_proxy) # ESP_BR_WEB_MAX_OPEN_SOCKETS, RCP_PROXY_SOCKETS
+                                     netcfg esp_ot_br_server rcp_proxy logging) # ESP_BR_WEB_MAX_OPEN_SOCKETS,
+                                     # RCP_PROXY_SOCKETS, LOGGING_SOCKETS

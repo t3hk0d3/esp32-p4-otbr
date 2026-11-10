@@ -20,6 +20,7 @@
 #include "esp_br_web.h"
 #include "console.h"
 #include "eth.h"
+#include "logging.h"
 #include "netcfg.h"
 #include "netnames.h"
 #include "timesync.h"
@@ -104,6 +105,11 @@ void app_main(void)
     // NVS that cannot be initialised (e.g. no free pages) must not boot-loop the board: the rollback target has the
     // same NVS. The device boots degraded (see br_core_note_storage_init); NVS is never erased here.
     br_core_note_storage_init(storage_init());
+    // Log levels from NVS (defaults when NVS is down). Not essential to boot: without it the levels stay ESP-IDF's.
+    esp_err_t log_err = logging_init();
+    if (log_err != ESP_OK) {
+        ESP_LOGE(TAG, "logging_init: %s, log levels stay at the build defaults", esp_err_to_name(log_err));
+    }
     // A slot that fails to mount (e.g. a web slot not yet populated) must not stop the network or
     // the firmware update path; storage_mount has already logged the cause.
     esp_err_t err = storage_mount();
@@ -111,6 +117,12 @@ void app_main(void)
         ESP_LOGE(TAG, "storage_mount: %s", esp_err_to_name(err));
     }
     ESP_ERROR_CHECK(esp_netif_init());
+    // Log capture and its drain to USB-JTAG and syslog (after esp_netif_init: syslog uses lwIP). Not essential either:
+    // without it the UART still gets every line.
+    log_err = logging_start();
+    if (log_err != ESP_OK) {
+        ESP_LOGE(TAG, "logging_start: %s, logs go to the UART only", esp_err_to_name(log_err));
+    }
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     // Mesh routing (after metrics_start and NVS, before the border router can come up): br_core hands the
     // post-init steps (OMR config, DHCPv6-PD) to routing_on_border_router_up. Not essential to boot: without the task

@@ -576,3 +576,64 @@ TEST_CASE("last viewer closing: gates recomputed with viewers_max off", "[loggin
     TEST_ASSERT_EQUAL(ESP_LOG_INFO, level_of("*"));
     TEST_ASSERT_EQUAL(ESP_LOG_INFO, level_of("ziggurat"));
 }
+
+/* ---- Levels published for the capture (read without the settings lock) ---- */
+
+TEST_CASE("before logging_init: published levels are all off", "[logging]")
+{
+    setup();
+    TEST_ASSERT_EQUAL_UINT32(0, logging_levels().word);
+}
+
+TEST_CASE("init on an empty NVS: default channel levels published", "[logging]")
+{
+    setup();
+    TEST_ASSERT_EQUAL(ESP_OK, logging_init());
+    logging_levels_t lv = logging_levels();
+
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, lv.channel[LOGGING_CH_UART]);
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, lv.channel[LOGGING_CH_JTAG]);
+    TEST_ASSERT_EQUAL(ESP_LOG_NONE, lv.channel[LOGGING_CH_SYSLOG]);
+    TEST_ASSERT_EQUAL(ESP_LOG_NONE, lv.viewers);
+}
+
+TEST_CASE("apply valid settings: channel levels published, generation + 1", "[logging]")
+{
+    setup();
+    TEST_ASSERT_EQUAL(ESP_OK, logging_init());
+    uint32_t gen = logging_settings_generation();
+    logging_settings_t s = defaults();
+
+    s.channel[LOGGING_CH_JTAG] = ESP_LOG_DEBUG;
+    s.channel[LOGGING_CH_SYSLOG] = ESP_LOG_WARN;
+    strcpy(s.syslog_target, "192.168.1.10");
+    TEST_ASSERT_EQUAL(ESP_OK, logging_apply(&s, NULL));
+
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, logging_levels().channel[LOGGING_CH_JTAG]);
+    TEST_ASSERT_EQUAL(ESP_LOG_WARN, logging_levels().channel[LOGGING_CH_SYSLOG]);
+    TEST_ASSERT_EQUAL_UINT32(gen + 1, logging_settings_generation());
+}
+
+TEST_CASE("apply invalid settings: published levels and generation unchanged", "[logging]")
+{
+    setup();
+    TEST_ASSERT_EQUAL(ESP_OK, logging_init());
+    uint32_t gen = logging_settings_generation();
+    uint32_t word = logging_levels().word;
+    logging_settings_t s = defaults();
+
+    s.channel[LOGGING_CH_JTAG] = (esp_log_level_t) 9;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, logging_apply(&s, NULL));
+    TEST_ASSERT_EQUAL_UINT32(word, logging_levels().word);
+    TEST_ASSERT_EQUAL_UINT32(gen, logging_settings_generation());
+}
+
+TEST_CASE("first debug viewer: viewers level published", "[logging]")
+{
+    setup();
+    TEST_ASSERT_EQUAL(ESP_OK, logging_init());
+    logging_viewers_max_changed(ESP_LOG_DEBUG);
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, logging_levels().viewers);
+    logging_viewers_max_changed(ESP_LOG_NONE);
+    TEST_ASSERT_EQUAL(ESP_LOG_NONE, logging_levels().viewers);
+}

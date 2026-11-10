@@ -20,6 +20,12 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 
 # Console on the UART0 bridge (CH343)
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+# No secondary console: the logging component owns USB-Serial-JTAG (it installs the driver and writes log lines there
+# at the JTAG channel's level); the console stays on UART0.
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+# Logging: every level is compiled in, so the per-channel and per-component levels can go up to Verbose at runtime
+# (spec "Debug ceiling"). The runtime levels still default to Info (CONFIG_LOG_DEFAULT_LEVEL, the logging settings).
+CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=5120
 # VFS slots: console, three SPIFFS mounts, OpenThread eventfd, and room for more
 CONFIG_VFS_MAX_COUNT=12
@@ -56,10 +62,10 @@ CONFIG_LWIP_NUM_NETIF_CLIENT_DATA=0
 # Sockets: web server 10 (max_open_sockets 7 + listener + 2 control sockets) + mesh routing up to 7 (BGP: a listener,
 # a current and a pending connection per peer, and 2 closing after a NOTIFICATION; RIPng: one, never both methods at
 # once) + 1 HTTP client (OTA, a radio firmware URL or the update check, which share it) + 6 RCP proxy (two channels in rcp-proxy at once, the C6 and the
-# one open USB device, each a listener, its client and one connection being refused) = 24. mDNS, OpenThread, DNS and
-# SNTP use lwIP raw PCBs, not sockets. routing/task.c fails the build below that. An existing p4/sdkconfig keeps its old
-# value: delete it after pulling (docs/development.md).
-CONFIG_LWIP_MAX_SOCKETS=24
+# one open USB device, each a listener, its client and one connection being refused) + 1 syslog (UDP) = 25. mDNS,
+# OpenThread, DNS and SNTP use lwIP raw PCBs, not sockets. routing/task.c fails the build below that. An existing
+# p4/sdkconfig keeps its old value: delete it after pulling (docs/development.md).
+CONFIG_LWIP_MAX_SOCKETS=25
 # Active TCP PCBs: the 16 of before were used up by the same sockets; the RCP proxy adds per channel its client and a
 # refused connection, plus headroom for PCBs still closing (TIME_WAIT) = 22. A refused proxy client is closed with a FIN
 # (an RST only when its bytes were still unread: lwIP's SO_LINGER {1, 0} resets only a connection with unsent data), so

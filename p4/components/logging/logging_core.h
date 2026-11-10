@@ -5,6 +5,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include "esp_err.h"
 #include "logging.h"
 
@@ -46,6 +47,46 @@ esp_err_t logging_core_remove_component(logging_settings_t *s, const char *tag);
  * call, so copy it at once; callers serialise validation.
  */
 esp_err_t logging_core_validate(const logging_settings_t *s, const char **field);
+
+/**
+ * Channel levels the capture and the drain read without a lock: one 32-bit word, published atomically by the settings
+ * code on every change (logging_levels() in logging_priv.h).
+ */
+typedef union {
+    struct {
+        uint8_t channel[LOGGING_CH_COUNT]; /**< esp_log_level_t of each channel. */
+        uint8_t viewers;                   /**< Highest level a live viewer wants; ESP_LOG_NONE without viewers. */
+    };
+    uint32_t word;
+} logging_levels_t;
+
+_Static_assert(sizeof(logging_levels_t) == sizeof(uint32_t), "logging_levels_t must load and store as one word");
+
+/** The channel levels of `s` and `viewers_max`, packed. */
+logging_levels_t logging_core_levels(const logging_settings_t *s, esp_log_level_t viewers_max);
+
+/** Highest level a channel other than the UART wants: JTAG, syslog and the viewers. */
+esp_log_level_t logging_core_nonuart_max(logging_levels_t lv);
+
+#define LOGGING_ROUTE_UART (1u << 0) /**< Hand the line to ESP-IDF's writer (the UART), which applies the tag level. */
+#define LOGGING_ROUTE_RING (1u << 1) /**< Format the line into the transit ring for the other channels. */
+
+/**
+ * Where a captured log line goes. `in_isr` (also passed before logging_start) hands every line to ESP-IDF unchanged.
+ * Otherwise UART when `level` is at or below `uart_level`; ring when no sink guard is held, `level` is at or below
+ * `nonuart_max` and the tag's ESP-IDF level `tag_level` (the gate: the component level capped by the channels) lets
+ * it through. A line at ESP_LOG_NONE goes nowhere. Returns LOGGING_ROUTE_* bits.
+ */
+unsigned logging_capture_route(esp_log_level_t level, esp_log_level_t uart_level, esp_log_level_t nonuart_max,
+                               esp_log_level_t tag_level, bool in_guard, bool in_isr);
+
+#define LOGGING_WANT_LIVE (1u << LOGGING_CH_COUNT) /**< logging_core_wanting: the live viewers. */
+
+/**
+ * The channels other than the UART that want a line of `level`: bit (1 << channel), plus LOGGING_WANT_LIVE for the
+ * viewers. Counts a line the full ring refused against each of them.
+ */
+unsigned logging_core_wanting(esp_log_level_t level, logging_levels_t lv);
 
 /** Tags seen since boot, in insertion order. */
 typedef struct {

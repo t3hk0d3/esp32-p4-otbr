@@ -77,6 +77,9 @@ static listener_t s_listeners[LOGGING_LISTENERS_MAX];
 static size_t s_n_listeners;
 static uint8_t s_blob[LOGGING_BLOB_SIZE];
 static char s_bad_field[sizeof("components.") + LOGGING_TAG_MAX];
+// Read by the capture without any lock (it must never take s_lock); written under s_lock (or before it exists).
+static uint32_t s_levels_word; // logging_levels_t.word
+static uint32_t s_generation;
 
 void logging_set_ops(const logging_ops_t *ops)
 {
@@ -95,21 +98,26 @@ void logging_reset(void)
     s_viewers_max = ESP_LOG_NONE;
     memset(s_listeners, 0, sizeof(s_listeners));
     s_n_listeners = 0;
+    __atomic_store_n(&s_levels_word, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_generation, 0, __ATOMIC_RELEASE);
 }
 
 /**
  * Hand every gate to ESP-IDF: the default first (ESP-IDF's "*" also forgets every per-tag level), then each override.
- * Between the two, a line from an override tag on another task is briefly filtered at the default's gate.
- * Under s_lock (or before it exists).
+ * Between the two, a line from an override tag on another task is briefly filtered at the default's gate. Then publish
+ * the channel levels for the capture. Under s_lock (or before it exists).
  */
 static void set_levels(void)
 {
+    logging_levels_t lv = logging_core_levels(&s_settings, s_viewers_max);
+
     s_ops->level_set("*", logging_core_gate(&s_settings, "*", s_viewers_max));
     for (int i = 0; i < s_settings.n_components; i++) {
         const char *tag = s_settings.components[i].tag;
 
         s_ops->level_set(tag, logging_core_gate(&s_settings, tag, s_viewers_max));
     }
+    __atomic_store_n(&s_levels_word, lv.word, __ATOMIC_RELEASE);
 }
 
 /**
@@ -196,6 +204,11 @@ esp_err_t logging_init(void)
     return ESP_OK;
 }
 
+bool logging_is_initialised(void)
+{
+    return s_lock != NULL;
+}
+
 esp_err_t logging_get_settings(logging_settings_t *out)
 {
     if (!out) {
@@ -233,6 +246,7 @@ esp_err_t logging_apply(const logging_settings_t *settings, const char **bad_fie
     // per-tag level, so the tag follows the default again.
     memcpy(&s_settings, settings, sizeof(s_settings));
     set_levels();
+    __atomic_add_fetch(&s_generation, 1, __ATOMIC_RELEASE);
 
     s_blob[0] = LOGGING_BLOB_VERSION;
     memcpy(&s_blob[1], &s_settings, sizeof(s_settings));
@@ -283,4 +297,16 @@ void logging_viewers_max_changed(esp_log_level_t viewers_max)
     set_levels();
     xSemaphoreGive(s_lock);
     notify_listeners();
+}
+
+logging_levels_t logging_levels(void)
+{
+    logging_levels_t lv = {.word = __atomic_load_n(&s_levels_word, __ATOMIC_ACQUIRE)};
+
+    return lv;
+}
+
+uint32_t logging_settings_generation(void)
+{
+    return __atomic_load_n(&s_generation, __ATOMIC_ACQUIRE);
 }

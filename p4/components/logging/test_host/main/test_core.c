@@ -347,3 +347,102 @@ TEST_CASE("empty or 24-byte tag: ignored, returns false", "[logging]")
     TEST_ASSERT_FALSE(logging_tagset_add(&set, "123456789012345678901234"));
     TEST_ASSERT_EQUAL(0, set.count);
 }
+
+/* ---- logging_core_levels / logging_core_nonuart_max ---- */
+
+static logging_levels_t levels(esp_log_level_t uart, esp_log_level_t jtag, esp_log_level_t syslog,
+                               esp_log_level_t viewers)
+{
+    logging_settings_t s = fresh();
+
+    s.channel[LOGGING_CH_UART] = uart;
+    s.channel[LOGGING_CH_JTAG] = jtag;
+    s.channel[LOGGING_CH_SYSLOG] = syslog;
+    return logging_core_levels(&s, viewers);
+}
+
+TEST_CASE("levels of UART info, JTAG debug, syslog warning, viewers verbose: packed into one word", "[logging]")
+{
+    logging_levels_t lv = levels(ESP_LOG_INFO, ESP_LOG_DEBUG, ESP_LOG_WARN, ESP_LOG_VERBOSE);
+
+    TEST_ASSERT_EQUAL(4, sizeof(lv.word));
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, lv.channel[LOGGING_CH_UART]);
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, lv.channel[LOGGING_CH_JTAG]);
+    TEST_ASSERT_EQUAL(ESP_LOG_WARN, lv.channel[LOGGING_CH_SYSLOG]);
+    TEST_ASSERT_EQUAL(ESP_LOG_VERBOSE, lv.viewers);
+}
+
+TEST_CASE("UART verbose, JTAG warning, syslog error, viewers off: nonuart_max is warning", "[logging]")
+{
+    TEST_ASSERT_EQUAL(ESP_LOG_WARN, logging_core_nonuart_max(levels(ESP_LOG_VERBOSE, ESP_LOG_WARN, ESP_LOG_ERROR,
+                                                                    ESP_LOG_NONE)));
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, logging_core_nonuart_max(levels(ESP_LOG_VERBOSE, ESP_LOG_NONE, ESP_LOG_NONE,
+                                                                     ESP_LOG_DEBUG)));
+}
+
+/* ---- logging_capture_route ---- */
+
+#define ROUTE_BOTH (LOGGING_ROUTE_UART | LOGGING_ROUTE_RING)
+
+TEST_CASE("line at or below the UART level: written through ESP-IDF's own path", "[logging]")
+{
+    TEST_ASSERT_EQUAL(LOGGING_ROUTE_UART,
+                      logging_capture_route(ESP_LOG_INFO, ESP_LOG_INFO, ESP_LOG_NONE, ESP_LOG_INFO, false, false));
+    TEST_ASSERT_EQUAL(LOGGING_ROUTE_UART,
+                      logging_capture_route(ESP_LOG_ERROR, ESP_LOG_INFO, ESP_LOG_NONE, ESP_LOG_INFO, false, false));
+    TEST_ASSERT_EQUAL(0, logging_capture_route(ESP_LOG_DEBUG, ESP_LOG_INFO, ESP_LOG_NONE, ESP_LOG_DEBUG, false, false));
+}
+
+TEST_CASE("line no non-UART channel wants: not formatted, ring untouched", "[logging]")
+{
+    TEST_ASSERT_EQUAL(0, logging_capture_route(ESP_LOG_DEBUG, ESP_LOG_INFO, ESP_LOG_INFO, ESP_LOG_VERBOSE, false,
+                                               false));
+    TEST_ASSERT_EQUAL(0, logging_capture_route(ESP_LOG_ERROR, ESP_LOG_NONE, ESP_LOG_NONE, ESP_LOG_VERBOSE, false,
+                                               false));
+}
+
+TEST_CASE("line some non-UART channel wants: one ring record", "[logging]")
+{
+    TEST_ASSERT_EQUAL(LOGGING_ROUTE_RING,
+                      logging_capture_route(ESP_LOG_DEBUG, ESP_LOG_INFO, ESP_LOG_DEBUG, ESP_LOG_DEBUG, false, false));
+    TEST_ASSERT_EQUAL(ROUTE_BOTH,
+                      logging_capture_route(ESP_LOG_INFO, ESP_LOG_INFO, ESP_LOG_DEBUG, ESP_LOG_INFO, false, false));
+}
+
+TEST_CASE("line above its tag level: ring untouched", "[logging]")
+{
+    TEST_ASSERT_EQUAL(0, logging_capture_route(ESP_LOG_DEBUG, ESP_LOG_NONE, ESP_LOG_VERBOSE, ESP_LOG_INFO, false,
+                                               false));
+}
+
+TEST_CASE("line at level off: not routed anywhere", "[logging]")
+{
+    TEST_ASSERT_EQUAL(0, logging_capture_route(ESP_LOG_NONE, ESP_LOG_VERBOSE, ESP_LOG_VERBOSE, ESP_LOG_VERBOSE, false,
+                                               false));
+}
+
+TEST_CASE("in an ISR or before logging_init: passed straight to ESP-IDF, ring untouched", "[logging]")
+{
+    TEST_ASSERT_EQUAL(LOGGING_ROUTE_UART,
+                      logging_capture_route(ESP_LOG_DEBUG, ESP_LOG_INFO, ESP_LOG_VERBOSE, ESP_LOG_VERBOSE, false, true));
+    TEST_ASSERT_EQUAL(LOGGING_ROUTE_UART,
+                      logging_capture_route(ESP_LOG_INFO, ESP_LOG_INFO, ESP_LOG_VERBOSE, ESP_LOG_VERBOSE, true, true));
+}
+
+TEST_CASE("task inside logging_sink_enter/leave: UART only, ring untouched", "[logging]")
+{
+    TEST_ASSERT_EQUAL(LOGGING_ROUTE_UART,
+                      logging_capture_route(ESP_LOG_INFO, ESP_LOG_INFO, ESP_LOG_DEBUG, ESP_LOG_DEBUG, true, false));
+    TEST_ASSERT_EQUAL(0, logging_capture_route(ESP_LOG_DEBUG, ESP_LOG_INFO, ESP_LOG_DEBUG, ESP_LOG_DEBUG, true, false));
+}
+
+TEST_CASE("full ring: each wanting channel counted, UART never", "[logging]")
+{
+    logging_levels_t lv = levels(ESP_LOG_VERBOSE, ESP_LOG_DEBUG, ESP_LOG_WARN, ESP_LOG_INFO);
+
+    TEST_ASSERT_EQUAL(1u << LOGGING_CH_JTAG, logging_core_wanting(ESP_LOG_DEBUG, lv));
+    TEST_ASSERT_EQUAL((1u << LOGGING_CH_JTAG) | LOGGING_WANT_LIVE, logging_core_wanting(ESP_LOG_INFO, lv));
+    TEST_ASSERT_EQUAL((1u << LOGGING_CH_JTAG) | (1u << LOGGING_CH_SYSLOG) | LOGGING_WANT_LIVE,
+                      logging_core_wanting(ESP_LOG_ERROR, lv));
+    TEST_ASSERT_EQUAL(0, logging_core_wanting(ESP_LOG_VERBOSE, lv));
+}

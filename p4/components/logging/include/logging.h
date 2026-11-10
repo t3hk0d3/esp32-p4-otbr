@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/time.h>
 #include "esp_err.h"
 #include "esp_log_level.h"
 
@@ -20,6 +21,8 @@ extern "C" {
 #define LOGGING_LINE_MAX 512 /**< Body bytes, truncation marker included. */
 #define LOGGING_VIEWERS_MAX 4
 #define LOGGING_SYSLOG_PORT 514
+/** lwIP sockets the component holds at most: the syslog UDP socket (counted in routing/task.c SOCKETS_NEEDED). */
+#define LOGGING_SOCKETS 1
 
 typedef enum {
     LOGGING_CH_UART,
@@ -92,6 +95,37 @@ esp_err_t logging_apply(const logging_settings_t *settings, const char **bad_fie
  * or logging_level_listener_add. ESP_ERR_NO_MEM when full, ESP_ERR_INVALID_STATE before logging_init.
  */
 esp_err_t logging_level_listener_add(const char *tag, logging_level_cb_t cb);
+
+/**
+ * Start the capture: the transit ring, the USB-Serial-JTAG driver and the drain task "log_out" (MGMT_CORE), which
+ * writes captured lines to USB-JTAG and syslog. Lines logged before this go to the UART only. Call after logging_init
+ * and esp_netif_init. ESP_ERR_INVALID_STATE before logging_init, ESP_ERR_NO_MEM when the ring or the task cannot be
+ * made (the UART keeps working either way); a JTAG driver that fails to install only leaves USB-JTAG silent.
+ */
+esp_err_t logging_start(void);
+
+/**
+ * Mark the calling task as a log sink until the matching logging_sink_leave (nestable, per task): lines it logs in
+ * between reach the UART only, never the ring, so sending a line cannot produce lines that are sent again. Up to 8
+ * tasks at once; beyond that the call is ignored (the sink's lines then loop back, so keep the sinks few).
+ */
+void logging_sink_enter(void);
+void logging_sink_leave(void);
+
+/** Counters and sink state since boot; zeroes before logging_start. */
+void logging_get_status(logging_status_t *out);
+
+/**
+ * Wall clock for syslog TIMESTAMP: `now` fills `out` and returns true while the clock is valid. NULL (the default) =
+ * NILVALUE. Called on the drain task.
+ */
+void logging_set_clock(bool (*now)(struct timeval *out));
+
+/**
+ * Tags of the lines the drain has seen since boot (at most LOGGING_KNOWN_TAGS_MAX), in first-seen order: up to `cap`
+ * pointers into a set that only grows, valid for the board's lifetime. Returns how many.
+ */
+size_t logging_known_tags(const char **out, size_t cap);
 
 #ifdef __cplusplus
 }

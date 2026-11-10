@@ -188,3 +188,64 @@ size_t logging_tagset_list(const logging_tagset_t *set, const char **out, size_t
     }
     return n;
 }
+
+logging_levels_t logging_core_levels(const logging_settings_t *s, esp_log_level_t viewers_max)
+{
+    logging_levels_t lv = {.word = 0};
+
+    for (int ch = 0; ch < LOGGING_CH_COUNT; ch++) {
+        lv.channel[ch] = (uint8_t) s->channel[ch];
+    }
+    lv.viewers = (uint8_t) viewers_max;
+    return lv;
+}
+
+esp_log_level_t logging_core_nonuart_max(logging_levels_t lv)
+{
+    uint8_t max = lv.viewers;
+
+    for (int ch = 0; ch < LOGGING_CH_COUNT; ch++) {
+        if (ch != LOGGING_CH_UART && lv.channel[ch] > max) {
+            max = lv.channel[ch];
+        }
+    }
+    return (esp_log_level_t) max;
+}
+
+unsigned logging_capture_route(esp_log_level_t level, esp_log_level_t uart_level, esp_log_level_t nonuart_max,
+                               esp_log_level_t tag_level, bool in_guard, bool in_isr)
+{
+    unsigned route = 0;
+
+    if (in_isr) {
+        return LOGGING_ROUTE_UART;
+    }
+    if (level == ESP_LOG_NONE) {
+        return 0;
+    }
+    if (level <= uart_level) {
+        route |= LOGGING_ROUTE_UART;
+    }
+    if (!in_guard && level <= nonuart_max && level <= tag_level) {
+        route |= LOGGING_ROUTE_RING;
+    }
+    return route;
+}
+
+unsigned logging_core_wanting(esp_log_level_t level, logging_levels_t lv)
+{
+    unsigned want = 0;
+
+    if (level == ESP_LOG_NONE) {
+        return 0;
+    }
+    for (int ch = 0; ch < LOGGING_CH_COUNT; ch++) {
+        if (ch != LOGGING_CH_UART && level <= lv.channel[ch]) {
+            want |= 1u << ch;
+        }
+    }
+    if (level <= lv.viewers) {
+        want |= LOGGING_WANT_LIVE;
+    }
+    return want;
+}
