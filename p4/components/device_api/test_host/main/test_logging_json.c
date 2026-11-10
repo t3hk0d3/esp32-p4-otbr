@@ -227,6 +227,10 @@ TEST_CASE("Logging PUT on a bad component tag: invalid_request with the tag's fi
 {
     assert_bad("{\"components\":{\"\":\"info\"}}", "components.");
     assert_bad("{\"components\":{\"a_tag_of_twenty_four_chr\":\"info\"}}", "components.a_tag_of_twenty_four_chr");
+    assert_bad("{\"components\":{\"a\\\"b\":\"info\"}}", "components.a\"b");
+    assert_bad("{\"components\":{\"a\\\\b\":\"info\"}}", "components.a\\b");
+    assert_bad("{\"components\":{\"a b\":\"info\"}}", "components.a b");
+    assert_bad("{\"components\":{\"caf\\u00e9\":\"info\"}}", "components.caf\xc3\xa9");
 }
 
 TEST_CASE("Logging PUT on a component tag listed twice: invalid_request with the tag's field", "[device_api]")
@@ -302,6 +306,80 @@ TEST_CASE("Logs WebSocket line at its longest: fits DEVICE_API_LOGS_FRAME_MAX", 
     l.tag[LOGGING_TAG_MAX - 1] = '\0';
     TEST_ASSERT_GREATER_THAN(0, device_api_logs_line(buf, sizeof(buf), &l));
     TEST_ASSERT_EQUAL(-1, device_api_logs_line(buf, 32, &l));
+}
+
+/** The frame of an info line from tag "t" at uptime 1 with body `text` (`len` bytes). */
+static const char *utf8_frame(const char *text, size_t len)
+{
+    static char buf[DEVICE_API_LOGS_FRAME_MAX];
+    logging_line_t l = {.uptime_ms = 1, .level = ESP_LOG_INFO, .tag = "t", .len = (uint16_t) len, .text = text};
+
+    TEST_ASSERT_GREATER_THAN(0, device_api_logs_line(buf, sizeof(buf), &l));
+    return buf;
+}
+
+#define FFFD "\xef\xbf\xbd"
+
+TEST_CASE("Logs WebSocket line with well-formed UTF-8: bytes kept as they are", "[device_api]")
+{
+    static const char text[] = "caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x98\x80 \xed\x9f\xbf \xf4\x8f\xbf\xbf";
+
+    TEST_ASSERT_EQUAL_STRING("I (1) t: caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x98\x80 \xed\x9f\xbf \xf4\x8f\xbf\xbf",
+                             utf8_frame(text, sizeof(text) - 1));
+}
+
+TEST_CASE("Logs WebSocket line cut inside a multibyte character: the partial character becomes one U+FFFD",
+          "[device_api]")
+{
+    TEST_ASSERT_EQUAL_STRING("I (1) t: ab" FFFD, utf8_frame("ab\xe2\x82", 4));
+    TEST_ASSERT_EQUAL_STRING("I (1) t: ab" FFFD, utf8_frame("ab\xf0\x9f\x98", 5));
+    TEST_ASSERT_EQUAL_STRING("I (1) t: ab" FFFD "c", utf8_frame("ab\xc3" "c", 4));
+}
+
+TEST_CASE("Logs WebSocket line with a lone continuation byte: replaced by U+FFFD, the rest kept", "[device_api]")
+{
+    TEST_ASSERT_EQUAL_STRING("I (1) t: a" FFFD "b", utf8_frame("a\x80" "b", 3));
+    TEST_ASSERT_EQUAL_STRING("I (1) t: " FFFD FFFD, utf8_frame("\xbf\x80", 2));
+}
+
+TEST_CASE("Logs WebSocket line with an overlong sequence: each of its bytes becomes U+FFFD", "[device_api]")
+{
+    TEST_ASSERT_EQUAL_STRING("I (1) t: " FFFD FFFD "/", utf8_frame("\xc0\xaf/", 3));
+    TEST_ASSERT_EQUAL_STRING("I (1) t: " FFFD FFFD FFFD, utf8_frame("\xe0\x80\xaf", 3));
+    TEST_ASSERT_EQUAL_STRING("I (1) t: " FFFD FFFD FFFD FFFD, utf8_frame("\xf0\x80\x80\xaf", 4));
+}
+
+TEST_CASE("Logs WebSocket line with a surrogate, a code point above U+10FFFF or F5..FF: replaced by U+FFFD",
+          "[device_api]")
+{
+    TEST_ASSERT_EQUAL_STRING("I (1) t: " FFFD FFFD FFFD, utf8_frame("\xed\xa0\x80", 3));
+    TEST_ASSERT_EQUAL_STRING("I (1) t: " FFFD FFFD FFFD FFFD, utf8_frame("\xf4\x90\x80\x80", 4));
+    TEST_ASSERT_EQUAL_STRING("I (1) t: " FFFD "x", utf8_frame("\xff" "x", 2));
+}
+
+TEST_CASE("Logs WebSocket line with an ill-formed tag: the tag's bytes replaced too", "[device_api]")
+{
+    char buf[64];
+    logging_line_t l = {.uptime_ms = 2, .level = ESP_LOG_WARN, .len = 2, .text = "ok"};
+
+    strcpy(l.tag, "t\xff");
+    TEST_ASSERT_GREATER_THAN(0, device_api_logs_line(buf, sizeof(buf), &l));
+    TEST_ASSERT_EQUAL_STRING("W (2) t" FFFD ": ok", buf);
+}
+
+TEST_CASE("Logs WebSocket line of nothing but ill-formed bytes at the longest: fits DEVICE_API_LOGS_FRAME_MAX",
+          "[device_api]")
+{
+    static char body[LOGGING_LINE_MAX];
+    static char buf[DEVICE_API_LOGS_FRAME_MAX];
+    logging_line_t l = {.uptime_ms = UINT32_MAX, .level = ESP_LOG_ERROR, .len = LOGGING_LINE_MAX, .text = body};
+
+    memset(body, 0xff, sizeof(body));
+    memset(l.tag, 0xff, LOGGING_TAG_MAX - 1);
+    l.tag[LOGGING_TAG_MAX - 1] = '\0';
+    TEST_ASSERT_EQUAL(sizeof("E (4294967295) : ") - 1 + 3 * (LOGGING_LINE_MAX + LOGGING_TAG_MAX - 1),
+                      device_api_logs_line(buf, sizeof(buf), &l));
+    TEST_ASSERT_EQUAL(-1, device_api_logs_line(buf, sizeof(buf) - 3 * LOGGING_TAG_MAX, &l));
 }
 
 TEST_CASE("Logs WebSocket drops for this viewer: a frame \"# dropped <n> lines\"", "[device_api]")

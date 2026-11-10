@@ -13,7 +13,7 @@
 #include "logging_text.h"
 
 static const char *const CHANNEL_NAMES[LOGGING_CH_COUNT] = {"uart", "jtag", "syslog"};
-static const char *const SYSLOG_STATES[] = {"off", "resolving", "sending", "unresolved"};
+static const char *const SYSLOG_STATES[] = {"off", "resolving", "sending", "unresolved", "no_socket"};
 static const char LEVEL_LETTERS[] = "NEWIDV"; // indexed by esp_log_level_t
 
 // The field a failed parse names; "components." plus a tag of any length the client sent, cut to fit.
@@ -217,13 +217,86 @@ esp_err_t device_api_logging_parse(const char *body, logging_settings_t *inout, 
     return err;
 }
 
+/**
+ * Length of the well-formed UTF-8 sequence (RFC 3629) at `s`, `n` bytes left; 0 when there is none, and `*bad` then
+ * gets the length of the maximal ill-formed subpart (at least 1), which becomes one U+FFFD (Unicode's "substitution of
+ * maximal subparts").
+ */
+static size_t utf8_sequence(const unsigned char *s, size_t n, size_t *bad)
+{
+    unsigned char lo = 0x80;
+    unsigned char hi = 0xbf;
+    size_t need;
+
+    if (s[0] < 0x80) {
+        return 1;
+    }
+    if (s[0] >= 0xc2 && s[0] <= 0xdf) {
+        need = 2;
+    } else if (s[0] >= 0xe0 && s[0] <= 0xef) {
+        need = 3;
+        lo = s[0] == 0xe0 ? 0xa0 : 0x80; // no overlong forms
+        hi = s[0] == 0xed ? 0x9f : 0xbf; // no surrogates
+    } else if (s[0] >= 0xf0 && s[0] <= 0xf4) {
+        need = 4;
+        lo = s[0] == 0xf0 ? 0x90 : 0x80; // no overlong forms
+        hi = s[0] == 0xf4 ? 0x8f : 0xbf; // nothing above U+10FFFF
+    } else {
+        *bad = 1; // a continuation byte, C0, C1 or F5..FF
+        return 0;
+    }
+    for (size_t i = 1; i < need; i++) {
+        if (i >= n || s[i] < lo || s[i] > hi) {
+            *bad = i;
+            return 0;
+        }
+        lo = 0x80;
+        hi = 0xbf;
+    }
+    return need;
+}
+
+/** Append `len` bytes of `text` at `*pos`, each ill-formed UTF-8 subpart as U+FFFD. False when `cap` is too small. */
+static bool append_utf8(char *out, size_t cap, size_t *pos, const char *text, size_t len)
+{
+    static const char REPLACEMENT[] = "\xef\xbf\xbd"; // U+FFFD
+    const unsigned char *s = (const unsigned char *) text;
+    size_t i = 0;
+
+    while (i < len) {
+        size_t bad = 0;
+        size_t good = utf8_sequence(s + i, len - i, &bad);
+        const char *from = good ? text + i : REPLACEMENT;
+        size_t n = good ? good : sizeof(REPLACEMENT) - 1;
+
+        if (cap - *pos <= n) {
+            return false;
+        }
+        memcpy(out + *pos, from, n);
+        *pos += n;
+        i += good ? good : bad;
+    }
+    return true;
+}
+
 int device_api_logs_line(char *out, size_t cap, const logging_line_t *line)
 {
     const unsigned level = (unsigned) line->level;
-    int n = snprintf(out, cap, "%c (%" PRIu32 ") %s: %.*s", level < sizeof(LEVEL_LETTERS) - 1 ? LEVEL_LETTERS[level] : '?',
-                     line->uptime_ms, line->tag, (int) line->len, line->text);
+    int n = snprintf(out, cap, "%c (%" PRIu32 ") ", level < sizeof(LEVEL_LETTERS) - 1 ? LEVEL_LETTERS[level] : '?',
+                     line->uptime_ms);
+    size_t pos;
 
-    return n < 0 || (size_t) n >= cap ? -1 : n;
+    if (n < 0 || (size_t) n >= cap) {
+        return -1;
+    }
+    pos = (size_t) n;
+    // A text frame must be valid UTF-8 (RFC 6455 5.6): a client closes the connection on anything else.
+    if (!append_utf8(out, cap, &pos, line->tag, strnlen(line->tag, sizeof(line->tag))) ||
+            !append_utf8(out, cap, &pos, ": ", 2) || !append_utf8(out, cap, &pos, line->text, line->len)) {
+        return -1;
+    }
+    out[pos] = '\0';
+    return (int) pos;
 }
 
 int device_api_logs_dropped(char *out, size_t cap, uint32_t n)

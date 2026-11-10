@@ -15,8 +15,11 @@ extern "C" {
 #define DEVICE_API_LOGGING_BODY_MAX 4096
 /** Room for the GET body at its largest: every override and known tag, escaped. */
 #define DEVICE_API_LOGGING_JSON_MAX 8192
-/** Longest text frame the live log WebSocket sends: "<L> (<uptime>) <tag>: <body>". */
-#define DEVICE_API_LOGS_FRAME_MAX (LOGGING_LINE_MAX + LOGGING_TAG_MAX + sizeof("X (4294967295) : "))
+/**
+ * Longest text frame the live log WebSocket sends: "<L> (<uptime>) <tag>: <body>" of the longest line with every byte
+ * of its tag and body ill-formed UTF-8 (each then the 3 bytes of U+FFFD).
+ */
+#define DEVICE_API_LOGS_FRAME_MAX (3 * (LOGGING_LINE_MAX + LOGGING_TAG_MAX) + sizeof("X (4294967295) : "))
 
 /**
  * The GET and PUT /device/logging body:
@@ -40,7 +43,10 @@ int device_api_logging_json(char *out, size_t cap, const logging_settings_t *set
  */
 esp_err_t device_api_logging_parse(const char *body, logging_settings_t *inout, const char **bad_field);
 
-/** The live log's frame for a line: "<L> (<uptime>) <tag>: <body>", L one of E W I D V. Length, or -1. */
+/**
+ * The live log's frame for a line: "<L> (<uptime>) <tag>: <body>", L one of E W I D V, valid UTF-8 (each ill-formed
+ * subpart of the tag or body replaced by U+FFFD). Length, or -1 when `cap` is too small.
+ */
 int device_api_logs_line(char *out, size_t cap, const logging_line_t *line);
 
 /** The live log's notice of lines dropped for this client: "# dropped <n> lines". Length, or -1. */
