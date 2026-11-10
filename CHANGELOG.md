@@ -9,15 +9,6 @@ release's `versions.txt`.
 
 ### Added
 
-- Time sync: the board sets its clock from NTP, from the server the DHCP lease names, else `pool.ntp.org`, or a custom
-  server. A Time section on the Ethernet page shows the board time and sync state; `GET`/`PUT /device/time`. Zigbee
-  status times are real dates, also for events before the first sync.
-- Thread and Zigbee together: one radio can run the Thread border router while the other runs the Zigbee coordinator,
-  in either order. `PUT /device/channels/{id}` no longer answers 409 `hybrid_not_supported`. Starting or stopping Zigbee
-  still reboots the board, and Thread with it; the Radios page says so before saving. Moving Thread onto the radio that
-  runs Zigbee is a reboot that stores both radios. The Dashboard warns when both networks use the same 802.15.4 channel.
-  Before downgrading to an older firmware, turn Zigbee (or Thread) off: older firmware never runs both. See
-  `docs/zigbee.md`.
 - Logging: one log stream (ESP-IDF components, OpenThread and Ziggurat) out on four channels with their own levels:
   UART (as before), USB-JTAG (header pins 27/28, needs a USB breakout), syslog over UDP (RFC 5424, `host[:port]`, a
   hostname is looked up again) and a live log in the browser (at most 2 viewers, each with its own level). Per-component
@@ -27,7 +18,16 @@ release's `versions.txt`.
   test builds only (`make build-test`, its own `p4/sdkconfig.test`); a release build stays at Info and reports it as
   `max_level`. `*` (everything else) goes up to Debug; a named component can go to Verbose. Levels default to what
   they were. The secondary console on USB-JTAG is off. The USB-JTAG channel is
-  not checked on hardware (no breakout). See `docs/logging.md`. On-board tests are written, not yet run.
+  not checked on hardware (no breakout). See `docs/logging.md`. On-board tests pass (2026-11-10).
+- Time sync: the board sets its clock from NTP, from the server the DHCP lease names, else `pool.ntp.org`, or a custom
+  server. A Time section on the Ethernet page shows the board time and sync state; `GET`/`PUT /device/time`. Zigbee
+  status times are real dates, also for events before the first sync.
+- Thread and Zigbee together: one radio can run the Thread border router while the other runs the Zigbee coordinator,
+  in either order. `PUT /device/channels/{id}` no longer answers 409 `hybrid_not_supported`. Starting or stopping Zigbee
+  still reboots the board, and Thread with it; the Radios page says so before saving. Moving Thread onto the radio that
+  runs Zigbee is a reboot that stores both radios. The Dashboard warns when both networks use the same 802.15.4 channel.
+  Before downgrading to an older firmware, turn Zigbee (or Thread) off: older firmware never runs both. See
+  `docs/zigbee.md`.
 
 ### Changed
 

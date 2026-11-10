@@ -74,9 +74,9 @@ CONFIG_LWIP_MAX_ACTIVE_TCP=22
 # UDP PCBs (every UDP socket holds one too), the most open at once: lwIP's DNS client 4 (a random source port per
 # request, DNS_TABLE_SIZE) + DHCP client 1 (shared by the netifs) + mDNS 1 (one PCB for both interfaces) + TREL 1 +
 # OpenThread's platform UDP 5 (DNS-SD server, Border Agent, its ephemeral-key agent, backbone TMF, DNS client) + the
-# DHCPv6-PD client (OpenThread infra_if) 1 + RIPng 1 + RCP proxy over UDP 2 (one per channel) + syslog 1 = 17. On top
-# come PCBs made per flow: a socket per DNS query OpenThread forwards upstream, and a PCB per NAT64 UDP session; the
-# other 15 are their room. SNTP is not started (it would take 1). lwIP allocates PCBs from the heap (MEMP_MEM_MALLOC),
+# DHCPv6-PD client (OpenThread infra_if) 1 + RIPng 1 + RCP proxy over UDP 2 (one per channel) + syslog 1 + SNTP 1
+# (time sync) = 18. On top come PCBs made per flow: a socket per DNS query OpenThread forwards upstream, and a PCB per
+# NAT64 UDP session; the other 14 are their room. lwIP allocates PCBs from the heap (MEMP_MEM_MALLOC),
 # so the limit costs nothing until used. logging_capture.c fails the build below 32; an existing p4/sdkconfig keeps
 # its old value (16): delete it after pulling (docs/development.md).
 CONFIG_LWIP_MAX_UDP_PCBS=32

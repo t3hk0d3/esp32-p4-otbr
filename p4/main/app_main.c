@@ -1,3 +1,4 @@
+#include <sys/time.h>
 #include "esp_check.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -39,6 +40,12 @@ static char s_web_base_path[] = "/web";
 
 // The web server's extra handlers (patch 10): the device API, then the Zigbee WebSocket. A failed /zigbee leaves the
 // device API in place.
+/** Syslog TIMESTAMP: the wall clock once time sync has set it (logging_set_clock; called on the log drain task). */
+static bool syslog_clock(struct timeval *out)
+{
+    return timesync_clock_valid() && gettimeofday(out, NULL) == 0;
+}
+
 static esp_err_t register_extra_handlers(httpd_handle_t server)
 {
     ESP_RETURN_ON_ERROR(device_api_register(server), TAG, "device_api_register");
@@ -123,6 +130,7 @@ void app_main(void)
     if (log_err != ESP_OK) {
         ESP_LOGE(TAG, "logging_start: %s, logs go to the UART only", esp_err_to_name(log_err));
     }
+    logging_set_clock(syslog_clock); // NILVALUE until time sync sets the clock
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     // Mesh routing (after metrics_start and NVS, before the border router can come up): br_core hands the
     // post-init steps (OMR config, DHCPv6-PD) to routing_on_border_router_up. Not essential to boot: without the task

@@ -72,7 +72,7 @@ on its own, and the log can be read live in the browser or later from a syslog s
   filter by component), TIMESTAMP from `time()` (UTC, ms) once the clock is valid, NILVALUE before (the receiver
   stamps arrival), the board's uptime in ms at the start of MSG. Clock validity comes from the RTC/NTP feature being
   designed in parallel (session "RTC/NTP synchronization", 2026-11-10): it provides a cheap non-blocking "clock
-  valid" query; until it lands, always NILVALUE. No back-dating (nothing is stored). UART, JTAG and live lines keep
+  valid" query (`timesync_clock_valid()`, wired in `app_main.c` since the merge with time sync). No back-dating (nothing is stored). UART, JTAG and live lines keep
   ESP-IDF's uptime ms (`CONFIG_LOG_TIMESTAMP_SOURCE` unchanged). The target may be an IPv4 address, `[IPv6]:port`, or a hostname.
 - **Defaults** (a fresh board behaves as today): UART Info, USB-JTAG Info, syslog Off with no target, component default
   Info, no component overrides.

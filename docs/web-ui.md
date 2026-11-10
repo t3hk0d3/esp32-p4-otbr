@@ -17,6 +17,7 @@ The menu has three parts:
 | **Device** | **Radios** | What each radio runs: Thread, Zigbee, RCP proxy or off | [Radios](radios.md) |
 | | **Ethernet** | Single or split (VLAN) setup, addresses, names, time server, Thread over Ethernet | [Networking](networking.md) |
 | | **Firmware** | Updates from GitHub, uploads, radio recovery | [Updates](updates.md) |
+| | **Logs** | Log levels per component, the syslog target, the live log | [Logging](logging.md) |
 | | **Diagnostics** | CPU, memory, tasks | [Monitoring](diagnostics.md) |
 | | **Packet capture** | Record 802.15.4 traffic for Wireshark | [Packet capture](sniffer.md) |
 | | **About** | Versions and licences | |
