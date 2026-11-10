@@ -31,8 +31,9 @@ int device_api_logging_json(char *out, size_t cap, const logging_settings_t *set
 /**
  * Apply a PUT /device/logging body over `inout`: any subset of channels.<uart|jtag|syslog>.level,
  * channels.syslog.target and components. `components` replaces the override set; its "*" key sets default_level (left
- * as it is when absent). Fields GET returns but PUT does not take (host, state, known_tags, viewers, counters) and
- * unknown keys are ignored. The target's syntax is checked here; the rest of the rules (a syslog level above off
+ * as it is when absent); a tag (or "*") listed twice is refused. Fields GET returns but PUT does not take (host,
+ * state, known_tags, viewers, counters) and unknown keys, at the top level or in a channel, are ignored, so a client
+ * can send back what GET gave it. The target's syntax is checked here; the rest of the rules (a syslog level above off
  * needs a target) by logging_apply. ESP_ERR_INVALID_ARG: `*bad_field` names the field ("body", "channels",
  * "channels.<name>", "channels.<name>.level", "channels.syslog.target", "components", "components.<tag>"), valid until
  * the next call; `inout` is then untouched. ESP_ERR_NO_MEM: no memory.

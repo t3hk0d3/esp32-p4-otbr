@@ -229,6 +229,24 @@ TEST_CASE("Logging PUT on a bad component tag: invalid_request with the tag's fi
     assert_bad("{\"components\":{\"a_tag_of_twenty_four_chr\":\"info\"}}", "components.a_tag_of_twenty_four_chr");
 }
 
+TEST_CASE("Logging PUT on a component tag listed twice: invalid_request with the tag's field", "[device_api]")
+{
+    assert_bad("{\"components\":{\"ziggurat\":\"debug\",\"ziggurat\":\"info\"}}", "components.ziggurat");
+    assert_bad("{\"components\":{\"*\":\"debug\",\"*\":\"info\"}}", "components.*");
+}
+
+TEST_CASE("Logging PUT with unknown top-level and channel keys: ignored, the rest applied", "[device_api]")
+{
+    logging_settings_t s = defaults();
+
+    TEST_ASSERT_EQUAL(ESP_OK, device_api_logging_parse(
+                          "{\"verbose\":true,\"channels\":{\"live\":{\"level\":\"debug\"},"
+                          "\"uart\":{\"level\":\"warning\",\"baud\":115200}}}",
+                          &s, NULL));
+    TEST_ASSERT_EQUAL(ESP_LOG_WARN, s.channel[LOGGING_CH_UART]);
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, s.channel[LOGGING_CH_JTAG]);
+}
+
 TEST_CASE("Logging PUT on 33 components: invalid_request with components", "[device_api]")
 {
     char body[2048];
@@ -347,8 +365,9 @@ TEST_CASE("Logs WebSocket text frame that is not a level: invalid, level untouch
     TEST_ASSERT_EQUAL(ESP_LOG_ERROR, level);
 }
 
-TEST_CASE("Logs WebSocket on a fifth viewer: 503 too many viewers before the upgrade", "[device_api]")
+TEST_CASE("Logs WebSocket on a third viewer: 503 too many viewers before the upgrade", "[device_api]")
 {
+    TEST_ASSERT_EQUAL(2, LOGGING_VIEWERS_MAX); // Ruling R11
     TEST_ASSERT_EQUAL(503, device_api_logs_ws_refusal(LOGGING_VIEWERS_MAX));
     TEST_ASSERT_EQUAL(0, device_api_logs_ws_refusal(LOGGING_VIEWERS_MAX - 1));
     TEST_ASSERT_EQUAL_STRING("too many viewers", DEVICE_API_LOGS_TOO_MANY);

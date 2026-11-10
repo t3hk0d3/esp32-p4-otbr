@@ -1,15 +1,18 @@
 // GET /device/logging/ws: the live log (spec 2026-11-10-logging, "Interfaces"). Each client is a logging viewer with
 // its own level (?level= at connect, then text frames {"level":"<name>"}); it gets one text frame per line from the
 // moment it connected, "<L> (<uptime>) <tag>: <body>", and "# dropped <n> lines" when its queue overflowed. Up to
-// LOGGING_VIEWERS_MAX clients (the handshake refuses a fifth with 503). As /device/console/ws (console_ws.c): the board
+// LOGGING_VIEWERS_MAX clients (the handshake refuses one more with 503). As /device/console/ws (console_ws.c): the board
 // pings every 10 s and closes a client that has not answered for 30 s (1001); ESP-IDF answers the client's pings and
 // close. Unlike the console, a slow client is never closed for being slow: its queue drops lines and it is told so.
 //
 // Tasks: the drain task ("log_out") queues lines and calls wake, which only notifies the forwarder here; the
 // forwarder queues the sends on the server task (httpd_queue_work), and the esp_timer tick goes the same way, so
 // neither the drain task nor the esp_timer task ever reaches lwIP. The sends run inside logging_sink_enter/leave: what
-// lwIP or the server logs meanwhile goes to the UART only and is never sent again. A socket whose send buffer is full is
-// skipped (no blocking send on the server task) until the next tick; its queue drops meanwhile.
+// lwIP or the server logs meanwhile goes to the UART only and is never sent again. The server's own dispatch around
+// them (httpd_main.c "work", "doing select", "processing ctrl message"; httpd_sess, httpd_ws) logs debug lines outside
+// that guard; viewers never get debug or verbose lines of the httpd* tags (logging_core_live_cap), so these cannot
+// loop either. A socket whose send buffer is full is skipped (no blocking send on the server task) until the next
+// tick; its queue drops meanwhile.
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
@@ -56,7 +59,11 @@ typedef struct {
     esp_timer_handle_t timer;
     int64_t last_pong_us;
     int64_t last_ping_us;
-    int64_t closing_us;      // our close frame went out (0: open)
+    int64_t closing_us;      // we are closing (0: open)
+    uint16_t close_code;     // the close frame to send while closing_us is set
+    char close_reason[32];
+    bool close_sent;         // that close frame went out
+    bool help_pending;       // the level help notice waits for a writable socket
     atomic_bool drain_queued;
     atomic_bool stalled;     // the send buffer was full: wakes are ignored until the tick retries
 } ws_slot_t;
@@ -73,12 +80,17 @@ static esp_err_t send_text(ws_slot_t *slot, const char *text, size_t len)
     return httpd_ws_send_frame_async(slot->hd, slot->fd, &frame);
 }
 
-// A notice to one client, as a sink (see the top of the file). On the server task.
-static void send_notice(ws_slot_t *slot, const char *text)
+// Whether the socket's send buffer has room for a frame now: lwIP reports a TCP socket writable while at least
+// TCP_SNDLOWAT bytes are free, several of the longest frames. Every send is gated on it, so the server task never
+// blocks on a client that does not read; a skipped frame is retried at the next tick.
+static bool writable(int fd)
 {
-    logging_sink_enter();
-    send_text(slot, text, strlen(text));
-    logging_sink_leave();
+    fd_set set;
+    struct timeval now = {0};
+
+    FD_ZERO(&set);
+    FD_SET(fd, &set);
+    return select(fd + 1, NULL, &set, NULL, &now) > 0;
 }
 
 static void viewer_close(ws_slot_t *slot)
@@ -89,39 +101,40 @@ static void viewer_close(ws_slot_t *slot)
     }
 }
 
-// Close frame with a code and reason; the viewer stops at once. On the server task. A slot's socket stays open for the
-// client's close frame; the tick closes it after CLOSE_WAIT_US. A socket without a slot is closed at once.
-static void close_with(ws_slot_t *slot, uint16_t code, const char *reason)
+// Send the slot's close frame when the socket can take it, as a sink. True once it went out.
+static bool send_close(ws_slot_t *slot)
 {
-    uint8_t payload[2 + 64];
-    const size_t reason_len = reason ? strnlen(reason, sizeof(payload) - 2) : 0;
+    uint8_t payload[2 + sizeof(slot->close_reason)];
+    const size_t reason_len = strnlen(slot->close_reason, sizeof(slot->close_reason));
 
-    viewer_close(slot);
-    payload[0] = (uint8_t)(code >> 8);
-    payload[1] = (uint8_t)code;
-    memcpy(payload + 2, reason, reason_len);
+    if (!writable(slot->fd)) {
+        return false;
+    }
+    payload[0] = (uint8_t)(slot->close_code >> 8);
+    payload[1] = (uint8_t)slot->close_code;
+    memcpy(payload + 2, slot->close_reason, reason_len);
     httpd_ws_frame_t frame = {.type = HTTPD_WS_TYPE_CLOSE, .final = true, .payload = payload, .len = 2 + reason_len};
 
     logging_sink_enter();
     httpd_ws_send_frame_async(slot->hd, slot->fd, &frame);
     logging_sink_leave();
+    return true;
+}
+
+// Close with a code and reason; the viewer stops at once. On the server task. A slot's socket stays open for the
+// client's close frame: the tick sends ours once the socket is writable and closes the socket after CLOSE_WAIT_US
+// either way. A socket without a slot gets one try and is closed at once.
+static void close_with(ws_slot_t *slot, uint16_t code, const char *reason)
+{
+    viewer_close(slot);
+    slot->close_code = code;
+    strlcpy(slot->close_reason, reason ? reason : "", sizeof(slot->close_reason));
+    slot->close_sent = send_close(slot);
     if (slot->active && slot->timer) {
         slot->closing_us = esp_timer_get_time();
     } else {
         httpd_sess_trigger_close(slot->hd, slot->fd);
     }
-}
-
-// Whether the socket's send buffer has room for a frame now: lwIP reports a TCP socket writable while at least
-// TCP_SNDLOWAT bytes are free, several of the longest frames.
-static bool writable(int fd)
-{
-    fd_set set;
-    struct timeval now = {0};
-
-    FD_ZERO(&set);
-    FD_SET(fd, &set);
-    return select(fd + 1, NULL, &set, NULL, &now) > 0;
 }
 
 static void request_drain(ws_slot_t *slot)
@@ -143,6 +156,10 @@ static void drain(ws_slot_t *slot)
         return;
     }
     logging_sink_enter();
+    if (slot->help_pending && writable(slot->fd)) {
+        slot->help_pending = false;
+        send_text(slot, LEVEL_HELP, strlen(LEVEL_HELP));
+    }
     for (int i = 0; i < BATCH_LINES; i++) {
         if (!writable(slot->fd)) {
             atomic_store(&slot->stalled, true); // the tick retries; the queue drops meanwhile
@@ -202,6 +219,8 @@ static void tick_work(void *arg)
     if (slot->closing_us) {
         if (now - slot->closing_us > CLOSE_WAIT_US) {
             httpd_sess_trigger_close(slot->hd, slot->fd);
+        } else if (!slot->close_sent) {
+            slot->close_sent = send_close(slot);
         }
         return;
     }
@@ -212,7 +231,7 @@ static void tick_work(void *arg)
     }
     httpd_sess_update_lru_counter(slot->hd, slot->fd); // a viewer that answers is not the socket to purge
     drain(slot); // also retries a stalled socket and a drain the forwarder could not queue
-    if (now - slot->last_ping_us >= PING_US) {
+    if (now - slot->last_ping_us >= PING_US && writable(slot->fd)) { // else the next tick tries again
         httpd_ws_frame_t ping = {.type = HTTPD_WS_TYPE_PING, .final = true};
 
         slot->last_ping_us = now;
@@ -241,6 +260,10 @@ static void forwarder(void *arg)
         for (size_t i = 0; i < SLOTS; i++) {
             ws_slot_t *slot = &s_slots[i];
 
+            if (!slot->active) { // closed since it was notified: nothing to send, and its handle may be stale
+                atomic_store(&slot->drain_queued, false);
+                continue;
+            }
             if ((bits & DRAIN_BIT(i)) && httpd_queue_work(slot->hd, drain_work, slot) != ESP_OK) {
                 atomic_store(&slot->drain_queued, false); // the tick retries
             }
@@ -329,6 +352,8 @@ esp_err_t device_api_logs_ws_opened(httpd_req_t *req)
     slot->viewer = NULL;
     slot->last_pong_us = slot->last_ping_us = now;
     slot->closing_us = 0;
+    slot->close_sent = false;
+    slot->help_pending = false;
     atomic_store(&slot->drain_queued, false);
     atomic_store(&slot->stalled, false);
     slot->active = true;
@@ -341,7 +366,8 @@ esp_err_t device_api_logs_ws_opened(httpd_req_t *req)
     req->free_ctx = slot_free;
     slot->viewer = logging_viewer_open(request_level(req), wake, slot);
     if (!slot->viewer) { // all taken in between (the handshake checked), or no PSRAM for the queue
-        close_with(slot, CLOSE_TRY_AGAIN, DEVICE_API_LOGS_TOO_MANY);
+        close_with(slot, CLOSE_TRY_AGAIN,
+                   device_api_logs_ws_viewers() >= LOGGING_VIEWERS_MAX ? DEVICE_API_LOGS_TOO_MANY : "no memory");
     }
     return ESP_OK;
 }
@@ -375,7 +401,8 @@ esp_err_t device_api_logs_ws_frame(httpd_req_t *req)
         if (device_api_logs_level_frame(buf, frame.len, &level) == ESP_OK) {
             logging_viewer_set_level(slot->viewer, level); // this client only; the gate follows
         } else {
-            send_notice(slot, LEVEL_HELP);
+            slot->help_pending = true; // sent by the drain once the socket is writable
+            drain(slot);
         }
     }
     return ESP_OK;

@@ -144,6 +144,8 @@ static esp_err_t parse_components(const cJSON *components, logging_settings_t *s
 {
     const cJSON *item;
 
+    bool star = false;
+
     if (!cJSON_IsObject(components)) {
         return bad("components", bad_field);
     }
@@ -156,8 +158,17 @@ static esp_err_t parse_components(const cJSON *components, logging_settings_t *s
             return bad_component(item->string, bad_field);
         }
         if (strcmp(item->string, "*") == 0) {
+            if (star) {
+                return bad_component(item->string, bad_field); // listed twice (Ruling R5)
+            }
+            star = true;
             s->default_level = level;
             continue;
+        }
+        for (size_t i = 0; i < s->n_components; i++) {
+            if (strcmp(s->components[i].tag, item->string) == 0) {
+                return bad_component(item->string, bad_field); // listed twice (Ruling R5)
+            }
         }
         err = logging_core_set_component(s, item->string, level);
         if (err == ESP_ERR_NO_MEM) {
@@ -170,6 +181,8 @@ static esp_err_t parse_components(const cJSON *components, logging_settings_t *s
     return ESP_OK;
 }
 
+// Unknown keys (top level and inside a channel) are ignored, as GET's read-only fields are: a client may PUT back what
+// GET gave it.
 esp_err_t device_api_logging_parse(const char *body, logging_settings_t *inout, const char **bad_field)
 {
     cJSON *json = cJSON_Parse(body);
