@@ -101,6 +101,8 @@ function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
 
 /* The text next to the switch. */
 function switchText(s) {
+  if (s && !s.enabled && s.active)
+    return 'Turns off at the next reboot. Until then the port stays exported.';
   if (!s || !s.enabled)
     return 'Off. The USB port belongs to the Radios page.';
   if (STATES[s.state] && STATES[s.state].live)
@@ -228,7 +230,7 @@ function renderStats(s) {
 function renderCommands(id, text) {
   var box = $(id);
   clear(box);
-  text.split('\n').forEach(function(line, i) {
+  text.split('\n').forEach(function(line) {
     var comment = /^(#|REM )/.test(line);
     var row = el('span', line + '\n', comment ? 'c' : '');
     box.appendChild(row);

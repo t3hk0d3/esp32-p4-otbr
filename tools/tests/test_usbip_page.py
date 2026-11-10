@@ -102,6 +102,7 @@ BLOCKED = {
 PENDING_ON = {**OFF, "enabled": True, "pending_reboot": True}
 PENDING_OFF = {**ATTACHED, "enabled": False, "pending_reboot": True}
 
+EVIL = "<img src=x onerror=alert(1)>"
 ALL_SHOWN = {"device": True, "client": True, "stats": True, "attach": True}
 NONE_SHOWN = {"device": False, "client": False, "stats": False, "attach": False}
 
@@ -267,6 +268,12 @@ class TestPageShows:
         )
         assert r == [False, True]
 
+    def test_turned_off_but_still_exported_says_when_it_ends(self):
+        # On enabled false while the port is still exported: the switch text says it turns off at the next reboot.
+        r = scenario(setup(PENDING_OFF) + "return t.el('switchText').textContent;")
+        assert "next reboot" in r
+        assert "Radios page" not in r
+
     def test_security_note_names_the_interface(self):
         # On interface mgmt: "management network"; on single: "Ethernet network".
         r = scenario(
@@ -290,6 +297,40 @@ class TestPageShows:
         for want in ("10c4:ea60", "abc123", "full", "1-1", "1 interface"):
             assert want in r[2]
         assert r[3:] == [False, True, True]
+
+    def test_hostile_device_strings_stay_text(self):
+        # On markup in every string the device or the board sends: each shows as the literal text, no element is made.
+        evil = EVIL
+        s = {
+            **ATTACHED,
+            "state": "unsupported",
+            "reason": evil,
+            "last_error": evil,
+            "device": {**CP2102, "product": evil, "manufacturer": evil, "serial": evil},
+            "client": {"addr": evil, "since": 0},
+        }
+        r = scenario(
+            setup(s)
+            + "t.put = () => ({status: 409, body: {error: 'usb_channel_in_use', detail: "
+            + json.dumps(evil)
+            + "}});"
+            "t.el('toggle').click(); t.el('dOk').click(); await t.advance(100);"
+            "const texts = ['devName', 'devMaker', 'devWhy', 'clientAddr', 'err409Text'].map((i) => t.el(i).textContent);"
+            "const kv = t.el('devKv').allText();"
+            "const imgs = Object.values(t.doc.byId).filter((e) => e.findAll((x) => x.tag === 'img').length);"
+            "return [texts, kv, imgs.length];"
+        )
+        assert r[0] == [EVIL] * 5
+        assert EVIL in r[1]
+        assert r[2] == 0
+
+    def test_blocked_reason_stays_text(self):
+        # On markup in the blocked reason: the note holds it as text.
+        r = scenario(
+            setup({**BLOCKED, "reason": EVIL})
+            + "return t.el('blockedText').textContent;"
+        )
+        assert EVIL in r
 
     def test_unsupported_device_shows_the_reason(self):
         # On a hub: the reason shows in the device card, and the client box says there is no client.

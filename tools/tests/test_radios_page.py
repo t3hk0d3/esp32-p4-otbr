@@ -1681,3 +1681,18 @@ class TestUsbipOn:
             + f"return [row.children[3].allText(), {links('row.children[4]')}];"
         )
         assert r == ["Unplugged", []]
+
+    def test_hostile_channel_reason_stays_text(self):
+        # On markup in channel_reason: the row and the dialog show it as text; no element is made from it.
+        evil = "<img src=x onerror=alert(1)>"
+        ch = {**SLZB_EXT, "channel_reason": evil}
+        r = scenario(
+            setup({"usbip": True, "channels": [C6, ch]}, USBIP_RUNNING)
+            + f"const row = {rows_js()}[1]; const a = row.children[4].allText();"
+            + open_row(1)
+            + "const imgs = Object.values(t.doc.byId).filter((e) => e.findAll((x) => x.tag === 'img').length);"
+            "return [a, t.el('mUnavailable').textContent, imgs.length];"
+        )
+        assert evil in r[0]
+        assert evil in r[1]
+        assert r[2] == 0
