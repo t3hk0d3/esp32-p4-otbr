@@ -205,8 +205,12 @@ void mux_chan_defaults(struct radio_mux_chan *ch, const char *id, radio_mux_kind
     radio_mux_proxy_defaults(&ch->proxy);
     ch->eff_mode = RADIO_MUX_MODE_UNAVAILABLE;
     ch->supported = true;
-    snprintf(ch->reason, sizeof(ch->reason), "%s",
-             kind == RADIO_MUX_KIND_USB && atomic_load(&g_mux.usb_external) ? g_mux.usb_ext_reason : "not detected");
+    if (kind == RADIO_MUX_KIND_USB && atomic_load(&g_mux.usb_external)) { // chan_state is absent (0) already
+        snprintf(ch->reason, sizeof(ch->reason), "%s", g_mux.usb_ext_reason);
+        snprintf(ch->chan_reason, sizeof(ch->chan_reason), "%s", g_mux.usb_ext_reason);
+    } else {
+        snprintf(ch->reason, sizeof(ch->reason), "not detected");
+    }
 }
 
 // At load: a singleton (otbr, ziggurat) stored on more than one channel (a move's stores cut apart) keeps the first in
@@ -286,12 +290,16 @@ void mux_load_chans(void)
 }
 
 // Any task, before or after the start: reads the stored blobs itself (the loaded records are not there before the start).
+// The modes are deduplicated as at load: the C6 (slot 0, otbr when nothing is stored) and then the USB channels in index
+// order; a USB channel whose singleton mode another channel has before it is stored off at load, so it does not count.
 bool radio_mux_stored_usb_stack(char *id, size_t cap, radio_mux_mode_t *mode)
 {
     char ids[RADIO_MUX_CHANNELS_MAX][RADIO_MUX_ID_MAX];
-    size_t len = sizeof(ids);
+    char usb_ids[RADIO_MUX_CHANNELS_MAX][RADIO_MUX_ID_MAX];
+    radio_mux_mode_t modes[RADIO_MUX_CHANNELS_MAX];
+    bool changed[RADIO_MUX_CHANNELS_MAX];
+    size_t len = sizeof(ids), n = 1; // modes[0] is the C6
     nvs_handle_t nvs;
-    bool found = false;
 
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
         return false;
@@ -299,30 +307,44 @@ bool radio_mux_stored_usb_stack(char *id, size_t cap, radio_mux_mode_t *mode)
     if (nvs_get_blob(nvs, NVS_INDEX, ids, &len) != ESP_OK) {
         len = 0;
     }
-    for (size_t i = 0; i < len / RADIO_MUX_ID_MAX && !found; i++) {
+    for (size_t i = 0; i < RADIO_MUX_CHANNELS_MAX; i++) {
+        modes[i] = RADIO_MUX_MODE_OFF;
+    }
+    modes[0] = RADIO_MUX_MODE_OTBR;
+    for (size_t i = 0; i < len / RADIO_MUX_ID_MAX; i++) {
         char key[16];
         chan_blob_t b;
         size_t blen = sizeof(b);
 
         ids[i][RADIO_MUX_ID_MAX - 1] = '\0';
-        if (radio_mux_is_builtin_id(ids[i])) {
-            continue;
-        }
         radio_mux_nvs_key(ids[i], key);
         if (nvs_get_blob(nvs, key, &b, &blen) != ESP_OK || blen != sizeof(b) || b.version != BLOB_VERSION ||
                 strncmp(b.id, ids[i], RADIO_MUX_ID_MAX) != 0) {
             continue;
         }
-        if (b.mode == RADIO_MUX_MODE_OTBR || b.mode == RADIO_MUX_MODE_ZIGGURAT) {
-            if (id && cap > 0) {
-                snprintf(id, cap, "%s", ids[i]);
-            }
-            if (mode) {
-                *mode = (radio_mux_mode_t)b.mode;
-            }
-            found = true;
+        const radio_mux_mode_t m = (radio_mux_mode_t)b.mode;
+        const bool valid = m == RADIO_MUX_MODE_OFF || m == RADIO_MUX_MODE_OTBR || m == RADIO_MUX_MODE_ZIGGURAT ||
+                           m == RADIO_MUX_MODE_RCP_PROXY;
+
+        if (radio_mux_is_builtin_id(ids[i])) {
+            modes[0] = valid ? m : RADIO_MUX_MODE_OTBR;
+        } else if (n < RADIO_MUX_CHANNELS_MAX) {
+            memcpy(usb_ids[n], ids[i], RADIO_MUX_ID_MAX); // terminated above
+            modes[n++] = valid ? m : RADIO_MUX_MODE_OFF;
         }
     }
     nvs_close(nvs);
-    return found;
+    radio_mux_singleton_dedupe(modes, changed, n);
+    for (size_t i = 1; i < n; i++) {
+        if (!changed[i] && (modes[i] == RADIO_MUX_MODE_OTBR || modes[i] == RADIO_MUX_MODE_ZIGGURAT)) {
+            if (id && cap > 0) {
+                snprintf(id, cap, "%s", usb_ids[i]);
+            }
+            if (mode) {
+                *mode = modes[i];
+            }
+            return true;
+        }
+    }
+    return false;
 }

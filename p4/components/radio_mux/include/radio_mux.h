@@ -309,7 +309,7 @@ esp_err_t radio_mux_forget(const char *id);
 // The USB port belongs to someone else (USB/IP): the mux does not start its USB transport, lists every stored USB
 // channel as unavailable with `reason` (RADIO_MUX_USB_EXTERNAL_REASON) and refuses a mode change on one
 // (RADIO_MUX_REFUSE_USB_EXTERNAL; line and proxy settings and forgetting still work). Before radio_mux_start only
-// (ESP_ERR_INVALID_STATE after it); the string is copied.
+// (ESP_ERR_INVALID_STATE after it, ESP_ERR_INVALID_ARG for a NULL reason); the string is copied.
 #define RADIO_MUX_USB_EXTERNAL_REASON "USB is exported over USB/IP"
 esp_err_t radio_mux_set_usb_external(const char *reason);
 // Whether radio_mux_set_usb_external was called. Any task.
@@ -317,7 +317,9 @@ bool radio_mux_usb_external(void);
 
 // Whether a stored USB channel (attached or not) is in mode otbr or ziggurat: its id goes into `id` (cap:
 // RADIO_MUX_ID_MAX fits any) and its mode into *mode (either may be NULL). Reads the stored channels from NVS, so it
-// works before and after radio_mux_start. false when none is, or NVS cannot be read.
+// works before and after radio_mux_start. The C6's stored otbr/ziggurat wins over a USB channel's (as at load, an
+// interrupted move leaves both). false when none is, or NVS cannot be read. Boot sequence and API handlers only: it
+// uses about 0.6 KB of stack, so not from a small one.
 bool radio_mux_stored_usb_stack(char *id, size_t cap, radio_mux_mode_t *mode);
 
 // Whether radio_mux_start has run (the API calls answer). Any task.

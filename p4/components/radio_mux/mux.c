@@ -154,6 +154,12 @@ static bool c6_maintained(const mux_port_t *p)
     return p->busy || g_mux.reinit.phase != RADIO_MUX_RP_IDLE;
 }
 
+// The channel_reason of an absent channel: the USB port's owner for a USB channel while the port is external, else "".
+static const char *absent_chan_reason(const struct radio_mux_chan *ch)
+{
+    return ch->kind == RADIO_MUX_KIND_USB && atomic_load(&g_mux.usb_external) ? g_mux.usb_ext_reason : "";
+}
+
 // Owner, under mux_lock: the channel's lifecycle state and reason (design section 4.1), from the port.
 static void set_chan_state(mux_port_t *p, struct radio_mux_chan *ch)
 {
@@ -186,6 +192,7 @@ static void set_chan_state(mux_port_t *p, struct radio_mux_chan *ch)
         case RADIO_MUX_AS_ABSENT:
         case RADIO_MUX_AS_CLOSING:
             cs = RADIO_MUX_CS_ABSENT;
+            why = absent_chan_reason(ch);
             break;
         case RADIO_MUX_AS_ATTACHED:
             break;
@@ -407,7 +414,7 @@ static void close_device(mux_port_t *p)
     ch->chan_state = RADIO_MUX_CS_ABSENT;
     ch->fault_kind = RADIO_MUX_FAULT_NONE;
     ch->work = RADIO_MUX_WORK_NONE;
-    ch->chan_reason[0] = '\0';
+    snprintf(ch->chan_reason, sizeof(ch->chan_reason), "%s", absent_chan_reason(ch));
     p->chan = NULL;
     mux_unlock();
     if (ch->remembered) {

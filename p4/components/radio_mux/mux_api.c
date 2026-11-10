@@ -530,7 +530,8 @@ radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req
 
 esp_err_t radio_mux_set_usb_external(const char *reason)
 {
-    ESP_RETURN_ON_FALSE(reason && !atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "after the start");
+    ESP_RETURN_ON_FALSE(reason, ESP_ERR_INVALID_ARG, TAG, "no reason");
+    ESP_RETURN_ON_FALSE(!atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "after the start");
     snprintf(g_mux.usb_ext_reason, sizeof(g_mux.usb_ext_reason), "%s", reason);
     atomic_store(&g_mux.usb_external, true);
     return ESP_OK;
