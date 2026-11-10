@@ -362,7 +362,9 @@ Lines that sending a line produces must not be sent again.
   answer of a syslog datagram to a closed port). Syslog and the live viewers therefore get the **network-path tags**
   at `info` at most: the tags starting with `httpd` (the web server), `esp.emac` (the Ethernet MAC and its DMA),
   `esp_eth` (the Ethernet driver and its netif glue), `esp_netif` (esp_netif, its handlers and bridge glue) and `lwip`
-  (lwIP's own debug output, when it is built to go through the logger). The UART and USB-JTAG are not capped.
+  (lwIP's own debug output, when it is built to go through the logger), and `vfs_calls` (ESP-IDF's `select()`, about
+  ten debug lines per call: the web server's loop wakes for every frame it sends, so at `debug` it alone made some
+  1,600 lines a second on the board). The UART and USB-JTAG are not capped.
 - The capture applies the same cap, so such a line is not even formatted when only syslog or a viewer would take it.
 
 ### USB-JTAG

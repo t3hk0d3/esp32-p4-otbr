@@ -20,7 +20,7 @@ import aiohttp
 import pexpect
 import pytest
 import requests
-from conftest import BOOT_TIMEOUT_S, GOT_IP, ROM_BANNER, wait_ot_state
+from conftest import BOOT_TIMEOUT_S, GOT_IP, ROM_BANNER, wait_ot_state, wait_reachable
 from test_vlan import (  # noqa: F401  (fixtures of the VLAN rig)
     docker_run,
     link_local,
@@ -39,7 +39,11 @@ NO_ANSWER_CLOSE_S = 50
 SYSLOG_WAIT_S = 20
 UNRESOLVED_WAIT_S = 60
 UART_QUIET_S = 10
-UART_STORM_LINES = 60
+UART_STORM_LINES = 3
+# A UART line of the logging component or its syslog lookup.
+LOGGING_LINE = re.compile(
+    r"^[EWIDV] \(\d+\) (logging|log_dns|log_out)[^:]*:|syslog", re.IGNORECASE
+)
 BODY_MAX = 4096
 VIEWERS_MAX = 2
 DEFAULTS = {
@@ -339,7 +343,7 @@ class TestSettings:
         url = "http://" + dut.expect(GOT_IP, timeout=BOOT_TIMEOUT_S).group(1).decode()
         assert stored(get_logging(url)) == stored(state)
 
-    def test_put_subset_and_persist(self, dut, base_url, logging_settings):
+    def test_put_subset_and_persist(self, dut, board_ip, base_url, logging_settings):
         # On a valid subset: 200 with the GET body; the settings survive a reboot.
         reply = logging_settings(
             {
@@ -359,8 +363,9 @@ class TestSettings:
             == requests.codes.ok
         )
         dut.expect(ROM_BANNER, timeout=BOOT_TIMEOUT_S)
-        url = "http://" + dut.expect(GOT_IP, timeout=BOOT_TIMEOUT_S).group(1).decode()
-        assert stored(get_logging(url)) == stored(reply)
+        # The UART is at warning now, so the boot's `eth: got ip` (info) is not printed: wait for the same address.
+        wait_reachable(board_ip, timeout=BOOT_TIMEOUT_S)
+        assert stored(get_logging(base_url)) == stored(reply)
 
     def test_put_replaces_the_override_set(self, base_url, logging_settings):
         # On components: the object replaces the overrides; "*" is the default.
@@ -718,7 +723,8 @@ class TestSyslog:
         assert get_logging(base_url)["channels"]["syslog"]["state"] == "sending"
 
     def test_syslog_unresolvable_target(self, dut, base_url, logging_settings):
-        # On a name that does not resolve: state unresolved, the board answers, the UART shows no log storm.
+        # On a name that does not resolve: state unresolved, the board answers, and the UART shows no storm of logging's
+        # own lines (OpenThread's usual info chatter, ~10 lines a second after a boot, is not counted).
         logging_settings(
             {"channels": {"syslog": {"level": "info", "target": "nonexistent.invalid"}}}
         )
@@ -734,14 +740,19 @@ class TestSyslog:
             requests.get(f"{base_url}/device/status", timeout=10).status_code
             == requests.codes.ok
         )
-        lines, deadline = 0, time.monotonic() + UART_QUIET_S
+        lines, deadline = [], time.monotonic() + UART_QUIET_S
         while time.monotonic() < deadline:
             try:
-                dut.expect(rb"[^\n]*\n", timeout=1)
-                lines += 1
+                line = (
+                    dut.expect(rb"[^\n]*\n", timeout=1)
+                    .group(0)
+                    .decode(errors="replace")
+                )
             except pexpect.TIMEOUT:
-                pass
-        assert lines < UART_STORM_LINES, f"{lines} UART lines in {UART_QUIET_S} s"
+                continue
+            if LOGGING_LINE.search(line):
+                lines.append(line.strip())
+        assert len(lines) < UART_STORM_LINES, lines
         assert get_logging(base_url)["channels"]["syslog"]["state"] == "unresolved"
 
 

@@ -11,7 +11,7 @@
 // lwIP or the server logs meanwhile goes to the UART only and is never sent again. The server's own dispatch around
 // them (httpd_main.c "work", "doing select", "processing ctrl message"; httpd_sess, httpd_ws) logs debug lines outside
 // that guard, and the Ethernet driver logs every received frame (the TCP ACKs of these sends among them); viewers never
-// get debug or verbose lines of the network-path tags (httpd*, esp.emac*, esp_eth*, esp_netif*, lwip*:
+// get debug or verbose lines of the network-path tags (httpd*, esp.emac*, esp_eth*, esp_netif*, lwip*, vfs_calls*:
 // logging_core_net_cap), so these cannot loop either. A socket whose send buffer is full is skipped (no blocking send
 // on the server task) until the next tick; its queue drops meanwhile.
 #include <stdatomic.h>

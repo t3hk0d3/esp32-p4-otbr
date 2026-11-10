@@ -39,6 +39,7 @@ static const char *const NET_PATH_TAGS[] = {
     "esp_eth",   // esp_eth ("link is not up, can't transmit" per frame), esp_eth.netif.netif_glue
     "esp_netif", // esp_netif_lwip (verbose per API call), esp_netif_handlers, esp_netif_br_glue
     "lwip",      // lwIP's own debug output (CONFIG_LWIP_DEBUG_ESP_LOG: per packet), lwip_arch
+    "vfs_calls", // esp_vfs_select: ~10 debug lines per select(), and the web server's loop selects once per frame sent
 };
 
 const char *logging_level_name(esp_log_level_t level)

@@ -79,9 +79,9 @@ _Static_assert(sizeof(logging_levels_t) == sizeof(uint32_t), "logging_levels_t m
 logging_levels_t logging_core_levels(const logging_settings_t *s, esp_log_level_t viewers_max);
 
 /**
- * Whether `tag` belongs to the network path (prefixes httpd, esp.emac, esp_eth, esp_netif, lwip): ESP-IDF's web
- * server, Ethernet driver, esp_netif and lwIP, which log while a live frame or a syslog datagram goes out or its ACK or
- * ICMP answer comes in. NULL: false.
+ * Whether `tag` belongs to the network path (prefixes httpd, esp.emac, esp_eth, esp_netif, lwip, vfs_calls): ESP-IDF's
+ * web server, Ethernet driver, esp_netif, lwIP and the VFS select() the web server's loop waits in, which log while a
+ * live frame or a syslog datagram goes out or its ACK or ICMP answer comes in. NULL: false.
  */
 bool logging_core_net_path_tag(const char *tag);
 

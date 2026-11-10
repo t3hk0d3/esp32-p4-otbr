@@ -287,7 +287,7 @@ frame `{"level":"<level>"}` changes the level of this viewer only (anything else
 Board notices start with `# `: `# dropped <n> lines` (this viewer lost lines; shown whatever its level). At most two
 viewers: a third is refused with 503 before the upgrade. The board pings every 10 s and closes with 1001 `no answer` a
 client silent for 30 s. Frames are valid UTF-8: ill-formed bytes in a line are replaced by U+FFFD. Viewers (and syslog)
-get no `debug` or `verbose` lines of the network-path tags (`httpd*`, `esp.emac*`, `esp_eth*`, `esp_netif*`, `lwip*`).
+get no `debug` or `verbose` lines of the network-path tags (`httpd*`, `esp.emac*`, `esp_eth*`, `esp_netif*`, `lwip*`, `vfs_calls*`).
 
 ```
 websocat 'ws://<board>/device/logging/ws?level=debug'

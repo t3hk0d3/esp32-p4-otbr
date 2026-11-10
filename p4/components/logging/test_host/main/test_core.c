@@ -560,7 +560,7 @@ TEST_CASE("full ring, debug line of a network-path tag: counted for JTAG only, n
 static const char *const NET_TAGS[] = {
     "httpd", "httpd_sess", "httpd_txrx", "httpd_ws", "httpd_parse", "httpd_uri", "esp.emac", "esp.emac.dma",
     "esp_eth", "esp_eth.netif.netif_glue", "esp_netif_lwip", "esp_netif_handlers", "esp_netif_br_glue", "lwip",
-    "lwip_arch",
+    "lwip_arch", "vfs_calls",
 };
 
 TEST_CASE("net cap on a network-path tag: debug or verbose capped at info", "[logging]")
