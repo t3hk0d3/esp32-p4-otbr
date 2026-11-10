@@ -781,7 +781,6 @@ class TestSave:
             (409, "incompatible", "firmware"),
             (409, "unavailable", "not plugged in"),
             (409, "not_available", "not in this build"),
-            (409, "hybrid_not_supported", "Thread and Zigbee"),
             (409, "probe_failed", "the test run failed"),
             (409, "c6_busy", "busy"),
             (409, "busy", "busy"),
@@ -1446,3 +1445,87 @@ class TestSettleMove:
         )
         assert "Moving Thread" in r[0]
         assert "did not start" in r[1]
+
+
+RESTART = "Saving reboots the board. Thread restarts with it: its devices lose the border router for about 20 s."
+OLLY_ZIG = {**OLLY, "mode": "ziggurat", "stored_mode": "ziggurat"}
+SNAP_HYBRID = {**SNAP_ZIG, "channels": [C6, OLLY_ZIG, SLZB, EZSP]}
+
+
+@needs_node
+class TestRebootNote:
+    """RadiosLogic.rebootNote"""
+
+    def note(self, snap, ch, pick, status):
+        return logic_of(
+            f"L.rebootNote({json.dumps(snap)}, {json.dumps(ch)}, {json.dumps(pick)}, {json.dumps(status)})"
+        )
+
+    def test_entering_zigbee_while_thread_runs_elsewhere_says_thread_restarts(self):
+        # On ziggurat picked on the OllyZig while Thread runs on the C6: the restart text.
+        assert self.note(SNAP_ZIG, OLLY, "ziggurat", RUNNING) == RESTART
+
+    def test_leaving_zigbee_while_thread_runs_elsewhere_says_thread_restarts(self):
+        # On off picked on the OllyZig that runs Zigbee while Thread runs on the C6: the restart text.
+        assert self.note(SNAP_HYBRID, OLLY_ZIG, "off", RUNNING) == RESTART
+
+    def test_otbr_on_zigbees_radio_says_the_move_reboots(self):
+        # On otbr picked on the OllyZig that runs Zigbee while Thread runs on the C6: the move-with-reboot text.
+        assert self.note(SNAP_HYBRID, OLLY_ZIG, "otbr", RUNNING) == (
+            "Saving reboots the board and moves Thread from ESP32-C6 (built-in) to this radio; Zigbee stops. "
+            "Thread devices lose the border router for about 20 s."
+        )
+
+    def test_without_thread_says_nothing(self):
+        # On ziggurat picked while no radio runs Thread: "".
+        c6_off = {**C6, "mode": "off", "stored_mode": "off"}
+        ezsp_off = {**EZSP, "stored_mode": "off"}  # the fixture stores otbr there
+        snap = {**SNAP_ZIG, "channels": [c6_off, OLLY, SLZB, ezsp_off]}
+        assert self.note(snap, OLLY, "ziggurat", NO_RADIO) == ""
+
+    def test_a_change_that_does_not_touch_zigbee_says_nothing(self):
+        # On rcp-proxy picked on the OllyZig (off) while Thread runs on the C6: "".
+        assert self.note(SNAP_ZIG, OLLY, "rcp-proxy", RUNNING) == ""
+
+
+@needs_node
+class TestRebootNoteDialog:
+    """Radios page dialog: #zigbeeNote"""
+
+    def test_picking_zigbee_shows_the_restart_note(self):
+        # On ziggurat picked on the OllyZig while Thread runs on the C6: #zigbeeNote shows the restart text.
+        r = scenario(
+            setup(SNAP_ZIG)
+            + open_row(1)
+            + f"{card('ziggurat')}.click(); await t.flush();"
+            + "return [t.el('zigbeeNote').hidden(), t.el('zigbeeNote').textContent];"
+        )
+        assert r == [False, RESTART]
+
+    def test_picking_a_mode_that_does_not_touch_zigbee_hides_the_note(self):
+        # On rcp-proxy picked on the OllyZig: #zigbeeNote hidden.
+        r = scenario(
+            setup(SNAP_ZIG)
+            + open_row(1)
+            + f"{card('rcp-proxy')}.click(); await t.flush();"
+            + "return t.el('zigbeeNote').hidden();"
+        )
+        assert r is True
+
+    def test_otbr_on_zigbees_radio_puts_the_reboot_text_in_the_otbr_note(self):
+        # On otbr picked on the OllyZig that runs Zigbee: #otbrNote has the move-with-reboot text, #zigbeeNote hidden.
+        r = scenario(
+            setup(SNAP_HYBRID)
+            + open_row(1)
+            + f"{card('otbr')}.click(); await t.flush();"
+            + "return [t.el('otbrNote').textContent, t.el('zigbeeNote').hidden()];"
+        )
+        assert r[0].startswith(
+            "Saving reboots the board and moves Thread from ESP32-C6 (built-in)"
+        )
+        assert r[1] is True
+
+    def test_no_text_for_hybrid_not_supported_is_left(self):
+        # On the page's code texts: no hybrid_not_supported entry (the board no longer sends it).
+        src = (FRONTEND / "static" / "radios.js").read_text()
+        assert "hybrid_not_supported" not in src

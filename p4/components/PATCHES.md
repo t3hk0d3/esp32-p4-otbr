@@ -382,6 +382,11 @@ reason, spec reference.
    `.dash-*` classes and styles `.tile-head h3`. Page tests: `tools/tests/test_status_page.py`,
    `tools/tests/test_zigbee_page.py`. (docs/superpowers/specs/2026-11-06-zigbee-mode-design.md,
    docs/superpowers/specs/2026-11-07-unified-dashboard-design.md)
+35. Applied (hybrid mode, Tasks 3 and 4). Frontend: `radios.html` gains `#zigbeeNote` under the otbr panel;
+   `static/radios.js` gains `RadiosLogic.rebootNote` (a save that enters or leaves Zigbee reboots the board and Thread
+   with it), shown in `#zigbeeNote`, or in `#otbrNote` when otbr is picked on the radio that runs Zigbee; the
+   `hybrid_not_supported` text is gone. Page tests: `tools/tests/test_radios_page.py`.
+   (docs/superpowers/specs/2026-11-10-hybrid-mode-design.md)
 
 ### REST guard classification (patches 2 and 9)
 
