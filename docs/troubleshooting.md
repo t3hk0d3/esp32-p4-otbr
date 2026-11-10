@@ -18,7 +18,8 @@ The Dashboard names the reason (`fault_reason` in `GET /device/status`):
 | **esp-hosted firmware** | The C6 still runs its factory firmware. | Upload `c6_installer.bin`, then `c6_rcp.bin`, both from the board's release ([First install](first-install.md#a-no-wires)). |
 | **rcp incompatible** | The radio firmware doesn't match the board's firmware, or the radio doesn't answer. | Upload `c6_rcp.bin` from the same release as the board's firmware. |
 | **rom recovery failed** | The C6 didn't answer and the repair over the maintenance jumper failed. | Check the jumper wires, then **Recover radio** on the Firmware page. Without a jumper: [First install](first-install.md#c-usb-uart-adapter), way C. |
-| **resetting the RCP failed**, **radio boot timed out**, **OpenThread main loop ended** | The radio didn't come up. The board retries up to three times in 10 minutes, then waits. | Check the antenna. Reboot the board, or upload `c6_rcp.bin` again. |
+| **resetting the RCP failed** | The radio stopped answering and the board's automatic recovery failed. It tries up to three times in 10 minutes, then waits. | Check the antenna. Reboot the board, or upload `c6_rcp.bin` again. |
+| **radio boot timed out**, **OpenThread main loop ended** | The radio didn't come up, or Thread stopped. The board does not retry these by itself. | Check the antenna, then reboot the board. If it comes back, upload `c6_rcp.bin` again. |
 | **storage unavailable** | The board's settings storage didn't start. The board runs without Thread rather than restart in a loop. | Update the firmware. If that doesn't help, erase the settings: `esptool --chip esp32p4 -p /dev/ttyACM0 erase-region 0x9000 0x10000` over USB-C, then reboot; the Thread network and network settings have to be set up again. |
 
 With a dongle running Thread, **No radio** means it is unplugged: plug it back in, or move Thread to another radio

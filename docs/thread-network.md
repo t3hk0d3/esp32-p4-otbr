@@ -6,8 +6,9 @@ The board stores the dataset and uses it again after every reboot.
 
 Three ways to give the board a network:
 
-- **Home Assistant** (recommended with Home Assistant): add the board to the OpenThread Border Router integration, and
-  Home Assistant writes its preferred network to the board. See [Home Assistant](home-assistant.md).
+- **Home Assistant** (recommended with Home Assistant): add the board to the OpenThread Border Router integration. A
+  board without a network gets Home Assistant's preferred network. A board that already has one keeps it; use **Add to
+  preferred network** to move it. See [Home Assistant](home-assistant.md).
 - **The Network page** (**Thread > Network**): form a new network, join one nearby, or paste a dataset.
 - **The REST API**, for scripts.
 
@@ -47,8 +48,9 @@ to be the leader, for example the one with the best position or power supply.
 Two boards that join the same network don't trade the leader role by themselves: the board that formed the network
 stays leader. To make another board the leader:
 
-1. On that board's Network page, find the **Leader** card. Move the **weight adjustment** slider above the current
-   leader's weight (for example +1) and press **Save**. The adjustment is stored and changes no role yet.
+1. On that board's Network page, find the **Leader** card. Move the **Weight adjustment** slider until **This board**
+   shows a higher weight than **Current leader** (with equal base weights, +1 is enough), and press **Save**. The
+   adjustment is stored and changes no role yet.
 2. Press **Become leader** and confirm. The board takes over; mesh traffic can pause for a few seconds; nothing needs to
    be paired again.
 
@@ -71,7 +73,9 @@ curl -X PUT -H 'Content-Type: application/json' -d '"enable"' http://<new-board>
 
 The last call is only needed when the new board had no network before (`GET /node/state` says `disabled`).
 
-Form a network from Python with `python-otbr-api` (`pip install python-otbr-api aiohttp`), as Home Assistant does:
+Form a network from Python with `python-otbr-api` (`pip install python-otbr-api aiohttp`), as Home Assistant does. It
+works on a board without a network; a board that already runs one refuses this partial dataset (409) until Thread is
+disabled (`otbr.set_enabled(False)`), which takes it off its current network:
 
 ```
 import asyncio, aiohttp, python_otbr_api as api

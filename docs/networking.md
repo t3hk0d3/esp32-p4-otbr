@@ -11,7 +11,8 @@ Everything on **Device > Ethernet**: how the board sits on your network, its nam
       other border routers (TREL) and routing.
 
   Nothing passes between the two. A request on the wrong one is refused (403). mDNS runs only on the Thread backbone,
-  so Home Assistant must be on that network. Your switch port must carry both VLANs (tagged) before you apply.
+  so Home Assistant must be on that network. Set up the switch port before you apply: each VLAN you
+  give an ID must be tagged on the port, and an interface you leave untagged uses the port's untagged (native) VLAN.
 
 ![Split mode: one tagged cable to a switch; the management VLAN for the browser and Prometheus, the Thread backbone VLAN for Home Assistant and other border routers](images/split-mode.svg)
 

@@ -1,7 +1,8 @@
 # Web UI tour
 
 Open `http://<board>/` in a browser: the board's IP address, or `http://esp-otbr-<last six hex digits of the
-MAC>.local/` where your computer resolves `.local` names. There is no login.
+MAC>.local/` where your computer resolves `.local` names. In [split mode](networking.md) use the management address:
+the `.local` name points at the Thread backbone, which doesn't serve the web UI. There is no login.
 
 The menu has three parts:
 

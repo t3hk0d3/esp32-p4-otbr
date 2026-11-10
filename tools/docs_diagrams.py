@@ -3,10 +3,13 @@
 Usage: python3 tools/docs_diagrams.py docs/images
 """
 
+import argparse
 import os
-import sys
 
-OUT = sys.argv[1]
+_parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+_parser.add_argument("out", help="output directory, e.g. docs/images")
+OUT = _parser.parse_args().out
+os.makedirs(OUT, exist_ok=True)
 
 STYLE = """  <style>
     :root { --bg: #eef2f4; --box: #ffffff; --line: #c3ced6; --ink: #17222c; --quiet: #5d6b77;

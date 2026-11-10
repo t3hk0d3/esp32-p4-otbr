@@ -75,8 +75,10 @@ project.
 4. The Dashboard now says the C6 has no radio firmware. Continue with [Upload the radio firmware](#upload-the-radio-firmware).
 
 If the upload is refused: `invalid_image` means the file is not `c6_installer.bin`, or it comes from another release
-than the board's firmware. `install_failed` means the transfer failed; the C6 still runs its factory firmware, so try
-again.
+than the board's firmware. `install_failed` means the transfer failed or got no answer at its end. The C6 may then still run its factory
+firmware, or it may already have taken the installer: wait a minute without powering off, then reload the Dashboard. If
+it still says **esp-hosted firmware**, upload the installer again; if it says the C6 has no radio firmware, the
+installer finished, so continue with [Upload the radio firmware](#upload-the-radio-firmware).
 
 ### B: with the maintenance jumper
 
@@ -104,7 +106,9 @@ You write the C6's base images yourself with `esptool`, from `c6-updater-flash.z
 2. Erase the P4, so it leaves the C6 alone: in the [browser flasher](flash.md), or
    `esptool --chip esp32p4 -p /dev/ttyACM0 erase-flash`. **This deletes the board's firmware and its stored Thread
    network and network settings.** On a board in service, save the network first:
-   `curl -H 'Accept: text/plain' http://<board>/node/dataset/active > dataset.tlv`.
+   `curl -f -H 'Accept: text/plain' http://<board>/node/dataset/active > dataset.tlv`, and check that the file holds a
+   long hex string. While the radio is in fault the board can't answer (the command then fails); take the dataset
+   from Home Assistant or another border router of the network instead.
 3. Unplug and replug the board: with IO9 grounded the C6 starts in its download mode.
 4. Unpack `c6-updater-flash.zip` and run, inside it (`/dev/ttyUSB0` is your adapter):
 

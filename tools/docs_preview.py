@@ -189,6 +189,10 @@ class Handler(SimpleHTTPRequestHandler):
                     e.headers.get("Content-Type", ""),
                     e.read(),
                 )
+            except (urllib.error.URLError, TimeoutError) as e:
+                detail = json.dumps({"error": "board_unreachable", "detail": str(e)})
+                self.send(502, "application/json", detail.encode())
+                return
             body = scrub_body(ctype, body, path)
             accept = "text" if "text/plain" in self.headers.get("Accept", "") else ""
             self.recording.put(key + ("#text" if accept else ""), status, ctype, body)
@@ -229,6 +233,8 @@ def main():
         "--scrub", action="store_true", help="scrub the recording again and exit"
     )
     args = parser.parse_args()
+    if args.record and not args.record.startswith(("http://", "https://")):
+        parser.error("--record needs an http:// or https:// URL")
     if args.scrub:
         rec = Recording(RECORDING)
         for key, entry in list(rec.entries.items()):

@@ -70,7 +70,7 @@ What each firmware shows in the Firmware column:
 
 | Detected | Type | Version and chip | Fits |
 | --- | --- | --- | --- |
-| OpenThread RCP | `spinel` | the version string, and the chip when the firmware reports it (OllyZig: `CC13XX_CC26XX`) | `otbr`, `rcp-proxy`, `off` |
+| OpenThread RCP | `spinel` | the version string, and the chip when the firmware reports it (OllyZig: `CC13XX_CC26XX`) | `otbr`, `ziggurat`, `rcp-proxy`, `off` |
 | Ziggurat-on-stick firmware | `ziggurat` | version | `rcp-proxy`, `off` |
 | Z-Stack | `znp` | the ZNP version, chip when known | `rcp-proxy`, `off` |
 | Silicon Labs NCP | `ezsp` | the ASH/EZSP version | `rcp-proxy`, `off` |

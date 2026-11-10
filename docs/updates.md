@@ -16,13 +16,14 @@ when you open the page (at most once an hour; **Check again** checks now) and sh
 
 <img src="images/firmware-update.png" width="640" alt="Updates from GitHub card on a board with a development build: newer than the release; the latest release's border router and radio firmware versions next to the installed ones, checked just now, and the buttons Install the latest release anyway and Check again">
 
-Press **Install and reboot**. The board downloads the release, installs the board firmware, then the radio firmware when
+Press **Install &lt;release&gt; and reboot**. The board downloads the release, installs the board firmware, then the radio firmware when
 it differs, and reboots once. It takes a minute or two.
 
 - The board never updates by itself: an update interrupts Thread, so you choose when.
 - The check needs internet access and DNS on the board.
 - If the radio firmware fails to install after the board firmware, the board still reboots into the new firmware and the
-  page says so. Press **Install and reboot** again: only the radio firmware is installed then.
+  page says so. The card then offers **Install the radio firmware of &lt;release&gt;**: it installs only the radio
+  firmware, without a reboot.
 - A board that runs a newer development build is offered **Install the latest release anyway** to go back to the
   release.
 
@@ -34,7 +35,9 @@ On the **Border Router** card, choose `otbr.bundle` from a release (or give its 
 **Install and reboot**. The board writes the new firmware next to the running one and reboots into it about a second
 after the reply.
 
-If the new firmware doesn't start properly within 60 s, the board goes back to the previous one by itself.
+The new firmware is kept once it has run for 60 s with its web server up. If it crashes or restarts before that,
+the board starts the previous firmware again by itself. A new firmware that hangs without restarting stays until you
+power-cycle the board, which then starts the previous one.
 
 ??? note "From the command line"
     ```

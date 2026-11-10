@@ -29,7 +29,8 @@ are kept across reboots and updates.
     | **Off** | nothing | you add a static route on the router yourself |
 
 2. **OMR prefix:** **Automatic** (the delegated prefix, or else the board's own ULA) or **Custom** (a /64 you route to
-   the board).
+   the board). With RIPng or BGP and **Automatic**, also tick **Also use and announce the board's own ULA**: without
+   it the board announces nothing.
 3. For BGP: this board's ASN and the peers (an IPv6 address and an ASN each).
 4. Save, then check **Sessions** (BGP) or the RIPng counters, and the router's routing table.
 

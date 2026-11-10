@@ -10,6 +10,7 @@ The pages see the board as esp-otbr-a1b2c3.local. It uses the system Chromium (/
 
 import argparse
 from pathlib import Path
+from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright
 
@@ -88,24 +89,29 @@ def main():
     )
     parser.add_argument("names", nargs="*", help="shots to take (default: all)")
     args = parser.parse_args()
+    unknown = [n for n in args.names if n not in SHOTS]
+    if unknown:
+        parser.error(f"unknown shots: {', '.join(unknown)}; known: {', '.join(SHOTS)}")
     names = args.names or list(SHOTS)
     with sync_playwright() as p:
-        port = args.base.rsplit(":", 1)[1].rstrip("/")
+        port = urlparse(args.base).port or 80
         rule = f"MAP {HOST[len('http://') :]}:80 127.0.0.1:{port}"
         browser = p.chromium.launch(
             executable_path=args.chromium, args=[f"--host-resolver-rules={rule}"]
         )
-        for name in names:
-            context = browser.new_context(
-                base_url=HOST,
-                viewport={"width": WIDTH, "height": 800},
-                device_scale_factor=1,
-            )
-            page = context.new_page()
-            SHOTS[name](page, str(Path(args.out) / name))
-            print(name)
-            context.close()
-        browser.close()
+        try:
+            for name in names:
+                context = browser.new_context(
+                    base_url=HOST,
+                    viewport={"width": WIDTH, "height": 800},
+                    device_scale_factor=1,
+                )
+                page = context.new_page()
+                SHOTS[name](page, str(Path(args.out) / name))
+                print(name)
+                context.close()
+        finally:
+            browser.close()
 
 
 if __name__ == "__main__":
