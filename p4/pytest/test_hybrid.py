@@ -102,8 +102,8 @@ def hybrid(dut, base_url):
         if channel_mode(base_url, thread) != OTBR_MODE:
             set_mode(
                 dut, base_url, thread, OTBR_MODE
-            )  # a move off the C6: 202, stored once it ran
-            wait_mode(base_url, thread, OTBR_MODE)
+            )  # a move: 202; the mode is stored before Thread starts on the target, so wait for it to run
+            wait_thread(base_url, thread)
         set_mode(dut, base_url, zigbee, ZIGBEE_MODE)  # entering Zigbee: a reboot
         wait_thread(base_url, thread)
         wait_state(base_url, EXPECTED_STATE, RUNNING_TIMEOUT_S)
