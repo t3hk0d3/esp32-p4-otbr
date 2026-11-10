@@ -1,6 +1,7 @@
 // Drain of the logging component: the sinks behind the transit ring. Each record goes to USB-Serial-JTAG (when its
 // driver is installed, a host is there and its TX buffer has room, else it is dropped) and to syslog over UDP (when the
-// target is resolved, else it is dropped), counted per channel. A syslog name target is looked up again every 10 min
+// target is resolved, else it is dropped), counted per channel, and to the queue of each live viewer whose level it
+// passes (logging_viewers.c). A syslog name target is looked up again every 10 min
 // and on every settings apply; a failed lookup is retried after 5 s, doubling up to 60 s. Nothing here logs: the drain task is a sink (logging_sink_enter), and the sinks
 // count their errors instead. The sink logic is host-tested through the ops seam; the task, the ESP-IDF ops and
 // logging_drain_start are target-only.
@@ -233,6 +234,9 @@ void logging_drain_line(const logging_line_t *line, logging_levels_t lv)
     }
     if (line->level <= lv.channel[LOGGING_CH_SYSLOG]) {
         sink_syslog(line);
+    }
+    if (line->level <= lv.viewers) {
+        logging_viewers_fanout(line); // no viewer: lv.viewers is off, nothing to do
     }
 }
 

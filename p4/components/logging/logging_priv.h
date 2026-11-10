@@ -119,6 +119,19 @@ esp_err_t logging_drain_start(logging_ring_t *ring, TaskHandle_t *task);
 /** Whether logging_init has run (the settings are in force). */
 bool logging_is_initialised(void);
 
+/**
+ * Queue a drained line for each open viewer whose level it passes and wake those viewers; a full queue drops it for
+ * that viewer. Counts live_sent (a line queued for at least one viewer) and live_dropped (a line dropped for at least
+ * one viewer). Drain task only.
+ */
+void logging_viewers_fanout(const logging_line_t *line);
+
+/** The viewers' part of logging_status_t: viewers, live_sent and live_dropped (added to what is there). Any task. */
+void logging_viewers_status(logging_status_t *out);
+
+/** Close every viewer and clear the live counters (host tests). */
+void logging_viewers_reset(void);
+
 #ifdef __cplusplus
 }
 #endif

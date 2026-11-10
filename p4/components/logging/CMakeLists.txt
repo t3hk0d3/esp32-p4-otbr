@@ -1,17 +1,17 @@
 if(IDF_TARGET STREQUAL "linux")
     # Host tests cover the pure core (including the capture's routing decision), the text helpers, the transit ring
     # (FreeRTOS POSIX port spinlock), the settings store and apply (NVS and esp_log_level_set through the ops seam in
-    # logging_priv.h) and the drain's sinks (USB-JTAG, resolver and UDP through the drain ops seam). The capture
-    # (linker wraps of esp_log) and the drain task are target-only.
+    # logging_priv.h), the drain's sinks (USB-JTAG, resolver and UDP through the drain ops seam) and the live viewers.
+    # The capture (linker wraps of esp_log) and the drain task are target-only.
     idf_component_register(SRCS "logging_core.c" "logging_text.c" "logging_ring.c" "logging_settings.c"
-                                "logging_drain.c"
+                                "logging_drain.c" "logging_viewers.c"
                            INCLUDE_DIRS "include" "."
-                           REQUIRES freertos log)
+                           REQUIRES freertos log heap)
     return()
 endif()
 
 idf_component_register(SRCS "logging_core.c" "logging_text.c" "logging_ring.c" "logging_settings.c"
-                            "logging_drain.c" "logging_capture.c"
+                            "logging_drain.c" "logging_viewers.c" "logging_capture.c"
                        INCLUDE_DIRS "include" "."
                        REQUIRES freertos log
                        PRIV_REQUIRES nvs_flash esp_driver_usb_serial_jtag lwip netnames esp_timer board_cores)

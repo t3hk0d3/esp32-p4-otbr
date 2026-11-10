@@ -238,4 +238,5 @@ void logging_get_status(logging_status_t *out)
         out->dropped[ch] += __atomic_load_n(&s_ring_dropped[ch], __ATOMIC_RELAXED);
     }
     out->live_dropped += __atomic_load_n(&s_live_dropped, __ATOMIC_RELAXED);
+    logging_viewers_status(out);
 }

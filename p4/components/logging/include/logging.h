@@ -57,8 +57,8 @@ typedef struct {
     uint8_t viewers;
     uint32_t sent[LOGGING_CH_COUNT];
     uint32_t dropped[LOGGING_CH_COUNT];
-    uint32_t live_sent;    /**< Lines queued to any viewer. */
-    uint32_t live_dropped;
+    uint32_t live_sent;    /**< Lines queued for at least one viewer. */
+    uint32_t live_dropped; /**< Lines a viewer wanted that the full ring refused or a full viewer queue dropped. */
 } logging_status_t;
 
 typedef struct {
@@ -126,6 +126,35 @@ void logging_set_clock(bool (*now)(struct timeval *out));
  * pointers into a set that only grows, valid for the board's lifetime. Returns how many.
  */
 size_t logging_known_tags(const char **out, size_t cap);
+
+/** A live viewer's queue: lines wait here (PSRAM) until the viewer reads them; a full queue drops new lines. */
+#define LOGGING_VIEWER_QUEUE (8 * 1024)
+
+/** A live log viewer (a WebSocket client): its own level and queue. */
+typedef struct logging_viewer logging_viewer_t;
+
+/**
+ * Open a viewer at `level` (ESP_LOG_NONE..ESP_LOG_VERBOSE): from now on every captured line at or below it (and its
+ * component's level) is queued for it, and `wake(ctx)` (may be NULL) is called after each line queued. `wake` runs on
+ * the drain task with the viewers' lock held: it must not block, log, touch lwIP or call a logging_viewer_ function.
+ * The generation gate is recomputed (the highest open viewer level counts as a channel). The queue is
+ * LOGGING_VIEWER_QUEUE bytes of PSRAM, allocated here. NULL when LOGGING_VIEWERS_MAX viewers are open, the level is out
+ * of range or there is no memory.
+ */
+logging_viewer_t *logging_viewer_open(esp_log_level_t level, void (*wake)(void *ctx), void *ctx);
+
+/** Change a viewer's level (ignored outside ESP_LOG_NONE..ESP_LOG_VERBOSE); the gate is recomputed. */
+void logging_viewer_set_level(logging_viewer_t *viewer, esp_log_level_t level);
+
+/**
+ * Take the viewer's oldest queued line. `*dropped_since` (may be NULL) gets the lines its full queue dropped since the
+ * last call that reported drops (0 when none), whether or not a line is returned. False when the queue is empty.
+ * `out->text` stays valid until the next read or the close. One reader per viewer; read and close from the same task.
+ */
+bool logging_viewer_read(logging_viewer_t *viewer, logging_line_t *out, uint32_t *dropped_since);
+
+/** Close a viewer (NULL is ignored): no more lines, the queue is freed, the gate is recomputed. */
+void logging_viewer_close(logging_viewer_t *viewer);
 
 #ifdef __cplusplus
 }
