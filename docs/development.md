@@ -174,7 +174,7 @@ in split mode (management untagged, Thread backbone on VLAN 49):
    restart the sync (`synced` stays). **Not run.**
 
 The timesync task's stack peaked at 1260 of 3072 bytes. Known: the reply to a `PUT` shows the old `servers` and
-`source` until the task applies the change (the page corrects it on its next poll).
+`source` until the task applies the change (the page reads the status again half a second after a save).
 
 ### Radios
 

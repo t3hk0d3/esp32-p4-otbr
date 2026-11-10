@@ -249,6 +249,24 @@ class TestTimePage:
             "Saved.",
         ]
 
+    def test_save_reads_the_status_again_once_the_board_applied_it(self):
+        # On a 200 save: one more GET within a second (the PUT reply predates the change), not only the 10 s poll.
+        r = scenario(
+            page("time", routes())
+            + START
+            + """
+            const gets = () => t.calls.filter((c) => c.method !== 'PUT' && c.url === '/device/time').length;
+            const before = gets();
+            t.el('tm-custom').fire('click');
+            t.el('tm-server').value = 'ntp.home.lan'; t.el('tm-server').fire('input');
+            t.el('tm-save').fire('click'); await t.advance(100);
+            const atReply = gets();
+            await t.advance(900);
+            return [atReply - before, gets() - before];
+        """
+        )
+        assert r == [0, 1]
+
     def test_a_400_with_a_field_shows_under_that_field(self):
         # On 400 invalid_config field server: the board's detail under the server field.
         put = "{status: 400, body: {error: 'invalid_config', field: 'server', detail: 'server: not a hostname'}}"

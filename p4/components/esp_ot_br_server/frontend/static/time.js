@@ -263,6 +263,8 @@ function save() {
         if (form.mode === 'auto' && form.server === '')
           form.server = saved.server = keep;
         note('tm-msg', 'Saved.', false);
+        // The reply predates the change: the board applies it on its own task, so read the result again.
+        env.setTimeout(refresh, 500);
       }, function(e) { note('tm-msg', e.message, true); })
       .then(function() {
         saving = false;
