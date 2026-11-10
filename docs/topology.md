@@ -7,7 +7,7 @@ Two pages under **Thread** help you see what is on your Thread network.
 **Thread > Topology** draws the mesh: every router, every device attached to a router, how they connect and their
 addresses.
 
-<img src="images/topology.png" width="640" alt="Topology page: the Thread mesh with its leader and routers">
+<img src="images/topology.png" width="640" alt="Topology page after Load: the network Home on channel 15 with 12 devices, the leader living-room-lamp and the routable prefixes; the map shows this border router, routers, end devices, an Apple TV as another border router and link quality numbers">
 
 - Press **Load topology**. The board asks every router about its neighbours, children and addresses; this takes a few
   seconds (up to a few minutes for battery devices that sleep) and adds a little delay to Thread traffic while it runs,

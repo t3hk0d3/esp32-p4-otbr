@@ -1,0 +1,304 @@
+{
+ "state": "done",
+ "age_s": 5,
+ "result": {
+  "partial": false,
+  "network": {
+   "name": "Home",
+   "channel": 15,
+   "partition_id": 1243556871,
+   "leader_router_id": 9,
+   "mesh_local_prefix": "fdde:ad00:beef::/64",
+   "this_rloc16": 34816,
+   "omr_prefixes": [
+    "2001:db8:4a2:1::/64",
+    "fd7a:91c3:22e0:1::/64"
+   ]
+  },
+  "routers": [
+   {
+    "rloc16": 9216,
+    "router_id": 9,
+    "ext_address": "d61a7c03f4e2b918",
+    "version": 5,
+    "leader": true,
+    "this_device": false,
+    "border_router": false,
+    "links": [
+     {
+      "router_id": 34,
+      "lq_in": 3
+     },
+     {
+      "router_id": 23,
+      "lq_in": 2
+     },
+     {
+      "router_id": 40,
+      "lq_in": 1
+     }
+    ],
+    "addresses": [
+     "fdde:ad00:beef::ff:fe00:2400",
+     "fdde:ad00:beef::ff:fe00:fc00",
+     "fe80::d41a:7c03:f4e2:b918"
+    ],
+    "responded": true,
+    "children_detail": true,
+    "children": [
+     {
+      "rloc16": 9217,
+      "ext_address": "1c88f02ab4d6e5a3",
+      "mode": {
+       "rx_on_when_idle": false,
+       "full_thread_device": false,
+       "full_network_data": false
+      },
+      "lq_in": 3,
+      "timeout_s": 240,
+      "age_s": 12,
+      "connected_s": 86400,
+      "rssi_avg": -61,
+      "rssi_last": -63,
+      "link_margin_db": 39,
+      "frame_error_pct": 0.4,
+      "message_error_pct": 0,
+      "version": 4,
+      "csl": false,
+      "addresses": [
+       "fdde:ad00:beef::1c88:f02a:b4d6"
+      ]
+     }
+    ]
+   },
+   {
+    "rloc16": 23552,
+    "router_id": 23,
+    "ext_address": "aa00000000005c00",
+    "version": 5,
+    "leader": false,
+    "this_device": false,
+    "border_router": false,
+    "links": [
+     {
+      "router_id": 9,
+      "lq_in": 2
+     },
+     {
+      "router_id": 34,
+      "lq_in": 3
+     },
+     {
+      "router_id": 99,
+      "lq_in": 1
+     }
+    ],
+    "addresses": [
+     "fdde:ad00:beef::ff:fe00:5c00"
+    ],
+    "responded": true,
+    "children_detail": false,
+    "children": [
+     {
+      "rloc16": 23554,
+      "mode": {
+       "rx_on_when_idle": false,
+       "full_thread_device": false,
+       "full_network_data": false
+      },
+      "lq_in": 2,
+      "addresses": [],
+      "ext_address": "c200000000005c02"
+     },
+     {
+      "rloc16": 23553,
+      "mode": {
+       "rx_on_when_idle": true,
+       "full_thread_device": true,
+       "full_network_data": false
+      },
+      "lq_in": 3,
+      "addresses": [],
+      "addresses_reported": false,
+      "ext_address": "c200000000005c01"
+     }
+    ]
+   },
+   {
+    "rloc16": 34816,
+    "router_id": 34,
+    "ext_address": "bb00000000008800",
+    "version": 5,
+    "leader": false,
+    "this_device": true,
+    "border_router": true,
+    "links": [
+     {
+      "router_id": 9,
+      "lq_in": 3
+     },
+     {
+      "router_id": 40,
+      "lq_in": 2
+     }
+    ],
+    "addresses": [
+     "fdde:ad00:beef::ff:fe00:8800",
+     "2001:db8:4a2:1::1"
+    ],
+    "responded": true,
+    "children_detail": true,
+    "children": [
+     {
+      "rloc16": 34817,
+      "ext_address": "c100000000008801",
+      "mode": {
+       "rx_on_when_idle": true,
+       "full_thread_device": false,
+       "full_network_data": false
+      },
+      "lq_in": 3,
+      "timeout_s": 240,
+      "age_s": 12,
+      "connected_s": 86400,
+      "rssi_avg": -61,
+      "rssi_last": -63,
+      "link_margin_db": 39,
+      "frame_error_pct": 0.4,
+      "message_error_pct": 0,
+      "version": 4,
+      "csl": false,
+      "addresses": [
+       "2001:db8:4a2:1::8801"
+      ]
+     },
+     {
+      "rloc16": 34818,
+      "ext_address": "c100000000008802",
+      "mode": {
+       "rx_on_when_idle": false,
+       "full_thread_device": false,
+       "full_network_data": false
+      },
+      "lq_in": 2,
+      "timeout_s": 240,
+      "age_s": 12,
+      "connected_s": 86400,
+      "rssi_avg": -61,
+      "rssi_last": -63,
+      "link_margin_db": 39,
+      "frame_error_pct": 0.4,
+      "message_error_pct": 0,
+      "version": 4,
+      "csl": false,
+      "addresses": [
+       "fd7a:91c3:22e0:1::77"
+      ]
+     },
+     {
+      "rloc16": 34819,
+      "ext_address": "c100000000008803",
+      "mode": {
+       "rx_on_when_idle": false,
+       "full_thread_device": false,
+       "full_network_data": false
+      },
+      "lq_in": 1,
+      "timeout_s": 240,
+      "age_s": 12,
+      "connected_s": 86400,
+      "rssi_avg": -61,
+      "rssi_last": -63,
+      "link_margin_db": 39,
+      "frame_error_pct": 0.4,
+      "message_error_pct": 0,
+      "version": 4,
+      "csl": false,
+      "addresses": [
+       "fdde:ad00:beef::8803:1",
+       "fe80::1"
+      ]
+     }
+    ]
+   },
+   {
+    "rloc16": 40960,
+    "router_id": 40,
+    "ext_address": "dd0000000000a000",
+    "version": 5,
+    "leader": false,
+    "this_device": false,
+    "border_router": false,
+    "links": [
+     {
+      "router_id": 9,
+      "lq_in": 3
+     },
+     {
+      "router_id": 34,
+      "lq_in": 2
+     }
+    ],
+    "addresses": [
+     "fdde:ad00:beef::ff:fe00:a000"
+    ],
+    "responded": true,
+    "children_detail": true,
+    "children": [
+     {
+      "rloc16": 40961,
+      "ext_address": "e1000000000a0001",
+      "mode": {
+       "rx_on_when_idle": false,
+       "full_thread_device": false,
+       "full_network_data": false
+      },
+      "lq_in": 3,
+      "timeout_s": 240,
+      "age_s": 12,
+      "connected_s": 86400,
+      "rssi_avg": -61,
+      "rssi_last": -63,
+      "link_margin_db": 39,
+      "frame_error_pct": 0.4,
+      "message_error_pct": 0,
+      "version": 4,
+      "csl": false,
+      "addresses": [
+       "2001:db8:4a2:1:2be4:6c19:a0f7:3381"
+      ]
+     }
+    ]
+   },
+   {
+    "rloc16": 54272,
+    "router_id": 53,
+    "ext_address": "ee0000000000d400",
+    "leader": false,
+    "this_device": false,
+    "border_router": true,
+    "links": [],
+    "addresses": [
+     "fdde:ad00:beef::ff:fe00:d400"
+    ],
+    "responded": true,
+    "children_detail": true,
+    "children": []
+   }
+  ],
+  "srp_hosts": [
+   {
+    "name": "kitchen-plug",
+    "addresses": [
+     "2001:db8:4a2:1:2be4:6c19:a0f7:3381"
+    ],
+    "services": [
+     {
+      "instance": "kitchen-plug",
+      "type": "_matter._tcp"
+     }
+    ]
+   }
+  ]
+ }
+}

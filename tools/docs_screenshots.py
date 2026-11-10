@@ -3,12 +3,13 @@
 
 Start the preview first (replaying the recording, or with --record against a board), then:
 
-    uv run --with playwright tools/docs_screenshots.py [--base http://localhost:8766] [name ...]
+    uv run --with playwright --with pillow tools/docs_screenshots.py [--base http://localhost:8766] [name ...]
 
 The pages see the board as esp-otbr-a1b2c3.local. It uses the system Chromium (/usr/bin/chromium; --chromium for another). Without names it takes every shot below.
 """
 
 import argparse
+import json
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -21,13 +22,16 @@ WIDTH = 1200
 HOST = "http://esp-otbr-a1b2c3.local"
 
 
-def page_shot(path, height=None):
-    """A full-page screenshot of `path` (or the top `height` pixels)."""
+def page_shot(path, height=None, before=None):
+    """A full-page screenshot of `path` (or the top `height` pixels), after the optional `before(page)`."""
 
     def shoot(page, out):
         page.goto(path)
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1500)
+        if before:
+            before(page)
+            page.wait_for_timeout(1500)
         if height:
             page.screenshot(
                 path=out, clip={"x": 0, "y": 0, "width": WIDTH, "height": height}
@@ -64,6 +68,45 @@ def pick_thread(page):
     page.locator("#track").get_by_text("Thread border router", exact=True).first.click()
 
 
+NAMES = REPO / "tools" / "docs_preview" / "topology-names.json"
+
+
+def load_topology(page):
+    page.locator("#t-load").click()
+
+
+def load_topology_map(page):
+    load_topology(page)
+    page.wait_for_timeout(1500)
+    page.evaluate(
+        "window.scrollTo(0, document.getElementById('t-map-card').getBoundingClientRect().top + window.scrollY - 66)"
+    )
+
+
+def view_shot(path, before=None):
+    """The browser viewport at `path`, for the landing page's carousel (HOME_VIEW, saved as WebP)."""
+
+    def shoot(page, out):
+        from PIL import Image
+
+        page.goto(path)
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(1500)
+        if before:
+            before(page)
+            page.wait_for_timeout(1500)
+        png = out + ".png"
+        page.screenshot(path=png)
+        Image.open(png).save(out, quality=82, method=6)
+        Path(png).unlink()
+
+    shoot.view = HOME_VIEW
+    return shoot
+
+
+# the landing page's screenshots: 800 x 562 CSS pixels at twice the density, 1600 x 1125 images
+HOME_VIEW = {"viewport": {"width": 800, "height": 562}, "device_scale_factor": 2}
+
 SHOTS = {
     "dashboard.png": page_shot("/"),
     "radios.png": page_shot("/radios.html", 560),
@@ -77,6 +120,11 @@ SHOTS = {
     "diagnostics.png": page_shot("/diagnostics.html"),
     "ethernet.png": page_shot("/ethernet.html", 900),
     "ethernet-trel.png": element_shot("/ethernet.html", "#trel"),
+    "topology.png": page_shot("/topology.html", 1100, load_topology),
+    "home/dashboard.webp": view_shot("/"),
+    "home/topology.webp": view_shot("/topology.html", load_topology_map),
+    "home/diagnostics.webp": view_shot("/diagnostics.html"),
+    "home/ethernet.webp": view_shot("/ethernet.html"),
 }
 
 
@@ -101,10 +149,20 @@ def main():
         )
         try:
             for name in names:
-                context = browser.new_context(
-                    base_url=HOST,
-                    viewport={"width": WIDTH, "height": 800},
-                    device_scale_factor=1,
+                view = getattr(
+                    SHOTS[name],
+                    "view",
+                    {
+                        "viewport": {"width": WIDTH, "height": 800},
+                        "device_scale_factor": 1,
+                    },
+                )
+                context = browser.new_context(base_url=HOST, **view)
+                # the sample mesh's device names, as the Topology page keeps them (localStorage)
+                context.add_init_script(
+                    "localStorage.setItem('topology:names', "
+                    + json.dumps(NAMES.read_text())
+                    + ")"
                 )
                 page = context.new_page()
                 SHOTS[name](page, str(Path(args.out) / name))

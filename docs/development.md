@@ -312,10 +312,12 @@ Diagrams and screenshots are made by scripts, so they can be retaken after a UI 
 - `python3 tools/docs_diagrams.py docs/images` writes the SVG diagrams.
 - `python3 tools/docs_preview.py` serves this checkout's web UI on `http://localhost:8766/` with the board answers
   recorded in `tools/docs_preview/recording.json` (`--record http://<board>` records new ones: only GETs reach the
-  board, and network keys and global IPv6 addresses are scrubbed). With it running,
-  `uv run --with playwright tools/docs_screenshots.py [name ...]` takes the screenshots into `docs/images/`, with the
-  board shown as `esp-otbr-a1b2c3.local`. Screenshots that need state the recording doesn't have (a radio fault, a
-  network trial, Home Assistant's own dialogs) are taken by hand.
+  board, and network keys and global IPv6 addresses are scrubbed). The Topology page gets a sample home mesh,
+  `tools/docs_preview/topology.json`, whose device names are in `topology-names.json`.
+- With the preview running, `uv run --with playwright --with pillow tools/docs_screenshots.py [name ...]` takes the
+  screenshots into `docs/images/`, the landing page's ones (`home/*.webp`) included, with the board shown as
+  `esp-otbr-a1b2c3.local`. Screenshots that need state the recording doesn't have (a radio fault, a network trial,
+  Home Assistant's own dialogs) are taken by hand.
 
 `.github/workflows/docs.yml` builds the site on pull requests that touch the docs and publishes it from `master` and
 after every successful `v*` build. Before publishing, `make docs-firmware` puts the P4 images of the latest release and

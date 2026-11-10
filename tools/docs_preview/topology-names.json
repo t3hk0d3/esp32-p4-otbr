@@ -1,0 +1,13 @@
+{
+ "d61a7c03f4e2b918": "living-room-lamp",
+ "1c88f02ab4d6e5a3": "kitchen-sensor",
+ "aa00000000005c00": "office-plug",
+ "c200000000005c02": "bathroom-leak",
+ "c200000000005c01": "garage-door",
+ "c100000000008801": "hallway-motion",
+ "c100000000008802": "front-door-lock",
+ "c100000000008803": "stairs-motion",
+ "dd0000000000a000": "porch-light",
+ "e1000000000a0001": "bedroom-blinds",
+ "ee0000000000d400": "Apple TV"
+}

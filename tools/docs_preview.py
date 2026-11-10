@@ -7,6 +7,9 @@ reach the board, GET /device/update is passed without `check`, and the GETs that
 WebSocket are never passed, so recording changes nothing on the board. Other
 methods answer 409 `preview` (or the canned answers below), so pressing a button changes nothing.
 
+The Topology page gets a sample home mesh (tools/docs_preview/topology.json, cut down from the page's test fixture)
+instead of a scan of the board; tools/docs_screenshots.py names its devices (topology-names.json).
+
 Secrets are scrubbed while recording: network keys and PSKc in JSON, and the network key TLV of hex datasets, become
 a fixed dummy key; global IPv6 addresses move into the documentation prefix 2001:db8::/32. --scrub rewrites an
 existing recording the same way.
@@ -29,6 +32,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 FRONTEND = REPO / "p4" / "components" / "esp_ot_br_server" / "frontend"
 RECORDING = REPO / "tools" / "docs_preview" / "recording.json"
+TOPOLOGY = REPO / "tools" / "docs_preview" / "topology.json"
 DUMMY_KEY = "00112233445566778899aabbccddeeff"
 SECRET_KEY = re.compile(r"(network_?key|pskc)", re.IGNORECASE)
 HEX = re.compile(r"^[0-9a-fA-F]{32,}$")
@@ -156,6 +160,11 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    @staticmethod
+    def topology():
+        """The sample mesh (a finished scan) the Topology page shows."""
+        return json.loads(TOPOLOGY.read_text())
+
     def is_static(self, path):
         return path == "/" or (FRONTEND / path.lstrip("/")).is_file()
 
@@ -165,6 +174,9 @@ class Handler(SimpleHTTPRequestHandler):
             super().do_GET()
             return
         key = request_key(self.path)
+        if path == "/device/topology":
+            self.send(200, "application/json", json.dumps(self.topology()).encode())
+            return
         if path in NEVER_FORWARD:
             self.send(
                 409,
@@ -213,6 +225,9 @@ class Handler(SimpleHTTPRequestHandler):
         self.rfile.read(int(self.headers.get("Content-Length") or 0))
         if self.path.split("?", 1)[0] == "/ping":
             self.send(200, "application/json", json.dumps(PING).encode())
+            return
+        if self.path.split("?", 1)[0] == "/device/topology":
+            self.send(202, "application/json", json.dumps(self.topology()).encode())
             return
         self.send(
             409,

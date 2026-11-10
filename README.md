@@ -84,7 +84,7 @@ down, the others keep the network reachable.
 <table>
   <tr>
     <td width="25%"><img src="docs/images/dashboard.png" alt="Dashboard while the border router runs: Board OK with uptime and Reboot; cards for the radios (ESP32-C6 runs Thread, USB radio off), Ethernet, board firmware, load and memory; Border router running, router of ha-thread-bbc1 on channel 15, with cards for the Thread network, identifiers, the radio co-processor, Home Assistant, prefix delegation, packet capture and the Thread addresses; Zigbee not active"></td>
-    <td width="25%"><img src="docs/images/topology.png" alt="Topology page: the Thread mesh with its leader and routers"></td>
+    <td width="25%"><img src="docs/images/topology.png" alt="Topology page: a home Thread mesh with the leader, routers, end devices and link quality"></td>
     <td width="25%"><img src="docs/images/diagnostics.png" alt="Diagnostics: CPU load per core, memory, OpenThread lock timings and tasks"></td>
     <td width="25%"><img src="docs/images/capture.png" alt="Packet capture page: channel, length and a curl-to-Wireshark command"></td>
   </tr>
