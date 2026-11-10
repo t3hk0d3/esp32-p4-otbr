@@ -82,7 +82,9 @@ The orchestrator's binding rule "Thread and Zigbee never both bound" (`radio_mux
 - the firmware fit: both need spinel RCP firmware, which the C6 and the supported dongles have.
 
 So a PUT of `ziggurat` on the dongle while Thread runs on the C6 binds Zigbee next to Thread, and the reverse. A PUT of
-`otbr` on the channel that runs Zigbee is a move of Thread onto that channel, and unbinds Zigbee from it (below).
+`otbr` on the channel that runs Zigbee is a move of Thread onto that channel, and unbinds Zigbee from it: since leaving
+Zigbee reboots, this move is a reboot, not a live move, and the new Thread radio and the old one (now off) are stored in
+one commit, so the boot-time rule for a mode stored twice cannot put Thread back on the old radio.
 
 ### 5.2 Reboots
 
