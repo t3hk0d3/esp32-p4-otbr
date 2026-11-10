@@ -58,9 +58,13 @@ static _Atomic uint8_t s_new_addr;
 // Network task only: the opened device and its interfaces claimed in esp-usb (a bit stays set after a release that
 // failed; the next claim or the close releases it again).
 static usb_device_handle_t s_dev;
-static uint8_t s_dev_addr;
+static _Atomic uint8_t s_dev_addr; // also read by the USB task (DEV_GONE)
 static uint32_t s_claimed[IFACE_BITMAP_WORDS];
 static atomic_bool s_dev_open; // read by the USB task (root port power-on)
+// Set by the USB task when esp-usb reports the open device gone, cleared by usbip_usb_open. Once the hub has seen the
+// disconnect, its port is in recovery: powering it off then would make esp-usb abort when the device is freed
+// (root_port_recycle finds an unpowered port), so port_power_cycle leaves the port to esp-usb's own recovery.
+static atomic_bool s_gone;
 
 // Network task only: the live DMA transfers, found by their data buffer (alloc returns the buffer, free and submit get
 // it back). Bounded, so the events queue can always take every completion.
@@ -133,9 +137,17 @@ static void client_event_cb(const usb_host_client_event_msg_t *msg, void *arg)
         atomic_store(&s_new_addr, msg->new_dev.address);
         post_dev(USBIP_EV_DEV_NEW);
         break;
-    case USB_HOST_CLIENT_EVENT_DEV_GONE: // the device we hold
+    case USB_HOST_CLIENT_EVENT_DEV_GONE: { // the device we hold (only owners get it)
+        uint8_t addr = atomic_load(&s_dev_addr);
+
+        atomic_store(&s_gone, true);
+        // Reported here; a later DEV_REMOVED for its address is not a second GONE.
+        if (addr != 0) {
+            atomic_compare_exchange_strong(&s_new_addr, &addr, 0);
+        }
         post_dev(USBIP_EV_DEV_GONE);
         break;
+    }
     case USB_HOST_CLIENT_EVENT_DEV_REMOVED: { // a device we do not hold (unsupported, or its open failed)
         uint8_t addr = msg->dev_removed.address;
 
@@ -182,6 +194,11 @@ static void power_restore_check(void)
 static void port_power_cycle(void *ctx)
 {
     (void)ctx;
+    if (s_dev == NULL || atomic_load(&s_gone)) {
+        // Gone already: the hub recovers and powers the port itself, and the next device enumerates as usual.
+        ESP_LOGI(TAG, "root port left on: the device is gone");
+        return;
+    }
     xSemaphoreTake(s_power_lock, portMAX_DELAY);
     esp_err_t err = usb_host_lib_set_root_port_power(false);
 
@@ -288,8 +305,12 @@ esp_err_t usbip_usb_start(QueueHandle_t events)
 
 /* ---- transfers (network task) ---- */
 
+// The slot of the live transfer whose data buffer is buf; -1 when none.
 static int xfer_slot(const void *buf)
 {
+    if (buf == NULL) {
+        return -1;
+    }
     for (int i = 0; i < USBIP_USB_XFERS_MAX; i++) {
         if (s_xfers[i] != NULL && s_xfers[i]->data_buffer == buf) {
             return i;
@@ -307,10 +328,15 @@ static void *ops_alloc(void *ctx, size_t n, bool dma)
     if (!dma) {
         return heap_caps_malloc(n, MALLOC_CAP_SPIRAM);
     }
-    int slot = xfer_slot(NULL);
+    int slot = -1;
 
+    for (int i = 0; i < USBIP_USB_XFERS_MAX && slot < 0; i++) {
+        if (s_xfers[i] == NULL) {
+            slot = i;
+        }
+    }
     if (slot < 0) {
-        ESP_LOGW(TAG, "%d DMA transfers alive: allocation refused", USBIP_USB_XFERS_MAX);
+        ESP_LOGW(TAG, "all %d DMA transfer slots in use: allocation refused", USBIP_USB_XFERS_MAX);
         return NULL;
     }
     usb_transfer_t *t = NULL;
@@ -543,6 +569,7 @@ esp_err_t usbip_usb_open(usbip_dev_rec_t *rec, const uint8_t **cfg, size_t *cfg_
     }
     s_dev = dev;
     s_dev_addr = addr;
+    atomic_store(&s_gone, false);
     atomic_store(&s_dev_open, true);
 
     const usb_device_desc_t *dd = NULL;
@@ -596,10 +623,8 @@ void usbip_usb_close(void)
         ESP_LOGE(TAG, "closing the device: %s", esp_err_to_name(err));
         return;
     }
-    uint8_t addr = s_dev_addr;
-
-    // Its unplug is not reported any more (a DEV_REMOVED for its address would otherwise read as a second GONE).
-    atomic_compare_exchange_strong(&s_new_addr, &addr, 0);
+    // s_new_addr stays: if the device is still there (an open that failed), its unplug comes as DEV_REMOVED and is
+    // reported as USBIP_EV_DEV_GONE. A device that went while open cleared it on DEV_GONE.
     s_dev = NULL;
     s_dev_addr = 0;
     memset(s_claimed, 0, sizeof(s_claimed));

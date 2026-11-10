@@ -54,13 +54,16 @@ esp_err_t usbip_usb_start(QueueHandle_t events);
 //   xfer's native handle and lives as long as the buffer: free(buf) frees both. alloc(n, false) is PSRAM.
 // - iface_release waits (bounded) until the interface's flushed transfers have come back to the USB task.
 // - port_power_cycle turns the root port off now; the USB task turns it on again once the device is closed and freed.
+//   When esp-usb already reported the device gone it does nothing (esp-usb recovers and powers the port itself).
 const usbip_engine_ops_t *usbip_usb_ops(void);
 
 // Opens the device of the last USBIP_EV_DEV_NEW, builds its record (usbip_core_dev_record) and checks that every
 // interface of the active configuration can be claimed at alternate setting 0 (claimed and released again: the engine
 // claims them when a session starts). cfg points at esp-usb's copy of the active configuration descriptor, valid until
 // usbip_usb_close. On an error the device is not held and why says what failed (the unsupported reason);
-// ESP_ERR_INVALID_STATE while a device is open, ESP_ERR_NOT_FOUND when none was reported.
+// ESP_ERR_INVALID_STATE while a device is open: a second USBIP_EV_DEV_NEW for the same device (usbip_usb_start can
+// report one that the client's own NEW_DEV also reports) is then a no-op for net.c. ESP_ERR_NOT_FOUND when none was
+// reported.
 esp_err_t usbip_usb_open(usbip_dev_rec_t *rec, const uint8_t **cfg, size_t *cfg_len, char *why, size_t cap);
 
 // Releases what is still claimed and closes the device. Stop the engine first: cfg becomes invalid. No-op without a
