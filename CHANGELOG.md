@@ -9,6 +9,12 @@ release's `versions.txt`.
 
 ### Added
 
+- USB/IP server: the device on the USB-A port is exported over the network (TCP 3240, bus id `1-1`, one client) and
+  attaches on Linux (`usbip attach -r <board> -b 1-1`) or Windows (usbip-win2). Off by default; turning it on or off
+  reboots the board and is refused while a USB channel runs `otbr` or `ziggurat` (409 `usb_channel_in_use`). While on,
+  the USB channels are `unavailable` and their mode changes get 409 `usbip_enabled`. No isochronous transfers, no hubs,
+  one configuration, no authentication or encryption. New `GET`/`PUT /device/usbip`, a USB/IP page and the `usbip`
+  flag in `GET /device/channels`. See `docs/usbip.md`. Not yet checked on a board.
 - Logging: one log stream (ESP-IDF components, OpenThread and Ziggurat) out on four channels with their own levels:
   UART (as before), USB-JTAG (header pins 27/28, needs a USB breakout), syslog over UDP (RFC 5424, `host[:port]`, a
   hostname is looked up again) and a live log in the browser (at most 2 viewers, each with its own level). Per-component

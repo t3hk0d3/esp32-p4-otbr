@@ -301,7 +301,7 @@ longer accepted) and a USB dongle (`usb-<vid>-<pid>`, plus `-<serial>` when the 
 reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /device/channels` answers
 
 ```
-{"available_modes": ["off", "otbr", "rcp-proxy", "ziggurat"],
+{"available_modes": ["off", "otbr", "rcp-proxy", "ziggurat"], "usbip": false,
  "channels": [
   {"id": "builtin-c6", "kind": "builtin", "label": "ESP32-C6 (built-in)", "mode": "otbr", "stored_mode": "otbr",
    "state": "running", "error": null, "line": {"baud": 460800, "flow_control": false}, "usb": null,
@@ -330,6 +330,8 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
  ]}
 ```
 
+- `usbip` is `true` while the [USB/IP server](usbip.md) is on: the USB channels are then `unavailable` with
+  `channel_reason` "USB is exported over USB/IP".
 - `available_modes` are the modes the build offers (those with a registered instance: `off`, `otbr`, `rcp-proxy` and
   `ziggurat`).
 - `mode` is what the channel does now: `unavailable` (reported only: not detected, unplugged, no driver), `off`,
@@ -380,6 +382,7 @@ settings are stored and applied at once, also for an unplugged radio.
 | 409 `mode_taken` | the mode is at its channel limit (one radio runs Thread, one runs Zigbee; both may run at once on different radios) |
 | 409 `probe_failed` | the target of a move or start did not answer as a spinel RCP, or runs `rcp-proxy` ("set it off first"); nothing changed |
 | 409 `port_taken` | the channel would listen in `rcp-proxy` on the adapter and port another channel stored in `rcp-proxy` listens on (also an unplugged one); `detail` names the port and that channel; nothing changed |
+| 409 `usbip_enabled` | a mode change on a USB channel while USB/IP is on (line and proxy settings are still accepted) |
 | 409 `busy` | an update, a firmware push, a recovery or another move runs, a mode is changed during a move, or the board is stopping or starting OpenThread on its radio (after an unplug, a plug-in) |
 | 500 `failed` | the mux is not started, storage failed or a probe took too long |
 | 503 `mux_busy` | the radio mux took the change but did not answer within 5 s; a mode, speed or proxy change may still be applied, a start, move or stop will not (read the channel again) |
@@ -393,6 +396,42 @@ switch back, a PUT of `otbr` on the target retries and one on another channel mo
 the board reboots. A refused stop leaves the
 channel `running` in `otbr` with `error` `drain_timeout`. Poll
 `GET /device/channels` after a 202. While OpenThread starts on its channel, that channel shows `starting`.
+
+### USB/IP
+
+The board can export the device on its USB-A port with USB/IP (TCP 3240); see [USB/IP server](usbip.md).
+`GET /device/usbip` answers:
+
+```
+{"enabled": true, "active": true, "pending_reboot": false,
+ "state": "attached", "reason": null,
+ "port": 3240, "interface": "mgmt",
+ "device": {"busid": "1-1", "vid": "10c4", "pid": "ea60", "bcd_device": "0100", "class": "00",
+            "speed": "full", "manufacturer": "Silicon Labs", "product": "CP2102N USB to UART Bridge Controller",
+            "serial": "abc123", "interfaces": 1, "endpoints": 2},
+ "client": {"addr": "192.168.10.20:51322", "since": 1762790000},
+ "counters": {"sessions": 3, "refused": 1, "submits": 12000, "completed": 11950, "errors": 2, "unlinks": 48,
+              "bytes_in": 1048576, "bytes_out": 65536, "sessions_ended_overload": 0},
+ "memory": {"inflight_bytes": 4096, "inflight_peak": 16384, "waiting_bytes": 0, "waiting_peak": 2048},
+ "last_error": null}
+```
+
+- `enabled` is the stored value, `active` whether USB/IP owns the port this boot, `pending_reboot` when they differ.
+- `state` is `off`, `blocked`, `no_device`, `unsupported`, `exportable` or `attached`; `reason` explains `blocked` and
+  `unsupported` and is `null` otherwise.
+- `interface` is `single` or `mgmt`. `device` is `null` without a device, `client` without a session (`since` in
+  epoch seconds, 0 when the clock is not set). `speed` is `low`, `full`, `high` or `unknown`.
+- `counters` and `memory` (bytes) count since boot.
+
+`PUT /device/usbip` takes `{"enabled": true|false}`, answered `{"reboot": true}` when the board reboots, or
+`{"kick": true}`, which drops the current client and answers `{}` (also without a session; not stored).
+
+| Reply | Meaning |
+| --- | --- |
+| 200 | applied |
+| 400 `bad_value` | the body is not one of the two forms |
+| 409 `usb_channel_in_use` | switching on while a USB channel's stored mode is `otbr` or `ziggurat`; `detail` is "`<id>` runs `<mode>`: move it or switch it off first" |
+| 409 `busy` | a long operation (update, firmware push, move) runs |
 
 ### Zigbee coordinator (experimental)
 
