@@ -33,8 +33,8 @@ from test_vlan import (  # noqa: F401  (fixtures of the VLAN rig)
 RUNNING_ROLES = ("leader", "router", "child")
 STATE_TIMEOUT_S = 120
 LINE_WAIT_S = 20
-SLOW_IDLE_S = 20
-SLOW_READ_S = 8
+SLOW_IDLE_S = 12  # well inside the 30 s "no answer" close: the stalled viewer answers no ping meanwhile
+SLOW_READ_S = 20
 NO_ANSWER_CLOSE_S = 50
 SYSLOG_WAIT_S = 20
 UNRESOLVED_WAIT_S = 60
@@ -270,7 +270,11 @@ class RawViewer:
         assert head.split()[1] == b"101", head
 
     def frames(self, seconds):
-        """(opcode, payload) of the frames that arrive within `seconds`; pings are answered."""
+        """(opcode, payload) of the frames that arrive within `seconds`; pings are answered.
+
+        Starts with a ping of its own: after a stall the board learns the reopened window from any segment the client
+        sends, instead of at its next zero-window probe (whose interval grew during the stall)."""
+        self.sock.sendall(bytes([0x89, 0x80]) + bytes(4))
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
             frame = self._parse()
@@ -581,26 +585,37 @@ class TestLiveLog:
         assert code == 1001 and reason == "no answer"
         assert elapsed < NO_ANSWER_CLOSE_S
 
-    def test_slow_viewer_drops(self, board_ip, ws_url, ot_running, logging_settings):
-        # On a viewer that reads nothing for 20 s under `*` at debug: it gets a "# dropped" frame once it reads
-        # again; the viewer that kept reading gets none.
+    def test_slow_viewer_drops(
+        self, board_ip, ws_url, console_ws, ot_running, logging_settings
+    ):
+        # On a viewer that reads nothing for 12 s under `*` at debug, with console commands sent back to back as the
+        # load: it gets a "# dropped" frame once it reads again; the viewer that kept reading gets none. (`*` at
+        # debug alone is ~1 KB/s on a quiet board, less than its socket buffers and 8 KB queue hold.)
         logging_settings({"components": {"*": "debug"}})
         slow = RawViewer(board_ip, "debug")
+
+        async def load(session, until):
+            while time.monotonic() < until:
+                await poke(session, console_ws)
 
         async def go():
             async with aiohttp.ClientSession() as session:
                 fast = await session.ws_connect(f"{ws_url}?level=debug")
+                loader = asyncio.create_task(
+                    load(session, time.monotonic() + SLOW_IDLE_S)
+                )
                 lines = await collect(fast, SLOW_IDLE_S)
+                await loader
                 await fast.close()
                 return lines
 
         try:
             fast_frames = asyncio.run(go())
-            notices = [
-                payload.decode()
-                for opcode, payload in slow.frames(SLOW_READ_S)
-                if opcode == 1 and payload.startswith(b"# dropped ")
-            ]
+            notices = []
+            for opcode, payload in slow.frames(SLOW_READ_S):
+                if opcode == 1 and payload.startswith(b"# dropped "):
+                    notices.append(payload.decode())
+                    break
         finally:
             slow.close()
         assert notices, "the slow viewer was never told about drops"

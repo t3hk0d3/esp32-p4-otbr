@@ -92,8 +92,9 @@ Lines look like the UART's:
 I (813120) radio_mux: channel up
 ```
 
-- `# dropped <n> lines` means this viewer lost lines because they came faster than it read them. A slow viewer is never
-  disconnected for being slow.
+- `# dropped <n> lines` means this viewer lost lines because they came faster than it read them. A slow viewer is not
+  disconnected for being slow, only when it answers none of the board's pings for 30 s (a client that stopped
+  reading altogether).
 - At most **2 viewers** at once; a third is refused.
 - Debug and verbose lines of the board's own network stack (the web server, Ethernet, lwIP, `select()`) never reach a
   viewer or syslog: sending them would make more of them, without end. Use the UART or USB-JTAG for those.
