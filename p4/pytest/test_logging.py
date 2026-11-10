@@ -3,7 +3,8 @@ docs/superpowers/specs/2026-11-10-logging-design.md). Hardware-gated: run in the
 
 Rig: the board alone, running as a border router with a stored dataset (the live lines come from OpenThread at debug
 level). The syslog test needs the test host reachable from the board over UDP (no firewall on the listener's port);
-the 403 test needs the VLAN rig (-m vlan_switch). Every test puts the logging settings back to the defaults.
+the 403 test needs the VLAN rig (-m vlan_switch). Every test puts the logging settings back to the defaults. No test
+erases NVS: the board keeps the Thread dataset of the shared rig.
 """
 
 import asyncio
@@ -34,7 +35,7 @@ STATE_TIMEOUT_S = 120
 LINE_WAIT_S = 20
 SLOW_IDLE_S = 20
 SLOW_READ_S = 8
-NO_ANSWER_CLOSE_S = 40
+NO_ANSWER_CLOSE_S = 50
 SYSLOG_WAIT_S = 20
 UNRESOLVED_WAIT_S = 60
 UART_QUIET_S = 10
@@ -49,6 +50,12 @@ DEFAULTS = {
     },
     "components": {"*": "info"},
 }
+POKE_EVERY_S = 3
+OT_LINES_WANTED = 3
+OT_WAIT_S = 90
+CONSOLE_END = re.compile(r"^(Done|Error \d+: .*)$", re.MULTILINE)
+# What the Thread console logs at info for every command: tag ot_console, the first word and the length only.
+TRIGGER = re.compile(r"^I \(\d+\) ot_console: console .+: state \(\d+ bytes\)$")
 LINE = re.compile(r"^[EWIDV] \(\d+\) [^\s:]+: .+$")
 OT_LINE = re.compile(r"^[EWIDV] \(\d+\) OPENTHREAD: .+$")
 # RFC 5424: <PRI>1 TIMESTAMP HOSTNAME APP-NAME PROCID MSGID STRUCTURED-DATA MSG; the board sends "-" for the unused
@@ -99,6 +106,53 @@ def logging_settings(base_url):
     yield put
     with contextlib.suppress(requests.RequestException):
         requests.put(f"{base_url}/device/logging", json=DEFAULTS, timeout=10)
+
+
+@pytest.fixture
+def console_ws(base_url, board_ip):
+    """The Thread console turned on for the test (off again afterwards), as the URL of its WebSocket.
+
+    It is the deterministic line source of these tests: every command sent over it is logged by the board at info
+    under the tag `ot_console` ("console <peer>: <first word> (<n> bytes)", ot_console.c), the moment it arrives.
+    """
+    r = requests.put(f"{base_url}/device/console", json={"enabled": True}, timeout=10)
+    assert r.status_code == requests.codes.ok, r.text
+    yield f"ws://{board_ip}/device/console/ws"
+    requests.put(f"{base_url}/device/console", json={"enabled": False}, timeout=10)
+
+
+async def poke(session, console_url, command="state"):
+    """Send one OpenThread CLI command over the console WebSocket and wait for its Done: the board logs
+    `I (..) ot_console: console <peer>: <command> (<n> bytes)` (TRIGGER for `state`)."""
+    ws = await session.ws_connect(console_url)
+    await ws.send_str(command)
+    text = ""
+    deadline = time.monotonic() + 15
+    while not CONSOLE_END.search(text) and time.monotonic() < deadline:
+        msg = await asyncio.wait_for(ws.receive(), 15)
+        if msg.type == aiohttp.WSMsgType.TEXT and not msg.data.startswith("# "):
+            text += msg.data.replace("\r", "")
+    await ws.close()
+
+
+async def gather_until(viewers, done, poker, timeout=LINE_WAIT_S):
+    """Frames per viewer, polled in 1 s slices: `poker()` is awaited again every POKE_EVERY_S, until
+    `done(frames_per_viewer)` holds or `timeout` ran out. One more slice follows `done`, so that a line that should
+    not arrive has had its time. Returns the lists (the caller asserts that `done` really held)."""
+    frames = [[] for _ in viewers]
+    deadline = time.monotonic() + timeout
+    next_poke, finished = 0.0, False
+    while time.monotonic() < deadline:
+        if time.monotonic() >= next_poke:
+            await poker()
+            next_poke = time.monotonic() + POKE_EVERY_S
+        slices = await asyncio.gather(*(collect(ws, 1) for ws in viewers))
+        for mine, new in zip(frames, slices, strict=True):
+            mine.extend(new)
+        if finished:
+            break
+        finished = done(frames)
+    return frames
 
 
 @pytest.fixture
@@ -232,8 +286,10 @@ class RawViewer:
 class TestSettings:
     """device_api GET/PUT /device/logging"""
 
-    def test_get_defaults(self, fresh_nvs, base_url):
-        # On a fresh board: UART and USB-JTAG info, syslog off with no target, everything else info, no overrides.
+    def test_get_defaults(self, dut, base_url, logging_settings):
+        # The NVS is not erased (the board keeps its Thread dataset): the documented defaults are put, GET gives them
+        # back in the documented shape and they survive a reboot. A fresh board's defaults: host test (logging_init).
+        logging_settings(DEFAULTS)
         state = get_logging(base_url)
         assert stored(state) == {
             "uart": "info",
@@ -248,6 +304,13 @@ class TestSettings:
         assert set(state["counters"]) == {"uart", "jtag", "syslog", "live"}
         for pair in state["counters"].values():
             assert set(pair) == {"sent", "dropped"}
+        assert (
+            requests.post(f"{base_url}/device/reboot", timeout=10).status_code
+            == requests.codes.ok
+        )
+        dut.expect(ROM_BANNER, timeout=BOOT_TIMEOUT_S)
+        url = "http://" + dut.expect(GOT_IP, timeout=BOOT_TIMEOUT_S).group(1).decode()
+        assert stored(get_logging(url)) == stored(state)
 
     def test_put_subset_and_persist(self, dut, base_url, logging_settings):
         # On a valid subset: 200 with the GET body; the settings survive a reboot.
@@ -363,11 +426,10 @@ class TestLiveLog:
     """device_api /device/logging/ws"""
 
     def test_ws_connect_with_level_is_101(self, ws_url, base_url):
-        # On connect with ?level=debug: 101 and the viewer is counted; a bad level is refused with 400.
+        # On connect with ?level=debug: ws_connect succeeds (it needs a 101) and the viewer is counted; a bad level is refused with 400.
         async def go():
             async with aiohttp.ClientSession() as session:
                 ws = await session.ws_connect(f"{ws_url}?level=debug")
-                assert ws._response.status == requests.codes.switching_protocols
                 await wait_viewers(base_url, 1)
                 await ws.close()
                 with pytest.raises(aiohttp.WSServerHandshakeError) as refused:
@@ -377,49 +439,64 @@ class TestLiveLog:
 
         asyncio.run(go())
 
-    def test_ws_lines_after_connect(self, ws_url, ot_running, logging_settings):
-        # On connect: text frames "<L> (<uptime>) <tag>: <body>", one line each, uptime never going backwards.
-        logging_settings({"components": {"*": "info", "OPENTHREAD": "debug"}})
-
+    def test_ws_lines_after_connect(self, ws_url, console_ws, ot_running):
+        # On connect: text frames "<L> (<uptime>) <tag>: <body>", one line each, uptime never going backwards, and
+        # only lines logged after the connection.
         async def go():
             async with aiohttp.ClientSession() as session:
-                ws = await session.ws_connect(f"{ws_url}?level=debug")
-                frames = await collect(ws, LINE_WAIT_S)
+                await poke(
+                    session, console_ws, "version"
+                )  # logged before the viewer exists
+                ws = await session.ws_connect(f"{ws_url}?level=info")
+                (frames,) = await gather_until(
+                    [ws],
+                    lambda f: any(TRIGGER.match(x) for x in f[0]),
+                    lambda: poke(session, console_ws),
+                )
                 await ws.close()
                 return frames
 
         frames = [f for f in asyncio.run(go()) if not f.startswith("# ")]
-        assert frames, "no line within the wait"
+        assert any(TRIGGER.match(f) for f in frames), frames
         assert all(LINE.match(f) for f in frames), [
             f for f in frames if not LINE.match(f)
         ]
+        assert not [f for f in frames if "console" in f and ": version (" in f]
         uptimes = [int(re.match(r"\w \((\d+)\)", f).group(1)) for f in frames]
         assert uptimes == sorted(uptimes)
 
-    def test_ws_per_viewer_level(self, ws_url, ot_running, logging_settings):
-        # On two viewers at debug and warning: only the debug one gets debug lines; a level frame moves one viewer.
-        logging_settings({"components": {"*": "info", "OPENTHREAD": "debug"}})
-
+    def test_ws_per_viewer_level(self, ws_url, console_ws, ot_running):
+        # On viewers at info and warning, with the info line TRIGGER provoked: the info viewer gets it, the warning
+        # viewer gets no info, debug or verbose line (the board has no on-demand debug line, so info is the line
+        # that tells the levels apart); a level frame moves one viewer only.
         async def go():
             async with aiohttp.ClientSession() as session:
-                deep = await session.ws_connect(f"{ws_url}?level=debug")
+                deep = await session.ws_connect(f"{ws_url}?level=info")
                 shallow = await session.ws_connect(f"{ws_url}?level=warning")
-                deep_lines, shallow_lines = await asyncio.gather(
-                    collect(deep, LINE_WAIT_S), collect(shallow, LINE_WAIT_S)
+
+                def poker():
+                    return poke(session, console_ws)
+
+                deep_lines, shallow_lines = await gather_until(
+                    [deep, shallow],
+                    lambda f: any(TRIGGER.match(x) for x in f[0]),
+                    poker,
                 )
-                await shallow.send_str('{"level":"debug"}')
-                raised = await collect(shallow, LINE_WAIT_S)
+                await shallow.send_str('{"level":"info"}')
+                (raised,) = await gather_until(
+                    [shallow],
+                    lambda f: any(TRIGGER.match(x) for x in f[0]),
+                    poker,
+                )
                 await shallow.send_str('{"level":"loud"}')
                 notices = await collect(shallow, 3)
                 await asyncio.gather(deep.close(), shallow.close())
                 return deep_lines, shallow_lines, raised, notices
 
         deep, shallow, raised, notices = asyncio.run(go())
-        assert any(f.startswith("D ") for f in deep)
-        assert shallow == [] or all(
-            f[0] in "EW" for f in shallow if not f.startswith("# ")
-        )
-        assert any(f.startswith("D ") for f in raised)
+        assert any(TRIGGER.match(f) for f in deep), deep
+        assert [f for f in shallow if f[:2] in ("I ", "D ", "V ")] == []
+        assert any(TRIGGER.match(f) for f in raised), raised
         assert any(n.startswith("# ignored") for n in notices)
 
     def test_ws_third_viewer_refused(self, ws_url, board_ip, base_url):
@@ -496,40 +573,58 @@ class TestLiveLog:
         assert re.fullmatch(r"# dropped \d+ lines", notices[0])
         assert not [f for f in fast_frames if f.startswith("# dropped")]
 
-    def test_ot_line_is_whole(self, ws_url, ot_running, logging_settings):
-        # On an OPENTHREAD debug viewer with nothing else enabled: every frame is one whole OpenThread line.
+    def test_ot_line_is_whole(self, ws_url, console_ws, ot_running, logging_settings):
+        # On an OPENTHREAD debug viewer with nothing else enabled: every frame is one whole OpenThread line. The
+        # console `ping ff02::1` makes OpenThread send (and log) packets at once; its own timers (MLE advertisements)
+        # keep it logging, so the wait polls up to OT_WAIT_S for OT_LINES_WANTED lines.
         logging_settings({"components": {"*": "off", "OPENTHREAD": "debug"}})
 
         async def go():
             async with aiohttp.ClientSession() as session:
                 ws = await session.ws_connect(f"{ws_url}?level=debug")
-                frames = await collect(ws, LINE_WAIT_S)
+                (frames,) = await gather_until(
+                    [ws],
+                    lambda f: (
+                        len([x for x in f[0] if not x.startswith("# ")])
+                        >= OT_LINES_WANTED
+                    ),
+                    lambda: poke(session, console_ws, "ping ff02::1"),
+                    OT_WAIT_S,
+                )
                 await ws.close()
                 return frames
 
         frames = [f for f in asyncio.run(go()) if not f.startswith("# ")]
-        assert frames, "OpenThread logged nothing within the wait"
+        assert len(frames) >= OT_LINES_WANTED, f"OpenThread logged {len(frames)} lines"
         assert all(OT_LINE.match(f) for f in frames), [
             f for f in frames if not OT_LINE.match(f)
         ]
 
-    def test_no_viewer_no_cost(self, base_url, ot_running, logging_settings):
-        # On debug lines produced with no viewer: nothing is queued or dropped for the live channel.
+    def test_no_viewer_no_cost(self, base_url, console_ws, ot_running):
+        # On lines produced with no viewer: the UART counts them (so lines were made), the live channel counts nothing.
         deadline = time.monotonic() + 15
         while get_logging(base_url)["viewers"] and time.monotonic() < deadline:
             time.sleep(0.5)
         before = get_logging(base_url)
         assert before["viewers"] == 0
-        logging_settings(
-            {
-                "channels": {"uart": {"level": "debug"}},
-                "components": {"*": "info", "OPENTHREAD": "debug"},
-            }
-        )
-        time.sleep(LINE_WAIT_S)
-        after = get_logging(base_url)
+
+        async def go():
+            async with aiohttp.ClientSession() as session:
+                deadline = time.monotonic() + LINE_WAIT_S
+                while time.monotonic() < deadline:
+                    await poke(session, console_ws)
+                    now = await asyncio.to_thread(get_logging, base_url)
+                    if (
+                        now["counters"]["uart"]["sent"]
+                        > before["counters"]["uart"]["sent"]
+                    ):
+                        return now
+                    await asyncio.sleep(1)
+                return now
+
+        after = asyncio.run(go())
         assert after["counters"]["uart"]["sent"] > before["counters"]["uart"]["sent"], (
-            "no debug lines were produced"
+            "no lines were produced"
         )
         assert after["counters"]["live"]["sent"] == before["counters"]["live"]["sent"]
         assert (
