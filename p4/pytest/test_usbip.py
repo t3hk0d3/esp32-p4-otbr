@@ -2,15 +2,19 @@
 USB channel rules. Written with Task 12 of the USB/IP plan as the contract; run in the batched on-board pass, never
 inside a task.
 
+The rig runs the board in single-interface mode (`interface` is asserted `single`).
+
 The first five tests need the board alone (no USB device on the USB-A port). The two marked `usb_dongle` need the
 ZigStar OllyZig on the USB-A port (run with `pytest -s -m usb_dongle`, see test_dongle.py). The enable flag is stored
 and takes a reboot, so the tests reboot the board; every test leaves USB/IP off.
 """
 
+import contextlib
 import socket
 import struct
 import time
 
+import pexpect
 import pytest
 import requests
 from conftest import BOOT_TIMEOUT_S, GOT_IP, ROM_BANNER, wait_reachable
@@ -24,12 +28,12 @@ OP_REQ_IMPORT = 0x8003
 OP_HDR = struct.Struct(">HHI")  # version, code, status
 BUSID_LEN = 32
 BUSID = b"1-1"
-ST_DEV_BUSY = 2
 ST_NODEV = 4
 FIRST_BYTE_S = 10
 FIRST_BYTE_SLACK_S = 4
 IO_TIMEOUT_S = 5
 COUNTER_WAIT_S = 5
+STATE_WAIT_S = 15
 USBIP_REASON = "USB is exported over USB/IP"
 
 
@@ -43,31 +47,82 @@ def put_usbip(base_url, body):
     return requests.put(f"{base_url}/device/usbip", json=body, timeout=10)
 
 
-def set_usbip(dut, base_url, enabled):
-    """PUT the flag, wait for the reboot it announces; return (the board's URL after it, the PUT reply body)."""
-    reply = put_usbip(base_url, {"enabled": enabled})
-    assert reply.status_code == requests.codes.ok, reply.text
-    body = reply.json()
-    if not body["reboot"]:
-        return base_url, body
+def get_usbip_when_up(base_url, timeout=BOOT_TIMEOUT_S):
+    """GET /device/usbip, retried while the board is unreachable (it may be mid-reboot)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            return get_usbip(base_url)
+        except requests.RequestException:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(1)
+
+
+def wait_boot(dut, session):
+    """Wait for a reboot in flight to finish; keep session["url"] at the board's address after it."""
     dut.expect(ROM_BANNER, timeout=BOOT_TIMEOUT_S)
     address = dut.expect(GOT_IP, timeout=BOOT_TIMEOUT_S).group(1).decode()
+    session["url"] = f"http://{address}"
     wait_reachable(address)
-    return f"http://{address}", body
+
+
+def set_usbip(dut, session, enabled):
+    """PUT the flag, wait for the reboot it announces; return the PUT reply body. session["url"] follows the board."""
+    reply = put_usbip(session["url"], {"enabled": enabled})
+    assert reply.status_code == requests.codes.ok, reply.text
+    body = reply.json()
+    if body["reboot"]:
+        wait_boot(dut, session)
+    return body
+
+
+def wait_state(base_url, wanted, timeout=STATE_WAIT_S):
+    """Poll GET /device/usbip until `state` is `wanted` (USB enumeration lags the boot); return the status."""
+    deadline = time.monotonic() + timeout
+    status = get_usbip_when_up(base_url)
+    while status["state"] != wanted and time.monotonic() < deadline:
+        time.sleep(0.5)
+        status = get_usbip_when_up(base_url)
+    assert status["state"] == wanted, status
+    return status
+
+
+def wait_dongle(base_url, timeout=MOVE_TIMEOUT_S):
+    """Wait until the dongle is listed as an available channel again; fail if it never is."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with contextlib.suppress(requests.RequestException):
+            channel = find_dongle(base_url)
+            if channel is not None:
+                return channel
+        time.sleep(1)
+    pytest.fail("the dongle never came back as a channel")
+
+
+def switch_off(dut, session):
+    """USB/IP stored off and off in this boot, whatever state the board is in (mid-reboot, flag pending)."""
+    status = get_usbip_when_up(session["url"])
+    if status[
+        "pending_reboot"
+    ]:  # stored and running differ: a reboot is due; wait for it, else force one
+        try:
+            wait_boot(dut, session)
+        except pexpect.TIMEOUT:
+            dut.serial.hard_reset()
+            wait_boot(dut, session)
+        status = get_usbip_when_up(session["url"])
+    if status["enabled"]:
+        set_usbip(dut, session, False)
 
 
 @pytest.fixture
 def usbip(dut, board_ip):
-    """usbip(): the board's URL, with USB/IP switched off first and again at the end (the board is shared)."""
-    state = {"url": f"http://{board_ip}"}
-
-    def switch_off():
-        if get_usbip(state["url"])["enabled"]:
-            state["url"], _ = set_usbip(dut, state["url"], False)
-
-    switch_off()
-    yield state
-    switch_off()
+    """Session dict {"url": ...}, with USB/IP switched off first and again at the end (the board is shared)."""
+    session = {"url": f"http://{board_ip}"}
+    switch_off(dut, session)
+    yield session
+    switch_off(dut, session)
 
 
 def op_request(code, busid=None):
@@ -115,8 +170,8 @@ def wait_refused(base_url, wanted):
 @pytest.fixture
 def exported(dut, usbip):
     """USB/IP switched on and the board rebooted; skipped when a USB device is attached (the tests expect none)."""
-    usbip["url"], _ = set_usbip(dut, usbip["url"], True)
-    if get_usbip(usbip["url"])["device"] is not None:
+    set_usbip(dut, usbip, True)
+    if get_usbip_when_up(usbip["url"])["device"] is not None:
         pytest.skip("a USB device is attached")
     return usbip["url"]
 
@@ -126,20 +181,20 @@ def test_off_by_default(usbip):
     status = get_usbip(usbip["url"])
     assert status["enabled"] is False
     assert status["state"] == "off"
-    with pytest.raises(OSError), usbip_connect(usbip["url"]):
+    with pytest.raises(ConnectionRefusedError), usbip_connect(usbip["url"]):
         pass
 
 
 def test_enable_without_device(dut, usbip):
     # PUT enable answers {"reboot": true}; after the reboot: no_device, one interface, empty DEVLIST, IMPORT is ST_NODEV.
-    url, body = set_usbip(dut, usbip["url"], True)
-    usbip["url"] = url
+    body = set_usbip(dut, usbip, True)
+    url = usbip["url"]
     assert body == {"reboot": True}
-    status = get_usbip(url)
+    status = get_usbip_when_up(url)
     if status["device"] is not None:
         pytest.skip("a USB device is attached")
+    status = wait_state(url, "no_device")
     assert status["enabled"] is True
-    assert status["state"] == "no_device"
     assert status["interface"] == "single"
     with usbip_connect(url) as sock:
         sock.sendall(op_request(OP_REQ_DEVLIST))
@@ -174,26 +229,29 @@ def test_silent_client_closed(exported):
 
 def test_disable_restores(dut, usbip):
     # PUT disable reboots into state off, nothing listens, and the same value again is {"reboot": false}.
-    usbip["url"], _ = set_usbip(dut, usbip["url"], True)
+    set_usbip(dut, usbip, True)
     assert get_usbip(usbip["url"])["enabled"] is True
-    url, body = set_usbip(dut, usbip["url"], False)
-    usbip["url"] = url
+    body = set_usbip(dut, usbip, False)
+    url = usbip["url"]
     assert body == {"reboot": True}
     status = get_usbip(url)
     assert status["enabled"] is False
     assert status["state"] == "off"
-    with pytest.raises(OSError), usbip_connect(url):
+    with pytest.raises(ConnectionRefusedError), usbip_connect(url):
         pass
     assert put_usbip(url, {"enabled": False}).json() == {"reboot": False}
 
 
 @pytest.fixture
-def dongle(usbip):
-    """The id of the plugged-in dongle (skipped without one); modes restored afterwards."""
+def dongle(dut, usbip):
+    """The id of the plugged-in dongle (skipped without one); USB/IP off and modes restored afterwards."""
     channel = find_dongle(usbip["url"])
     if channel is None:
         pytest.skip("no USB dongle attached")
     yield channel["id"]
+    switch_off(
+        dut, usbip
+    )  # before the modes: a mode PUT is refused (409) while USB/IP is on
     reset_modes(usbip["url"], channel["id"])
 
 
@@ -214,7 +272,7 @@ def test_usb_channel_while_exported(dut, usbip, dongle):
     # While exported: the channel is unavailable with the reason, a mode PUT is 409 usbip_enabled, and after disable
     # plus the reboot its stored mode (rcp-proxy, which does not block enabling) is back.
     set_mode(usbip["url"], "rcp-proxy", dongle)
-    usbip["url"], _ = set_usbip(dut, usbip["url"], True)
+    set_usbip(dut, usbip, True)
     channel = get_channel(usbip["url"], dongle)
     assert channel["mode"] == "unavailable"
     assert channel["channel_reason"] == USBIP_REASON
@@ -222,8 +280,8 @@ def test_usb_channel_while_exported(dut, usbip, dongle):
     reply = put_channel(usbip["url"], {"mode": "off"}, dongle)
     assert reply.status_code == requests.codes.conflict, reply.text
     assert reply.json()["error"] == "usbip_enabled"
-    usbip["url"], _ = set_usbip(dut, usbip["url"], False)
-    deadline = time.monotonic() + MOVE_TIMEOUT_S
-    while find_dongle(usbip["url"]) is None and time.monotonic() < deadline:
-        time.sleep(1)
-    assert get_channel(usbip["url"], dongle)["stored_mode"] == "rcp-proxy"
+    set_usbip(dut, usbip, False)
+    wait_dongle(usbip["url"])
+    channel = get_channel(usbip["url"], dongle)
+    assert channel["mode"] == "rcp-proxy"
+    assert channel["stored_mode"] == "rcp-proxy"
