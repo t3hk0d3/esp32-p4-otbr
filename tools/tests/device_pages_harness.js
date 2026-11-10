@@ -11,7 +11,7 @@ const FRONTEND = path.join(__dirname, '..', '..', 'p4', 'components', 'esp_ot_br
 const Common = require(path.join(FRONTEND, 'static', 'device_common.js'));
 const SCRIPTS = {radios: 'radios', index: 'status', ethernet: 'ethernet', routing: 'routing', firmware: 'firmware', capture: 'capture',
                  diagnostics: 'diagnostics', names: 'names', leader: 'leader',
-                 topology: 'topology', console: 'console', zigbee: 'zigbee', time: 'time'};
+                 topology: 'topology', console: 'console', zigbee: 'zigbee', logs: 'logs', time: 'time'};
 /* Scripts that live on another script's page: the names section is part of the Ethernet page, the Leader card of Network. */
 const HTML = {names: 'ethernet', leader: 'network', time: 'ethernet'};
 
@@ -133,8 +133,8 @@ class Doc {
   createElementNS(ns, tag) { const e = new El(this, tag); e.ns = ns; return e; }
   createTextNode(t) { const e = new El(this, '#text'); e.textContent = t; return e; }
   addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); }
-  fire(t) {
-    const ev = {type: t, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }};
+  fire(t, extra) {
+    const ev = Object.assign({type: t, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }}, extra || {});
     (this.listeners[t] || []).forEach((f) => f(ev));
     return ev;
   }

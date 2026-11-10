@@ -401,6 +401,12 @@ reason, spec reference.
    (both WebSockets included) plus `/zigbee` and the catch-all, two slots of headroom kept. Live log clients use the web
    server's sockets (`ESP_BR_WEB_MAX_OPEN_SOCKETS`, 7, unchanged), so the lwIP socket sum does not change.
    (docs/superpowers/specs/2026-11-10-logging-design.md)
+38. Applied (logging, Task 9). Frontend, the Device -> Logs page: new `frontend/logs.html` and `static/logs.js`
+   (`LogsLogic` pure, `LogsPage`; settings cards for channels and components, a live card that opens its WebSocket
+   only on Connect); `static/api.js` adds `{href : '/logs.html', label : 'Logs'}` to the Device menu after Firmware;
+   `static/style.css` adds the `.lg-*` rules (foldable cards, level colours, fullscreen). Page tests:
+   `tools/tests/test_logs_page.py`, `tools/tests/test_device_pages.py`. (docs/superpowers/specs/2026-11-10-logging-design.md,
+   Web UI)
 
 ### REST guard classification (patches 2 and 9)
 
