@@ -264,9 +264,10 @@ TEST_CASE("full viewer queue: the queue holds about LOGGING_VIEWER_QUEUE bytes o
 
 /* ---- open beyond max ---- */
 
-TEST_CASE("open beyond LOGGING_VIEWERS_MAX: the fifth open returns NULL", "[logging]")
+TEST_CASE("open beyond LOGGING_VIEWERS_MAX: the third open returns NULL", "[logging]")
 {
     setup();
+    TEST_ASSERT_EQUAL(2, LOGGING_VIEWERS_MAX); // Ruling R11
     logging_viewer_t *v[LOGGING_VIEWERS_MAX];
 
     for (int i = 0; i < LOGGING_VIEWERS_MAX; i++) {
@@ -286,7 +287,7 @@ TEST_CASE("open after a close at the maximum: succeeds", "[logging]")
     for (int i = 0; i < LOGGING_VIEWERS_MAX; i++) {
         v[i] = logging_viewer_open(ESP_LOG_INFO, wake, NULL);
     }
-    logging_viewer_close(v[2]);
+    logging_viewer_close(v[LOGGING_VIEWERS_MAX - 1]);
     TEST_ASSERT_NOT_NULL(logging_viewer_open(ESP_LOG_DEBUG, wake, NULL));
     teardown();
 }
@@ -396,5 +397,112 @@ TEST_CASE("viewer at off: counts as no level, gets nothing", "[logging]")
     drain(ESP_LOG_ERROR, "eth", 1, "boom");
     TEST_ASSERT_FALSE(read_text(v, text, sizeof(text), NULL));
     TEST_ASSERT_EQUAL(1, status().viewers);
+    teardown();
+}
+
+/* ---- httpd's own debug lines never reach a viewer (Ruling R13) ---- */
+
+TEST_CASE("debug viewer and debug lines from httpd tags: not queued, nothing woken", "[logging]")
+{
+    setup();
+    logging_viewer_t *v = logging_viewer_open(ESP_LOG_VERBOSE, wake, (void *) 1);
+    const char *tags[] = {"httpd", "httpd_sess", "httpd_txrx", "httpd_ws", "httpd_parse", "httpd_uri"};
+    char text[128];
+
+    for (size_t i = 0; i < sizeof(tags) / sizeof(tags[0]); i++) {
+        drain(ESP_LOG_DEBUG, tags[i], 1, "work");
+        drain(ESP_LOG_VERBOSE, tags[i], 2, "doing select");
+    }
+    TEST_ASSERT_FALSE(read_text(v, text, sizeof(text), NULL));
+    TEST_ASSERT_EQUAL(0, s_wakes[1]);
+    TEST_ASSERT_EQUAL_UINT32(0, status().live_sent);
+    TEST_ASSERT_EQUAL_UINT32(0, status().live_dropped);
+    teardown();
+}
+
+TEST_CASE("debug viewer and an info line from an httpd tag: queued", "[logging]")
+{
+    setup();
+    logging_viewer_t *v = logging_viewer_open(ESP_LOG_DEBUG, wake, (void *) 1);
+    char text[128];
+
+    drain(ESP_LOG_INFO, "httpd_uri", 3, "no handler");
+    TEST_ASSERT_TRUE(read_text(v, text, sizeof(text), NULL));
+    TEST_ASSERT_EQUAL_STRING("3 3 httpd_uri no handler", text);
+    drain(ESP_LOG_DEBUG, "radio_mux", 4, "detail"); // other tags keep the viewer's level
+    TEST_ASSERT_TRUE(read_text(v, text, sizeof(text), NULL));
+    teardown();
+}
+
+/* ---- lines the transit ring refused (Ruling R12) ---- */
+
+TEST_CASE("ring drops while viewers are open: each open viewer's next read reports them", "[logging]")
+{
+    setup();
+    logging_viewer_t *a = logging_viewer_open(ESP_LOG_INFO, wake, (void *) 1);
+    logging_viewer_t *b = logging_viewer_open(ESP_LOG_DEBUG, wake, (void *) 2);
+    char text[128];
+    uint32_t dropped = 0;
+
+    logging_viewers_add_dropped(5);
+    drain(ESP_LOG_INFO, "eth", 1, "link up");
+    TEST_ASSERT_TRUE(read_text(a, text, sizeof(text), &dropped));
+    TEST_ASSERT_EQUAL_UINT32(5, dropped);
+    TEST_ASSERT_FALSE(read_text(a, text, sizeof(text), &dropped));
+    TEST_ASSERT_EQUAL_UINT32(0, dropped);
+    TEST_ASSERT_TRUE(read_text(b, text, sizeof(text), &dropped));
+    TEST_ASSERT_EQUAL_UINT32(5, dropped);
+    teardown();
+}
+
+TEST_CASE("ring drops added to a full queue's own drops: one total", "[logging]")
+{
+    setup();
+    logging_viewer_t *v = logging_viewer_open(ESP_LOG_INFO, wake, (void *) 1);
+    char body[LOGGING_LINE_MAX + 1];
+    char text[LOGGING_LINE_MAX + 64];
+    uint32_t dropped = 0;
+    int queued = 0;
+
+    memset(body, 'q', LOGGING_LINE_MAX);
+    body[LOGGING_LINE_MAX] = '\0';
+    for (int i = 0; i < 40; i++) {
+        drain(ESP_LOG_INFO, "flood", (uint32_t) i, body);
+    }
+    logging_viewers_add_dropped(3);
+    TEST_ASSERT_TRUE(read_text(v, text, sizeof(text), &dropped));
+    queued = 1;
+    while (read_text(v, text, sizeof(text), NULL)) {
+        queued++;
+    }
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)(40 - queued + 3), dropped);
+    teardown();
+}
+
+TEST_CASE("ring drops with no viewer open, or before a viewer opens: not reported to it", "[logging]")
+{
+    setup();
+    logging_viewers_add_dropped(7); // nobody open: ignored
+    logging_viewer_t *v = logging_viewer_open(ESP_LOG_INFO, wake, (void *) 1);
+    char text[128];
+    uint32_t dropped = 9;
+
+    drain(ESP_LOG_INFO, "eth", 1, "link up");
+    TEST_ASSERT_TRUE(read_text(v, text, sizeof(text), &dropped));
+    TEST_ASSERT_EQUAL_UINT32(0, dropped);
+    teardown();
+}
+
+TEST_CASE("ring drops reported without a line: viewer woken, dropped_since set, read false", "[logging]")
+{
+    setup();
+    logging_viewer_t *v = logging_viewer_open(ESP_LOG_INFO, wake, (void *) 1);
+    char text[128];
+    uint32_t dropped = 0;
+
+    logging_viewers_add_dropped(2);
+    TEST_ASSERT_EQUAL(1, s_wakes[1]); // woken, so the notice goes out without waiting for a line
+    TEST_ASSERT_FALSE(read_text(v, text, sizeof(text), &dropped));
+    TEST_ASSERT_EQUAL_UINT32(2, dropped);
     teardown();
 }

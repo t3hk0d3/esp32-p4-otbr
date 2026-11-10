@@ -19,7 +19,7 @@ extern "C" {
 #define LOGGING_KNOWN_TAGS_MAX 64
 #define LOGGING_TARGET_MAX 128
 #define LOGGING_LINE_MAX 512 /**< Body bytes, truncation marker included. */
-#define LOGGING_VIEWERS_MAX 4
+#define LOGGING_VIEWERS_MAX 2
 #define LOGGING_SYSLOG_PORT 514
 /** lwIP sockets the component holds at most: the syslog UDP socket (counted in routing/task.c SOCKETS_NEEDED). */
 #define LOGGING_SOCKETS 1

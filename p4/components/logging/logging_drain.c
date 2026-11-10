@@ -352,9 +352,21 @@ static uint32_t uptime_ms(void)
     return (uint32_t)(esp_timer_get_time() / 1000);
 }
 
+/** Hand the viewers the lines the full ring refused for them since the last call (Ruling R12). */
+static void notice_ring_drops(uint32_t *seen)
+{
+    uint32_t now = logging_capture_live_dropped();
+
+    if (now != *seen) {
+        logging_viewers_add_dropped(now - *seen);
+        *seen = now;
+    }
+}
+
 static void drain_task(void *arg)
 {
     logging_ring_t *ring = arg;
+    uint32_t ring_drops = logging_capture_live_dropped();
     uint32_t seen = 0;
     bool configured = false;
     logging_line_t line;
@@ -372,8 +384,11 @@ static void drain_task(void *arg)
             }
         }
         logging_drain_tick(uptime_ms());
+        // Checked before each record, so a viewer's drop notice lands about where the lines went missing.
+        notice_ring_drops(&ring_drops);
         while (logging_ring_pop(ring, &line, s_text, sizeof(s_text))) {
             logging_drain_line(&line, logging_levels());
+            notice_ring_drops(&ring_drops);
         }
     }
 }

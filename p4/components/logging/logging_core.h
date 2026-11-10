@@ -68,6 +68,14 @@ logging_levels_t logging_core_levels(const logging_settings_t *s, esp_log_level_
 /** Highest level a channel other than the UART wants: JTAG, syslog and the viewers. */
 esp_log_level_t logging_core_nonuart_max(logging_levels_t lv);
 
+/**
+ * Highest level a live viewer at `viewer` gets of `tag`: the viewer's level, except for the web server's own tags
+ * (those starting with "httpd") which are capped at info. The web server logs debug lines while it sends to the
+ * viewers, outside the sink guard; sent to a debug viewer they would make more sends, without end (Ruling R13).
+ * UART, JTAG and syslog are not capped: they send from the drain task, a sink.
+ */
+esp_log_level_t logging_core_live_cap(const char *tag, esp_log_level_t viewer);
+
 #define LOGGING_ROUTE_UART (1u << 0) /**< Hand the line to ESP-IDF's writer (the UART), which applies the tag level. */
 #define LOGGING_ROUTE_RING (1u << 1) /**< Format the line into the transit ring for the other channels. */
 

@@ -226,6 +226,11 @@ esp_err_t logging_start(void)
     return ESP_OK;
 }
 
+uint32_t logging_capture_live_dropped(void)
+{
+    return __atomic_load_n(&s_live_dropped, __ATOMIC_RELAXED);
+}
+
 void logging_get_status(logging_status_t *out)
 {
     memset(out, 0, sizeof(*out));

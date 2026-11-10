@@ -465,3 +465,30 @@ TEST_CASE("full ring: each wanting channel counted, UART never", "[logging]")
                       logging_core_wanting(ESP_LOG_ERROR, lv));
     TEST_ASSERT_EQUAL(0, logging_core_wanting(ESP_LOG_VERBOSE, lv));
 }
+
+/* ---- logging_core_live_cap (Ruling R13: no feedback loop through httpd's own debug lines) ---- */
+
+TEST_CASE("live cap on an httpd tag: a debug or verbose viewer gets it at info at most", "[logging]")
+{
+    const char *tags[] = {"httpd", "httpd_sess", "httpd_txrx", "httpd_ws", "httpd_parse", "httpd_uri"};
+
+    for (size_t i = 0; i < sizeof(tags) / sizeof(tags[0]); i++) {
+        TEST_ASSERT_EQUAL_MESSAGE(ESP_LOG_INFO, logging_core_live_cap(tags[i], ESP_LOG_DEBUG), tags[i]);
+        TEST_ASSERT_EQUAL_MESSAGE(ESP_LOG_INFO, logging_core_live_cap(tags[i], ESP_LOG_VERBOSE), tags[i]);
+    }
+}
+
+TEST_CASE("live cap on an httpd tag: a viewer at info or below keeps its level", "[logging]")
+{
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, logging_core_live_cap("httpd_ws", ESP_LOG_INFO));
+    TEST_ASSERT_EQUAL(ESP_LOG_WARN, logging_core_live_cap("httpd_ws", ESP_LOG_WARN));
+    TEST_ASSERT_EQUAL(ESP_LOG_NONE, logging_core_live_cap("httpd", ESP_LOG_NONE));
+}
+
+TEST_CASE("live cap on any other tag: the viewer's level", "[logging]")
+{
+    TEST_ASSERT_EQUAL(ESP_LOG_VERBOSE, logging_core_live_cap("radio_mux", ESP_LOG_VERBOSE));
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, logging_core_live_cap("esp_http_server", ESP_LOG_DEBUG));
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, logging_core_live_cap("http", ESP_LOG_DEBUG));
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, logging_core_live_cap("", ESP_LOG_DEBUG));
+}

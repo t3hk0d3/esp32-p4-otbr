@@ -126,6 +126,15 @@ bool logging_is_initialised(void);
  */
 void logging_viewers_fanout(const logging_line_t *line);
 
+/**
+ * `n` lines a viewer wanted were refused by the full transit ring: each open viewer reports them with its next read
+ * (in `dropped_since`) and is woken. Drain task only.
+ */
+void logging_viewers_add_dropped(uint32_t n);
+
+/** Lines a viewer wanted that the full transit ring refused since boot (logging_status_t.live_dropped's part). */
+uint32_t logging_capture_live_dropped(void);
+
 /** The viewers' part of logging_status_t: viewers, live_sent and live_dropped (added to what is there). Any task. */
 void logging_viewers_status(logging_status_t *out);
 

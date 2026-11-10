@@ -217,6 +217,11 @@ esp_log_level_t logging_core_nonuart_max(logging_levels_t lv)
     return (esp_log_level_t) max;
 }
 
+esp_log_level_t logging_core_live_cap(const char *tag, esp_log_level_t viewer)
+{
+    return tag && strncmp(tag, "httpd", 5) == 0 && viewer > ESP_LOG_INFO ? ESP_LOG_INFO : viewer;
+}
+
 unsigned logging_capture_route(esp_log_level_t level, esp_log_level_t uart_level, esp_log_level_t nonuart_max,
                                esp_log_level_t tag_level, bool in_guard, bool in_isr)
 {

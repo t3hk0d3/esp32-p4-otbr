@@ -1,7 +1,8 @@
 // Live viewers of the logging component: up to LOGGING_VIEWERS_MAX readers (the live log WebSocket's clients), each
 // with its own level and an 8 KB queue in PSRAM. The drain task copies each line into the queue of every viewer whose
-// level it passes and calls that viewer's wake; a full queue drops the line for that viewer only and counts it. The
-// reader takes lines off its queue on its own task. The highest open level is a channel of its own for the generation
+// level it passes (the web server's own tags capped at info: logging_core_live_cap) and calls that viewer's wake; a full
+// queue drops the line for that viewer only and counts it, and lines the full transit ring refused are reported to
+// every open viewer (logging_viewers_add_dropped). The reader takes lines off its queue on its own task. The highest open level is a channel of its own for the generation
 // gate (logging_viewers_max_changed): with no viewer it is off, so lines nobody else wants are never formatted.
 //
 // Locks: s_lock guards the slots (open, level) and is held by the drain while it copies a line (no blocking inside);
@@ -12,6 +13,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "esp_heap_caps.h"
+#include "logging_core.h"
 #include "logging_priv.h"
 #include "logging_ring.h"
 
@@ -22,7 +24,8 @@ struct logging_viewer {
     void *ctx;
     uint8_t *mem;          /**< PSRAM: the queue, then the reader's line buffer. */
     logging_ring_t ring;   /**< The queue: the drain produces, the reader consumes. */
-    uint32_t reported;     /**< Reader only: ring drops already reported. */
+    uint32_t reported;     /**< Reader only: queue drops already reported. */
+    uint32_t pending;      /**< Atomic: transit ring drops not reported yet (added by the drain, taken by the reader). */
 };
 
 #define VIEWER_MEM (LOGGING_VIEWER_QUEUE + LOGGING_LINE_MAX)
@@ -102,6 +105,7 @@ logging_viewer_t *logging_viewer_open(esp_log_level_t level, void (*wake)(void *
         v->ctx = ctx;
         v->mem = mem;
         v->reported = 0;
+        __atomic_store_n(&v->pending, 0, __ATOMIC_RELAXED);
         logging_ring_init(&v->ring, mem, LOGGING_VIEWER_QUEUE);
         v->open = true;
     }
@@ -137,7 +141,7 @@ bool logging_viewer_read(logging_viewer_t *viewer, logging_line_t *out, uint32_t
     if (dropped_since) {
         uint32_t dropped = logging_ring_dropped(&viewer->ring);
 
-        *dropped_since = dropped - viewer->reported;
+        *dropped_since = dropped - viewer->reported + __atomic_exchange_n(&viewer->pending, 0, __ATOMIC_RELAXED);
         viewer->reported = dropped;
     }
     return logging_ring_pop(&viewer->ring, out, (char *) viewer->mem + LOGGING_VIEWER_QUEUE, LOGGING_LINE_MAX);
@@ -178,7 +182,7 @@ void logging_viewers_fanout(const logging_line_t *line)
         logging_viewer_t *v = &s_viewers[i];
         logging_ring_slot_t slot;
 
-        if (!v->open || line->level > v->level) {
+        if (!v->open || line->level > logging_core_live_cap(line->tag, v->level)) {
             continue;
         }
         if (!logging_ring_reserve(&v->ring, len, &slot)) {
@@ -199,6 +203,25 @@ void logging_viewers_fanout(const logging_line_t *line)
     if (dropped) {
         __atomic_fetch_add(&s_live_dropped, 1, __ATOMIC_RELAXED);
     }
+}
+
+void logging_viewers_add_dropped(uint32_t n)
+{
+    if (n == 0 || __atomic_load_n(&s_locks, __ATOMIC_ACQUIRE) != LOCKS_READY) {
+        return;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < LOGGING_VIEWERS_MAX; i++) {
+        logging_viewer_t *v = &s_viewers[i];
+
+        if (v->open) {
+            __atomic_fetch_add(&v->pending, n, __ATOMIC_RELAXED);
+            if (v->wake) {
+                v->wake(v->ctx);
+            }
+        }
+    }
+    xSemaphoreGive(s_lock);
 }
 
 void logging_viewers_status(logging_status_t *out)
