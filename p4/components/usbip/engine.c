@@ -306,6 +306,11 @@ static void flush_slot(usbip_engine_t *e, usbip_engine_slot_t *s, fate_t fate)
 {
     bool any = false;
 
+    // A flushed transfer reports 0 bytes even when it moved data: OUT collateral is answered, never sent twice (6.3).
+    if (!(s->addr & 0x80)) {
+        fate = FATE_RESET;
+    }
+
     for (usbip_engine_xfer_t *t = s->inflight, *next; t != NULL; t = next) {
         next = t->next;
         if (t->returned) {
@@ -428,20 +433,19 @@ static bool pump_one(usbip_engine_t *e, int i)
     return true;
 }
 
-// Spec 8.1: the freed endpoint's FIFO first, then the other FIFOs round-robin, one transfer per endpoint per pass.
+// Spec 8.1: the freed endpoint's FIFO head first, then the FIFOs round-robin starting after it, one transfer per
+// endpoint per pass.
 static void drain(usbip_engine_t *e, int first)
 {
-    while (e->active && pump_one(e, first)) {
-    }
+    pump_one(e, first);
     bool progress = true;
 
     while (e->active && progress) {
         progress = false;
-        for (int k = 0; k < SLOTS && e->active; k++) {
-            progress |= pump_one(e, (e->rr + k) % SLOTS);
+        for (int k = 1; k <= SLOTS && e->active; k++) {
+            progress |= pump_one(e, (first + k) % SLOTS);
         }
     }
-    e->rr = (uint8_t)((e->rr + 1) % SLOTS);
 }
 
 // --- Commands ---
@@ -449,6 +453,7 @@ static void drain(usbip_engine_t *e, int first)
 static void on_submit(usbip_engine_t *e, const usbip_cmd_t *c, const uint8_t *out)
 {
     e->counters.submits++;
+    // The direction comes from the command header, also on EP0 (not from bmRequestType); Linux keeps them in step.
     bool in = c->direction == USBIP_DIR_IN;
     uint8_t num = (uint8_t)(c->ep & 0x0f);
     usbip_ep_info_t info = {.addr = 0, .type = TYPE_CONTROL, .mps = EP0_MPS_MAX};
@@ -502,7 +507,7 @@ static void on_submit(usbip_engine_t *e, const usbip_cmd_t *c, const uint8_t *ou
     t->x = (usbip_xfer_t) {
         .seqnum = c->seqnum, .ep = info.addr, .in = in, .type = info.type, .flags = c->submit.flags,
     };
-    t->length = (size_t)c->submit.length;
+    t->length = (size_t)c->submit.length;  // buffers are sized from submit.length, not from the setup's wLength
     t->slot = (uint8_t)slot;
     t->req = (uint8_t)req;
     memcpy(t->setup, c->submit.setup, SETUP_LEN);
@@ -608,8 +613,13 @@ static size_t data_got(const usbip_engine_xfer_t *t, size_t actual)
 static void answer(usbip_engine_t *e, usbip_engine_xfer_t *t, usbip_xfer_status_t st, size_t actual)
 {
     size_t got = data_got(t, actual);
+    int32_t status = usbip_core_status_errno(st, t->x.in && got < t->length, t->x.flags);
 
-    answer_status(e, t, usbip_core_status_errno(st, t->x.in && got < t->length, t->x.flags), got);
+    // The IN buffer is rounded up to the MPS: more than the client asked for is an overflow, as on Linux.
+    if (status == 0 && t->x.in && actual > (t->slot == 0 ? SETUP_LEN : 0) + t->length) {
+        status = -USBIP_EOVERFLOW;
+    }
+    answer_status(e, t, status, got);
 }
 
 // CLEAR_FEATURE(ENDPOINT_HALT) went through: reset the host side's toggles of the endpoint's interface the only way
@@ -776,7 +786,12 @@ esp_err_t usbip_engine_start(usbip_engine_t *e, const usbip_engine_ops_t *ops, v
     ESP_RETURN_ON_FALSE(e != NULL && ops != NULL && dev != NULL && cfg != NULL && cfg_len >= 9, ESP_ERR_INVALID_ARG,
                         TAG, "engine start: bad arguments");
     ESP_RETURN_ON_FALSE(!e->active, ESP_ERR_INVALID_STATE, TAG, "engine start: a session runs");
+    // Counters and memory peaks count since boot (spec 9); only the session state starts afresh.
+    usbip_counters_t counters = e->counters;
+    usbip_mem_stats_t peaks = e->budget.stats;
+
     memset(e, 0, sizeof(*e));
+    e->counters = counters;
     e->ops = ops;
     e->ctx = ctx;
     e->devid = (dev->busnum << 16) | dev->devnum;
@@ -784,6 +799,8 @@ esp_err_t usbip_engine_start(usbip_engine_t *e, const usbip_engine_ops_t *ops, v
     e->cfg = cfg;
     e->cfg_len = cfg_len;
     usbip_budget_init(&e->budget);
+    e->budget.stats.inflight_peak = peaks.inflight_peak;
+    e->budget.stats.waiting_peak = peaks.waiting_peak;
 
     size_t total = (size_t)cfg[2] | ((size_t)cfg[3] << 8);
 

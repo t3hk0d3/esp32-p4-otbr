@@ -31,7 +31,8 @@ static struct {
     int n_rep;
     int allocs, frees, dma_allocs;
     esp_err_t submit_ret;
-    int fail_iface, fail_alt;  // claims of interface fail_iface - 1 at fail_alt fail; 0: none fail
+    int fail_iface, fail_alt;
+    bool fail_dma;  // DMA allocations fail  // claims of interface fail_iface - 1 at fail_alt fail; 0: none fail
     int64_t now;
     char why[64];
     int ends;
@@ -107,6 +108,9 @@ static void fake_power(void *ctx)
 
 static void *fake_alloc(void *ctx, size_t n, bool dma)
 {
+    if (dma && f.fail_dma) {
+        return NULL;
+    }
     f.allocs++;
     f.dma_allocs += dma;
     return calloc(1, n ? n : 1);
@@ -211,6 +215,7 @@ static void start(const uint8_t *cfg, size_t len)
 {
     finish_quiet();
     memset(&f, 0, sizeof(f));
+    memset(&eng, 0, sizeof(eng));  // a fresh boot: counters and peaks from 0
     usbip_dev_rec_t dev = {.busnum = 1, .devnum = 3, .config_value = 1, .num_ifaces = cfg[4]};
 
     TEST_ASSERT_EQUAL(ESP_OK, usbip_engine_start(&eng, &ops, NULL, &dev, cfg, len));
@@ -733,26 +738,66 @@ TEST_CASE("CLEAR_FEATURE(ENDPOINT_HALT): re-claims the interface at its current 
     submit(1, 0x82, 64);
     submit(2, 0x81, 16);
     submit(3, 0x81, 16);
-    submit(4, 0x02, 64);
+    submit(5, 0x81, 16);
     control(10, 0x02, 1, 0, 0x82, 0);
     complete(10, USBIP_XS_COMPLETED, 8);
-    ASSERT_ORDER("halt 81", "flush 81", "clear 81", "halt 82", "flush 82", "clear 82", "halt 02", "flush 02",
-                 "clear 02", "release 0", "claim 0 0", "ret_submit 10");
+    ASSERT_ORDER("halt 81", "flush 81", "clear 81", "halt 82", "flush 82", "clear 82", "release 0", "claim 0 0",
+                 "ret_submit 10");
     TEST_ASSERT_EQUAL_INT(-1, log_find("release 1"));
+    TEST_ASSERT_EQUAL_INT(-1, log_find("halt 02"));  // nothing in flight there
     f.n_log = 0;
     complete(3, USBIP_XS_CANCELED, 0);
     complete(1, USBIP_XS_CANCELED, 0);
-    complete(4, USBIP_XS_CANCELED, 0);
+    complete(5, USBIP_XS_CANCELED, 0);
     complete(2, USBIP_XS_CANCELED, 0);
     assert_ret_submit(1, -USBIP_ECONNRESET, 0);
-    ASSERT_ORDER("submit 4", "submit 2", "submit 3");
+    ASSERT_ORDER("submit 2", "submit 3", "submit 5");
     TEST_ASSERT_NULL(reply(USBIP_RET_SUBMIT, 2));
     TEST_ASSERT_NULL(reply(USBIP_RET_SUBMIT, 3));
-    TEST_ASSERT_NULL(reply(USBIP_RET_SUBMIT, 4));
+    TEST_ASSERT_NULL(reply(USBIP_RET_SUBMIT, 5));
     TEST_ASSERT_NOT_NULL(pending(2));
     TEST_ASSERT_NOT_NULL(pending(3));
-    TEST_ASSERT_NOT_NULL(pending(4));
+    TEST_ASSERT_NOT_NULL(pending(5));
     finish();
+}
+
+TEST_CASE("CLEAR_FEATURE(ENDPOINT_HALT): a canceled OUT on another endpoint answers -ECONNRESET and is never "
+          "resubmitted", "[usbip]")
+{
+    start(cfg_bt, sizeof(cfg_bt));
+    submit(1, 0x82, 64);
+    submit(4, 0x02, 64);
+    control(10, 0x02, 1, 0, 0x82, 0);
+    complete(10, USBIP_XS_COMPLETED, 8);
+    ASSERT_ORDER("halt 02", "flush 02", "clear 02", "release 0", "claim 0 0");
+    complete(4, USBIP_XS_CANCELED, 0);
+    complete(1, USBIP_XS_CANCELED, 0);
+    assert_ret_submit(4, -USBIP_ECONNRESET, 0);
+    TEST_ASSERT_EQUAL_INT(1, log_count("submit 4"));
+    TEST_ASSERT_NULL(pending(4));
+    finish();
+}
+
+TEST_CASE("CLEAR_FEATURE(ENDPOINT_HALT): when the interface cannot be claimed again, its transfers answer -ECONNRESET "
+          "and its endpoints -EINVAL", "[usbip]")
+{
+    start(cfg_cp, sizeof(cfg_cp));
+    submit(1, 0x81, 64);  // collateral of a clear on 0x01
+    f.fail_iface = 0 + 1;
+    f.fail_alt = 0;
+    control(10, 0x02, 1, 0, 0x01, 0);
+    complete(10, USBIP_XS_COMPLETED, 8);
+    ASSERT_ORDER("halt 81", "flush 81", "clear 81", "release 0", "claim 0 0", "ret_submit 10");
+    assert_ret_submit(10, 0, 0);  // the device cleared its halt
+    complete(1, USBIP_XS_CANCELED, 0);
+    assert_ret_submit(1, -USBIP_ECONNRESET, 0);
+    TEST_ASSERT_EQUAL_INT(1, log_count("submit 1"));
+    submit(2, 0x81, 64);
+    assert_ret_submit(2, -USBIP_EINVAL, 0);
+    f.fail_iface = 0;
+    f.n_log = 0;
+    finish();
+    TEST_ASSERT_EQUAL_INT(0, log_count("release 0"));  // not claimed any more
 }
 
 TEST_CASE("SET_ADDRESS: answers -EPIPE", "[usbip]")
@@ -1138,4 +1183,140 @@ TEST_CASE("session start: on a claim failure releases what it claimed and return
     ASSERT_ORDER("claim 0 0", "claim 1 0", "release 0");
     TEST_ASSERT_EQUAL_INT(1, log_count("release"));
     f.fail_iface = 0;
+}
+
+// --- Fix round 1 ---
+
+TEST_CASE("counters and memory peaks: kept across sessions (reset at boot only)", "[usbip]")
+{
+    start(cfg_cp, sizeof(cfg_cp));
+    submit(1, 0x01, 16384);
+    for (uint32_t s = 2; s < 200 && f.ends == 0; s++) {
+        submit(s, 0x01, 16384);
+    }
+    TEST_ASSERT_EQUAL_INT(1, f.ends);
+    finish_quiet();
+    usbip_mem_stats_t before;
+
+    usbip_engine_mem(&eng, &before);
+    usbip_dev_rec_t dev = {.busnum = 1, .devnum = 3, .config_value = 1, .num_ifaces = 1};
+
+    TEST_ASSERT_EQUAL(ESP_OK, usbip_engine_start(&eng, &ops, NULL, &dev, cfg_cp, sizeof(cfg_cp)));
+    usbip_counters_t c;
+    usbip_mem_stats_t m;
+
+    usbip_engine_counters(&eng, &c);
+    usbip_engine_mem(&eng, &m);
+    TEST_ASSERT_EQUAL_UINT32(1, c.overload_ends);
+    TEST_ASSERT_GREATER_THAN(60, c.submits);
+    TEST_ASSERT_EQUAL_size_t(before.waiting_peak, m.waiting_peak);
+    TEST_ASSERT_EQUAL_size_t(before.inflight_peak, m.inflight_peak);
+    TEST_ASSERT_GREATER_THAN(USBIP_WAIT_BYTES - 16384 - 1024, m.waiting_peak);
+    TEST_ASSERT_EQUAL_size_t(0, m.waiting);
+    TEST_ASSERT_EQUAL_size_t(0, m.inflight);
+    finish();
+}
+
+TEST_CASE("budget pressure: the freed endpoint's FIFO gets its head out, then the others in turn", "[usbip]")
+{
+    start(cfg_bt, sizeof(cfg_bt));
+    submit(1, 0x82, 16384);
+    submit(2, 0x82, 16384);  // 32768
+    submit(3, 0x81, 16);     // reserve: 32784
+    submit(4, 0x82, 8128);   // backlog of 0x82
+    submit(5, 0x82, 8128);
+    submit(6, 0x81, 8128);   // backlog of 0x81
+    submit(7, 0x81, 8128);
+    complete(1, USBIP_XS_COMPLETED, 0);  // 16400 in flight: room for two of 8128
+    TEST_ASSERT_NOT_NULL(pending(4));
+    TEST_ASSERT_NOT_NULL(pending(6));
+    TEST_ASSERT_NULL(pending(5));
+    TEST_ASSERT_NULL(pending(7));
+    finish();
+}
+
+TEST_CASE("IN completion with more bytes than asked: answers -EOVERFLOW with actual_length = length", "[usbip]")
+{
+    start(cfg_cp, sizeof(cfg_cp));
+    submit(1, 0x81, 10);  // a 64-byte buffer
+    complete(1, USBIP_XS_COMPLETED, 64);
+    assert_ret_submit(1, -USBIP_EOVERFLOW, 10);
+    TEST_ASSERT_EQUAL_size_t(10, reply(USBIP_RET_SUBMIT, 1)->n);
+    control(2, 0x80, 6, 0x0100, 0, 18);  // EP0: 8 + 64-byte buffer
+    complete(2, USBIP_XS_COMPLETED, 8 + 20);
+    assert_ret_submit(2, -USBIP_EOVERFLOW, 18);
+    submit(3, 0x81, 10);
+    complete(3, USBIP_XS_COMPLETED, 10);  // exactly what was asked
+    assert_ret_submit(3, 0, 10);
+    finish();
+}
+
+TEST_CASE("UNLINK of a transfer back from a flush but not yet resubmitted: answers -ECONNRESET and never submits it "
+          "again", "[usbip]")
+{
+    start(cfg_cp, sizeof(cfg_cp));
+    submit(1, 0x81, 64);
+    submit(2, 0x81, 64);
+    submit(3, 0x81, 64);
+    unlink(10, 2);
+    complete(1, USBIP_XS_CANCELED, 0);  // back, waits for 2 and 3
+    unlink(11, 1);
+    assert_ret_unlink(11, -USBIP_ECONNRESET);
+    complete(2, USBIP_XS_CANCELED, 0);
+    complete(3, USBIP_XS_CANCELED, 0);
+    assert_ret_unlink(10, -USBIP_ECONNRESET);
+    TEST_ASSERT_EQUAL_INT(1, log_count("submit 1"));
+    TEST_ASSERT_EQUAL_INT(2, log_count("submit 3"));
+    TEST_ASSERT_EQUAL_INT(0, replies_for(USBIP_RET_SUBMIT, 1));
+    TEST_ASSERT_EQUAL_INT(2, f.n_rep);
+    finish();
+}
+
+TEST_CASE("UNLINK of a seqnum already being unlinked: the second answers 0, the first -ECONNRESET", "[usbip]")
+{
+    start(cfg_cp, sizeof(cfg_cp));
+    submit(1, 0x81, 64);
+    unlink(10, 1);
+    unlink(11, 1);
+    assert_ret_unlink(11, 0);
+    TEST_ASSERT_EQUAL_INT(1, log_count("flush 81"));
+    complete(1, USBIP_XS_CANCELED, 0);
+    assert_ret_unlink(10, -USBIP_ECONNRESET);
+    TEST_ASSERT_EQUAL_INT(0, replies_for(USBIP_RET_SUBMIT, 1));
+    TEST_ASSERT_EQUAL_INT(2, f.n_rep);
+    finish();
+}
+
+TEST_CASE("SET_INTERFACE: when the USB side refuses the forward, claims the previous alt and answers -EPROTO",
+          "[usbip]")
+{
+    start(cfg_alt, sizeof(cfg_alt));
+    f.submit_ret = ESP_ERR_INVALID_STATE;
+    control(10, 0x01, 11, 1, 0, 0);
+    f.submit_ret = ESP_OK;
+    ASSERT_ORDER("release 0", "submit 10", "claim 0 0", "ret_submit 10");
+    assert_ret_submit(10, -USBIP_EPROTO, 0);
+    submit(11, 0x83, 8);
+    assert_ret_submit(11, -USBIP_EINVAL, 0);
+    submit(12, 0x81, 64);
+    TEST_ASSERT_NOT_NULL(pending(12));
+    finish();
+}
+
+TEST_CASE("DMA buffer allocation fails: answers -ENOMEM and frees the transfer", "[usbip]")
+{
+    start(cfg_cp, sizeof(cfg_cp));
+    f.fail_dma = true;
+    submit(1, 0x81, 64);
+    f.fail_dma = false;
+    assert_ret_submit(1, -USBIP_ENOMEM, 0);
+    TEST_ASSERT_EQUAL_INT(0, log_count("submit"));
+    usbip_mem_stats_t m;
+
+    usbip_engine_mem(&eng, &m);
+    TEST_ASSERT_EQUAL_size_t(0, m.inflight);
+    TEST_ASSERT_EQUAL_INT(f.allocs, f.frees);
+    submit(2, 0x81, 64);  // the endpoint's reserve is free again
+    TEST_ASSERT_NOT_NULL(pending(2));
+    finish();
 }

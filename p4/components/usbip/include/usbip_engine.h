@@ -21,7 +21,9 @@
 // Unlink of a transfer in flight on a bulk or interrupt endpoint (spec 6.5): the endpoint is halted, flushed and
 // cleared at once; the RET_UNLINK goes out when the unlinked transfer comes back: -ECONNRESET and no RET_SUBMIT when
 // it was canceled, or its RET_SUBMIT then RET_UNLINK 0 when it had completed before the flush took it. The endpoint's
-// other canceled transfers are submitted again in their original order once all of them are back, ahead of its FIFO.
+// other canceled IN transfers are submitted again in their original order once all of them are back, ahead of its
+// FIFO. A canceled OUT transfer is never submitted again (a flush reports 0 bytes even when data went out, spec 6.3):
+// as collateral of any cancel (CLEAR_FEATURE(ENDPOINT_HALT), SET_INTERFACE) it is answered -ECONNRESET, actual 0.
 //
 // Endpoint commands: ep_halt / ep_flush / ep_clear are never called for EP0 (esp-usb refuses them). A flush completes
 // every transfer in flight on the endpoint as USBIP_XS_CANCELED, asynchronously, through usbip_engine_on_complete.
@@ -120,7 +122,6 @@ typedef struct {
     const uint8_t *cfg;
     size_t cfg_len;
     uint8_t num_ifaces;
-    uint8_t rr;
     usbip_engine_iface_t ifaces[USBIP_IFACES_MAX];
     usbip_engine_slot_t slots[USBIP_EP_MAX + 1];  // 0 = EP0, 1..15 = non-control endpoints (budget indices)
     usbip_budget_t budget;
@@ -128,8 +129,8 @@ typedef struct {
 } usbip_engine_t;
 
 // Starts a session for dev: claims every interface of cfg at alternate setting 0. cfg (the active configuration
-// descriptor, already validated by usbip_core_dev_record) must stay valid until the session ends. Resets the counters
-// and memory peaks. On a claim failure the interfaces already claimed are released and the error is returned.
+// descriptor, already validated by usbip_core_dev_record) must stay valid until the session ends. Keeps the counters
+// and memory peaks: they count since the struct was zeroed (boot, spec 9). On a claim failure the interfaces already claimed are released and the error is returned.
 // e must be zeroed before its first start (static storage is); ESP_ERR_INVALID_STATE while a session runs.
 esp_err_t usbip_engine_start(usbip_engine_t *e, const usbip_engine_ops_t *ops, void *ctx, const usbip_dev_rec_t *dev,
                              const uint8_t *cfg, size_t cfg_len);
