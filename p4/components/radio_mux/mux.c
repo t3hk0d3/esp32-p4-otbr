@@ -1223,7 +1223,7 @@ static radio_mux_verdict_t check_mode(struct radio_mux_chan *ch, radio_mux_mode_
 {
     radio_mux_chan_view_t views[RADIO_MUX_CHANNELS_MAX];
     struct radio_mux_chan *by_view[RADIO_MUX_CHANNELS_MAX];
-    size_t n = 0, target = 0, move_from = 0;
+    size_t n = 0, target = 0, move_from = RADIO_MUX_CHANNELS_MAX; // no channel until check_bind names one
 
     for (size_t i = 0; i < RADIO_MUX_CHANNELS_MAX; i++) {
         if (g_mux.chans[i].used) {

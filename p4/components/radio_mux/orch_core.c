@@ -62,6 +62,9 @@ radio_mux_verdict_t radio_mux_orch_check_bind(const radio_mux_rules_t *rules, co
 {
     size_t first = 0, count = 0;
 
+    if (move_from != NULL) {
+        *move_from = n; // every verdict that does not move Thread names no channel
+    }
     if (want == RADIO_MUX_MODE_UNAVAILABLE || want == RADIO_MUX_MODE_INVALID) {
         return RADIO_MUX_REFUSE_BAD_VALUE;
     }

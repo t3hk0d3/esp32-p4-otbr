@@ -126,7 +126,7 @@ TEST_CASE("On otbr for the channel that already is otbr: returns RADIO_MUX_APPLY
 
     three_channels(c);
     TEST_ASSERT_EQUAL(RADIO_MUX_APPLY, radio_mux_orch_check_bind(&none, c, N_CHANS, 0, RADIO_MUX_MODE_OTBR, false, &from));
-    TEST_ASSERT_EQUAL(99, from);
+    TEST_ASSERT_EQUAL(N_CHANS, from); // no move: no channel named
 }
 
 TEST_CASE("On a registered limit-1 mode already used by another channel: returns RADIO_MUX_REFUSE_MODE_TAKEN",
@@ -358,7 +358,7 @@ TEST_CASE("On a change on a channel in reinit: returns RADIO_MUX_REFUSE_BUSY", "
                       radio_mux_orch_check_bind(&none, c, N_CHANS, 1, RADIO_MUX_MODE_RCP_PROXY, true, NULL));
     TEST_ASSERT_EQUAL(RADIO_MUX_REFUSE_BUSY,
                       radio_mux_orch_check_bind(&none, c, N_CHANS, 0, RADIO_MUX_MODE_OFF, true, &from));
-    TEST_ASSERT_EQUAL(99, from); // no move
+    TEST_ASSERT_EQUAL(N_CHANS, from); // no move: no channel named
     // The same mode again is a change too (a PUT of the mode retries a fault).
     TEST_ASSERT_EQUAL(RADIO_MUX_REFUSE_BUSY,
                       radio_mux_orch_check_bind(&none, c, N_CHANS, 0, RADIO_MUX_MODE_OTBR, true, NULL));
@@ -867,4 +867,36 @@ TEST_CASE("modes_after: a reboot with move_from n: changes only the target", "[r
     TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OFF, out[0]);
     TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OTBR, out[1]);
     TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OFF, out[2]);
+}
+
+/* ---- final review: a reboot that is not a Thread move names no channel to turn off ---- */
+
+TEST_CASE("On ziggurat on the dongle while Thread runs on the C6: move_from is n, and modes_after keeps the C6 in otbr",
+          "[radio_mux]")
+{
+    radio_mux_rules_t zig = hybrid_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    radio_mux_mode_t out[N_CHANS];
+    size_t from = 99;
+
+    three_channels(c);
+    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY_REBOOT, radio_mux_orch_check_bind(&zig, c, N_CHANS, 1, MODE_ZIGGURAT, false, &from));
+    TEST_ASSERT_EQUAL(N_CHANS, from);
+    radio_mux_orch_modes_after(c, N_CHANS, 1, MODE_ZIGGURAT, from, out);
+    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OTBR, out[0]);
+    TEST_ASSERT_EQUAL(MODE_ZIGGURAT, out[1]);
+}
+
+TEST_CASE("On off on the dongle that runs Zigbee while Thread runs on the C6: APPLY_REBOOT with move_from n",
+          "[radio_mux]")
+{
+    radio_mux_rules_t zig = hybrid_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    size_t from = 99;
+
+    three_channels(c);
+    c[1].mode = MODE_ZIGGURAT;
+    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY_REBOOT,
+                      radio_mux_orch_check_bind(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OFF, false, &from));
+    TEST_ASSERT_EQUAL(N_CHANS, from);
 }

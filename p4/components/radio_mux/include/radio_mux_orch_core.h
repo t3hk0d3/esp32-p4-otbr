@@ -61,7 +61,8 @@ const char *radio_mux_busy_reason(radio_mux_work_t w);
 // channel has it (a move; *move_from is that channel's index), otbr while no channel has it (a start; *move_from is
 // n), and the otbr channel leaving otbr for another mode without a reboot (a stop; *move_from is target). move_from may
 // be NULL. RADIO_MUX_APPLY_REBOOT: entering or leaving a mode whose rule has reboot_on_change; for otbr onto a channel
-// leaving such a mode, *move_from is the channel that runs otbr now (turned off by the same store), or n.
+// leaving such a mode, *move_from is the channel that runs otbr now (turned off by the same store), or n. Every other
+// verdict sets *move_from to n.
 radio_mux_verdict_t radio_mux_orch_check_bind(const radio_mux_rules_t *rules, const radio_mux_chan_view_t *chans,
                                               size_t n, size_t target, radio_mux_mode_t want, bool in_reinit,
                                               size_t *move_from);
