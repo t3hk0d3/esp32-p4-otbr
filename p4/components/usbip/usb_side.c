@@ -350,8 +350,10 @@ static void *ops_alloc(void *ctx, size_t n, bool dma)
         ESP_LOGW(TAG, "all %d DMA transfer slots in use: allocation refused", USBIP_USB_XFERS_MAX);
         return NULL;
     }
-    // The caps esp-usb allocates transfer data buffers with (CONFIG_USB_HOST_DWC_DMA_CAP_MEMORY_IN_PSRAM is on).
-    const size_t free_dma = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
+    // esp-usb allocates transfer data buffers in PSRAM (CONFIG_USB_HOST_DWC_DMA_CAP_MEMORY_IN_PSRAM). Ask for SPIRAM
+    // alone: no P4 heap region carries MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM (the allocator drops DMA for a SPIRAM request,
+    // heap_align_hw.c), so that query answers 0; all of the P4's PSRAM is reachable by the USB DMA.
+    const size_t free_dma = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
 
     if (!usbip_core_alloc_fits(free_dma, n, USBIP_PSRAM_FREE_FLOOR)) {
         ESP_LOGW(TAG, "%u bytes of DMA PSRAM would leave %u free, under the %u floor: allocation refused", (unsigned)n,

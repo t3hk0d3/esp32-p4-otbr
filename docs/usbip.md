@@ -139,7 +139,9 @@ Memory: transfer buffers live in PSRAM, at most 408 KB in flight. Reads (IN) sha
 have one transfer of up to 2 KB in flight, and a larger first transfer (a 120 KB write, for example) goes when it fits
 under the 408 KB. A transfer is also refused (`-ENOMEM`) when it would leave less than 1 MB of PSRAM free. Requests
 that wait for the device queue in PSRAM, up to 1 MB per session; beyond that the session ends (counter
-`sessions_ended_overload`).
+`sessions_ended_overload`). An OUT endpoint has one transfer in flight, so a client that queues more than about eight
+120 KB writes at once (deep asynchronous writes with libusb, for example) ends its session; USB storage sends one
+command at a time.
 
 Devices that stall or never answer a control transfer end the session, and the board resets them.
 

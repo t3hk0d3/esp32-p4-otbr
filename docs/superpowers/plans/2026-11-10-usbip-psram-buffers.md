@@ -33,7 +33,7 @@ component, Unity `TEST_CASE("On <scenario>: <effect>")`). Commands run as `<cmd>
 | `USBIP_XFER_MAX` | 16 KB | 120 KB (122880) | Linux `usb-storage` default; under the hardware limit of every endpoint |
 | `USBIP_INFLIGHT_BYTES` (IN shared) | 32 KB | 256 KB | two 120 KB reads plus small ones; PSRAM has ~30 MB free |
 | `USBIP_INFLIGHT_HARD` | 80 KB literal | expression: shared + `USBIP_XFER_MAX` + (`USBIP_EP_MAX` + 1) x `USBIP_RESERVE_SMALL` = 408 KB | keeps the §8.1 invariant "shared and small grants leave room for one large transfer" by construction |
-| Heap floor | 48 KB internal DMA (`USBIP_DMA_FREE_FLOOR`) | 1 MB PSRAM DMA (`USBIP_PSRAM_FREE_FLOOR`, checked against `MALLOC_CAP_DMA \| MALLOC_CAP_SPIRAM`) | the buffers now come from PSRAM; 1 MB leaves room for OTA and the other PSRAM users |
+| Heap floor | 48 KB internal DMA (`USBIP_DMA_FREE_FLOOR`) | 1 MB PSRAM DMA (`USBIP_PSRAM_FREE_FLOOR`, checked against `MALLOC_CAP_SPIRAM`: no P4 heap region carries DMA and SPIRAM together) | the buffers now come from PSRAM; 1 MB leaves room for OTA and the other PSRAM users |
 | `TX_RING_LEN` (net.c) | 256 KB | 768 KB | must hold every IN completion that can be in flight (408 KB + headers) so a burst never reads as "client does not read" |
 | `USBIP_WAIT_BYTES` | 1 MB | unchanged | ≥ 8 waiting 120 KB transfers |
 | Kconfig | off | `CONFIG_USB_HOST_DWC_DMA_CAP_MEMORY_IN_PSRAM=y` in `p4/sdkconfig.defaults` | the user's call |
@@ -74,7 +74,7 @@ usbip_core_alloc_fits(size_t free, size_t n, size_t floor) -> bool (core.c, new 
 
 ops_alloc (usb_side.c, target only)
     On a DMA buffer request
-        - checks free PSRAM DMA memory against USBIP_PSRAM_FREE_FLOOR via usbip_core_alloc_fits
+        - checks free PSRAM (MALLOC_CAP_SPIRAM) against USBIP_PSRAM_FREE_FLOOR via usbip_core_alloc_fits
         - allocates through usb_host_transfer_alloc (PSRAM with the Kconfig on)
     On the floor not met
         - returns NULL (the client gets -ENOMEM), logs the numbers
