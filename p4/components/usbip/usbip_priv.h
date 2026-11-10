@@ -26,9 +26,10 @@ extern "C" {
 #define USBIP_USB_XFERS_MAX (2 * (USBIP_INFLIGHT_XFERS + USBIP_EP_MAX + 1))
 // The length the events queue passed to usbip_usb_start must have: one completion per live transfer plus device
 // events. The USB task blocks on a full queue (a completion is never dropped), so a shorter queue can stall it.
-// A DMA transfer buffer is refused (the engine answers -ENOMEM) when it would leave less than this much internal DMA
-// memory free: the rest of the firmware keeps a floor however the budget and the heap's other users add up.
-#define USBIP_DMA_FREE_FLOOR (48 * 1024)
+// A DMA transfer buffer (PSRAM, CONFIG_USB_HOST_DWC_DMA_CAP_MEMORY_IN_PSRAM) is refused (the engine answers -ENOMEM)
+// when it would leave less than this much DMA-capable PSRAM free: the rest of the firmware (OTA among it) keeps a floor
+// however the budget and the heap's other users add up.
+#define USBIP_PSRAM_FREE_FLOOR (1024 * 1024)
 #define USBIP_USB_EVENTS_LEN (USBIP_USB_XFERS_MAX + 8)
 
 // One message from the USB task to the network task.

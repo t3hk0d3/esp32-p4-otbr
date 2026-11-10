@@ -22,7 +22,7 @@ bool usbip_budget_grant(usbip_budget_t *b, uint8_t ep_index, bool is_in, size_t 
     bool multi = is_in && ep_index != 0;
     size_t new_charged = b->charged - charge(b->ep_bytes[ep_index]) + charge(b->ep_bytes[ep_index] + n);
     bool small = first && n <= USBIP_RESERVE_SMALL;
-    // IN endpoints share the 32 KB, a first transfer included: an IN takes the large reserve only when it does not fit.
+    // IN endpoints share USBIP_INFLIGHT_BYTES, a first transfer included: an IN takes the large reserve only when it does not fit.
     bool shared = multi && b->inflight_bytes + n <= USBIP_INFLIGHT_BYTES && b->inflight_xfers < USBIP_INFLIGHT_XFERS;
     bool large = first && new_charged <= USBIP_INFLIGHT_HARD;
 

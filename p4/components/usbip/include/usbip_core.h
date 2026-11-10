@@ -20,13 +20,20 @@ extern "C" {
 #define USBIP_KEEPALIVE_INTERVAL_S 5
 #define USBIP_KEEPALIVE_PROBES 3
 #define USBIP_CTRL_DATA_MAX 4096
-#define USBIP_XFER_MAX 16384
+// One transfer: Linux usb-storage reads up to 120 KB (max_sectors 240). Transfer buffers live in PSRAM
+// (CONFIG_USB_HOST_DWC_DMA_CAP_MEMORY_IN_PSRAM, spec 8.1).
+#define USBIP_XFER_MAX (120 * 1024)
 #define USBIP_EP_MAX 15
-#define USBIP_INFLIGHT_BYTES 32768
+#define USBIP_INFLIGHT_BYTES (256 * 1024)
 #define USBIP_INFLIGHT_XFERS 32
 #define USBIP_RESERVE_SMALL 2048
-#define USBIP_INFLIGHT_HARD 81920
+// Shared IN bytes, one large transfer and every endpoint's small reserve: one large transfer always fits once no other
+// is in flight (408 KB).
+#define USBIP_INFLIGHT_HARD (USBIP_INFLIGHT_BYTES + USBIP_XFER_MAX + (USBIP_EP_MAX + 1) * USBIP_RESERVE_SMALL)
 #define USBIP_WAIT_BYTES 1048576
+// esp-usb's per-transfer limit is 131071 bytes floored to whole packets: 130048 for a 1024-byte endpoint, the worst.
+_Static_assert(USBIP_XFER_MAX <= 130048, "USBIP_XFER_MAX must fit esp-usb's per-transfer limit on every endpoint");
+_Static_assert(USBIP_WAIT_BYTES >= USBIP_XFER_MAX, "a waiting transfer of USBIP_XFER_MAX must fit the waiting cap");
 #define USBIP_EP0_UNLINK_MS 2000
 
 #define USBIP_ST_OK 0
@@ -107,6 +114,9 @@ int32_t usbip_core_status_errno(usbip_xfer_status_t st, bool short_in, uint32_t 
 
 // 0 or a negative Linux errno. ep is the claimed endpoint (control: type 0), NULL when it is not claimed.
 int32_t usbip_core_check_submit(const usbip_cmd_t *c, uint32_t devid, const usbip_ep_info_t *ep);
+
+// Whether allocating n bytes out of `free` leaves at least `floor` free (false when n exceeds free).
+bool usbip_core_alloc_fits(size_t free, size_t n, size_t floor);
 
 usbip_set_verdict_t usbip_core_check_enable(bool want, bool stored, bool long_op, bool usb_stack_held);
 

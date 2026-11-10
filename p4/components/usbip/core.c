@@ -215,6 +215,11 @@ int32_t usbip_core_check_submit(const usbip_cmd_t *c, uint32_t devid, const usbi
     return 0;
 }
 
+bool usbip_core_alloc_fits(size_t free, size_t n, size_t floor)
+{
+    return n <= free && free - n >= floor;
+}
+
 usbip_set_verdict_t usbip_core_check_enable(bool want, bool stored, bool long_op, bool usb_stack_held)
 {
     if (want == stored) {

@@ -350,12 +350,12 @@ static void *ops_alloc(void *ctx, size_t n, bool dma)
         ESP_LOGW(TAG, "all %d DMA transfer slots in use: allocation refused", USBIP_USB_XFERS_MAX);
         return NULL;
     }
-    // The caps esp-usb allocates transfer data buffers with (CONFIG_USB_HOST_DWC_DMA_CAP_MEMORY_IN_PSRAM is off).
-    size_t free_dma = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    // The caps esp-usb allocates transfer data buffers with (CONFIG_USB_HOST_DWC_DMA_CAP_MEMORY_IN_PSRAM is on).
+    const size_t free_dma = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
 
-    if (free_dma < n || free_dma - n < USBIP_DMA_FREE_FLOOR) {
-        ESP_LOGW(TAG, "%u bytes of DMA memory would leave %u free, under the %u floor: allocation refused", (unsigned)n,
-                 (unsigned)(free_dma < n ? 0 : free_dma - n), (unsigned)USBIP_DMA_FREE_FLOOR);
+    if (!usbip_core_alloc_fits(free_dma, n, USBIP_PSRAM_FREE_FLOOR)) {
+        ESP_LOGW(TAG, "%u bytes of DMA PSRAM would leave %u free, under the %u floor: allocation refused", (unsigned)n,
+                 (unsigned)(free_dma < n ? 0 : free_dma - n), (unsigned)USBIP_PSRAM_FREE_FLOOR);
         return NULL;
     }
     usb_transfer_t *t = NULL;

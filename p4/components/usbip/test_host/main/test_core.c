@@ -327,13 +327,13 @@ static usbip_cmd_t submit_cmd(uint32_t devid, int32_t length)
     return c;
 }
 
-TEST_CASE("On a transfer above 16384: -EINVAL, and 16384 itself passes", "[usbip]")
+TEST_CASE("On a transfer above USBIP_XFER_MAX: -EINVAL, and USBIP_XFER_MAX itself passes", "[usbip]")
 {
     const usbip_ep_info_t bulk = {.addr = 0x81, .type = 2, .mps = 64};
-    usbip_cmd_t c = submit_cmd(0x10005, 16385);
+    usbip_cmd_t c = submit_cmd(0x10005, USBIP_XFER_MAX + 1);
 
     TEST_ASSERT_EQUAL_INT32(-22, usbip_core_check_submit(&c, 0x10005, &bulk));
-    c.submit.length = 16384;
+    c.submit.length = USBIP_XFER_MAX;
     TEST_ASSERT_EQUAL_INT32(0, usbip_core_check_submit(&c, 0x10005, &bulk));
     c.submit.length = -1;
     TEST_ASSERT_EQUAL_INT32(-22, usbip_core_check_submit(&c, 0x10005, &bulk));
@@ -436,4 +436,21 @@ TEST_CASE("On each state: names it as the API shows it", "[usbip]")
     TEST_ASSERT_EQUAL_STRING("unsupported", usbip_state_name(USBIP_STATE_UNSUPPORTED));
     TEST_ASSERT_EQUAL_STRING("exportable", usbip_state_name(USBIP_STATE_EXPORTABLE));
     TEST_ASSERT_EQUAL_STRING("attached", usbip_state_name(USBIP_STATE_ATTACHED));
+}
+
+TEST_CASE("On free - n >= floor: usbip_core_alloc_fits is true", "[usbip]")
+{
+    TEST_ASSERT_TRUE(usbip_core_alloc_fits(1000, 400, 600));  // exactly the floor is left
+    TEST_ASSERT_TRUE(usbip_core_alloc_fits(1000, 100, 600));
+}
+
+TEST_CASE("On free - n < floor: usbip_core_alloc_fits is false", "[usbip]")
+{
+    TEST_ASSERT_FALSE(usbip_core_alloc_fits(1000, 401, 600));  // one byte under the floor
+}
+
+TEST_CASE("On n > free: usbip_core_alloc_fits is false without underflow", "[usbip]")
+{
+    TEST_ASSERT_FALSE(usbip_core_alloc_fits(100, 101, 0));  // free - n would wrap to a huge value
+    TEST_ASSERT_FALSE(usbip_core_alloc_fits(0, 1, 0));
 }

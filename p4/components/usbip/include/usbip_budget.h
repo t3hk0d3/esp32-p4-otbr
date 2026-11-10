@@ -7,9 +7,9 @@
 // - small reserve: an endpoint with nothing in flight always gets a transfer of up to USBIP_RESERVE_SMALL (2 KB), even
 //   when the shared bytes or the transfer count are used up (HCI commands, EP0, always-pending HID/HCI reads);
 // - shared: an IN endpoint (not EP0) with transfers in flight gets one more while in-flight bytes + n <=
-//   USBIP_INFLIGHT_BYTES (32 KB) and in-flight transfers < USBIP_INFLIGHT_XFERS (32);
+//   USBIP_INFLIGHT_BYTES (256 KB) and in-flight transfers < USBIP_INFLIGHT_XFERS (32);
 // - large reserve: an endpoint with nothing in flight gets a larger first transfer (OUT, EP0, or an IN whose shared
-//   check fails) while the charged bytes after the grant stay <= USBIP_INFLIGHT_HARD (80 KB);
+//   check fails) while the charged bytes after the grant stay <= USBIP_INFLIGHT_HARD (408 KB);
 // - otherwise the transfer waits in its FIFO. OUT endpoints and EP0 have at most one transfer in flight.
 // Every grant counts toward the in-flight bytes and transfers, so the shared check sees reserve grants too.
 //
@@ -17,9 +17,9 @@
 // USBIP_RESERVE_SMALL). An idle endpoint is charged the 2 KB its small reserve may take at any moment, so a large
 // grant leaves room for every small reserve still to come. Small grants and releases never raise the charge.
 //
-// Internal RAM worst case: in-flight bytes <= charged bytes <= USBIP_INFLIGHT_HARD (80 KB): 32 KB IN shared, one 16 KB
-// large transfer and the 16 x 2 KB small reserves. Shared and small grants alone stay at or below 64 KB, so one 16 KB
-// OUT or EP0 transfer always fits once no other large transfer is in flight.
+// PSRAM worst case (transfer buffers are DMA PSRAM): in-flight bytes <= charged bytes <= USBIP_INFLIGHT_HARD (408 KB):
+// 256 KB IN shared, one 120 KB large transfer and the 16 x 2 KB small reserves. Shared and small grants alone stay at
+// or below 288 KB, so one 120 KB OUT or EP0 transfer always fits once no other large transfer is in flight.
 #pragma once
 
 #include <stdbool.h>

@@ -88,6 +88,9 @@ CONFIG_LWIP_MAX_UDP_PCBS=32
 # USB host: a configuration descriptor over 256 bytes fails enumeration at the default control transfer size (USB/IP
 # exports composite devices).
 CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE=1024
+# USB transfer buffers and descriptor lists in PSRAM (the P4's USB DMA reaches it): USB/IP transfers of up to 120 KB
+# without internal RAM. Also moves the USB serial radio channels' buffers.
+CONFIG_USB_HOST_DWC_DMA_CAP_MEMORY_IN_PSRAM=y
 
 # lwIP never forwards IPv4: no routing between interfaces (spec 5.13); NAT64 egress is generated locally by OpenThread.
 CONFIG_LWIP_IP_FORWARD=n

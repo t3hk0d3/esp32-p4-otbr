@@ -8,6 +8,11 @@
 
 #define W(n) ((n) & 0xff), (((n) >> 8) & 0xff)
 #define DEVID 0x10003
+// Two max reads plus this remainder fill the shared IN budget exactly: three transfers, so the bytes (not the
+// 32-transfer count) are the limit that bites.
+#define SHARED_REST (USBIP_INFLIGHT_BYTES - 2 * USBIP_XFER_MAX)
+// Small enough that 1 MB of waiting data takes more than 60 of them (a max transfer would take only nine).
+#define OVERLOAD_CHUNK (USBIP_XFER_MAX / 8)
 
 // --- Fake ops: records every call in one log, keeps submitted transfers until the test completes them. ---
 
@@ -493,7 +498,7 @@ TEST_CASE("short IN with URB_SHORT_NOT_OK: answers -EREMOTEIO", "[usbip]")
     finish();
 }
 
-TEST_CASE("transfer above 16 KB, an iso endpoint, or an endpoint not claimed: answers -EINVAL at once", "[usbip]")
+TEST_CASE("transfer above USBIP_XFER_MAX, an iso endpoint, or an endpoint not claimed: answers -EINVAL at once", "[usbip]")
 {
     start(cfg_bt, sizeof(cfg_bt));
     submit(1, 0x82, USBIP_XFER_MAX + 1);
@@ -520,36 +525,38 @@ TEST_CASE("wrong devid: answers -ENODEV", "[usbip]")
 TEST_CASE("budget full: queues it in the endpoint's PSRAM FIFO and submits it in order when a slot frees", "[usbip]")
 {
     start(cfg_cp, sizeof(cfg_cp));
-    submit(1, 0x81, 16384);
-    submit(2, 0x81, 16384);
+    submit(1, 0x81, USBIP_XFER_MAX);
+    submit(2, 0x81, USBIP_XFER_MAX);
+    submit(3, 0x81, SHARED_REST);  // shared 256 KB full
     int dma = f.dma_allocs;
 
-    submit(3, 0x81, 64);
     submit(4, 0x81, 64);
-    TEST_ASSERT_EQUAL_INT(2, log_count("submit"));
+    submit(5, 0x81, 64);
+    TEST_ASSERT_EQUAL_INT(3, log_count("submit"));
     TEST_ASSERT_EQUAL_INT(dma, f.dma_allocs);  // waiting transfers hold no DMA memory
     usbip_mem_stats_t m;
 
     usbip_engine_mem(&eng, &m);
-    TEST_ASSERT_EQUAL_size_t(32768, m.inflight);
+    TEST_ASSERT_EQUAL_size_t(USBIP_INFLIGHT_BYTES, m.inflight);
     TEST_ASSERT_GREATER_THAN(0, m.waiting);
     complete(1, USBIP_XS_COMPLETED, 0);
-    ASSERT_ORDER("ret_submit 1", "submit 3", "submit 4");
+    ASSERT_ORDER("ret_submit 1", "submit 4", "submit 5");
     usbip_engine_mem(&eng, &m);
     TEST_ASSERT_EQUAL_size_t(0, m.waiting);
-    TEST_ASSERT_EQUAL_size_t(16384 + 128, m.inflight);
+    TEST_ASSERT_EQUAL_size_t(USBIP_XFER_MAX + SHARED_REST + 128, m.inflight);
     finish();
 }
 
 TEST_CASE("endpoint with nothing in flight: grants it a slot even when the shared budget is used up", "[usbip]")
 {
     start(cfg_bt, sizeof(cfg_bt));
-    submit(1, 0x82, 16384);
-    submit(2, 0x82, 16384);
-    submit(3, 0x82, 64);  // waits: shared budget used up
-    submit(4, 0x81, 16);  // reserve of 0x81
-    TEST_ASSERT_NULL(pending(3));
-    TEST_ASSERT_NOT_NULL(pending(4));
+    submit(1, 0x82, USBIP_XFER_MAX);
+    submit(2, 0x82, USBIP_XFER_MAX);
+    submit(3, 0x82, SHARED_REST);
+    submit(4, 0x82, 64);  // waits: shared budget used up
+    submit(5, 0x81, 16);  // reserve of 0x81
+    TEST_ASSERT_NULL(pending(4));
+    TEST_ASSERT_NOT_NULL(pending(5));
     finish();
 }
 
@@ -557,11 +564,11 @@ TEST_CASE("budget pressure: a large first OUT over the hard cap waits and goes o
           "[usbip]")
 {
     start(cfg_bt, sizeof(cfg_bt));
-    for (uint32_t s = 1; s <= USBIP_INFLIGHT_XFERS; s++) {
-        submit(s, 0x81, 1024);  // IN shared: 32 KB
-    }
-    submit(40, 0x82, USBIP_XFER_MAX);  // large reserve of 0x82: charged 76 KB
-    submit(41, 0x02, USBIP_XFER_MAX);  // would be 90 KB: waits
+    submit(1, 0x81, USBIP_XFER_MAX);  // IN shared: 256 KB full by bytes, 3 transfers
+    submit(2, 0x81, USBIP_XFER_MAX);
+    submit(3, 0x81, SHARED_REST);
+    submit(40, 0x82, USBIP_XFER_MAX);  // large reserve of 0x82: charged 404 KB
+    submit(41, 0x02, USBIP_XFER_MAX);  // would be 522 KB: waits
     TEST_ASSERT_NOT_NULL(pending(40));
     TEST_ASSERT_NULL(pending(41));
     control(42, 0x20, 0, 0, 0, 3);  // EP0's small reserve still goes
@@ -578,7 +585,7 @@ TEST_CASE("budget pressure: a large first OUT over the hard cap waits and goes o
 TEST_CASE("Budget full of IN reads on 0x81: a bulk OUT on 0x02 is still submitted", "[usbip]")
 {
     start(cfg_bt, sizeof(cfg_bt));
-    // btusb keeps interrupt and bulk reads pending; here interrupt reads on 0x81 fill the shared budget.
+    // btusb keeps interrupt and bulk reads pending; here small reads on 0x81 hit the 32-transfer limit (not the bytes).
     for (uint32_t s = 1; s <= 34; s++) {
         submit(s, 0x81, 1024);
     }
@@ -593,11 +600,11 @@ TEST_CASE("Budget full of IN reads on 0x81: a bulk OUT on 0x02 is still submitte
 TEST_CASE("waiting data exceeds 1 MB: ends the session and counts sessions_ended_overload", "[usbip]")
 {
     start(cfg_cp, sizeof(cfg_cp));
-    submit(1, 0x01, 16384);  // in flight
+    submit(1, 0x01, OVERLOAD_CHUNK);  // in flight
     uint32_t s = 2;
 
     for (; s < 200 && f.ends == 0; s++) {
-        submit(s, 0x01, 16384);
+        submit(s, 0x01, OVERLOAD_CHUNK);
     }
     TEST_ASSERT_EQUAL_INT(1, f.ends);
     TEST_ASSERT_GREATER_THAN(60, s);
@@ -610,7 +617,7 @@ TEST_CASE("waiting data exceeds 1 MB: ends the session and counts sessions_ended
 
     usbip_engine_mem(&eng, &m);
     TEST_ASSERT_EQUAL_size_t(0, m.waiting);
-    TEST_ASSERT_GREATER_THAN(USBIP_WAIT_BYTES - 16384 - 1024, m.waiting_peak);
+    TEST_ASSERT_GREATER_THAN(USBIP_WAIT_BYTES - OVERLOAD_CHUNK - 1024, m.waiting_peak);
     TEST_ASSERT_EQUAL_INT(1, log_count("power"));
     finish();
 }
@@ -920,16 +927,18 @@ TEST_CASE("UNLINK, still waits in the endpoint's FIFO: removes it and answers RE
 TEST_CASE("Unlink of a waiting transfer: exactly one answer for its seqnum, none after the slot frees", "[usbip]")
 {
     start(cfg_cp, sizeof(cfg_cp));
-    submit(1, 0x81, 16384);
-    submit(2, 0x81, 16384);
-    submit(3, 0x81, 64);  // waits in PSRAM
-    submit(4, 0x81, 64);
-    unlink(10, 3);
+    submit(1, 0x81, USBIP_XFER_MAX);
+    submit(2, 0x81, USBIP_XFER_MAX);
+    submit(3, 0x81, SHARED_REST);  // shared 256 KB full
+    submit(4, 0x81, 64);  // waits in PSRAM
+    submit(5, 0x81, 64);
+    unlink(10, 4);
     complete(1, USBIP_XS_COMPLETED, 0);
     complete(2, USBIP_XS_COMPLETED, 0);
-    complete(4, USBIP_XS_COMPLETED, 0);
-    TEST_ASSERT_EQUAL_INT(0, log_count("submit 3"));
-    TEST_ASSERT_EQUAL_INT(0, replies_for(USBIP_RET_SUBMIT, 3));
+    complete(3, USBIP_XS_COMPLETED, 0);
+    complete(5, USBIP_XS_COMPLETED, 0);
+    TEST_ASSERT_EQUAL_INT(0, log_count("submit 4"));
+    TEST_ASSERT_EQUAL_INT(0, replies_for(USBIP_RET_SUBMIT, 4));
     TEST_ASSERT_EQUAL_INT(1, replies_for(USBIP_RET_UNLINK, 10));
     assert_ret_unlink(10, -USBIP_ECONNRESET);
     usbip_mem_stats_t m;
@@ -961,10 +970,12 @@ TEST_CASE("UNLINK, in flight on a bulk or interrupt endpoint: resubmits the endp
           "original order, ahead of its FIFO", "[usbip]")
 {
     start(cfg_cp, sizeof(cfg_cp));
+    const int32_t chunk = USBIP_INFLIGHT_BYTES / 8;  // 8 x 32 KB: the shared bytes (not the count) are full
+
     for (uint32_t s = 1; s <= 8; s++) {
-        submit(s, 0x81, 4096);  // 32 KB in flight
+        submit(s, 0x81, chunk);
     }
-    submit(9, 0x81, 4096);  // waits
+    submit(9, 0x81, chunk);  // waits
     TEST_ASSERT_NULL(pending(9));
     unlink(20, 3);
     submit(10, 0x81, 64);  // arrives during the flush: behind the FIFO
@@ -1055,11 +1066,13 @@ TEST_CASE("budget pressure: a waiting transfer goes out when its endpoint frees,
           "transfers", "[usbip]")
 {
     start(cfg_bt, sizeof(cfg_bt));
-    submit(1, 0x82, 8192);
-    submit(2, 0x82, 16384);
-    submit(3, 0x81, 16);    // reserve: 24592 in flight
-    submit(4, 0x81, 8192);  // 32784 would exceed: waits
-    submit(5, 0x82, 8192);  // waits
+    const int32_t part = 80 * 1024;
+
+    submit(1, 0x82, part);
+    submit(2, 0x82, USBIP_XFER_MAX);
+    submit(3, 0x81, 16);    // reserve: 200 KB + 16 in flight
+    submit(4, 0x81, part);  // 280 KB + 16 would exceed 256 KB: waits
+    submit(5, 0x82, part);  // waits
     TEST_ASSERT_NULL(pending(4));
     TEST_ASSERT_NULL(pending(5));
     complete(1, USBIP_XS_COMPLETED, 0);
@@ -1071,11 +1084,11 @@ TEST_CASE("budget pressure: a waiting transfer goes out when its endpoint frees,
 TEST_CASE("budget pressure: waiting transfers of one endpoint go out in arrival order", "[usbip]")
 {
     start(cfg_cp, sizeof(cfg_cp));
-    submit(1, 0x81, 16384);
-    submit(2, 0x81, 16384);
-    submit(3, 0x81, 16384);
-    submit(4, 0x81, 16384);
-    submit(5, 0x81, 16384);
+    submit(1, 0x81, USBIP_XFER_MAX);
+    submit(2, 0x81, USBIP_XFER_MAX);
+    submit(3, 0x81, USBIP_XFER_MAX);
+    submit(4, 0x81, USBIP_XFER_MAX);
+    submit(5, 0x81, USBIP_XFER_MAX);
     complete(1, USBIP_XS_COMPLETED, 0);
     complete(2, USBIP_XS_COMPLETED, 0);
     complete(3, USBIP_XS_COMPLETED, 0);
@@ -1125,13 +1138,14 @@ TEST_CASE("session end: power-cycles the root port so the device re-enumerates",
 TEST_CASE("Device gone with transfers in flight: all buffers freed", "[usbip]")
 {
     start(cfg_cp, sizeof(cfg_cp));
-    submit(1, 0x81, 16384);
-    submit(2, 0x81, 16384);
-    submit(3, 0x81, 64);    // waits
-    submit(4, 0x01, 64);
-    submit(5, 0x01, 128);   // waits, with OUT data in PSRAM
-    control(6, 0x80, 6, 0x0100, 0, 18);
-    control(7, 0x00, 3, 1, 0, 0);  // waits behind 6
+    submit(1, 0x81, USBIP_XFER_MAX);
+    submit(2, 0x81, USBIP_XFER_MAX);
+    submit(3, 0x81, SHARED_REST);
+    submit(4, 0x81, 64);    // waits
+    submit(5, 0x01, 64);
+    submit(6, 0x01, 128);   // waits, with OUT data in PSRAM
+    control(7, 0x80, 6, 0x0100, 0, 18);
+    control(8, 0x00, 3, 1, 0, 0);  // waits behind 7
     complete(1, USBIP_XS_NO_DEVICE, 0);
     assert_ret_submit(1, -USBIP_ENODEV, 0);
     TEST_ASSERT_EQUAL_INT(1, f.ends);
@@ -1145,8 +1159,9 @@ TEST_CASE("Device gone with transfers in flight: all buffers freed", "[usbip]")
     int reps = f.n_rep;
 
     complete(2, USBIP_XS_NO_DEVICE, 0);
-    complete(4, USBIP_XS_CANCELED, 0);
-    complete(6, USBIP_XS_NO_DEVICE, 0);
+    complete(3, USBIP_XS_NO_DEVICE, 0);
+    complete(5, USBIP_XS_CANCELED, 0);
+    complete(7, USBIP_XS_NO_DEVICE, 0);
     TEST_ASSERT_EQUAL_INT(reps, f.n_rep);
     TEST_ASSERT_EQUAL_INT(0, f.n_pend);
     TEST_ASSERT_EQUAL_INT(f.allocs, f.frees);
@@ -1212,9 +1227,9 @@ TEST_CASE("session start: on a claim failure releases what it claimed and return
 TEST_CASE("counters and memory peaks: kept across sessions (reset at boot only)", "[usbip]")
 {
     start(cfg_cp, sizeof(cfg_cp));
-    submit(1, 0x01, 16384);
+    submit(1, 0x01, OVERLOAD_CHUNK);
     for (uint32_t s = 2; s < 200 && f.ends == 0; s++) {
-        submit(s, 0x01, 16384);
+        submit(s, 0x01, OVERLOAD_CHUNK);
     }
     TEST_ASSERT_EQUAL_INT(1, f.ends);
     finish_quiet();
@@ -1233,7 +1248,7 @@ TEST_CASE("counters and memory peaks: kept across sessions (reset at boot only)"
     TEST_ASSERT_GREATER_THAN(60, c.submits);
     TEST_ASSERT_EQUAL_size_t(before.waiting_peak, m.waiting_peak);
     TEST_ASSERT_EQUAL_size_t(before.inflight_peak, m.inflight_peak);
-    TEST_ASSERT_GREATER_THAN(USBIP_WAIT_BYTES - 16384 - 1024, m.waiting_peak);
+    TEST_ASSERT_GREATER_THAN(USBIP_WAIT_BYTES - OVERLOAD_CHUNK - 1024, m.waiting_peak);
     TEST_ASSERT_EQUAL_size_t(0, m.waiting);
     TEST_ASSERT_EQUAL_size_t(0, m.inflight);
     finish();
@@ -1242,14 +1257,16 @@ TEST_CASE("counters and memory peaks: kept across sessions (reset at boot only)"
 TEST_CASE("budget pressure: the freed endpoint's FIFO gets its head out, then the others in turn", "[usbip]")
 {
     start(cfg_bt, sizeof(cfg_bt));
-    submit(1, 0x82, 16384);
-    submit(2, 0x82, 16384);  // 32768
-    submit(3, 0x81, 16);     // reserve: 32784
-    submit(4, 0x82, 8128);   // backlog of 0x82
-    submit(5, 0x82, 8128);
-    submit(6, 0x81, 8128);   // backlog of 0x81
-    submit(7, 0x81, 8128);
-    complete(1, USBIP_XS_COMPLETED, 0);  // 16400 in flight: room for two of 8128
+    const int32_t backlog = 60 * 1024;
+
+    submit(1, 0x82, USBIP_XFER_MAX);
+    submit(2, 0x82, USBIP_XFER_MAX);  // 240 KB
+    submit(3, 0x81, 16);              // reserve: 240 KB + 16
+    submit(4, 0x82, backlog);         // backlog of 0x82
+    submit(5, 0x82, backlog);
+    submit(6, 0x81, backlog);         // backlog of 0x81
+    submit(7, 0x81, backlog);
+    complete(1, USBIP_XS_COMPLETED, 0);  // 120 KB + 16 in flight: room for two of 60 KB, not three
     TEST_ASSERT_NOT_NULL(pending(4));
     TEST_ASSERT_NOT_NULL(pending(6));
     TEST_ASSERT_NULL(pending(5));

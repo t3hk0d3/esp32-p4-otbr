@@ -62,7 +62,10 @@ _Static_assert(1 + 1 + PENDING_MAX + 1 <= USBIP_SOCKETS, "USBIP_SOCKETS (usbip.h
 #define ACCEPT_BACKOFF_MS 1000 // accept() failing (no free socket): the listener rests that long
 #define CLOSE_RETRY_MS 500     // a device close esp-usb refused
 #define RESET_WAIT_MS 5000     // after a session: the device's power-cycle shows as DEV_GONE within this
-#define TX_RING_LEN (256 * 1024)
+#define TX_RING_LEN (768 * 1024)
+// Every IN completion that can be in flight fits the ring, so a burst of them never reads as a client that does not read.
+_Static_assert(TX_RING_LEN >= USBIP_INFLIGHT_HARD + USBIP_USB_XFERS_MAX * USBIP_CMD_HDR_LEN,
+               "TX_RING_LEN must hold every reply that can be in flight");
 #define TX_STALL_MS 30000
 #define RX_ROUND_MAX (64 * 1024) // session bytes read per wake-up before the events get a turn
 #define SKIP_CHUNK 256
