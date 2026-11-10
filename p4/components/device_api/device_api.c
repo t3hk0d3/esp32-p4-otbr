@@ -46,6 +46,9 @@
 #include "time_json.h"
 #include "console_json.h"
 #include "console_ws.h"
+#include "logging.h"
+#include "logging_json.h"
+#include "logs_ws.h"
 #include "ot_console.h"
 #include "thread_json.h"
 #include "zigbee.h"
@@ -447,6 +450,21 @@ static void fill_zigbee_metrics(metrics_device_t *device)
     free(st);
 }
 
+static void fill_logging_metrics(metrics_logging_t *out)
+{
+    logging_status_t st;
+
+    _Static_assert(METRICS_LOG_CHANNELS == LOGGING_CH_COUNT, "metrics and logging channels must match");
+    logging_get_status(&st);
+    for (int ch = 0; ch < LOGGING_CH_COUNT; ch++) {
+        out->sent[ch] = st.sent[ch];
+        out->dropped[ch] = st.dropped[ch];
+    }
+    out->live_sent = st.live_sent;
+    out->live_dropped = st.live_dropped;
+    out->viewers = st.viewers;
+}
+
 // Like /device/status without the OpenThread read: br_core_get_status_brief. The Thread figures come from the collector.
 static esp_err_t metrics_get_handler(httpd_req_t *req)
 {
@@ -474,6 +492,7 @@ static esp_err_t metrics_get_handler(httpd_req_t *req)
     };
 
     fill_zigbee_metrics(&device);
+    fill_logging_metrics(&device.logging);
     httpd_resp_set_type(req, METRICS_CONTENT_TYPE);
     esp_err_t err = metrics_write(&device, send_metrics_chunk, req);
 
@@ -1854,6 +1873,86 @@ static esp_err_t console_put_handler(httpd_req_t *req)
     return send_console(req);
 }
 
+/* ---- /device/logging (logging spec, "Interfaces") ---- */
+
+// 200 with the GET /device/logging body: the settings in force, the sinks' state and the counters.
+static esp_err_t send_logging(httpd_req_t *req)
+{
+    logging_settings_t *settings = malloc(sizeof(*settings));
+    char *body = malloc(DEVICE_API_LOGGING_JSON_MAX);
+    const char *known[LOGGING_KNOWN_TAGS_MAX];
+    logging_status_t status;
+    esp_err_t err;
+
+    if (!settings || !body) {
+        err = send_error(req, 500, "no_memory", "out of memory", false);
+    } else if (logging_get_settings(settings) != ESP_OK) {
+        err = send_error(req, 503, "not_started", "logging is not running", false);
+    } else {
+        logging_get_status(&status);
+        const size_t n_known = logging_known_tags(known, LOGGING_KNOWN_TAGS_MAX);
+
+        if (device_api_logging_json(body, DEVICE_API_LOGGING_JSON_MAX, settings, &status, known, n_known) < 0) {
+            err = send_error(req, 500, "internal", "the reply does not fit its buffer", false);
+        } else {
+            err = send_json(req, body);
+        }
+    }
+    free(settings);
+    free(body);
+    return err;
+}
+
+static esp_err_t logging_get_handler(httpd_req_t *req)
+{
+    return send_logging(req);
+}
+
+// Any subset of the settings over the ones in force, applied at once and stored; replies like GET.
+static esp_err_t logging_put_handler(httpd_req_t *req)
+{
+    const int length_status = device_api_length_check(req->content_len, DEVICE_API_LOGGING_BODY_MAX);
+
+    if (length_status != 0) {
+        return send_error(req, length_status, length_status == 413 ? "payload_too_large" : "length_required",
+                          "send the logging settings as a JSON body", true);
+    }
+    char *body = read_small_body(req);
+
+    if (!body) {
+        return send_error(req, 400, "invalid_request", "the body could not be read", true);
+    }
+    logging_settings_t *settings = malloc(sizeof(*settings));
+    const char *bad_field = NULL;
+    char field[sizeof("components.") + 64];
+    esp_err_t err = settings ? logging_get_settings(settings) : ESP_ERR_NO_MEM;
+
+    if (err == ESP_OK) {
+        err = device_api_logging_parse(body, settings, &bad_field);
+        if (err == ESP_OK) {
+            err = logging_apply(settings, &bad_field);
+        }
+    }
+    // Both name the field in a static buffer the next call rewrites: copied before anything else runs.
+    strlcpy(field, err == ESP_ERR_INVALID_ARG && bad_field ? bad_field : "body", sizeof(field));
+    free(settings);
+    free(body);
+    if (err == ESP_ERR_INVALID_ARG) {
+        return send_error(req, 400, "invalid_request", field, false);
+    }
+    if (err == ESP_ERR_NO_MEM) {
+        return send_error(req, 500, "no_memory", "out of memory", false);
+    }
+    if (err == ESP_ERR_INVALID_STATE) {
+        return send_error(req, 503, "not_started", "logging is not running", false);
+    }
+    if (err != ESP_OK) {
+        return send_error(req, 500, "storage_failed", "the logging settings are in force but could not be stored",
+                          false);
+    }
+    return send_logging(req);
+}
+
 /* ---- /device/routing (mesh routing spec section 6) ---- */
 
 #define ROUTING_BODY_MAX 2048
@@ -2419,6 +2518,31 @@ static esp_err_t gated_ws_handshake(httpd_req_t *req)
     return ESP_OK;
 }
 
+// The live log's policy check, before the handshake: the interface policy (403), the level in the URL (400) and the
+// number of viewers (503).
+static esp_err_t gated_logs_ws_handshake(httpd_req_t *req)
+{
+    if (!netcfg_request_allowed(req, NETCFG_SVC_DEVICE_API)) {
+        return ESP_FAIL;
+    }
+    char *query = request_query(req);
+    esp_log_level_t level;
+    const esp_err_t level_err = device_api_logs_query_level(query, &level);
+
+    free(query);
+    if (level_err != ESP_OK) {
+        send_error(req, 400, "invalid_request", "level", true);
+        return ESP_FAIL;
+    }
+    const int refused = device_api_logs_ws_refusal(device_api_logs_ws_viewers());
+
+    if (refused) {
+        send_error(req, refused, "too_many_viewers", DEVICE_API_LOGS_TOO_MANY, true);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
 esp_err_t device_api_register(httpd_handle_t server)
 {
     ESP_RETURN_ON_FALSE(server != NULL, ESP_ERR_INVALID_ARG, TAG, "no server");
@@ -2461,6 +2585,8 @@ esp_err_t device_api_register(httpd_handle_t server)
         {"/device/routing", HTTP_PUT, routing_put_handler},
         {"/device/console", HTTP_GET, console_get_handler},
         {"/device/console", HTTP_PUT, console_put_handler},
+        {"/device/logging", HTTP_GET, logging_get_handler},
+        {"/device/logging", HTTP_PUT, logging_put_handler},
         {"/device/channels", HTTP_GET, channels_get_handler},
         {CHANNELS_PREFIX "*", HTTP_PUT, channel_put_handler},
         {CHANNELS_PREFIX "*", HTTP_DELETE, channel_delete_handler},
@@ -2483,5 +2609,16 @@ esp_err_t device_api_register(httpd_handle_t server)
     };
 
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &console_ws), TAG, "registering %s failed", console_ws.uri);
+    // The live log's WebSocket, the same way.
+    const httpd_uri_t logs_ws = {
+        .uri = "/device/logging/ws",
+        .method = HTTP_GET,
+        .handler = device_api_logs_ws_frame,
+        .is_websocket = true,
+        .ws_pre_handshake_cb = gated_logs_ws_handshake,
+        .ws_post_handshake_cb = device_api_logs_ws_opened,
+    };
+
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &logs_ws), TAG, "registering %s failed", logs_ws.uri);
     return ESP_OK;
 }

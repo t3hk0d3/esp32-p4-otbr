@@ -1,7 +1,7 @@
 # Internals
 
-How the board does what the guides describe: the rules behind radio modes, the C6's maintenance, the update check and
-the diagnostics figures. You don't need this page to run the board. The API shapes and error codes are in
+How the board does what the guides describe: the rules behind radio modes, the C6's maintenance, the update check,
+the diagnostics figures and logging. You don't need this page to run the board. The API shapes and error codes are in
 [HTTP API](../api.md).
 
 ## Radios
@@ -324,3 +324,96 @@ bootloader and the C6 partition table together are the **base image**; the P4 ap
 - A supervisor reboots the board when the OpenThread lock is not free for 2 minutes or the HTTP server task does not
   answer for 2 minutes (console: `supervisor: the OpenThread lock is stuck` or `... the HTTP server task is stuck`). The
   core dump is kept in the `coredump` partition.
+
+## Logging
+
+The guide is [Logging](../logging.md); the API is in [HTTP API](../api.md#logging).
+
+### The path of a line
+
+- Every ESP-IDF log call passes through the logging component (it wraps `esp_log` and `esp_log_va` at link time), and
+  OpenThread's lines are formatted whole and handed to the same path (tag `OPENTHREAD`), as are Ziggurat's (`ziggurat`).
+- ESP-IDF's per-tag level is the **gate**: a tag's component level, capped by the highest level any channel or viewer
+  wants. A line above it is not formatted at all, which is why `debug` and `verbose` cost nothing while nobody asks.
+- The default (`*`) stops at Debug (`LOGGING_DEFAULT_MAX`): ESP-IDF's `ESP_EARLY_LOGx`/`ESP_DRAM_LOGx` bypass
+  `esp_log` and print through `esp_rom_printf` whenever ESP-IDF's default level allows them, and at Verbose the
+  Ethernet DMA's cache syncs (`cache`) print one on every frame. On the board that took 98% of core 0 in `emac_rx` and
+  stopped HTTP. A named component can still be Verbose: early logs only look at the default level.
+- Above the gate sits the build's **ceiling** (`CONFIG_LOG_MAXIMUM_LEVEL`): Info in a release build, so `debug` and
+  `verbose` calls are compiled out; Verbose in a test build (`p4/sdkconfig.defaults.test`). `logging_level_ceiling()`
+  reports it, `logging_apply` and the live viewers refuse levels above it, and `logging_init` lowers stored ones to it
+  (a board that ran a test build keeps its NVS until the next change). `logging_capture.c` stops a build whose ceiling
+  doesn't match `OTBR_TEST_BUILD`.
+- A line at or below the UART level goes to ESP-IDF's own UART writer, synchronously and unchanged. A line some other
+  channel wants is formatted once into a 16 KB transit ring in internal RAM, and the drain task (`log_out`, core 1,
+  below the HTTP server's priority) writes it to USB-JTAG and syslog and queues it for each live viewer.
+- Lines logged in a constrained context (an interrupt, the flash cache off, the scheduler suspended or not running) and
+  before the capture starts go to the UART only, and only at or below the UART level: ESP-IDF's writer checks just the
+  tag's gate, which a verbose viewer raises. Without that check, the Ethernet DMA's verbose cache-sync lines (tag
+  `cache`) went to the 115200-baud UART on every frame and starved the Ethernet receive task.
+- OpenThread's own log level follows the `OPENTHREAD` component, and Ziggurat's follows `ziggurat`, so neither formats
+  lines nobody will see. OpenThread's lines on the UART now read `I (123) OPENTHREAD: ...`, like every other tag.
+- A line is cut at 512 bytes, 256 for OpenThread, on a UTF-8 character boundary, marked `…[cut]`.
+- Each viewer has an 8 KB queue in PSRAM. Live log frames are always valid UTF-8: an ill-formed byte sequence in a line
+  is replaced by U+FFFD, as RFC 6455 clients close the connection on anything else.
+
+### Feedback loops
+
+Lines that sending a line produces must not be sent again.
+
+- The drain task, a live log send and the syslog lookup run as **sinks**: whatever they log themselves (lwIP, the
+  USB-JTAG driver, the web server's send path) goes to the UART only.
+- Some lines come from outside a sink but are still caused by the sends: the web server's dispatch around a send, and
+  the Ethernet driver's `receive len=` line for every received frame (the TCP ACK of a WebSocket frame, the ICMP
+  answer of a syslog datagram to a closed port). Syslog and the live viewers therefore get the **network-path tags**
+  at `info` at most: the tags starting with `httpd` (the web server), `esp.emac` (the Ethernet MAC and its DMA),
+  `esp_eth` (the Ethernet driver and its netif glue), `esp_netif` (esp_netif, its handlers and bridge glue) and `lwip`
+  (lwIP's own debug output, when it is built to go through the logger), and `vfs_calls` (ESP-IDF's `select()`, about
+  ten debug lines per call: the web server's loop wakes for every frame it sends, so at `debug` it alone made some
+  1,600 lines a second on the board). The UART and USB-JTAG are not capped.
+- The capture applies the same cap, so such a line is not even formatted when only syslog or a viewer would take it.
+
+### USB-JTAG
+
+The USB-Serial-JTAG driver is installed at start with a 1 KB TX buffer and written without waiting. A host counts as
+connected while it sends USB start-of-frame packets (a few ticks without one and it is gone). While no host is there,
+the JTAG channel is left out of the capture, so its lines are neither formatted nor counted as dropped; a line already
+in the ring when the host leaves is skipped uncounted. A host that is there but does not read fills the TX buffer:
+those lines are dropped and counted. If the driver does not install, one error line at boot says so and the channel
+stays silent.
+
+### Syslog
+
+- The target is parsed once per save; an IP address is never looked up. A name is looked up by a short-lived task
+  (`log_dns`, 4 KB stack, gone after the lookup), never on `log_out`: a DNS timeout must not hold up USB-JTAG and the
+  viewers. The drain only checks for the answer, and starts the next lookup when one is due.
+- States: `off`, `resolving` (the first lookup runs), `sending`, `unresolved` (the lookup failed and there is no
+  earlier address), `no_socket` (resolved, but lwIP had no UDP socket to give). A failed lookup and a missing socket are
+  tried again after 5 s, doubling to 60 s, counted from the end of the last try. A name that resolved is looked up
+  again every 10 minutes and after every save; a failed refresh keeps sending to the last address. A save that changes
+  the target, or turns syslog off, while a lookup runs drops that lookup's answer.
+- A send error drops the line and counts it; it never logs (that line would be sent again).
+- Severity: error 3, warning 4, info 6, debug and verbose 7. HOSTNAME is the board's hostname. The TIMESTAMP is UTC with
+  milliseconds once the clock is set, NILVALUE before.
+- The syslog socket is one of the board's lwIP sockets and UDP PCBs; both limits are summed in `p4/sdkconfig.defaults`.
+
+### Counters
+
+`sent` and `dropped` per channel, plus `live`, are in `GET /device/logging` and the
+[metrics](../metrics.md#logging-metrics). A line the full transit ring refused is counted against each channel that
+wanted it, and every open viewer gets a `# dropped <n> lines` notice for it. A viewer whose queue is full loses lines
+on its own and is told the same way. Counters restart at 0 on reboot.
+
+### Known limitations
+
+- **A producer stuck mid-line stalls the other channels.** A record in the transit ring is reserved, then formatted,
+  then committed. Until the oldest reserved record is committed, the drain cannot take any later one, so USB-JTAG,
+  syslog and the live log stop until it commits. The window holds only the formatting of one line (no lock, no wait),
+  but a task preempted inside it for long, by higher-priority tasks keeping its core busy, holds the others up as long.
+  The UART is not affected: it is written before the ring.
+- **The Thread Console's `loglevel` command bypasses the settings.** It calls ESP-IDF's `esp_log_level_set` directly.
+  The gate of that tag then no longer matches the settings: lines can be filtered out that a channel wants, or
+  formatted that none does, and the Logs page does not show it. The next save of the logging settings (Logs page,
+  `PUT /device/logging`, `log`) sets every gate again.
+- The capture's routing decision reads the channel levels from one atomic word; a tag's gate is ESP-IDF's per-tag
+  level, which ESP-IDF looks up under its own lock (waiting at most 10 ms).

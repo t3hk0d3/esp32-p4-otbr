@@ -18,6 +18,7 @@ DEVICE_MENU = [
     ["/radios.html", "Radios"],
     ["/ethernet.html", "Ethernet"],
     ["/firmware.html", "Firmware"],
+    ["/logs.html", "Logs"],
     ["/diagnostics.html", "Diagnostics"],
     ["/capture.html", "Packet capture"],
 ]
@@ -60,6 +61,7 @@ PAGES = {
         ],
     ),
     "diagnostics": ("diagnostics", ["/device/diag"]),
+    "logs": ("logs", ["/device/logging", "/device/logging/ws"]),
     # /ping is the Thread web GUI's, registered in esp_br_web_api.h like /get_properties above.
     "topology": ("topology", ["/device/topology", "/ping"]),
     "ethernet": ("ethernet", ["/device/network", "/device/names", "/device/time"]),

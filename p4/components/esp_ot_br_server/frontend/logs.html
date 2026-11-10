@@ -1,0 +1,127 @@
+<!--
+  SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
+  SPDX-License-Identifier: Apache-2.0
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Thread Border Router - Logs</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="/favicon.ico">
+</head>
+<body class="device-page">
+<nav class="nav" id="nav"></nav>
+<div class="container">
+    <div class="page-head">
+        <div>
+            <h1 class="page-title">Logs</h1>
+            <p class="page-desc">Where the board's log goes, how much of it, and a live view. A line goes out on a channel
+                only if it passes both its component's level and the channel's level.</p>
+        </div>
+    </div>
+
+    <div class="trial-banner hidden" id="trialBanner">
+        <div class="trial-row">
+            <div class="trial-clock"><span class="trial-time" id="trialRemaining">-</span><span class="trial-unit">left</span></div>
+            <div class="trial-text">
+                <strong>New network settings are on trial</strong>
+                <p>The board goes back to the previous settings unless you keep them from the management
+                    interface.</p>
+            </div>
+            <button class="btn btn-primary" id="confirmBtn" type="button">Keep new settings</button>
+        </div>
+        <div class="trial-track" aria-hidden="true"><div class="trial-fill" id="trialFill"></div></div>
+    </div>
+    <div class="form-hint" id="confirmMsg" role="status" aria-live="polite"></div>
+    <div class="form-hint lg-msg" id="lg-note" role="status" aria-live="polite"></div>
+
+    <section class="card section lg-card" id="ch-card">
+        <button class="lg-fold" id="ch-fold" type="button" aria-expanded="false" aria-controls="ch-body">
+            <span class="lg-car" aria-hidden="true">&#9654;</span><span class="lg-name">Channels</span>
+            <span class="lg-sum" id="ch-sum"></span>
+        </button>
+        <div class="lg-body" id="ch-body">
+            <div class="table-wrap">
+                <table class="lg-table">
+                    <thead><tr><th scope="col">Channel</th><th scope="col">Level</th><th scope="col">Where</th>
+                        <th scope="col">Status</th></tr></thead>
+                    <tbody>
+                        <tr><th scope="row">UART</th>
+                            <td><select class="form-select" id="ch-uart" aria-label="UART level"></select></td>
+                            <td class="lg-where">CH343 USB-UART, 115200 baud</td>
+                            <td><span class="con-pill con-idle" id="uart-pill">-</span></td></tr>
+                        <tr><th scope="row">USB-JTAG</th>
+                            <td><select class="form-select" id="ch-jtag" aria-label="USB-JTAG level"></select></td>
+                            <td class="lg-where">header pins 27/28 (GPIO24/25)</td>
+                            <td><span class="con-pill con-idle" id="jtag-pill" title="Nobody reading it means its lines are dropped">-</span></td></tr>
+                        <tr><th scope="row">Syslog</th>
+                            <td><select class="form-select" id="ch-syslog" aria-label="Syslog level"></select></td>
+                            <td><input class="form-input lg-target" id="sys-target" type="text" placeholder="host[:port]"
+                                       autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Syslog target"
+                                       aria-describedby="sys-hint" aria-invalid="false">
+                                <div class="form-hint" id="sys-hint">UDP, port 514 if omitted. IPv6: [fd00::1]:514</div></td>
+                            <td><span class="con-pill con-idle" id="sys-pill">-</span></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section class="card section lg-card" id="cp-card">
+        <button class="lg-fold" id="cp-fold" type="button" aria-expanded="false" aria-controls="cp-body">
+            <span class="lg-car" aria-hidden="true">&#9654;</span><span class="lg-name">Components</span>
+            <span class="lg-sum" id="cp-sum"></span>
+        </button>
+        <div class="lg-body" id="cp-body">
+            <div class="table-wrap">
+                <table class="lg-table">
+                    <thead><tr><th scope="col">Component (log tag)</th><th scope="col">Level</th>
+                        <th scope="col"><span class="offscreen">Remove</span></th></tr></thead>
+                    <tbody id="cp-rows"></tbody>
+                    <tfoot><tr>
+                        <td><input class="form-input lg-tag-in" id="cp-new" type="text" list="known-tags"
+                                   placeholder="add a component..." autocomplete="off" autocapitalize="off"
+                                   spellcheck="false" aria-label="Component to add"></td>
+                        <td><select class="form-select" id="cp-new-lv" aria-label="Level of the new component"></select></td>
+                        <td><button class="btn btn-primary btn-sm" id="cp-add" type="button">Add</button></td>
+                    </tr></tfoot>
+                </table>
+            </div>
+            <datalist id="known-tags"></datalist>
+            <p class="lg-hint">Suggestions are the tags the board has logged since boot. Up to 32 components.</p>
+            <p class="lg-hint hidden" id="lv-ceiling"></p>
+        </div>
+    </section>
+
+    <section class="card section lg-card" id="live" aria-labelledby="live-title">
+        <div class="lg-live">
+            <div class="lg-livehead">
+                <h2 class="con-title" id="live-title">Live</h2>
+                <span class="con-pill con-idle" id="live-pill" role="status" aria-live="polite">Disconnected</span>
+                <button class="btn con-toggle" id="live-toggle" type="button">Connect</button>
+                <label class="lg-count" for="live-lv">Level</label>
+                <select class="form-select" id="live-lv"></select>
+                <button class="btn" id="live-pause" type="button">Pause</button>
+                <button class="btn" id="live-clear" type="button">Clear</button>
+                <button class="btn" id="live-copy" type="button">Copy all</button>
+                <input class="form-input lg-filter" id="live-filter" type="text" placeholder="filter..."
+                       autocomplete="off" spellcheck="false" aria-label="Filter lines">
+                <span class="con-spacer"></span>
+                <span class="lg-count" id="live-count"></span>
+                <button class="btn" id="live-fs" type="button">&#9974; Fullscreen</button>
+            </div>
+            <div class="lg-out" id="live-out" role="log" aria-live="off" aria-label="Live log"></div>
+            <p class="form-hint lg-help">Lines from the moment you connect; nothing is kept on the board. The level is yours:
+                other viewers choose their own. At most 2 viewers at a time. From a shell:
+                <code>websocat 'ws://&lt;board&gt;/device/logging/ws?level=debug'</code></p>
+        </div>
+    </section>
+</div>
+<div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
+<script src="/static/api.js"></script>
+<script src="/static/device_common.js"></script>
+<script src="/static/logs.js"></script>
+</body>
+</html>

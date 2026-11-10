@@ -3,6 +3,7 @@
 #include "board_cores.h"
 #include "esp_check.h"
 #include "esp_console.h"
+#include "logging.h"
 #include "netcfg.h"
 #include "routing.h"
 #ifdef OTBR_TEST_BUILD
@@ -22,6 +23,7 @@ esp_err_t console_start(void)
     ESP_RETURN_ON_ERROR(esp_console_new_repl_uart(&uart_config, &repl_config, &repl), TAG, "creating REPL failed");
     ESP_RETURN_ON_ERROR(netcfg_console_register(), TAG, "net command");
     ESP_RETURN_ON_ERROR(routing_console_register(), TAG, "routing command");
+    ESP_RETURN_ON_ERROR(logging_console_register(), TAG, "log command");
 #ifdef OTBR_TEST_BUILD
     ESP_RETURN_ON_ERROR(test_cmds_register(), TAG, "test commands");
 #endif

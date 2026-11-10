@@ -5,7 +5,7 @@ set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/.." "${CMAKE_CURRENT_LIST_DI
                          "${CMAKE_CURRENT_LIST_DIR}/../../netcfg"
                          "${CMAKE_CURRENT_LIST_DIR}/../../routing"
                          "${CMAKE_CURRENT_LIST_DIR}/../../radio_mux" "${CMAKE_CURRENT_LIST_DIR}/../../rcp_proxy" "${CMAKE_CURRENT_LIST_DIR}/../../zigbee"
-                         "${CMAKE_CURRENT_LIST_DIR}/../../self_update"
+                         "${CMAKE_CURRENT_LIST_DIR}/../../self_update" "${CMAKE_CURRENT_LIST_DIR}/../../logging"
                          "${CMAKE_CURRENT_LIST_DIR}/../../timesync"
                          "${CMAKE_CURRENT_LIST_DIR}/../../../../common/rcp_sync_proto")
 set(COMPONENTS main)

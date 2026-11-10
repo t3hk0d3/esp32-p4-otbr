@@ -66,6 +66,10 @@ void core_teardown_openthread(void);
 bool core_wait_sessions_closed(uint32_t wait_ms);
 bool core_ot_ready_now(void);
 esp_err_t core_start_ot_task(void);
+// ot_log.c / br_core.c: OpenThread's log level follows the OPENTHREAD component level.
+void br_core_ot_log_start(void);        // registers the level listener (br_core_start)
+void br_core_ot_log_apply_locked(void); // otLoggingSetLevel with the level in force; the OpenThread lock must be held
+void core_ot_log_push(void);            // applies the level now, from the applying task, when OpenThread can be called
 bool core_backbone_has_ip6(void);
 // The C6's rcp.compatible verdict (known from now on), whatever channel OpenThread runs on.
 void core_set_c6_compatible(bool compatible);

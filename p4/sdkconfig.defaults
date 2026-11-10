@@ -20,6 +20,11 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 
 # Console on the UART0 bridge (CH343)
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+# No secondary console: the logging component owns USB-Serial-JTAG (it installs the driver and writes log lines there
+# at the JTAG channel's level); the console stays on UART0.
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+# Logging: a release build compiles in up to Info (the ESP-IDF default), so Debug and Verbose calls cost no flash or
+# time; a test build (make build-test) adds them through sdkconfig.defaults.test.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=5120
 # VFS slots: console, three SPIFFS mounts, OpenThread eventfd, and room for more
 CONFIG_VFS_MAX_COUNT=12
@@ -56,16 +61,25 @@ CONFIG_LWIP_NUM_NETIF_CLIENT_DATA=0
 # Sockets: web server 10 (max_open_sockets 7 + listener + 2 control sockets) + mesh routing up to 7 (BGP: a listener,
 # a current and a pending connection per peer, and 2 closing after a NOTIFICATION; RIPng: one, never both methods at
 # once) + 1 HTTP client (OTA, a radio firmware URL or the update check, which share it) + 6 RCP proxy (two channels in rcp-proxy at once, the C6 and the
-# one open USB device, each a listener, its client and one connection being refused) = 24. mDNS, OpenThread, DNS and
-# SNTP use lwIP raw PCBs, not sockets. routing/task.c fails the build below that. An existing p4/sdkconfig keeps its old
-# value: delete it after pulling (docs/development.md).
-CONFIG_LWIP_MAX_SOCKETS=24
+# one open USB device, each a listener, its client and one connection being refused) + 1 syslog (UDP) = 25. mDNS,
+# OpenThread, DNS and SNTP use lwIP raw PCBs, not sockets. routing/task.c fails the build below that. An existing
+# p4/sdkconfig keeps its old value: delete it after pulling (docs/development.md).
+CONFIG_LWIP_MAX_SOCKETS=25
 # Active TCP PCBs: the 16 of before were used up by the same sockets; the RCP proxy adds per channel its client and a
 # refused connection, plus headroom for PCBs still closing (TIME_WAIT) = 22. A refused proxy client is closed with a FIN
 # (an RST only when its bytes were still unread: lwIP's SO_LINGER {1, 0} resets only a connection with unsent data), so
 # its PCB lingers in FIN_WAIT or TIME_WAIT; its socket is free at once, and lwIP takes such PCBs back, oldest first,
 # when a new connection needs one (tcp_alloc).
 CONFIG_LWIP_MAX_ACTIVE_TCP=22
+# UDP PCBs (every UDP socket holds one too), the most open at once: lwIP's DNS client 4 (a random source port per
+# request, DNS_TABLE_SIZE) + DHCP client 1 (shared by the netifs) + mDNS 1 (one PCB for both interfaces) + TREL 1 +
+# OpenThread's platform UDP 5 (DNS-SD server, Border Agent, its ephemeral-key agent, backbone TMF, DNS client) + the
+# DHCPv6-PD client (OpenThread infra_if) 1 + RIPng 1 + RCP proxy over UDP 2 (one per channel) + syslog 1 + SNTP 1
+# (time sync) = 18. On top come PCBs made per flow: a socket per DNS query OpenThread forwards upstream, and a PCB per
+# NAT64 UDP session; the other 14 are their room. lwIP allocates PCBs from the heap (MEMP_MEM_MALLOC),
+# so the limit costs nothing until used. logging_capture.c fails the build below 32; an existing p4/sdkconfig keeps
+# its old value (16): delete it after pulling (docs/development.md).
+CONFIG_LWIP_MAX_UDP_PCBS=32
 
 # lwIP never forwards IPv4: no routing between interfaces (spec 5.13); NAT64 egress is generated locally by OpenThread.
 CONFIG_LWIP_IP_FORWARD=n

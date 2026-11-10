@@ -1,0 +1,179 @@
+From 9f49ac1fc8279ea2d5907cbae00757607a5d26e2 Mon Sep 17 00:00:00 2001
+From: Igor Yamolov <clouster@yandex.ru>
+Date: Mon, 9 Nov 2026 14:13:33 +0100
+Subject: [PATCH] Add a tracing subscriber that hands events to
+ ziggurat_platform_log
+
+A host that embeds ziggurat-ot as a C staticlib has no view of the stack's
+tracing. Install a minimal subscriber in ziggurat_start that formats each event
+(target and fields) into a fixed 256-byte line and passes it, with its level,
+to a new platform function, ziggurat_platform_log. The host must not block in
+it: it can be called inside a critical section.
+
+The level is set at runtime with ziggurat_log_set_level (0 off .. 5 trace) and
+checked on every event.
+---
+ crates/ziggurat-ot/Cargo.lock |   1 +
+ crates/ziggurat-ot/Cargo.toml |   2 +
+ crates/ziggurat-ot/src/lib.rs |   2 +
+ crates/ziggurat-ot/src/log.rs | 103 ++++++++++++++++++++++++++++++++++
+ 4 files changed, 108 insertions(+)
+ create mode 100644 crates/ziggurat-ot/src/log.rs
+
+diff --git a/crates/ziggurat-ot/Cargo.lock b/crates/ziggurat-ot/Cargo.lock
+index e4524da..75ecfa4 100644
+--- a/crates/ziggurat-ot/Cargo.lock
++++ b/crates/ziggurat-ot/Cargo.lock
+@@ -1448,6 +1448,7 @@ dependencies = [
+  "embassy-time-driver",
+  "embassy-time-queue-utils",
+  "riscv",
++ "tracing",
+  "ziggurat-driver",
+  "ziggurat-ieee-802154",
+  "ziggurat-ncp-api",
+diff --git a/crates/ziggurat-ot/Cargo.toml b/crates/ziggurat-ot/Cargo.toml
+index 7497aae..f3f9fe5 100644
+--- a/crates/ziggurat-ot/Cargo.toml
++++ b/crates/ziggurat-ot/Cargo.toml
+@@ -23,6 +23,8 @@ embassy-time = "0.5"
+ embassy-time-driver = "0.2"
+ embassy-time-queue-utils = { version = "0.3", features = ["generic-queue-16"] }
+ critical-section = "1"
++# The stack's tracing events, passed to the platform log.
++tracing = { version = "0.1", default-features = false }
+ # inline-asm: without it cortex-m injects prebuilt path-named archive members
+ # (bin/thumbv8m...o) that arm-none-eabi-objcopy --strip-debug chokes on.
+ cortex-m = { version = "0.7.9", features = ["critical-section-single-core", "inline-asm"], optional = true }
+diff --git a/crates/ziggurat-ot/src/lib.rs b/crates/ziggurat-ot/src/lib.rs
+index 259aab3..b6f6f19 100644
+--- a/crates/ziggurat-ot/src/lib.rs
++++ b/crates/ziggurat-ot/src/lib.rs
+@@ -28,6 +28,7 @@ use riscv as _;
+ 
+ mod crypto;
+ mod link_ops;
++mod log;
+ mod platform;
+ mod time_driver;
+ 
+@@ -332,6 +333,7 @@ static STARTED: AtomicBool = AtomicBool::new(false);
+ #[unsafe(no_mangle)]
+ pub extern "C" fn ziggurat_start() {
+     assert!(!STARTED.swap(true, Ordering::AcqRel));
++    log::install();
+ 
+     #[cfg(target_os = "none")]
+     heap::init();
+diff --git a/crates/ziggurat-ot/src/log.rs b/crates/ziggurat-ot/src/log.rs
+new file mode 100644
+index 0000000..09e326f
+--- /dev/null
++++ b/crates/ziggurat-ot/src/log.rs
+@@ -0,0 +1,103 @@
++//! A minimal `tracing` subscriber that formats each event and hands
++//! it to the platform (`ziggurat_platform_log`). The level is set at runtime with
++//! `ziggurat_log_set_level` (0 off, 1 error, 2 warn, 3 info, 4 debug, 5 trace).
++//! No spans: the stack emits none.
++
++use core::fmt::{self, Write};
++use core::sync::atomic::{AtomicU8, Ordering};
++
++use tracing::field::{Field, Visit};
++use tracing::span::{Attributes, Id, Record};
++use tracing::subscriber::Interest;
++use tracing::{Event, Level, Metadata, Subscriber};
++
++unsafe extern "C" {
++    /// One formatted log line (no newline). May be called inside a critical section, so it must
++    /// not block or take locks.
++    fn ziggurat_platform_log(level: u8, msg: *const u8, len: usize);
++}
++
++static LEVEL: AtomicU8 = AtomicU8::new(2);
++
++/// Set the runtime log level: 0 off, 1 error, 2 warn, 3 info, 4 debug, 5 trace.
++#[unsafe(no_mangle)]
++pub extern "C" fn ziggurat_log_set_level(level: u8) {
++    LEVEL.store(level.min(5), Ordering::Relaxed);
++}
++
++fn rank(level: &Level) -> u8 {
++    match *level {
++        Level::ERROR => 1,
++        Level::WARN => 2,
++        Level::INFO => 3,
++        Level::DEBUG => 4,
++        Level::TRACE => 5,
++    }
++}
++
++struct Line {
++    buf: [u8; 256],
++    len: usize,
++}
++
++impl Write for Line {
++    fn write_str(&mut self, s: &str) -> fmt::Result {
++        let room = self.buf.len() - self.len;
++        let mut n = s.len().min(room);
++        while !s.is_char_boundary(n) {
++            n -= 1;
++        }
++        self.buf[self.len..self.len + n].copy_from_slice(&s.as_bytes()[..n]);
++        self.len += n;
++        Ok(()) // a long line is cut (on a character boundary), never an error
++    }
++}
++
++struct Fields<'a>(&'a mut Line);
++
++impl Visit for Fields<'_> {
++    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
++        if field.name() == "message" {
++            let _ = write!(self.0, " {value:?}");
++        } else {
++            let _ = write!(self.0, " {}={value:?}", field.name());
++        }
++    }
++}
++
++struct PlatformLog;
++
++impl Subscriber for PlatformLog {
++    // Asked on every event, so a level change takes effect at once.
++    fn register_callsite(&self, _metadata: &'static Metadata<'static>) -> Interest {
++        Interest::sometimes()
++    }
++
++    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
++        rank(metadata.level()) <= LEVEL.load(Ordering::Relaxed)
++    }
++
++    fn new_span(&self, _span: &Attributes<'_>) -> Id {
++        Id::from_u64(1)
++    }
++
++    fn record(&self, _span: &Id, _values: &Record<'_>) {}
++
++    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
++
++    fn event(&self, event: &Event<'_>) {
++        let meta = event.metadata();
++        let mut line = Line { buf: [0; 256], len: 0 };
++        let _ = write!(line, "{}:", meta.target());
++        event.record(&mut Fields(&mut line));
++        unsafe { ziggurat_platform_log(rank(meta.level()), line.buf.as_ptr(), line.len) };
++    }
++
++    fn enter(&self, _span: &Id) {}
++
++    fn exit(&self, _span: &Id) {}
++}
++
++pub(crate) fn install() {
++    let _ = tracing::dispatcher::set_global_default(tracing::Dispatch::new(PlatformLog));
++}
+-- 
+2.56.0
+

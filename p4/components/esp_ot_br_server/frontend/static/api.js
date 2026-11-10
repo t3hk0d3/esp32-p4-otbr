@@ -143,6 +143,7 @@ var pages = [
       {href : '/radios.html', label : 'Radios'},
       {href : '/ethernet.html', label : 'Ethernet'},
       {href : '/firmware.html', label : 'Firmware'},
+      {href : '/logs.html', label : 'Logs'},
       {href : '/diagnostics.html', label : 'Diagnostics'},
       {href : '/capture.html', label : 'Packet capture'}
     ]

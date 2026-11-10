@@ -66,8 +66,13 @@ static const char *TAG = "br_core";
 #define LEADER_NVS_KEY "leader_adj"
 #define FAULT_INCOMPATIBLE MODE_FSM_FAULT_INCOMPATIBLE
 #define TREL_SET_LOCK_MS 1000
+#define OT_LOG_LOCK_MS 1000
+#define OT_LOG_RETRY_US 1000000
 #define TREL_QUERY_MS 3000 // how long a peer query collects answers (esp mdns sends it about once a second)
 #define TREL_QUERY_DELAY_MS 100 // after an address event: a burst of them gets one query
+
+static esp_timer_handle_t s_log_retry_timer; // made in br_core_start (ot_log_retry below)
+static void ot_log_retry(void *arg);
 
 core_state_t g_core;
 bool g_storage_degraded; // set by br_core_note_storage_init before br_core_start
@@ -489,6 +494,10 @@ static esp_err_t init_openthread(void)
     ESP_RETURN_ON_ERROR(esp_openthread_init(&s_platform_config), TAG, "esp_openthread_init");
     esp_openthread_mux_init_done(); // from now on a reset after GONE is answered as done (mux_spinel_interface.cpp)
     g_core.ot_initialised = true;
+    // On the OpenThread task, before the main loop starts, by design: the owner calls its own API (Ruling R8).
+    esp_openthread_lock_acquire(portMAX_DELAY);
+    br_core_ot_log_apply_locked(); // the OPENTHREAD component level, before OpenThread's first lines
+    esp_openthread_lock_release();
     set_vendor_sw_version();
 #if CONFIG_OPENTHREAD_RADIO_TREL
     esp_openthread_lock_acquire(portMAX_DELAY);
@@ -535,6 +544,10 @@ static void ot_task(void *arg)
     }
     maybe_start_bringup();
     xSemaphoreGive(g_core.mutex);
+    // On the OpenThread task, before the main loop starts, by design: the owner calls its own API (Ruling R8).
+    esp_openthread_lock_acquire(portMAX_DELAY);
+    br_core_ot_log_apply_locked(); // a level change that came in before ot_ready was set
+    esp_openthread_lock_release();
     ESP_LOGI(TAG, "OpenThread initialised on %s", radio_mux_chan_id(core_radio_chan()));
     g_core.loop_running = true;
     xSemaphoreGive(g_core.init_done); // core_radio_ot_start; br_core_start waits for br_radio's after_channel_op
@@ -632,8 +645,15 @@ esp_err_t br_core_start(esp_netif_t *backbone)
     g_core.sessions_done = xSemaphoreCreateBinary();
     ESP_RETURN_ON_FALSE(g_core.boot_done && g_core.init_done && g_core.loop_done && g_core.bringup_done &&
                         g_core.sessions_done, ESP_ERR_NO_MEM, TAG, "no memory");
+    const esp_timer_create_args_t log_retry = {.callback = ot_log_retry, .name = "ot_log_retry"};
+
+    if (esp_timer_create(&log_retry, &s_log_retry_timer) != ESP_OK) {
+        s_log_retry_timer = NULL; // a level change that meets a busy lock then waits for the next change or restart
+        ESP_LOGW(TAG, "no OpenThread log level retry timer");
+    }
     // Only now: the status and session calls (the HTTP server already runs) use the objects above once this is set.
     g_core.started = true;
+    br_core_ot_log_start();
 
     // mDNS first (normally started earlier by app_main): it answers while the radio boots.
     // Not essential for the radio: without mDNS the board is reachable by its address, and an early return here would leave
@@ -737,6 +757,85 @@ static bool ot_callable(void)
 
     xSemaphoreGive(g_core.mutex);
     return callable;
+}
+
+// OpenThread's log level could not be applied (the lock was busy): retried by a one-shot esp_timer until it is, or until
+// OpenThread is down (the start applies the level then). No task of its own. The timer is made in br_core_start, before
+// anything can schedule it. Its callback runs on the esp_timer task, which every other timer shares, so it never waits:
+// the state mutex and the OpenThread lock are only tried, and a busy one schedules the next try. Closing the session
+// takes the state mutex, whose holders never block while they hold it.
+
+static void ot_log_schedule_retry(void)
+{
+    if (s_log_retry_timer && !esp_timer_is_active(s_log_retry_timer)) {
+        esp_timer_start_once(s_log_retry_timer, OT_LOG_RETRY_US);
+    }
+}
+
+typedef enum { OT_LOG_TRY_OPEN, OT_LOG_TRY_BUSY, OT_LOG_TRY_DOWN } ot_log_try_t;
+
+// br_core_ot_session_begin and ot_callable in one zero-wait take of the state mutex.
+static ot_log_try_t ot_log_session_try_begin(void)
+{
+    if (!g_core.started) {
+        return OT_LOG_TRY_DOWN;
+    }
+    if (xSemaphoreTake(g_core.mutex, 0) != pdTRUE) {
+        return OT_LOG_TRY_BUSY;
+    }
+    const bool callable = g_core.ot_ready && br_core_get_mode() != BR_MODE_RADIO_FAULT;
+
+    if (callable) {
+        g_core.ot_sessions++;
+    }
+    xSemaphoreGive(g_core.mutex);
+    return callable ? OT_LOG_TRY_OPEN : OT_LOG_TRY_DOWN;
+}
+
+static void ot_log_retry(void *arg)
+{
+    (void)arg;
+    const ot_log_try_t opened = ot_log_session_try_begin();
+
+    if (opened != OT_LOG_TRY_OPEN) {
+        if (opened == OT_LOG_TRY_BUSY) {
+            ot_log_schedule_retry();
+        }
+        return;
+    }
+    if (esp_openthread_lock_acquire(0)) {
+        br_core_ot_log_apply_locked(); // the level in force now
+        esp_openthread_lock_release();
+    } else {
+        ot_log_schedule_retry();
+    }
+    br_core_ot_session_end();
+}
+
+static void ot_log_apply_now(uint32_t lock_ms)
+{
+    if (!ot_callable() || !br_core_ot_session_begin()) {
+        return;
+    }
+    if (!ot_callable()) { // a radio fault came in between
+        br_core_ot_session_end();
+        return;
+    }
+    if (esp_openthread_lock_acquire(pdMS_TO_TICKS(lock_ms))) {
+        br_core_ot_log_apply_locked();
+        esp_openthread_lock_release();
+    } else {
+        ot_log_schedule_retry(); // the level in force is read again when the lock is got
+    }
+    br_core_ot_session_end();
+}
+
+// Called by the OPENTHREAD level listener on the task that applied the settings (never the OpenThread task). While
+// OpenThread is down the level only stays stored: ot_task applies it once OpenThread is up (after the init and again
+// once ot_ready is set, so a change in between is not lost). A busy lock is retried by a timer.
+void core_ot_log_push(void)
+{
+    ot_log_apply_now(OT_LOG_LOCK_MS);
 }
 
 #if CONFIG_OPENTHREAD_RADIO_TREL

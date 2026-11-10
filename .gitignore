@@ -2,6 +2,8 @@ dist/
 build/
 sdkconfig
 sdkconfig.old
+sdkconfig.test
+sdkconfig.test.old
 managed_components/
 .artifacts/
 .superpowers/

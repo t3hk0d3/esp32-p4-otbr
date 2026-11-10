@@ -32,6 +32,7 @@ void sample_input(sample_input_t *s)
         .mode = 1, .version = "v0.2.0", .slot = 1, .rcp_version = "rcp-1.2", .rcp_compatible = true,
         .rcp_compatible_known = true, .storage_ok = true,
         .sniffer_active = false, .sniffer_frames = 7, .sniffer_drops = 2, .eth_up = true, .trial_pending = false,
+        .logging = {.sent = {100, 40, 30}, .dropped = {0, 5, 6}, .live_sent = 20, .live_dropped = 3, .viewers = 2},
     };
     s->diag.uptime_s = 3600;
     s->diag.reset_reason = "power-on";

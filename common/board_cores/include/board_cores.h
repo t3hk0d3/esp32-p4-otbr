@@ -18,7 +18,8 @@
 //                  routing (the BGP and RIPng sockets), the radio channel mux's owner task radio_mux, rcp_proxy (the
 //                  rcp-proxy mode's sockets) and rcp_resolve (its connect targets' name lookups); br_radio
 //                  (br_core: OpenThread's start and stop on the OTBR channel, moves between channels, the RCP probe);
-//                  zigbee_tx (the Zigbee WebSocket sender, has the HTTP server task send).
+//                  zigbee_tx (the Zigbee WebSocket sender, has the HTTP server task send); log_out (the logging
+//                  component's drain: USB-JTAG and syslog).
 //   ZIGBEE_TASK_CORE  the zigbee task (every ziggurat_* call, the spinel client): NET_CORE, at the OpenThread task's
 //                  priority (ZIGBEE_TASK_PRIORITY = CONFIG_OPENTHREAD_TASK_PRIORITY, checked in the zigbee component).
 //
