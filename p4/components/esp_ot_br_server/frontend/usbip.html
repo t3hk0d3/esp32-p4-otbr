@@ -49,6 +49,8 @@
             </div>
             <button class="u-toggle" id="toggle" type="button" role="switch" aria-checked="false" aria-label="Export the USB port"></button>
         </div>
+        <div class="u-save hidden" id="saveRow"><p id="saveText"></p>
+            <button class="btn btn-primary" id="saveBtn" type="button">Save and Reboot</button></div>
         <div class="form-hint" id="toggleMsg" role="status" aria-live="polite"></div>
         <div class="u-err hidden" id="err409"><span id="err409Text"></span> Change it on the
             <a id="err409Link" href="/radios.html">Radios page</a>, then turn USB/IP on.</div>
@@ -113,14 +115,6 @@
 </div>
 <div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
 
-<dialog class="con-dialog" id="dlg" aria-labelledby="dTitle">
-    <h3 id="dTitle">-</h3>
-    <p id="dText">-</p>
-    <div class="con-dlg-actions">
-        <button class="btn btn-outline" id="dCancel" type="button">Cancel</button>
-        <button class="btn btn-primary" id="dOk" type="button">Reboot</button>
-    </div>
-</dialog>
 <script src="/static/api.js"></script>
 <script src="/static/device_common.js"></script>
 <script src="/static/usbip.js"></script>

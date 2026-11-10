@@ -411,7 +411,7 @@ reason, spec reference.
    38). `device_api` adds `GET`/`PUT /device/usbip`: 39 routes (both WebSockets included) plus `/zigbee` and the
    catch-all, two slots of headroom kept. (docs/superpowers/specs/2026-11-10-usbip-design.md)
 41. Applied (USB/IP, Task 11). `esp_ot_br_server` frontend: new page `frontend/usbip.html` with `static/usbip.js` (on/off
-   switch with the reboot confirmation, device and client cards, counters, attach commands); `static/api.js` adds
+   switch that stages the change and a Save and Reboot button, device and client cards, counters, attach commands); `static/api.js` adds
    `USB/IP` to the Device menu after Radios; `static/style.css` appends the `u-*` classes; `frontend/radios.html` gets
    the `mUsbipLink` line and `static/radios.js` shows the USB channels as exported while `/device/channels` says
    `"usbip": true` (reason with a link to the USB/IP page, mode cards disabled). `pack_web.py` packs the new files

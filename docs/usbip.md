@@ -16,7 +16,7 @@ on (see [Radios and USB/IP](#radios-and-usbip)).
 ## Turning it on
 
 On the **USB/IP** page (Device menu) use the switch, or `PUT /device/usbip` with `{"enabled": true}`
-([API](api.md#usbip)). Turning it on or off **reboots the board**; the page asks for confirmation first.
+([API](api.md#usbip)). Turning it on or off **reboots the board**: flip the switch, then press **Save and Reboot**.
 
 Turning it on is refused with 409 `usb_channel_in_use` while a USB channel's stored mode is `otbr` or `ziggurat`
 (`"<id> runs <mode>: move it or switch it off first"`): move Thread or Zigbee to the C6 or switch the dongle off on the
@@ -144,8 +144,9 @@ Devices that stall or never answer a control transfer end the session, and the b
 
 `/usbip.html`, in the Device menu.
 
-- The **switch** turns USB/IP on or off after a confirmation that the board reboots, then follows the reboot. A refused
-  switch-on (409 `usb_channel_in_use`) links to the Radios page.
+- The **switch** only stages the change: **Save and Reboot** appears next to it, says what the reboot does, stores the
+  value and follows the reboot. Flipping the switch back drops the change. A refused switch-on (409
+  `usb_channel_in_use`) links to the Radios page.
 - The **device card** shows the product, ids, speed and state, with the reason when `unsupported` or `blocked`.
 - The **client card** shows the address and since when, with a **Kick** button that ends the session.
 - Four tiles show **Sessions**, **Transfers**, **From device** and **Buffers in use**. The numbers count since boot;

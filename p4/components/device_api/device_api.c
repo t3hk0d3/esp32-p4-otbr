@@ -1820,7 +1820,7 @@ static esp_err_t usbip_put_handler(httpd_req_t *req)
     case USBIP_SET_REFUSE_BUSY:
         return send_error(req, 409, "busy", "an update or firmware push is running or waits for its reboot", false);
     case USBIP_SET_STORE_FAILED:
-        return send_error(req, 500, "store_failed", "the setting could not be stored; nothing changed", false);
+        return send_error(req, 500, "storage_failed", "the setting could not be stored; nothing changed", false);
     case USBIP_SET_REBOOT: {
         const esp_err_t err = send_json(req, "{\"reboot\":true}");
 

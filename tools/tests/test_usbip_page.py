@@ -345,7 +345,7 @@ class TestPageShows:
             + "t.put = () => ({status: 409, body: {error: 'usb_channel_in_use', detail: "
             + json.dumps(evil)
             + "}});"
-            "t.el('toggle').click(); t.el('dOk').click(); await t.advance(100);"
+            "t.el('toggle').click(); t.el('saveBtn').click(); await t.advance(100);"
             "const texts = ['devName', 'devMaker', 'devWhy', 'clientAddr', 'err409Text'].map((i) => t.el(i).textContent);"
             "const kv = t.el('devKv').allText();"
             "return [texts, kv, t.doc.markupWrites];"
@@ -454,32 +454,41 @@ class TestPageShows:
 class TestPageToggle:
     """UsbipPage toggle"""
 
-    def test_asks_before_anything_is_sent(self):
-        # On clicking the switch while off: the dialog opens and states the reboot; nothing is sent.
+    def test_click_only_stages_the_change(self):
+        # On clicking the switch while off: it shows on, Save and Reboot appears with the reboot stated; nothing is sent.
         r = scenario(
             setup(OFF)
             + "t.el('toggle').click(); await t.flush();"
-            + f"return [t.el('dlg').open, t.el('dTitle').textContent, t.el('dText').textContent, {puts()}];"
+            + f"return [t.el('toggle').attrs['aria-checked'], t.el('saveRow').hidden(), t.el('saveText').textContent, {puts()}];"
         )
-        assert r[0] is True
-        assert r[1] == "Turn USB/IP on?"
-        assert "reboots" in r[2]
+        assert r[0] == "true"
+        assert r[1] is False
+        assert "Save and Reboot restarts the board" in r[2]
         assert r[3] == []
 
-    def test_cancel_sends_nothing(self):
-        # On Cancel: the dialog closes, nothing is sent, the switch stays.
+    def test_flipping_back_unstages(self):
+        # On a second click: the switch shows the stored value again, Save and Reboot hides, nothing is sent.
         r = scenario(
             setup(OFF)
-            + "t.el('toggle').click(); t.el('dCancel').click(); await t.advance(10);"
-            + f"return [t.el('dlg').open, {puts()}, t.el('toggle').attrs['aria-checked']];"
+            + "t.el('toggle').click(); t.el('toggle').click(); await t.advance(10);"
+            + f"return [t.el('saveRow').hidden(), {puts()}, t.el('toggle').attrs['aria-checked']];"
         )
-        assert r == [False, [], "false"]
+        assert r == [True, [], "false"]
+
+    def test_poll_keeps_the_staged_value(self):
+        # On a status poll while a change waits: the switch keeps the staged value and Save and Reboot stays.
+        r = scenario(
+            setup(OFF)
+            + "t.el('toggle').click(); await t.advance(10000);"
+            + "return [t.el('toggle').attrs['aria-checked'], t.el('saveRow').hidden()];"
+        )
+        assert r == ["true", False]
 
     def test_turning_on_puts_enabled_true_and_waits_for_the_board(self):
-        # On confirming: PUT {"enabled": true}; on {"reboot": true} the page says so, waits and reloads once.
+        # On Save and Reboot: PUT {"enabled": true}; on {"reboot": true} the page says so, waits and reloads once.
         r = scenario(
             setup(OFF) + "t.put = () => ({status: 200, body: {reboot: true}});"
-            "t.el('toggle').click(); t.el('dOk').click(); await t.advance(1000);"
+            "t.el('toggle').click(); t.el('saveBtn').click(); await t.advance(1000);"
             + f"const a = [{puts()}, t.el('toggleMsg').textContent, t.reloads()];"
             "await t.advance(20000); return [a, t.reloads()];"
         )
@@ -489,14 +498,15 @@ class TestPageToggle:
         assert r[1] == 1
 
     def test_turning_off_puts_enabled_false(self):
-        # On confirming while on: the dialog warns a client loses the device; PUT {"enabled": false}.
+        # On switching off while on: nothing is sent until Save and Reboot, which warns a client loses the device;
+        # then PUT {"enabled": false}.
         r = scenario(
             setup() + "t.put = () => ({status: 200, body: {reboot: true}});"
-            "t.el('toggle').click(); const text = t.el('dText').textContent; const title = t.el('dTitle').textContent;"
-            "t.el('dOk').click(); await t.advance(100);"
-            + f"return [title, text, {puts()}];"
+            + f"t.el('toggle').click(); await t.flush(); const before = {puts()}; const text = t.el('saveText').textContent;"
+            "t.el('saveBtn').click(); await t.advance(100);"
+            + f"return [before, text, {puts()}];"
         )
-        assert r[0] == "Turn USB/IP off?"
+        assert r[0] == []
         assert "loses it" in r[1]
         assert r[2] == [{"enabled": False}]
 
@@ -504,7 +514,7 @@ class TestPageToggle:
         # On {"reboot": false}: no wait for the board, no reload, the controls work again.
         r = scenario(
             setup(OFF) + "t.put = () => ({status: 200, body: {reboot: false}});"
-            "t.el('toggle').click(); t.el('dOk').click(); await t.advance(10000);"
+            "t.el('toggle').click(); t.el('saveBtn').click(); await t.advance(10000);"
             "return [t.reloads(), t.calls.filter((c) => c.url === '/device/diag').length, t.el('toggle').disabled];"
         )
         assert r == [0, 0, False]
@@ -515,7 +525,7 @@ class TestPageToggle:
         r = scenario(
             setup(OFF)
             + f"t.put = () => ({{status: 409, body: {{error: 'usb_channel_in_use', detail: {json.dumps(detail)}}}}});"
-            "t.el('toggle').click(); t.el('dOk').click(); await t.advance(10000);"
+            "t.el('toggle').click(); t.el('saveBtn').click(); await t.advance(10000);"
             "return [t.el('err409').hidden(), t.el('err409Text').textContent, t.el('err409Link').attrs.href,"
             "t.reloads(), t.el('toggle').attrs['aria-checked'], t.el('toggle').disabled];"
         )
@@ -527,14 +537,14 @@ class TestPageToggle:
         assert r[5] is False
 
     def test_the_409_goes_away_on_the_next_try(self):
-        # On a second confirm that succeeds: the 409 box hides.
+        # On a second Save and Reboot that succeeds: the 409 box hides.
         detail = "x runs otbr: move it or switch it off first"
         r = scenario(
             setup(OFF)
             + f"t.put = () => ({{status: 409, body: {{error: 'usb_channel_in_use', detail: {json.dumps(detail)}}}}});"
-            "t.el('toggle').click(); t.el('dOk').click(); await t.advance(100);"
+            "t.el('toggle').click(); t.el('saveBtn').click(); await t.advance(100);"
             "t.put = () => ({status: 200, body: {reboot: false}});"
-            "t.el('toggle').click(); t.el('dOk').click(); await t.advance(100);"
+            "t.el('toggle').click(); t.el('saveBtn').click(); await t.advance(100);"
             "return t.el('err409').hidden();"
         )
         assert r is True
@@ -544,7 +554,7 @@ class TestPageToggle:
         r = scenario(
             setup(OFF)
             + "t.put = () => ({status: 409, body: {error: 'busy', detail: 'an update runs'}});"
-            "t.el('toggle').click(); t.el('dOk').click(); await t.advance(100);"
+            "t.el('toggle').click(); t.el('saveBtn').click(); await t.advance(100);"
             "return [t.el('toggleMsg').textContent, t.el('err409').hidden()];"
         )
         assert "busy" in r[0] and "an update runs" in r[0]
@@ -555,7 +565,7 @@ class TestPageToggle:
         r = scenario(
             setup(OFF)
             + "t.put = () => ({status: 400, body: {error: 'bad_value', detail: 'enabled must be a boolean'}});"
-            "t.el('toggle').click(); t.el('dOk').click(); await t.advance(100);"
+            "t.el('toggle').click(); t.el('saveBtn').click(); await t.advance(100);"
             "return t.el('toggleMsg').textContent;"
         )
         assert "enabled must be a boolean" in r
@@ -570,9 +580,9 @@ class TestPageKick:
         r = scenario(
             setup()
             + "const n = t.calls.length; t.el('kickBtn').click(); await t.advance(100);"
-            + f"return [{puts()}, t.confirms().length, t.el('dlg').open, t.calls.slice(n).filter((c) => c.method === 'GET' && c.url === '/device/usbip').length > 0];"
+            + f"return [{puts()}, t.confirms().length, t.calls.slice(n).filter((c) => c.method === 'GET' && c.url === '/device/usbip').length > 0];"
         )
-        assert r == [[{"kick": True}], 0, False, True]
+        assert r == [[{"kick": True}], 0, True]
 
     def test_kick_failure_is_shown(self):
         # On a refused kick: the message shows the board's answer.

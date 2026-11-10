@@ -117,17 +117,12 @@ function switchText(s) {
   return 'On, but not running: see below.';
 }
 
-function confirmTexts(turningOn) {
-  return turningOn ? {
-    title : 'Turn USB/IP on?',
-    text : 'The board reboots (about 30 s). Afterwards the USB port is shared over the network, and radios on it are ' +
-           'not used until you turn USB/IP off; their settings are kept.'
-  }
-                   : {
-                       title : 'Turn USB/IP off?',
-                       text : 'The board reboots (about 30 s). A computer that has the device attached loses it. ' +
-                              'Radios on the USB port get their settings back.'
-                     };
+/* What Save and Reboot does, shown next to the button while a change waits. */
+function rebootText(turningOn) {
+  return turningOn ? 'Not saved yet. Save and Reboot restarts the board (about 30 s); afterwards the USB port is shared ' +
+                         'over the network, and radios on it are not used until you turn USB/IP off; their settings are kept.'
+                   : 'Not saved yet. Save and Reboot restarts the board (about 30 s); a computer that has the device ' +
+                         'attached loses it, and radios on the USB port get their settings back.';
 }
 
 /* Rows of the device card: [[key, value], ...]. */
@@ -167,7 +162,7 @@ return {
   sinceText : sinceText,
   sizeText : sizeText,
   switchText : switchText,
-  confirmTexts : confirmTexts,
+  rebootText : rebootText,
   deviceFacts : deviceFacts,
   interfaceName : interfaceName,
   statFigures : statFigures,
@@ -178,12 +173,12 @@ return {
 function UsbipPage(env) {
 var C = typeof DeviceCommon !== 'undefined' ? DeviceCommon : require('./device_common.js');
 var L = UsbipLogic;
-var kit = C.DeviceKit(env, {actionIds : [ 'toggle', 'kickBtn', 'dOk' ]});
+var kit = C.DeviceKit(env, {actionIds : [ 'toggle', 'kickBtn', 'saveBtn' ]});
 var $ = kit.$, el = kit.el, clear = kit.clear, setText = kit.setText, show = kit.show, note = kit.note;
 var POLL_MS = 3000;
 
 var status = null; // last GET /device/usbip
-var asked = null;  // the value the open confirmation would store
+var staged = null; // the switch's unsaved value; null when it shows the stored one
 
 function hostName() { return env.location && env.location.host ? env.location.host : ''; }
 
@@ -252,7 +247,9 @@ function render() {
   var chip = $('headChip');
   chip.className = 'chip' + (v.chip.cls ? ' ' + v.chip.cls : '');
   chip.textContent = v.chip.text;
-  $('toggle').setAttribute('aria-checked', String(!!s.enabled));
+  if (staged === !!s.enabled)
+    staged = null; // stored meanwhile (another tab)
+  renderSave();
   setText('switchText', L.switchText(s));
   showIf('blockedNote', s.state === 'blocked');
   if (s.state === 'blocked')
@@ -307,23 +304,31 @@ function put(body) {
 
 /* ---- the switch ---- */
 
-function ask() {
-  if (!status || kit.isBusy())
-    return;
-  asked = !status.enabled;
-  var t = L.confirmTexts(asked);
-  setText('dTitle', t.title);
-  setText('dText', t.text);
-  setText('dOk', 'Reboot');
-  var dlg = $('dlg');
-  if (!dlg.open)
-    dlg.showModal();
+function shownValue() { return staged !== null ? staged : !!(status && status.enabled); }
+
+/* The switch shows the staged value; Save and Reboot shows while it differs from the stored one. */
+function renderSave() {
+  $('toggle').setAttribute('aria-checked', String(shownValue()));
+  showIf('saveRow', staged !== null);
+  if (staged !== null)
+    setText('saveText', L.rebootText(staged));
 }
 
-function closeAsk() {
-  var dlg = $('dlg');
-  if (dlg.open)
-    dlg.close();
+/* A click only stages the change; nothing is sent until Save and Reboot. Flipping back unstages it. */
+function stage() {
+  if (!status || kit.isBusy())
+    return;
+  var next = !shownValue();
+  staged = next === !!status.enabled ? null : next;
+  showIf('err409', false);
+  note('toggleMsg', '', false);
+  renderSave();
+}
+
+/* Back to the stored value, after the board answered without rebooting. */
+function unstage() {
+  staged = null;
+  renderSave();
 }
 
 function showRefused(detail) {
@@ -332,9 +337,7 @@ function showRefused(detail) {
 }
 
 function apply() {
-  var value = asked;
-  closeAsk();
-  asked = null;
+  var value = staged;
   if (value === null || kit.isBusy())
     return Promise.resolve(null);
   return kit.runOp(function() {
@@ -346,6 +349,7 @@ function apply() {
         kit.waitForBoard('toggleMsg');
         return {handoff : true};
       }
+      unstage();
       if (r.status === 200)
         return refresh().then(function() { return r; });
       if (r.status === 409 && r.body && r.body.error === 'usb_channel_in_use') {
@@ -355,6 +359,7 @@ function apply() {
       note('toggleMsg', kit.failure(r), true);
       return r;
     }, function(e) {
+      unstage();
       note('toggleMsg', e.message + ' If the board accepted the change it is rebooting: reload this page in a minute.',
            true);
     });
@@ -388,13 +393,8 @@ function pickOs(linux) {
 }
 
 function init() {
-  $('toggle').addEventListener('click', ask);
-  $('dCancel').addEventListener('click', function() {
-    asked = null;
-    closeAsk();
-  });
-  $('dlg').addEventListener('close', function() { asked = null; });
-  $('dOk').addEventListener('click', apply);
+  $('toggle').addEventListener('click', stage);
+  $('saveBtn').addEventListener('click', apply);
   $('kickBtn').addEventListener('click', kick);
   $('osLinux').addEventListener('click', function() { pickOs(true); });
   $('osWin').addEventListener('click', function() { pickOs(false); });
