@@ -825,3 +825,46 @@ TEST_CASE("On a ready channel whose mode does not run (fault, no_radio, incompat
                                   down[i]);
     }
 }
+
+/* ---- radio_mux_orch_modes_after ---- */
+
+TEST_CASE("modes_after: a plain change: changes only the target", "[radio_mux]")
+{
+    radio_mux_chan_view_t c[N_CHANS];
+    radio_mux_mode_t out[N_CHANS];
+
+    three_channels(c);
+    radio_mux_orch_modes_after(c, N_CHANS, 2, RADIO_MUX_MODE_RCP_PROXY, N_CHANS, out);
+    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OTBR, out[0]);
+    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OFF, out[1]);
+    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_RCP_PROXY, out[2]);
+}
+
+TEST_CASE("modes_after: a reboot that moves Thread: target otbr, the old Thread channel off, others kept",
+          "[radio_mux]")
+{
+    radio_mux_chan_view_t c[N_CHANS];
+    radio_mux_mode_t out[N_CHANS];
+
+    three_channels(c);
+    c[1].mode = MODE_ZIGGURAT;
+    c[2].mode = RADIO_MUX_MODE_RCP_PROXY;
+    radio_mux_orch_modes_after(c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, 0, out);
+    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OFF, out[0]);
+    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OTBR, out[1]);
+    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_RCP_PROXY, out[2]);
+}
+
+TEST_CASE("modes_after: a reboot with move_from n: changes only the target", "[radio_mux]")
+{
+    radio_mux_chan_view_t c[N_CHANS];
+    radio_mux_mode_t out[N_CHANS];
+
+    three_channels(c);
+    c[0].mode = RADIO_MUX_MODE_OFF;
+    c[1].mode = MODE_ZIGGURAT;
+    radio_mux_orch_modes_after(c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, N_CHANS, out);
+    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OFF, out[0]);
+    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OTBR, out[1]);
+    TEST_ASSERT_EQUAL(RADIO_MUX_MODE_OFF, out[2]);
+}

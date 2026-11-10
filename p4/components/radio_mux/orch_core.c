@@ -121,6 +121,20 @@ radio_mux_verdict_t radio_mux_orch_check_bind(const radio_mux_rules_t *rules, co
     return RADIO_MUX_APPLY;
 }
 
+void radio_mux_orch_modes_after(const radio_mux_chan_view_t *chans, size_t n, size_t target, radio_mux_mode_t want,
+                                size_t move_from, radio_mux_mode_t *out)
+{
+    for (size_t i = 0; i < n; i++) {
+        out[i] = chans[i].mode;
+    }
+    if (move_from < n && move_from != target) {
+        out[move_from] = RADIO_MUX_MODE_OFF;
+    }
+    if (target < n) {
+        out[target] = want;
+    }
+}
+
 bool radio_mux_orch_should_bind(radio_mux_chan_state_t cs, bool fits, bool bound)
 {
     return cs == RADIO_MUX_CS_READY && fits && !bound;

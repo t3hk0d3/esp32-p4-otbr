@@ -66,6 +66,11 @@ radio_mux_verdict_t radio_mux_orch_check_bind(const radio_mux_rules_t *rules, co
                                               size_t n, size_t target, radio_mux_mode_t want, bool in_reinit,
                                               size_t *move_from);
 
+// The stored mode of every channel after setting `target` to `want` (out[0..n)): `want` on the target, and, when
+// move_from < n (a reboot that moves Thread, from radio_mux_orch_check_bind), off on move_from; others as stored.
+void radio_mux_orch_modes_after(const radio_mux_chan_view_t *chans, size_t n, size_t target, radio_mux_mode_t want,
+                                size_t move_from, radio_mux_mode_t *out);
+
 // Whether the orchestrator binds a channel's configured instance now: the channel is ready, its firmware fits the
 // instance's mode, and the instance is not bound to it yet.
 bool radio_mux_orch_should_bind(radio_mux_chan_state_t cs, bool fits, bool bound);

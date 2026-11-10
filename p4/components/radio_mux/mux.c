@@ -1216,10 +1216,13 @@ static radio_mux_verdict_t check_req(const struct radio_mux_chan *ch, const radi
 }
 
 // On MOVE: `from` gets the channel OpenThread leaves ("" for a start), *stop whether it is a stop on `ch` itself.
+// On APPLY_REBOOT: *also is the other channel whose stored mode changes with this one (a reboot that moves Thread off
+// it), with that mode in *also_mode; NULL when only `ch` changes.
 static radio_mux_verdict_t check_mode(struct radio_mux_chan *ch, radio_mux_mode_t want, char *from, size_t cap,
-                                      bool *stop)
+                                      bool *stop, struct radio_mux_chan **also, radio_mux_mode_t *also_mode)
 {
     radio_mux_chan_view_t views[RADIO_MUX_CHANNELS_MAX];
+    struct radio_mux_chan *by_view[RADIO_MUX_CHANNELS_MAX];
     size_t n = 0, target = 0, move_from = 0;
 
     for (size_t i = 0; i < RADIO_MUX_CHANNELS_MAX; i++) {
@@ -1227,6 +1230,7 @@ static radio_mux_verdict_t check_mode(struct radio_mux_chan *ch, radio_mux_mode_
             if (&g_mux.chans[i] == ch) {
                 target = n;
             }
+            by_view[n] = &g_mux.chans[i];
             views[n++] = view_of(&g_mux.chans[i]);
         }
     }
@@ -1236,9 +1240,21 @@ static radio_mux_verdict_t check_mode(struct radio_mux_chan *ch, radio_mux_mode_
                                                             &move_from);
 
     *stop = false;
+    *also = NULL;
     if (v == RADIO_MUX_MOVE) {
         snprintf(from, cap, "%s", move_from < n ? views[move_from].id : "");
         *stop = move_from == target;
+    }
+    if (v == RADIO_MUX_APPLY_REBOOT) {
+        radio_mux_mode_t after[RADIO_MUX_CHANNELS_MAX];
+
+        radio_mux_orch_modes_after(views, n, target, want, move_from, after);
+        for (size_t i = 0; i < n; i++) {
+            if (i != target && after[i] != views[i].mode) {
+                *also = by_view[i];
+                *also_mode = after[i];
+            }
+        }
     }
     return v;
 }
@@ -1260,9 +1276,11 @@ static void handle_set(mux_call_t *call)
         return;
     }
     radio_mux_verdict_t v = check_req(ch, req, &proxy);
+    struct radio_mux_chan *also = NULL; // a reboot that moves Thread: the channel it leaves, stored with this one
+    radio_mux_mode_t also_mode = RADIO_MUX_MODE_OFF;
 
     if (v == RADIO_MUX_APPLY && req->has_mode) {
-        v = check_mode(ch, req->mode, call->from, sizeof(call->from), &call->stop);
+        v = check_mode(ch, req->mode, call->from, sizeof(call->from), &call->stop, &also, &also_mode);
         if (v == RADIO_MUX_MOVE && !call->have_mover) {
             v = RADIO_MUX_REFUSE_NOT_AVAILABLE; // nothing runs a move yet (Task 7)
         }
@@ -1278,6 +1296,7 @@ static void handle_set(mux_call_t *call)
         return; // refused, or a MOVE: the caller runs the mover; nothing stored here
     }
     const struct radio_mux_chan old = *ch;
+    const struct radio_mux_chan also_old = also != NULL ? *also : old;
     const bool mode_changed = req->has_mode && req->mode != ch->mode;
     const bool proxy_changed = req->has_proxy && memcmp(&proxy, &ch->proxy, sizeof(proxy)) != 0;
     const bool line_changed = (req->has_baud && req->baud != mux_eff_baud(ch)) || (req->has_flow && req->flow != ch->flow);
@@ -1293,10 +1312,18 @@ static void handle_set(mux_call_t *call)
         ch->flow = req->flow;
     }
     ch->proxy = proxy;
+    if (also != NULL) {
+        also->mode = also_mode;
+    }
     mux_unlock();
-    if (mux_store_chan(ch) != ESP_OK) {
+    // Both channels in one commit when the reboot moves Thread: a cut store would leave otbr on both, and the load's
+    // dedupe would keep it on the first (the C6), not where it was asked to go.
+    if ((also != NULL ? mux_store_chans(ch, also) : mux_store_chan(ch)) != ESP_OK) {
         mux_lock();
         *ch = old;
+        if (also != NULL) {
+            *also = also_old;
+        }
         mux_unlock();
         call->verdict = RADIO_MUX_REFUSE_FAILED;
         return;
