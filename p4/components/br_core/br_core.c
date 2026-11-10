@@ -67,6 +67,8 @@ static const char *TAG = "br_core";
 #define FAULT_INCOMPATIBLE MODE_FSM_FAULT_INCOMPATIBLE
 #define TREL_SET_LOCK_MS 1000
 #define OT_LOG_LOCK_MS 1000
+#define OT_LOG_RETRY_LOCK_MS 100
+#define OT_LOG_RETRY_US 1000000
 #define TREL_QUERY_MS 3000 // how long a peer query collects answers (esp mdns sends it about once a second)
 #define TREL_QUERY_DELAY_MS 100 // after an address event: a burst of them gets one query
 
@@ -490,6 +492,7 @@ static esp_err_t init_openthread(void)
     ESP_RETURN_ON_ERROR(esp_openthread_init(&s_platform_config), TAG, "esp_openthread_init");
     esp_openthread_mux_init_done(); // from now on a reset after GONE is answered as done (mux_spinel_interface.cpp)
     g_core.ot_initialised = true;
+    // On the OpenThread task, before the main loop starts, by design: the owner calls its own API (Ruling R8).
     esp_openthread_lock_acquire(portMAX_DELAY);
     br_core_ot_log_apply_locked(); // the OPENTHREAD component level, before OpenThread's first lines
     esp_openthread_lock_release();
@@ -539,6 +542,7 @@ static void ot_task(void *arg)
     }
     maybe_start_bringup();
     xSemaphoreGive(g_core.mutex);
+    // On the OpenThread task, before the main loop starts, by design: the owner calls its own API (Ruling R8).
     esp_openthread_lock_acquire(portMAX_DELAY);
     br_core_ot_log_apply_locked(); // a level change that came in before ot_ready was set
     esp_openthread_lock_release();
@@ -747,10 +751,34 @@ static bool ot_callable(void)
     return callable;
 }
 
-// Called by the OPENTHREAD level listener on the task that applied the settings (never the OpenThread task). While
-// OpenThread is down the level only stays stored: ot_task applies it once OpenThread is up (after the init and again
-// once ot_ready is set, so a change in between is not lost).
-void core_ot_log_push(void)
+// OpenThread's log level could not be applied (the lock was busy): retried by a one-shot esp_timer until it is, or until
+// OpenThread is down (the start applies the level then). No task of its own; the callback waits only OT_LOG_RETRY_LOCK_MS.
+static esp_timer_handle_t s_log_retry_timer;
+
+static void ot_log_apply_now(uint32_t lock_ms);
+
+static void ot_log_retry(void *arg)
+{
+    (void)arg;
+    ot_log_apply_now(OT_LOG_RETRY_LOCK_MS);
+}
+
+static void ot_log_schedule_retry(void)
+{
+    if (!s_log_retry_timer) {
+        const esp_timer_create_args_t args = {.callback = ot_log_retry, .name = "ot_log_retry"};
+
+        if (esp_timer_create(&args, &s_log_retry_timer) != ESP_OK) {
+            s_log_retry_timer = NULL;
+            return;
+        }
+    }
+    if (!esp_timer_is_active(s_log_retry_timer)) {
+        esp_timer_start_once(s_log_retry_timer, OT_LOG_RETRY_US);
+    }
+}
+
+static void ot_log_apply_now(uint32_t lock_ms)
 {
     if (!ot_callable() || !br_core_ot_session_begin()) {
         return;
@@ -759,13 +787,21 @@ void core_ot_log_push(void)
         br_core_ot_session_end();
         return;
     }
-    if (esp_openthread_lock_acquire(pdMS_TO_TICKS(OT_LOG_LOCK_MS))) {
+    if (esp_openthread_lock_acquire(pdMS_TO_TICKS(lock_ms))) {
         br_core_ot_log_apply_locked();
         esp_openthread_lock_release();
     } else {
-        ESP_LOGW(TAG, "OpenThread log level: OpenThread busy, applied at the next start");
+        ot_log_schedule_retry(); // the level in force is read again when the lock is got
     }
     br_core_ot_session_end();
+}
+
+// Called by the OPENTHREAD level listener on the task that applied the settings (never the OpenThread task). While
+// OpenThread is down the level only stays stored: ot_task applies it once OpenThread is up (after the init and again
+// once ot_ready is set, so a change in between is not lost). A busy lock is retried by a timer.
+void core_ot_log_push(void)
+{
+    ot_log_apply_now(OT_LOG_LOCK_MS);
 }
 
 #if CONFIG_OPENTHREAD_RADIO_TREL

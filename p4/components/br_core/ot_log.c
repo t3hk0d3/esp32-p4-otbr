@@ -9,17 +9,16 @@
 #include <stdatomic.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <string.h>
 #include "esp_log.h"
 #include "openthread/logging.h"
 #include "logging.h"
+#include "logging_text.h"
 #include "br_core_priv.h"
 #include "ot_log_map.h"
 
 #define OT_LOG_TAG "OPENTHREAD"
 // On the stack of whichever task logs (the OpenThread task has 12 KB); a longer line is cut. Half of LOGGING_LINE_MAX.
 #define OT_LINE_MAX 256
-#define OT_CUT_MARK "[cut]"
 
 static const char *TAG = "br_core";
 
@@ -59,9 +58,8 @@ void __wrap_otPlatLog(otLogLevel log_level, otLogRegion log_region, const char *
     if (n < 0) {
         return;
     }
-    if ((size_t)n >= sizeof(text)) {
-        memcpy(text + sizeof(text) - sizeof(OT_CUT_MARK), OT_CUT_MARK, sizeof(OT_CUT_MARK));
-    }
+    const size_t len = logging_text_truncate(text, (size_t)n, sizeof(text) - 1); // "…[cut]" on a character boundary
+    text[len] = '\0';
     esp_log_write(level, OT_LOG_TAG, "%c (%lu) %s: %s\n", level_letter(level), (unsigned long)esp_log_timestamp(),
                   OT_LOG_TAG, text);
 }
