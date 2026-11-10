@@ -1448,6 +1448,7 @@ class TestSettleMove:
 
 
 RESTART = "Saving reboots the board. Thread restarts with it: its devices lose the border router for about 20 s."
+REBOOT_ONLY = "Saving reboots the board."
 OLLY_ZIG = {**OLLY, "mode": "ziggurat", "stored_mode": "ziggurat"}
 SNAP_HYBRID = {**SNAP_ZIG, "channels": [C6, OLLY_ZIG, SLZB, EZSP]}
 
@@ -1476,12 +1477,36 @@ class TestRebootNote:
             "Thread devices lose the border router for about 20 s."
         )
 
-    def test_without_thread_says_nothing(self):
-        # On ziggurat picked while no radio runs Thread: "".
+    def test_entering_zigbee_without_thread_says_only_the_reboot(self):
+        # On ziggurat picked while no radio runs Thread: the reboot, nothing about Thread.
         c6_off = {**C6, "mode": "off", "stored_mode": "off"}
         ezsp_off = {**EZSP, "stored_mode": "off"}  # the fixture stores otbr there
         snap = {**SNAP_ZIG, "channels": [c6_off, OLLY, SLZB, ezsp_off]}
-        assert self.note(snap, OLLY, "ziggurat", NO_RADIO) == ""
+        assert self.note(snap, OLLY, "ziggurat", NO_RADIO) == REBOOT_ONLY
+
+    def test_leaving_zigbee_without_thread_says_only_the_reboot(self):
+        # On off picked on the OllyZig that runs Zigbee while no radio runs Thread: the reboot only.
+        c6_off = {**C6, "mode": "off", "stored_mode": "off"}
+        ezsp_off = {**EZSP, "stored_mode": "off"}
+        snap = {**SNAP_ZIG, "channels": [c6_off, OLLY_ZIG, SLZB, ezsp_off]}
+        assert self.note(snap, OLLY_ZIG, "off", NO_RADIO) == REBOOT_ONLY
+
+    def test_otbr_on_zigbees_radio_without_thread_says_thread_starts_through_a_reboot(
+        self,
+    ):
+        # On otbr picked on the OllyZig that runs Zigbee while no radio runs Thread: the start-with-reboot text.
+        c6_off = {**C6, "mode": "off", "stored_mode": "off"}
+        ezsp_off = {**EZSP, "stored_mode": "off"}
+        snap = {**SNAP_ZIG, "channels": [c6_off, OLLY_ZIG, SLZB, ezsp_off]}
+        assert self.note(snap, OLLY_ZIG, "otbr", NO_RADIO) == (
+            "Saving reboots the board and starts Thread on this radio; Zigbee stops."
+        )
+
+    def test_an_unplugged_radio_stored_as_zigbee_says_nothing(self):
+        # On the stored ziggurat picked on an unplugged OllyZig while Thread runs on the C6: "" (no mode change is sent).
+        unplugged = {**OLLY, "mode": "unavailable", "stored_mode": "ziggurat"}
+        snap = {**SNAP_ZIG, "channels": [C6, unplugged, SLZB, EZSP]}
+        assert self.note(snap, unplugged, "ziggurat", RUNNING) == ""
 
     def test_zigbee_on_the_radio_thread_runs_on_says_thread_stops(self):
         # On ziggurat picked on the C6 while Thread runs on the C6: Thread stops for good (no other radio runs it).

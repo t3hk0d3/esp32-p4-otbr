@@ -1,9 +1,11 @@
 """Hybrid mode: Thread (OTBR) on one radio and the Zigbee coordinator on the other, at once.
 Hardware-gated: written for the batched on-board pass, never run where it was written.
 
-Rig: the board on the LAN with the built-in C6 and a spinel dongle on the USB-A port (`-m usb_dongle`). Thread keeps the
-board's stored dataset: no test here forms a Thread network (RF rule: never 11, 15 or 25; Zigbee forms on TEST_CHANNEL
-20). The unplug test needs a person (`-s -m manual_unplug`); the push test needs OTBR_RCP_IMAGE, as test_rcp_push.
+Rig: the board on the LAN with the built-in C6 and a spinel dongle on the USB-A port. Run the automated tests with
+`-m "usb_dongle and not manual_unplug"` (a bare `-m usb_dongle` replaces pytest.ini's marker filter and would also run
+the unplug test). Thread keeps the board's stored dataset: no test here forms a Thread network (RF rule: never 11, 15 or
+25; Zigbee forms on TEST_CHANNEL 20). The unplug test needs a person (`-s -m manual_unplug`); the push test needs
+OTBR_RCP_IMAGE, as test_rcp_push.
 
 Spec: docs/superpowers/specs/2026-11-10-hybrid-mode-design.md. Every test puts the board back as it found it: Thread on
 the C6, the dongle off (fixture `hybrid`).
@@ -151,23 +153,31 @@ def test_both_run(hybrid, base_url, record_property, assignment):
 
 def test_zigbee_load_leaves_thread_pings(hybrid, base_url, dut):
     """Energy scans through a zigpy client for LOAD_S while the board pings a Thread router: no scan fails and no
-    ping is lost."""
+    ping is lost. The pings run in a worker thread, so every ping burst overlaps scans."""
     hybrid(THREAD_ON_C6)
     router = thread_router(base_url)
     lost = []
+    scans = []
 
     async def body():
+        loop = asyncio.get_running_loop()
         async with zigpy_app(base_url.removeprefix("http://")) as app:
             end = time.monotonic() + LOAD_S
             while time.monotonic() < end:
-                scan = await app.energy_scan(
-                    channels=zigpy_types.Channels.ALL_CHANNELS, duration_exp=2, count=1
-                )
-                assert len(scan) == 16
-                lost.append(ping_loss(dut, router))
+                burst = loop.run_in_executor(None, ping_loss, dut, router)
+                while not burst.done():
+                    scan = await app.energy_scan(
+                        channels=zigpy_types.Channels.ALL_CHANNELS,
+                        duration_exp=2,
+                        count=1,
+                    )
+                    assert len(scan) == 16
+                    scans.append(len(scan))
+                lost.append(await burst)
 
     run(body())
     assert lost and sum(lost) == 0, lost
+    assert len(scans) >= len(lost), (len(scans), len(lost))
 
 
 def test_reboot_keeps_both(hybrid, base_url, dut):

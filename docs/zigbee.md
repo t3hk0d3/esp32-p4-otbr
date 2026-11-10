@@ -4,8 +4,8 @@
     Zigbee mode is new and not yet tested much on real boards. Expect rough edges, and don't rely on it for a network
     you can't afford to lose. Keep ZHA's backups.
 
-In Zigbee mode the board is a Zigbee coordinator for Home Assistant's ZHA integration, instead of a Thread border
-router. The Zigbee stack (Ziggurat) runs on the board itself; ZHA talks to it over the network. The radio is the C6 or a
+In Zigbee mode a radio of the board is a Zigbee coordinator for Home Assistant's ZHA integration. The other radio can
+keep running the Thread border router (see [Thread and Zigbee together](#thread-and-zigbee-together)). The Zigbee stack (Ziggurat) runs on the board itself; ZHA talks to it over the network. The radio is the C6 or a
 USB dongle with OpenThread RCP firmware: the same radio hardware serves both Thread and Zigbee. Ethernet, the web UI,
 updates and the diagnostics work as before.
 
@@ -16,10 +16,10 @@ On the **Radios** page set the mode of the radio to **Zigbee** (`ziggurat`), or 
 `{"mode": "ziggurat"}` (the C6 is `builtin-c6`, a USB dongle `usb-<vid>-<pid>[-<serial>]`). Changing into or out of Zigbee
 mode reboots the board. When the board is back, the Dashboard's **Zigbee** section shows the coordinator running.
 
-A radio in Zigbee mode is not a Thread radio. If the C6 is the Zigbee radio, Thread does not run on the board (the
-Thread menu entries are hidden and the Thread REST API does not serve a network); Home Assistant's OpenThread Border
-Router integration then has nothing to talk to. Setting the C6 back to `otbr` reboots into Thread with the dataset
-the board had stored.
+A radio in Zigbee mode is not a Thread radio. When no other radio runs Thread (the C6 is the Zigbee radio and no
+dongle is set to `otbr`), Thread does not run on the board: the Thread menu entries are hidden and the Thread REST API
+does not serve a network, so Home Assistant's OpenThread Border Router integration has nothing to talk to. Setting a
+radio to `otbr` (the C6 back, or a dongle) brings Thread back with the dataset the board had stored.
 
 ## Connecting Home Assistant
 
@@ -68,8 +68,11 @@ transmit power), radio traffic, the memory the stack uses and the radio firmware
 Thread and the Zigbee coordinator can run at the same time on separate radios: one radio in `otbr`, the other in
 `ziggurat`, in either order. Each keeps running when the other's radio is unplugged, fails or is updated.
 
-- Starting or stopping Zigbee reboots the board, and Thread restarts with it: Thread devices lose the border router for
-  about 20 s. The Radios page says so before you save. Moving Thread onto the radio that runs Zigbee is also a reboot.
+- Starting or stopping Zigbee reboots the board, and Thread on the other radio restarts with it: Thread devices lose
+  the border router for about 20 s. The Radios page says so before you save. Moving Thread onto the radio that runs
+  Zigbee is also a reboot, and Zigbee stops.
+- Setting Zigbee on the radio that runs Thread does not restart Thread: it stops, and its devices have no border router
+  from this board until you set another radio to Thread.
 - Keep the two networks on different 802.15.4 channels. Thread's channel is its dataset's, Zigbee's is the one ZHA
   formed on. When they are the same, the Dashboard's Zigbee section shows a warning: both work, but each slows the other
   under load.

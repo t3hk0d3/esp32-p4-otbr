@@ -17,7 +17,8 @@ don't need this page.
 
 Thread and the Zigbee coordinator can run at the same time, each on its own radio (for example Thread on the built-in
 ESP32-C6 and Zigbee on a USB dongle, or the other way round). A radio runs one mode at a time. Starting or stopping
-Zigbee reboots the board, and Thread restarts with it. An RCP proxy can run beside either.
+Zigbee reboots the board, and Thread on the other radio restarts with it. Setting Zigbee on the radio that runs Thread
+stops Thread until you set another radio to Thread. An RCP proxy can run beside either.
 
 ## Supported dongles
 
@@ -65,6 +66,9 @@ pick **Thread border router** and press **Move Thread here**.
 - The move takes up to about a minute. The page follows it and shows the result. The old radio is set to **Off**.
 - If Thread doesn't start on the new radio, it stays bound there and the board shows a radio fault: try again, or move
   Thread back.
+- When the new radio runs Zigbee, the move is different: there is no check first, and saving reboots the board. After
+  the reboot Thread runs on the new radio, Zigbee is stopped and the old radio is **Off**. Thread devices lose the
+  border router for about 20 s.
 
 <img src="images/radios-move.png" width="480" alt="Configure dialog of the USB dongle with Thread border router picked: a note says saving moves Thread from ESP32-C6 (built-in) to this radio, devices lose the border router for a few seconds, the network stays; the button reads Move Thread here">
 
