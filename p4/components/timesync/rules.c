@@ -186,6 +186,9 @@ int64_t timesync_rules_age_s(int64_t now_uptime_us, int64_t at_uptime_us)
 void timesync_rules_dhcp_capture(timesync_dhcp_t *dst, uint8_t count, const uint32_t *addrs_net_order,
                                  timesync_iface_t iface)
 {
+    if (count == 0 && dst->count > 0 && iface != dst->iface) {
+        return; // the other interface's lease names none: what this one named still stands
+    }
     memset(dst, 0, sizeof(*dst));
     if (count == 0) {
         return;

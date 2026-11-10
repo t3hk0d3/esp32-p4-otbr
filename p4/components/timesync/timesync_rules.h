@@ -40,7 +40,8 @@ bool timesync_rules_clock_valid(int64_t now_epoch);
 
 /**
  * Replace the whole record with what one lease names: the addresses (network byte order, count clipped to 2) and its
- * interface. A count of 0 clears it, interface included.
+ * interface. A count of 0 clears it, interface included, unless another interface named the servers held: a lease
+ * without NTP servers on one interface does not take away those of the other (split mode).
  */
 void timesync_rules_dhcp_capture(timesync_dhcp_t *dst, uint8_t count, const uint32_t *addrs_net_order,
                                  timesync_iface_t iface);

@@ -267,6 +267,15 @@ TEST_CASE("Capture with count 0: clears, interface included", "[timesync]")
     TEST_ASSERT_EQUAL(TIMESYNC_IFACE_NONE, d.iface);
 }
 
+TEST_CASE("Capture with count 0 from another interface: keeps what the first lease named", "[timesync]")
+{
+    timesync_dhcp_t d = lease(2, TIMESYNC_IFACE_MGMT);
+
+    timesync_rules_dhcp_capture(&d, 0, NULL, TIMESYNC_IFACE_THREAD_BB);
+    TEST_ASSERT_EQUAL(2, d.count);
+    TEST_ASSERT_EQUAL(TIMESYNC_IFACE_MGMT, d.iface);
+}
+
 /* ---- API names ---- */
 
 TEST_CASE("Names: the spec 5.2 strings, NULL for none", "[timesync]")
