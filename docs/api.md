@@ -37,6 +37,9 @@ below, any of them can answer 500 `internal` or `no_memory`.
 | `GET /device/console` | Thread console setting and session: `{"enabled": bool, "session": null \| {"peer": "<address>", "since_s": <s>}}`, see [Thread console](#thread-console) | |
 | `PUT /device/console` | body `{"enabled": bool}`; stored, off by default; turning it off closes the session (4003); replies like GET | 400 `invalid_request` (`enabled` missing or not a boolean), `length_required`; 413 `payload_too_large`; 500 `storage_failed`; 503 `not_started` (the console did not start at boot) |
 | `GET /device/console/ws` | WebSocket: the board's OpenThread CLI, see [Thread console](#thread-console) | 403 on an interface that does not serve the device API |
+| `GET /device/logging` | log settings and status: `channels` (`uart`, `jtag` with `host`, `syslog` with `target` and `state`), `components` (`"*"` is the default level), `known_tags`, `viewers`, `counters` (`sent` and `dropped` for `uart`, `jtag`, `syslog`, `live`), see [Logging](logging.md) | 503 `not_started` |
+| `PUT /device/logging` | any subset of `channels.<name>.level`, `channels.syslog.target` and `components`; applied at once and stored; `components` replaces the override set (`"*"` sets the default); unknown keys are ignored, so a client may PUT back what GET gave it; replies like GET | 400 `invalid_request` (`detail` names the field, e.g. `channels.syslog.target`, `components.<tag>`; a tag listed twice is refused), `length_required`; 413 `payload_too_large` (over 4096 bytes); 500 `storage_failed` (the levels are in force but were not stored), `no_memory`; 503 `not_started` |
+| `GET /device/logging/ws` | WebSocket: the live log, see [Live log](#live-log) | 400 `invalid_request` (`level` in the URL is not a level), 403 on an interface that does not serve the device API, 503 `too_many_viewers` (two viewers are open) |
 | `GET /device/channels` | every radio channel and the modes the board offers, see [Radio channels](#radio-channels) | |
 | `PUT /device/channels/{id}` | any of `mode`, `baud`, `flow_control` and an `rcp_proxy` object; replies with the channel (`"reboot": true` when the mode's consumer reboots), or 202 `{"moving": true, "moved_from": "<id>"}` when Thread moves to this channel (also for a start, `moved_from` null, and a stop of Thread, `moved_from` the channel itself); `otbr` on the channel that runs Zigbee is no 202 but the channel with `"reboot": true` (Thread moves or starts there through the reboot) | 400 `bad_value` (`detail` names the field), `length_required`; 404 `unknown_channel`; 409 `unavailable`, `not_available`, `incompatible`, `mode_taken`, `probe_failed`, `port_taken`, `busy`; 413 `payload_too_large` (over 512 bytes); 500 `failed`; 503 `mux_busy` (the radio mux took the change but did not answer in time: a mode, speed or proxy change may still be applied, a start, move or stop will not) |
 | `DELETE /device/channels/{id}` | forget an unplugged radio and its settings; 204 | 404 `unknown_channel`; 409 `in_use` (the C6 or a plugged-in radio); 500 `failed`; 503 `not_started`, `mux_busy` (taken but not answered in time: the radio may still be forgotten) |
@@ -246,6 +249,43 @@ border router while it is used. It is off by default: turn it on with `PUT /devi
 
 ```
 websocat ws://<board>/device/console/ws
+```
+
+### Logging
+
+Concepts, channels and levels are in [Logging](logging.md). `GET /device/logging` answers
+
+```json
+{
+  "channels": {
+    "uart": {"level": "info"},
+    "jtag": {"level": "info", "host": false},
+    "syslog": {"level": "off", "target": "", "state": "off"}
+  },
+  "components": {"*": "info", "ziggurat": "debug"},
+  "known_tags": ["esp_netif", "OPENTHREAD", "ziggurat"],
+  "viewers": 0,
+  "counters": {"uart": {"sent": 0, "dropped": 0}, "jtag": {"sent": 0, "dropped": 0},
+               "syslog": {"sent": 0, "dropped": 0}, "live": {"sent": 0, "dropped": 0}}
+}
+```
+
+Levels are `off`, `error`, `warning`, `info`, `debug`, `verbose`. `syslog.state` is `off`, `resolving`, `sending` or
+`unresolved`. `target` is `host[:port]` (port 514 when omitted; `[fd00::1]:514` for IPv6). `components` holds one level
+per tag plus `"*"`; a `PUT` with `components` replaces the whole override set, so leaving a tag out removes its override.
+The syslog level cannot be raised above `off` while the target is empty (400 `channels.syslog.target`).
+
+### Live log
+
+`GET /device/logging/ws` sends the log lines logged after the connection, one per text frame, as
+`<L> (<uptime ms>) <tag>: <text>` with `L` one of `E W I D V`. Connect with `?level=<level>` (default `info`); a text
+frame `{"level":"<level>"}` changes the level of this viewer only (anything else is answered with a `# ignored` notice).
+Board notices start with `# `: `# dropped <n> lines` (this viewer lost lines; shown whatever its level). At most two
+viewers: a third is refused with 503 before the upgrade. The board pings every 10 s and closes with 1001 `no answer` a
+client silent for 30 s. Viewers get no `debug` or `verbose` lines of the `httpd*` tags.
+
+```
+websocat 'ws://<board>/device/logging/ws?level=debug'
 ```
 
 ### Radio channels

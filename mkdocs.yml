@@ -68,6 +68,7 @@ nav:
       - Packet capture: sniffer.md
       - Topology and console: topology.md
       - Monitoring: diagnostics.md
+      - Logging: logging.md
       - Maintenance jumper: maintenance-jumper.md
       - Troubleshooting: troubleshooting.md
       - Glossary: glossary.md

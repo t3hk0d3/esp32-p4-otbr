@@ -124,6 +124,19 @@ Served only while a radio is in Zigbee mode, see [Zigbee coordinator](zigbee.md)
 `zigbee_frames_total{dir="tx"}` less the failures that never reached the radio, so it is not exact. The counters start
 again from 0 when the board reboots.
 
+## Logging metrics
+
+See [Logging](logging.md).
+
+| Metric | Type | Labels |
+| --- | --- | --- |
+| `br_log_lines_sent_total` | counter | `channel` = uart, jtag, syslog, live (live: queued for a viewer) |
+| `br_log_lines_dropped_total` | counter | `channel` = uart, jtag, syslog, live |
+| `br_log_viewers` | gauge | |
+
+`dropped` counts lines a channel wanted but could not take: a full transit ring or viewer queue, no USB-JTAG host, a
+syslog send error or an unresolved target. The counters start again from 0 when the board reboots.
+
 ## Example alerts
 
 ```yaml

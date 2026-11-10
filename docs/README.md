@@ -18,6 +18,7 @@ Using the board:
 - [Packet capture](sniffer.md): 802.15.4 captures into Wireshark.
 - [Topology and console](topology.md): the mesh map and the OpenThread command line in the browser.
 - [Monitoring](diagnostics.md): the Diagnostics page; [Prometheus metrics](metrics.md) for history and alerts.
+- [Logging](logging.md): log levels per component, syslog, the live log in the browser, the `log` console command.
 - [Maintenance jumper](maintenance-jumper.md): radio repair and its console.
 - [Troubleshooting](troubleshooting.md): what the Dashboard's faults mean, common problems, limitations.
 - [Glossary](glossary.md).
@@ -26,7 +27,7 @@ Reference:
 
 - [HTTP API](api.md): every endpoint, its fields and errors.
 - [Prometheus metrics](metrics.md): the metric list, scrape config and example alerts.
-- [Internals](reference/internals.md): how radios, the C6's maintenance, updates and diagnostics work.
+- [Internals](reference/internals.md): how radios, the C6's maintenance, updates, diagnostics and logging work.
 
 Working on it:
 

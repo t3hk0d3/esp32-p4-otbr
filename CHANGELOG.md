@@ -18,6 +18,14 @@ release's `versions.txt`.
   runs Zigbee is a reboot that stores both radios. The Dashboard warns when both networks use the same 802.15.4 channel.
   Before downgrading to an older firmware, turn Zigbee (or Thread) off: older firmware never runs both. See
   `docs/zigbee.md`.
+- Logging: one log stream (ESP-IDF components, OpenThread and Ziggurat) out on four channels with their own levels:
+  UART (as before), USB-JTAG (header pins 27/28, needs a USB breakout), syslog over UDP (RFC 5424, `host[:port]`, a
+  hostname is looked up again) and a live log in the browser (at most 2 viewers, each with its own level). Per-component
+  levels combine with the channel level (a line must pass both). New `GET`/`PUT /device/logging`,
+  `GET /device/logging/ws`, the **Device → Logs** page, the console command `log`, and the metrics
+  `br_log_lines_sent_total`, `br_log_lines_dropped_total` and `br_log_viewers`. Debug and verbose calls are no longer
+  compiled out; levels default to what they were. The secondary console on USB-JTAG is off. The USB-JTAG channel is
+  not checked on hardware (no breakout). See `docs/logging.md`. On-board tests are written, not yet run.
 
 ## [0.5.0] - 2026-11-10
 
