@@ -47,8 +47,9 @@ this section uses the API's words.
 Defaults: the C6 is `otbr`; a new dongle is `off`; baud 460800; flow control off.
 
 What fits: `otbr` needs spinel (OpenThread RCP) firmware; `rcp-proxy` and `off` fit anything. A PUT of a mode the
-detected firmware does not fit is refused with 409 `incompatible`, naming the detected type. OTBR together with a
-registered `ziggurat` consumer is refused with 409 `hybrid_not_supported`.
+detected firmware does not fit is refused with 409 `incompatible`, naming the detected type. `otbr` and `ziggurat` may
+run at once on different channels; a PUT of `otbr` on the channel that runs `ziggurat` is a reboot that stores the
+channel Thread leaves as `off` in the same commit.
 
 Line settings per USB channel: baud (38400, 57600, 115200, 230400, 460800, 921600, 1000000, 2000000) and flow control
 (cp210x only; the other bridges have none).

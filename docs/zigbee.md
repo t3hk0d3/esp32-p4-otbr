@@ -63,10 +63,21 @@ transmit power), radio traffic, the memory the stack uses and the radio firmware
   not start on it: <reason>" when Zigbee does not run on the new firmware.
 - **Firmware that does not fit.** A radio whose firmware cannot run the stack shows `incompatible` with the reason.
 
+## Thread and Zigbee together
+
+Thread and the Zigbee coordinator can run at the same time on separate radios: one radio in `otbr`, the other in
+`ziggurat`, in either order. Each keeps running when the other's radio is unplugged, fails or is updated.
+
+- Starting or stopping Zigbee reboots the board, and Thread restarts with it: Thread devices lose the border router for
+  about 20 s. The Radios page says so before you save. Moving Thread onto the radio that runs Zigbee is also a reboot.
+- Keep the two networks on different 802.15.4 channels. Thread's channel is its dataset's, Zigbee's is the one ZHA
+  formed on. When they are the same, the Dashboard's Zigbee section shows a warning: both work, but each slows the other
+  under load.
+- Before going back to a firmware older than this feature, turn Zigbee off (or Thread): older firmware never runs both
+  and was not tested booting with both stored.
+
 ## Limits
 
-- No hybrid: Thread and the Zigbee coordinator never run at once on the board, even on separate radios (409
-  `hybrid_not_supported`). A radio in RCP proxy mode can run beside either.
 - One Zigbee radio at a time; a second radio in Zigbee mode is refused.
 - No settings on the board: the network (Zigbee channel, PAN ID, keys) is ZHA's. Resetting the board forgets the network, so
   keep ZHA's backups.

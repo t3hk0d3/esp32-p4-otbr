@@ -7,6 +7,15 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+### Added
+
+- Thread and Zigbee together: one radio can run the Thread border router while the other runs the Zigbee coordinator,
+  in either order. `PUT /device/channels/{id}` no longer answers 409 `hybrid_not_supported`. Starting or stopping Zigbee
+  still reboots the board, and Thread with it; the Radios page says so before saving. Moving Thread onto the radio that
+  runs Zigbee is a reboot that stores both radios. The Dashboard warns when both networks use the same 802.15.4 channel.
+  Before downgrading to an older firmware, turn Zigbee (or Thread) off: older firmware never runs both. See
+  `docs/zigbee.md`.
+
 ## [0.5.0] - 2026-11-10
 
 ### Added

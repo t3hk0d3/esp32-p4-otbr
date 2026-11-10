@@ -15,8 +15,9 @@ ZigStar OllyZig. Each radio runs in one **mode** that you pick on the **Radios**
 Out of the box the C6 runs the Thread border router and a new dongle is off. Without a dongle nothing changes: you
 don't need this page.
 
-Thread and the Zigbee coordinator never run at the same time on the board, even on two radios. An RCP proxy can run
-beside either.
+Thread and the Zigbee coordinator can run at the same time, each on its own radio (for example Thread on the built-in
+ESP32-C6 and Zigbee on a USB dongle, or the other way round). A radio runs one mode at a time. Starting or stopping
+Zigbee reboots the board, and Thread restarts with it. An RCP proxy can run beside either.
 
 ## Supported dongles
 
