@@ -76,9 +76,9 @@ CATALOGUE = {
     "br_routing_announced_prefixes": "gauge",
     "br_routing_omr_custom": "gauge",
     # Logging spec, "Calls made by Claude" (Prometheus).
-    "otbr_log_lines_sent": "counter",
-    "otbr_log_lines_dropped": "counter",
-    "otbr_log_viewers": "gauge",
+    "br_log_lines_sent": "counter",
+    "br_log_lines_dropped": "counter",
+    "br_log_viewers": "gauge",
 }
 
 BGP = {
