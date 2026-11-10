@@ -149,7 +149,8 @@ TEST_CASE("bad input: ESP_ERR_INVALID_ARG with a message, settings untouched", "
         logging_settings_t before = s;
         const char *err;
         char *argv[6] = {(char *) "log", (char *) bad[i].a1, (char *) bad[i].a2, (char *) bad[i].a3, (char *) "extra",
-                         NULL};
+                         NULL
+                        };
         int argc = bad[i].argc;
 
         err = NULL;

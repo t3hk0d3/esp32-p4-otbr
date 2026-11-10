@@ -400,13 +400,15 @@ TEST_CASE("viewer at off: counts as no level, gets nothing", "[logging]")
     teardown();
 }
 
-/* ---- httpd's own debug lines never reach a viewer (Ruling R13) ---- */
+/* ---- the network path's own debug lines never reach a viewer (Rulings R13, R14) ---- */
 
-TEST_CASE("debug viewer and debug lines from httpd tags: not queued, nothing woken", "[logging]")
+TEST_CASE("debug viewer and debug lines from network-path tags: not queued, nothing woken", "[logging]")
 {
     setup();
     logging_viewer_t *v = logging_viewer_open(ESP_LOG_VERBOSE, wake, (void *) 1);
-    const char *tags[] = {"httpd", "httpd_sess", "httpd_txrx", "httpd_ws", "httpd_parse", "httpd_uri"};
+    const char *tags[] = {"httpd", "httpd_sess", "httpd_txrx", "httpd_ws", "httpd_parse", "httpd_uri", "esp.emac",
+                          "esp_eth", "esp_netif_lwip", "lwip"
+                         };
     char text[128];
 
     for (size_t i = 0; i < sizeof(tags) / sizeof(tags[0]); i++) {

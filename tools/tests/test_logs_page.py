@@ -147,6 +147,12 @@ class TestLogsLogic:
             ("", False),
             ("*", False),
             ("has space", False),
+            ("esp.emac", True),
+            ('say"hi', False),
+            ("it's", False),
+            ("back\\slash", False),
+            ("caf\u00e9", False),
+            ("tab\there", False),
         ],
     )
     def test_tag_valid(self, tag, ok):
@@ -301,6 +307,7 @@ class TestLogsPage:
             ("resolving", "resolving", "con-warn"),
             ("sending", "sending", "con-ok"),
             ("unresolved", "unresolved", "con-warn"),
+            ("no_socket", "no socket", "con-warn"),
         ],
     )
     def test_syslog_pill_follows_the_state(self, state, text, cls):

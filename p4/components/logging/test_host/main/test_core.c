@@ -183,6 +183,41 @@ TEST_CASE("tag of 24 or more bytes, empty, or \"*\": ESP_ERR_INVALID_ARG", "[log
     TEST_ASSERT_EQUAL(1, s.n_components);
 }
 
+TEST_CASE("tag with a space, a quote, a backslash, a control or a non-ASCII byte: ESP_ERR_INVALID_ARG", "[logging]")
+{
+    const char *bad[] = {"has space", "say\"hi", "it's", "back\\slash", "tab\there", "nl\n", "del\x7f", "caf\xc3\xa9",
+                         " lead", "trail "
+                        };
+    logging_settings_t s = fresh();
+
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        TEST_ASSERT_EQUAL_MESSAGE(ESP_ERR_INVALID_ARG, logging_core_set_component(&s, bad[i], ESP_LOG_INFO), bad[i]);
+    }
+    TEST_ASSERT_EQUAL(0, s.n_components);
+}
+
+TEST_CASE("tag of printable ASCII (dots, dashes, brackets, tilde): accepted", "[logging]")
+{
+    const char *good[] = {"esp.emac", "esp-netif_lwip-ppp", "OPENTHREAD", "a[1]", "~!#$%&()*+,/:;<=>?@^`{|"};
+    logging_settings_t s = fresh();
+
+    for (size_t i = 0; i < sizeof(good) / sizeof(good[0]); i++) {
+        TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, logging_core_set_component(&s, good[i], ESP_LOG_INFO), good[i]);
+    }
+}
+
+TEST_CASE("settings with a quoted tag (NVS or PUT): ESP_ERR_INVALID_ARG, field components.<tag>", "[logging]")
+{
+    logging_settings_t s = fresh();
+    const char *field = NULL;
+
+    s.n_components = 1;
+    strcpy(s.components[0].tag, "a\"b");
+    s.components[0].level = ESP_LOG_INFO;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, logging_core_validate(&s, &field));
+    TEST_ASSERT_EQUAL_STRING("components.a\"b", field);
+}
+
 TEST_CASE("removing a known tag: removed, others keep their order", "[logging]")
 {
     logging_settings_t s = fresh();
@@ -358,12 +393,14 @@ TEST_CASE("listed tags: pointers and text unchanged by later adds (lock-free rea
     TEST_ASSERT_EQUAL_STRING("zigbee", after[2]);
 }
 
-TEST_CASE("empty or 24-byte tag: ignored, returns false", "[logging]")
+TEST_CASE("empty, 24-byte or quoted tag: ignored, returns false", "[logging]")
 {
     logging_tagset_t set = {0};
 
     TEST_ASSERT_FALSE(logging_tagset_add(&set, ""));
     TEST_ASSERT_FALSE(logging_tagset_add(&set, "123456789012345678901234"));
+    TEST_ASSERT_FALSE(logging_tagset_add(&set, "a\"b"));
+    TEST_ASSERT_FALSE(logging_tagset_add(&set, "a b"));
     TEST_ASSERT_EQUAL(0, set.count);
 }
 
@@ -394,9 +431,50 @@ TEST_CASE("levels of UART info, JTAG debug, syslog warning, viewers verbose: pac
 TEST_CASE("UART verbose, JTAG warning, syslog error, viewers off: nonuart_max is warning", "[logging]")
 {
     TEST_ASSERT_EQUAL(ESP_LOG_WARN, logging_core_nonuart_max(levels(ESP_LOG_VERBOSE, ESP_LOG_WARN, ESP_LOG_ERROR,
-                                                                    ESP_LOG_NONE)));
+                                                                    ESP_LOG_NONE), "radio_mux"));
     TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, logging_core_nonuart_max(levels(ESP_LOG_VERBOSE, ESP_LOG_NONE, ESP_LOG_NONE,
-                                                                     ESP_LOG_DEBUG)));
+                                                                     ESP_LOG_DEBUG), "radio_mux"));
+}
+
+TEST_CASE("network-path tag, syslog and viewers at debug: nonuart_max is info unless JTAG wants more", "[logging]")
+{
+    logging_levels_t lv = levels(ESP_LOG_INFO, ESP_LOG_NONE, ESP_LOG_DEBUG, ESP_LOG_VERBOSE);
+
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, logging_core_nonuart_max(lv, "esp.emac"));
+    TEST_ASSERT_EQUAL(ESP_LOG_VERBOSE, logging_core_nonuart_max(lv, "radio_mux"));
+    TEST_ASSERT_EQUAL(ESP_LOG_VERBOSE, logging_core_nonuart_max(lv, NULL));
+    lv.channel[LOGGING_CH_JTAG] = ESP_LOG_DEBUG;
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, logging_core_nonuart_max(lv, "esp.emac"));
+}
+
+/* ---- logging_core_jtag_gate ---- */
+
+TEST_CASE("JTAG gate without a USB host: the JTAG level is off, the others unchanged", "[logging]")
+{
+    logging_levels_t lv = logging_core_jtag_gate(levels(ESP_LOG_INFO, ESP_LOG_DEBUG, ESP_LOG_WARN, ESP_LOG_ERROR),
+                                                 false);
+
+    TEST_ASSERT_EQUAL(ESP_LOG_NONE, lv.channel[LOGGING_CH_JTAG]);
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, lv.channel[LOGGING_CH_UART]);
+    TEST_ASSERT_EQUAL(ESP_LOG_WARN, lv.channel[LOGGING_CH_SYSLOG]);
+    TEST_ASSERT_EQUAL(ESP_LOG_ERROR, lv.viewers);
+    TEST_ASSERT_EQUAL(ESP_LOG_WARN, logging_core_nonuart_max(lv, "radio_mux"));
+}
+
+TEST_CASE("JTAG gate with a USB host: levels unchanged", "[logging]")
+{
+    logging_levels_t in = levels(ESP_LOG_INFO, ESP_LOG_DEBUG, ESP_LOG_WARN, ESP_LOG_ERROR);
+
+    TEST_ASSERT_EQUAL_HEX32(in.word, logging_core_jtag_gate(in, true).word);
+}
+
+TEST_CASE("JTAG-only debug line without a USB host: not routed to the ring", "[logging]")
+{
+    logging_levels_t lv = logging_core_jtag_gate(levels(ESP_LOG_INFO, ESP_LOG_DEBUG, ESP_LOG_NONE, ESP_LOG_NONE), false);
+
+    TEST_ASSERT_EQUAL(0, logging_capture_route(ESP_LOG_DEBUG, ESP_LOG_INFO, logging_core_nonuart_max(lv, "x"),
+                                               ESP_LOG_DEBUG, false, false));
+    TEST_ASSERT_EQUAL(0, logging_core_wanting(ESP_LOG_DEBUG, "x", lv));
 }
 
 /* ---- logging_capture_route ---- */
@@ -459,36 +537,58 @@ TEST_CASE("full ring: each wanting channel counted, UART never", "[logging]")
 {
     logging_levels_t lv = levels(ESP_LOG_VERBOSE, ESP_LOG_DEBUG, ESP_LOG_WARN, ESP_LOG_INFO);
 
-    TEST_ASSERT_EQUAL(1u << LOGGING_CH_JTAG, logging_core_wanting(ESP_LOG_DEBUG, lv));
-    TEST_ASSERT_EQUAL((1u << LOGGING_CH_JTAG) | LOGGING_WANT_LIVE, logging_core_wanting(ESP_LOG_INFO, lv));
+    TEST_ASSERT_EQUAL(1u << LOGGING_CH_JTAG, logging_core_wanting(ESP_LOG_DEBUG, "radio_mux", lv));
+    TEST_ASSERT_EQUAL((1u << LOGGING_CH_JTAG) | LOGGING_WANT_LIVE, logging_core_wanting(ESP_LOG_INFO, "radio_mux", lv));
     TEST_ASSERT_EQUAL((1u << LOGGING_CH_JTAG) | (1u << LOGGING_CH_SYSLOG) | LOGGING_WANT_LIVE,
-                      logging_core_wanting(ESP_LOG_ERROR, lv));
-    TEST_ASSERT_EQUAL(0, logging_core_wanting(ESP_LOG_VERBOSE, lv));
+                      logging_core_wanting(ESP_LOG_ERROR, "radio_mux", lv));
+    TEST_ASSERT_EQUAL(0, logging_core_wanting(ESP_LOG_VERBOSE, "radio_mux", lv));
 }
 
-/* ---- logging_core_live_cap (Ruling R13: no feedback loop through httpd's own debug lines) ---- */
-
-TEST_CASE("live cap on an httpd tag: a debug or verbose viewer gets it at info at most", "[logging]")
+TEST_CASE("full ring, debug line of a network-path tag: counted for JTAG only, not syslog or viewers", "[logging]")
 {
-    const char *tags[] = {"httpd", "httpd_sess", "httpd_txrx", "httpd_ws", "httpd_parse", "httpd_uri"};
+    logging_levels_t lv = levels(ESP_LOG_INFO, ESP_LOG_DEBUG, ESP_LOG_DEBUG, ESP_LOG_DEBUG);
 
-    for (size_t i = 0; i < sizeof(tags) / sizeof(tags[0]); i++) {
-        TEST_ASSERT_EQUAL_MESSAGE(ESP_LOG_INFO, logging_core_live_cap(tags[i], ESP_LOG_DEBUG), tags[i]);
-        TEST_ASSERT_EQUAL_MESSAGE(ESP_LOG_INFO, logging_core_live_cap(tags[i], ESP_LOG_VERBOSE), tags[i]);
+    TEST_ASSERT_EQUAL(1u << LOGGING_CH_JTAG, logging_core_wanting(ESP_LOG_DEBUG, "httpd_txrx", lv));
+    TEST_ASSERT_EQUAL((1u << LOGGING_CH_JTAG) | (1u << LOGGING_CH_SYSLOG) | LOGGING_WANT_LIVE,
+                      logging_core_wanting(ESP_LOG_INFO, "httpd_txrx", lv));
+    TEST_ASSERT_EQUAL((1u << LOGGING_CH_JTAG) | (1u << LOGGING_CH_SYSLOG) | LOGGING_WANT_LIVE,
+                      logging_core_wanting(ESP_LOG_DEBUG, "radio_mux", lv));
+}
+
+/* ---- logging_core_net_cap (Rulings R13, R14: no feedback loop through the network path's own debug lines) ---- */
+
+static const char *const NET_TAGS[] = {
+    "httpd", "httpd_sess", "httpd_txrx", "httpd_ws", "httpd_parse", "httpd_uri", "esp.emac", "esp.emac.dma",
+    "esp_eth", "esp_eth.netif.netif_glue", "esp_netif_lwip", "esp_netif_handlers", "esp_netif_br_glue", "lwip",
+    "lwip_arch",
+};
+
+TEST_CASE("net cap on a network-path tag: debug or verbose capped at info", "[logging]")
+{
+    for (size_t i = 0; i < sizeof(NET_TAGS) / sizeof(NET_TAGS[0]); i++) {
+        TEST_ASSERT_TRUE_MESSAGE(logging_core_net_path_tag(NET_TAGS[i]), NET_TAGS[i]);
+        TEST_ASSERT_EQUAL_MESSAGE(ESP_LOG_INFO, logging_core_net_cap(NET_TAGS[i], ESP_LOG_DEBUG), NET_TAGS[i]);
+        TEST_ASSERT_EQUAL_MESSAGE(ESP_LOG_INFO, logging_core_net_cap(NET_TAGS[i], ESP_LOG_VERBOSE), NET_TAGS[i]);
     }
 }
 
-TEST_CASE("live cap on an httpd tag: a viewer at info or below keeps its level", "[logging]")
+TEST_CASE("net cap on a network-path tag: info or below kept", "[logging]")
 {
-    TEST_ASSERT_EQUAL(ESP_LOG_INFO, logging_core_live_cap("httpd_ws", ESP_LOG_INFO));
-    TEST_ASSERT_EQUAL(ESP_LOG_WARN, logging_core_live_cap("httpd_ws", ESP_LOG_WARN));
-    TEST_ASSERT_EQUAL(ESP_LOG_NONE, logging_core_live_cap("httpd", ESP_LOG_NONE));
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, logging_core_net_cap("httpd_ws", ESP_LOG_INFO));
+    TEST_ASSERT_EQUAL(ESP_LOG_WARN, logging_core_net_cap("esp.emac", ESP_LOG_WARN));
+    TEST_ASSERT_EQUAL(ESP_LOG_NONE, logging_core_net_cap("lwip", ESP_LOG_NONE));
 }
 
-TEST_CASE("live cap on any other tag: the viewer's level", "[logging]")
+TEST_CASE("net cap on any other tag: the level as it is", "[logging]")
 {
-    TEST_ASSERT_EQUAL(ESP_LOG_VERBOSE, logging_core_live_cap("radio_mux", ESP_LOG_VERBOSE));
-    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, logging_core_live_cap("esp_http_server", ESP_LOG_DEBUG));
-    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, logging_core_live_cap("http", ESP_LOG_DEBUG));
-    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, logging_core_live_cap("", ESP_LOG_DEBUG));
+    const char *tags[] = {"radio_mux", "esp_http_server", "http", "", "esp", "eth_phy_802_3", "OPENTHREAD", "lw",
+                          "mdns", "esp-netif_lwip-ppp"
+                         };
+
+    for (size_t i = 0; i < sizeof(tags) / sizeof(tags[0]); i++) {
+        TEST_ASSERT_FALSE_MESSAGE(logging_core_net_path_tag(tags[i]), tags[i]);
+        TEST_ASSERT_EQUAL_MESSAGE(ESP_LOG_VERBOSE, logging_core_net_cap(tags[i], ESP_LOG_VERBOSE), tags[i]);
+    }
+    TEST_ASSERT_FALSE(logging_core_net_path_tag(NULL));
+    TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, logging_core_net_cap(NULL, ESP_LOG_DEBUG));
 }

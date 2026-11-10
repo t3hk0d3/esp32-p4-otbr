@@ -27,6 +27,8 @@ static const char *syslog_state_name(logging_syslog_state_t state)
         return "sending";
     case LOGGING_SYSLOG_UNRESOLVED:
         return "unresolved";
+    case LOGGING_SYSLOG_NO_SOCKET:
+        return "no_socket";
     default:
         return "off";
     }
@@ -86,7 +88,7 @@ static int cmd_set(int argc, char **argv)
     }
     printf("log: done\n");
     if (strcmp(argv[1], "syslog") == 0 && strcmp(argv[2], "off") != 0 &&
-        s_settings.channel[LOGGING_CH_SYSLOG] == ESP_LOG_NONE) {
+            s_settings.channel[LOGGING_CH_SYSLOG] == ESP_LOG_NONE) {
         printf("log: syslog level is still off; turn it on with: log level syslog <level>\n");
     }
     return 0;
@@ -105,7 +107,7 @@ esp_err_t logging_console_register(void)
     const esp_console_cmd_t command = {
         .command = "log",
         .help = "log: show levels, syslog target, overrides and counters; "
-                "log level <uart|jtag|syslog> <level>; log tag <tag|*> <level|default>; log syslog <host[:port]|off>",
+        "log level <uart|jtag|syslog> <level>; log tag <tag|*> <level|default>; log syslog <host[:port]|off>",
         .func = cmd_log,
     };
 

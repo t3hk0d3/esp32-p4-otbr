@@ -31,6 +31,21 @@
 #include "logging_ring.h"
 #include "logging_text.h"
 
+// A p4/sdkconfig made before p4/sdkconfig.defaults gained the logging settings keeps its old values; these would build
+// but break the channels quietly.
+#if CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG
+#error "The secondary console owns USB-Serial-JTAG, which the logging component needs for its JTAG channel (CONFIG_ESP_CONSOLE_SECONDARY_NONE in p4/sdkconfig.defaults): p4/sdkconfig predates p4/sdkconfig.defaults (an existing sdkconfig keeps its values): delete p4/sdkconfig and build again (docs/development.md)."
+#endif
+#if CONFIG_LOG_MAXIMUM_LEVEL < 5
+#error "Debug and verbose log calls are compiled out, so no channel can reach those levels (CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE in p4/sdkconfig.defaults): p4/sdkconfig predates p4/sdkconfig.defaults (an existing sdkconfig keeps its values): delete p4/sdkconfig and build again (docs/development.md)."
+#endif
+#if CONFIG_LWIP_MAX_UDP_PCBS < 32
+#error "CONFIG_LWIP_MAX_UDP_PCBS is below the UDP PCBs the board can hold at once (syslog's socket among them; the sum is in p4/sdkconfig.defaults): p4/sdkconfig predates p4/sdkconfig.defaults (an existing sdkconfig keeps its values): delete p4/sdkconfig and build again (docs/development.md)."
+#endif
+#if CONFIG_LOG_VERSION != 1
+#error "The capture wraps the esp_log and esp_log_va of ESP-IDF's log version 1 (CONFIG_LOG_VERSION_1); version 2 formats lines elsewhere and would bypass it. Set CONFIG_LOG_VERSION_1, or delete a p4/sdkconfig that predates p4/sdkconfig.defaults and build again (docs/development.md)."
+#endif
+
 static const char *TAG = "logging";
 
 #define RING_SIZE (16 * 1024) /**< Internal RAM: every task writes it, the drain reads it. */
@@ -98,9 +113,9 @@ void logging_sink_leave(void)
     }
 }
 
-static void count_ring_drop(esp_log_level_t level, logging_levels_t lv)
+static void count_ring_drop(esp_log_level_t level, const char *tag, logging_levels_t lv)
 {
-    unsigned want = logging_core_wanting(level, lv);
+    unsigned want = logging_core_wanting(level, tag, lv);
 
     for (int ch = 0; ch < LOGGING_CH_COUNT; ch++) {
         if (want & (1u << ch)) {
@@ -132,7 +147,7 @@ static void capture(esp_log_level_t level, const char *tag, const char *format, 
 
     strlcpy(meta.tag, tag ? tag : "", sizeof(meta.tag));
     if (!logging_ring_reserve(&s_ring, want + 1, &slot)) {
-        count_ring_drop(level, lv);
+        count_ring_drop(level, tag, lv);
         return;
     }
     // Reserved: until the commit this record holds back every later one, so only the formatting and the body strip
@@ -158,9 +173,10 @@ static __attribute__((noinline)) void route_line(esp_log_config_t config, const 
                                                  va_list args)
 {
     esp_log_level_t level = config.opts.log_level;
-    logging_levels_t lv = logging_levels();
+    // USB-JTAG without a host wants nothing: its lines are neither formatted nor counted (one volatile read).
+    logging_levels_t lv = logging_core_jtag_gate(logging_levels(), logging_drain_jtag_host());
     esp_log_level_t uart = (esp_log_level_t) lv.channel[LOGGING_CH_UART];
-    esp_log_level_t nonuart = logging_core_nonuart_max(lv);
+    esp_log_level_t nonuart = logging_core_nonuart_max(lv, tag); // the network-path tags capped (R14)
     esp_log_level_t tag_level = ESP_LOG_NONE;
     bool guard = false;
     unsigned route;

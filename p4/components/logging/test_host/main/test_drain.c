@@ -19,7 +19,12 @@ static struct {
     size_t jtag_len;
     int jtag_writes;
     esp_err_t resolve_result;
-    int resolves;
+    int resolves; /**< Lookups started. */
+    bool async;         /**< Lookups run until `finished` is set; else they end at once. */
+    bool finished;
+    bool running;       /**< A lookup was started and not yet polled to its end. */
+    bool start_fails;   /**< resolve_start cannot start one (no task). */
+    bool open_fails;    /**< udp_open has no socket to give. */
     char resolved_host[LOGGING_TARGET_MAX];
     uint16_t resolved_port;
     int opens;
@@ -54,19 +59,35 @@ static int fake_jtag_write(const void *buf, size_t len)
     return (int) len;
 }
 
-static esp_err_t fake_resolve(const char *host, uint16_t port, struct sockaddr_storage *addr, socklen_t *addr_len)
+static bool fake_resolve_start(const char *host, uint16_t port)
 {
-    struct sockaddr_in *in = (struct sockaddr_in *) addr;
-
+    TEST_ASSERT_FALSE(s_fake.running); // one lookup at a time
     s_fake.resolves++;
     strlcpy(s_fake.resolved_host, host, sizeof(s_fake.resolved_host));
     s_fake.resolved_port = port;
+    if (s_fake.start_fails) {
+        return false;
+    }
+    s_fake.running = true;
+    s_fake.finished = false;
+    return true;
+}
+
+static esp_err_t fake_resolve_poll(struct sockaddr_storage *addr, socklen_t *addr_len)
+{
+    struct sockaddr_in *in = (struct sockaddr_in *) addr;
+
+    TEST_ASSERT_TRUE(s_fake.running);
+    if (s_fake.async && !s_fake.finished) {
+        return ESP_ERR_NOT_FINISHED;
+    }
+    s_fake.running = false;
     if (s_fake.resolve_result != ESP_OK) {
         return s_fake.resolve_result;
     }
     memset(addr, 0, sizeof(*addr));
     in->sin_family = AF_INET;
-    in->sin_port = htons(port);
+    in->sin_port = htons(s_fake.resolved_port);
     in->sin_addr.s_addr = htonl(0xc0a80100 | s_fake.addr_octet);
     *addr_len = sizeof(*in);
     return ESP_OK;
@@ -76,7 +97,7 @@ static int fake_udp_open(int family)
 {
     s_fake.opens++;
     s_fake.open_family = family;
-    return FAKE_FD;
+    return s_fake.open_fails ? -1 : FAKE_FD;
 }
 
 static int fake_udp_send(int fd, const void *buf, size_t len, const struct sockaddr *to, socklen_t to_len)
@@ -116,7 +137,8 @@ static bool fake_clock(struct timeval *out)
 static const logging_drain_ops_t FAKE_OPS = {
     .jtag_connected = fake_jtag_connected,
     .jtag_write = fake_jtag_write,
-    .resolve = fake_resolve,
+    .resolve_start = fake_resolve_start,
+    .resolve_poll = fake_resolve_poll,
     .udp_open = fake_udp_open,
     .udp_send = fake_udp_send,
     .udp_close = fake_udp_close,
@@ -127,7 +149,8 @@ static const logging_drain_ops_t FAKE_OPS = {
 static const logging_drain_ops_t NO_JTAG_OPS = {
     .jtag_connected = fake_jtag_connected,
     .jtag_write = NULL,
-    .resolve = fake_resolve,
+    .resolve_start = fake_resolve_start,
+    .resolve_poll = fake_resolve_poll,
     .udp_open = fake_udp_open,
     .udp_send = fake_udp_send,
     .udp_close = fake_udp_close,
@@ -227,15 +250,16 @@ TEST_CASE("JTAG record above the JTAG level: not written, nothing counted", "[lo
     teardown();
 }
 
-TEST_CASE("JTAG with no host: dropped silently, dropped[JTAG] + 1, jtag_host false, no write", "[logging]")
+TEST_CASE("JTAG with no host: skipped, nothing counted, jtag_host false, no write", "[logging]")
 {
     setup();
     s_fake.connected = false;
     logging_line_t l = line(ESP_LOG_WARN, "eth", 5, "link down");
 
     logging_drain_line(&l, levels(ESP_LOG_INFO, ESP_LOG_NONE));
+    logging_drain_line(&l, levels(ESP_LOG_INFO, ESP_LOG_NONE));
     TEST_ASSERT_EQUAL(0, s_fake.jtag_writes);
-    TEST_ASSERT_EQUAL_UINT32(1, status().dropped[LOGGING_CH_JTAG]);
+    TEST_ASSERT_EQUAL_UINT32(0, status().dropped[LOGGING_CH_JTAG]);
     TEST_ASSERT_EQUAL_UINT32(0, status().sent[LOGGING_CH_JTAG]);
     TEST_ASSERT_FALSE(status().jtag_host);
     TEST_ASSERT_EQUAL(0, s_log_lines);
@@ -256,7 +280,7 @@ TEST_CASE("JTAG with a host that does not read (TX buffer full): dropped[JTAG] +
     teardown();
 }
 
-TEST_CASE("JTAG without a driver: dropped[JTAG] + 1, nothing formatted or written, host not asked", "[logging]")
+TEST_CASE("JTAG without a driver: nothing counted, formatted or written, host not asked", "[logging]")
 {
     setup();
     logging_drain_set_ops(&NO_JTAG_OPS);
@@ -266,7 +290,8 @@ TEST_CASE("JTAG without a driver: dropped[JTAG] + 1, nothing formatted or writte
     logging_drain_line(&l, levels(ESP_LOG_INFO, ESP_LOG_NONE));
     TEST_ASSERT_EQUAL(0, s_fake.jtag_writes);
     TEST_ASSERT_EQUAL(0, s_fake.connected_calls);
-    TEST_ASSERT_EQUAL_UINT32(1, status().dropped[LOGGING_CH_JTAG]);
+    TEST_ASSERT_EQUAL_UINT32(0, status().dropped[LOGGING_CH_JTAG]);
+    TEST_ASSERT_EQUAL_UINT32(0, status().sent[LOGGING_CH_JTAG]);
     TEST_ASSERT_FALSE(status().jtag_host);
     teardown();
 }
@@ -526,6 +551,203 @@ TEST_CASE("syslog level changed, same target: socket kept, not resolved again", 
     TEST_ASSERT_EQUAL(0, s_fake.closes);
     TEST_ASSERT_EQUAL(1, s_fake.resolves);
     TEST_ASSERT_EQUAL(LOGGING_SYSLOG_SENDING, status().syslog);
+    teardown();
+}
+
+/* ---- syslog lookups off the drain task (Ruling R15) ---- */
+
+TEST_CASE("syslog lookup still running: the tick returns at once, state resolving, lines dropped", "[logging]")
+{
+    setup();
+    s_fake.async = true;
+    syslog_on(ESP_LOG_WARN, "logs.lan");
+    logging_line_t l = line(ESP_LOG_ERROR, "zigbee", 1, "boom");
+
+    TEST_ASSERT_TRUE(s_fake.running);
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_RESOLVING, status().syslog);
+    logging_drain_tick(70000); // long past any back-off: still the one lookup
+    TEST_ASSERT_EQUAL(1, s_fake.resolves);
+    logging_drain_line(&l, levels(ESP_LOG_NONE, ESP_LOG_WARN));
+    TEST_ASSERT_EQUAL(0, s_fake.sends);
+    TEST_ASSERT_EQUAL_UINT32(1, status().dropped[LOGGING_CH_SYSLOG]);
+    teardown();
+}
+
+TEST_CASE("syslog lookup that ends later: applied at the next tick, socket opened, state sending", "[logging]")
+{
+    setup();
+    s_fake.async = true;
+    syslog_on(ESP_LOG_WARN, "logs.lan");
+    s_fake.finished = true;
+    logging_drain_tick(800);
+    TEST_ASSERT_FALSE(s_fake.running);
+    TEST_ASSERT_EQUAL(1, s_fake.opens);
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_SENDING, status().syslog);
+    TEST_ASSERT_EQUAL(1, s_fake.resolves);
+    teardown();
+}
+
+TEST_CASE("syslog lookup that fails after a while: unresolved, retried 5 s after its end", "[logging]")
+{
+    setup();
+    s_fake.async = true;
+    s_fake.resolve_result = ESP_FAIL;
+    syslog_on(ESP_LOG_WARN, "nowhere.lan");
+    s_fake.finished = true;
+    logging_drain_tick(8000); // a DNS timeout of 8 s
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_UNRESOLVED, status().syslog);
+    logging_drain_tick(12999);
+    TEST_ASSERT_EQUAL(1, s_fake.resolves);
+    logging_drain_tick(13000);
+    TEST_ASSERT_EQUAL(2, s_fake.resolves);
+    teardown();
+}
+
+TEST_CASE("syslog failed refresh that runs long: still sending to the last address meanwhile", "[logging]")
+{
+    setup();
+    syslog_on(ESP_LOG_WARN, "logs.lan");
+    logging_line_t l = line(ESP_LOG_ERROR, "zigbee", 1, "boom");
+
+    s_fake.async = true;
+    s_fake.resolve_result = ESP_FAIL;
+    logging_drain_tick(600000);
+    TEST_ASSERT_TRUE(s_fake.running);
+    logging_drain_line(&l, levels(ESP_LOG_NONE, ESP_LOG_WARN));
+    TEST_ASSERT_EQUAL(1, s_fake.sends);
+    s_fake.finished = true;
+    logging_drain_tick(610000);
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_SENDING, status().syslog);
+    logging_drain_line(&l, levels(ESP_LOG_NONE, ESP_LOG_WARN));
+    TEST_ASSERT_EQUAL(2, s_fake.sends);
+    TEST_ASSERT_EQUAL(10, s_fake.sent_octet);
+    teardown();
+}
+
+TEST_CASE("syslog target changed while a lookup runs: its result dropped, the new target looked up", "[logging]")
+{
+    setup();
+    s_fake.async = true;
+    syslog_on(ESP_LOG_WARN, "old.lan");
+    logging_drain_configure(ESP_LOG_WARN, "new.lan:1514");
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_RESOLVING, status().syslog);
+    s_fake.finished = true;
+    logging_drain_tick(100); // old.lan's answer dropped; new.lan started
+    TEST_ASSERT_EQUAL(0, s_fake.opens);
+    TEST_ASSERT_EQUAL(2, s_fake.resolves);
+    TEST_ASSERT_EQUAL_STRING("new.lan", s_fake.resolved_host);
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_RESOLVING, status().syslog);
+    s_fake.finished = true;
+    logging_drain_tick(200);
+    TEST_ASSERT_EQUAL(1, s_fake.opens);
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_SENDING, status().syslog);
+    teardown();
+}
+
+TEST_CASE("syslog turned off while a lookup runs: its result dropped, no socket, state off", "[logging]")
+{
+    setup();
+    s_fake.async = true;
+    syslog_on(ESP_LOG_WARN, "logs.lan");
+    logging_drain_configure(ESP_LOG_NONE, "");
+    s_fake.finished = true;
+    logging_drain_tick(100);
+    TEST_ASSERT_FALSE(s_fake.running);
+    TEST_ASSERT_EQUAL(0, s_fake.opens);
+    TEST_ASSERT_EQUAL(1, s_fake.resolves);
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_OFF, status().syslog);
+    teardown();
+}
+
+TEST_CASE("syslog lookup that cannot start: unresolved, retried after 5 s", "[logging]")
+{
+    setup();
+    s_fake.start_fails = true;
+    syslog_on(ESP_LOG_WARN, "logs.lan");
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_UNRESOLVED, status().syslog);
+    logging_drain_tick(4999);
+    TEST_ASSERT_EQUAL(1, s_fake.resolves);
+    s_fake.start_fails = false;
+    logging_drain_tick(5000);
+    TEST_ASSERT_EQUAL(2, s_fake.resolves);
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_SENDING, status().syslog);
+    teardown();
+}
+
+/* ---- syslog without a socket ---- */
+
+TEST_CASE("syslog resolved but no UDP socket: state no_socket (not unresolved), lines dropped", "[logging]")
+{
+    setup();
+    s_fake.open_fails = true;
+    syslog_on(ESP_LOG_WARN, "192.168.1.10");
+    logging_line_t l = line(ESP_LOG_ERROR, "zigbee", 1, "boom");
+
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_NO_SOCKET, status().syslog);
+    logging_drain_line(&l, levels(ESP_LOG_NONE, ESP_LOG_WARN));
+    TEST_ASSERT_EQUAL(0, s_fake.sends);
+    TEST_ASSERT_EQUAL_UINT32(1, status().dropped[LOGGING_CH_SYSLOG]);
+    teardown();
+}
+
+TEST_CASE("syslog without a socket: tried again after 5 s, then 10 s; sending once a socket is there", "[logging]")
+{
+    setup();
+    s_fake.open_fails = true;
+    syslog_on(ESP_LOG_WARN, "192.168.1.10");
+    logging_drain_tick(4999);
+    TEST_ASSERT_EQUAL(1, s_fake.opens);
+    logging_drain_tick(5000);
+    TEST_ASSERT_EQUAL(2, s_fake.opens);
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_NO_SOCKET, status().syslog);
+    logging_drain_tick(14999);
+    TEST_ASSERT_EQUAL(2, s_fake.opens);
+    s_fake.open_fails = false;
+    logging_drain_tick(15000);
+    TEST_ASSERT_EQUAL(3, s_fake.opens);
+    TEST_ASSERT_EQUAL(LOGGING_SYSLOG_SENDING, status().syslog);
+    teardown();
+}
+
+/* ---- network-path tags on syslog (Ruling R14) ---- */
+
+TEST_CASE("syslog at debug, debug lines of network-path tags: not sent, nothing counted", "[logging]")
+{
+    const char *tags[] = {"esp.emac", "httpd_txrx", "esp_eth", "esp_netif_lwip", "lwip"};
+
+    setup();
+    syslog_on(ESP_LOG_DEBUG, "192.168.1.10");
+    for (size_t i = 0; i < sizeof(tags) / sizeof(tags[0]); i++) {
+        logging_line_t l = line(ESP_LOG_DEBUG, tags[i], 1, "receive len= 60");
+
+        logging_drain_line(&l, levels(ESP_LOG_NONE, ESP_LOG_DEBUG));
+    }
+    TEST_ASSERT_EQUAL(0, s_fake.sends);
+    TEST_ASSERT_EQUAL_UINT32(0, status().sent[LOGGING_CH_SYSLOG]);
+    TEST_ASSERT_EQUAL_UINT32(0, status().dropped[LOGGING_CH_SYSLOG]);
+    teardown();
+}
+
+TEST_CASE("syslog at debug: info lines of network-path tags and debug lines of others sent", "[logging]")
+{
+    setup();
+    syslog_on(ESP_LOG_DEBUG, "192.168.1.10");
+    logging_line_t net = line(ESP_LOG_INFO, "esp.emac", 1, "link up");
+    logging_line_t other = line(ESP_LOG_DEBUG, "radio_mux", 2, "detail");
+
+    logging_drain_line(&net, levels(ESP_LOG_NONE, ESP_LOG_DEBUG));
+    logging_drain_line(&other, levels(ESP_LOG_NONE, ESP_LOG_DEBUG));
+    TEST_ASSERT_EQUAL(2, s_fake.sends);
+    teardown();
+}
+
+TEST_CASE("JTAG at debug, debug line of a network-path tag: written (JTAG is not capped)", "[logging]")
+{
+    setup();
+    logging_line_t l = line(ESP_LOG_DEBUG, "esp.emac", 7, "receive len= 60");
+
+    logging_drain_line(&l, levels(ESP_LOG_DEBUG, ESP_LOG_NONE));
+    TEST_ASSERT_EQUAL_UINT32(1, status().sent[LOGGING_CH_JTAG]);
     teardown();
 }
 

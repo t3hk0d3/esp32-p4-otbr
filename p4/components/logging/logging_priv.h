@@ -73,8 +73,16 @@ typedef struct {
      * when the driver is not installed: the JTAG channel then drops every line without asking for a host.
      */
     int (*jtag_write)(const void *buf, size_t len);
-    /** Look `host` up (may block); `addr` gets its address with `port`. */
-    esp_err_t (*resolve)(const char *host, uint16_t port, struct sockaddr_storage *addr, socklen_t *addr_len);
+    /**
+     * Start looking `host` up off the drain task, without blocking it (one lookup at a time); false when it cannot
+     * start (counted as a failed lookup).
+     */
+    bool (*resolve_start)(const char *host, uint16_t port);
+    /**
+     * The started lookup: ESP_ERR_NOT_FINISHED while it runs; ESP_OK with `addr` (its address with the port); another
+     * error when it failed. A finished lookup is reported once.
+     */
+    esp_err_t (*resolve_poll)(struct sockaddr_storage *addr, socklen_t *addr_len);
     /** A UDP socket of `family`, or -1. */
     int (*udp_open)(int family);
     /** Send one datagram without blocking; -1 on error. */
@@ -98,9 +106,10 @@ void logging_drain_reset(void);
 void logging_drain_configure(esp_log_level_t syslog_level, const char *target);
 
 /**
- * Look the syslog target up when due (blocks while it does) and open the socket: right after a configure, after a
- * failure 5 s later doubling up to 60 s, and while sending to a name every LOGGING_SYSLOG_REFRESH_MS (a failed
- * refresh keeps the last address). Drain task only.
+ * Poll the running syslog lookup and, when one is due, start the next (never blocks: the lookup runs off the drain
+ * task); a lookup that ended opens the socket. Due: right after a configure, after a failure 5 s later doubling up to
+ * 60 s, and while sending to a name every LOGGING_SYSLOG_REFRESH_MS (a failed refresh keeps the last address). The
+ * waits count from the end of the last lookup. A configure while a lookup runs drops its result. Drain task only.
  */
 void logging_drain_tick(uint32_t now_ms);
 
@@ -115,6 +124,12 @@ void logging_drain_status(logging_status_t *out);
  * "log_out" on MGMT_CORE, which pops `ring` when notified. ESP_ERR_NO_MEM when the task cannot be made.
  */
 esp_err_t logging_drain_start(logging_ring_t *ring, TaskHandle_t *task);
+
+/**
+ * Target only: whether USB-JTAG can take lines now: its driver is installed and a USB host is there (SOF packets seen
+ * within the last few ticks). One volatile read, cheap enough for every log call.
+ */
+bool logging_drain_jtag_host(void);
 
 /** Whether logging_init has run (the settings are in force). */
 bool logging_is_initialised(void);

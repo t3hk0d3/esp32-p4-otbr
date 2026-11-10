@@ -18,7 +18,7 @@ var LINE = /^([EWIDV]) \((\d+)\) ([^ :]+): (.*)$/;
 var TARGET_HELP = 'Not a host[:port], e.g. 192.168.1.10:514, logs.lan or [fd00::1]:514';
 var STATES = {
   off : [ 'off', 'con-idle' ], resolving : [ 'resolving', 'con-warn' ], sending : [ 'sending', 'con-ok' ],
-  unresolved : [ 'unresolved', 'con-warn' ]
+  unresolved : [ 'unresolved', 'con-warn' ], no_socket : [ 'no socket', 'con-warn' ]
 };
 
 function levelName(level) { return NAMES[level] || String(level); }
@@ -99,7 +99,10 @@ function withoutComponent(components, tag) {
   return out;
 }
 
-function tagValid(tag) { return tag.length >= 1 && tag.length <= TAG_MAX && tag !== '*' && !/\s/.test(tag); }
+/* As the board: printable ASCII without spaces, quotes or backslashes. */
+function tagValid(tag) {
+  return tag.length >= 1 && tag.length <= TAG_MAX && tag !== '*' && /^[\x21-\x7e]+$/.test(tag) && !/["'\\]/.test(tag);
+}
 
 /* One WebSocket frame: {notice, level, tag, text, body}. "# ..." frames are notices from the board. */
 function classify(frame) {
@@ -336,7 +339,7 @@ function checkTarget() {
 function addComponent() {
   var tag = $('cp-new').value.trim();
   if (!L.tagValid(tag)) {
-    say('A component is the log tag, up to 23 characters, without spaces.', true);
+    say('A component is the log tag: up to 23 characters, no spaces or quotes.', true);
     return;
   }
   if (!Object.prototype.hasOwnProperty.call(current.components, tag) && Object.keys(current.components).length > 32) {

@@ -1,9 +1,10 @@
 // Live viewers of the logging component: up to LOGGING_VIEWERS_MAX readers (the live log WebSocket's clients), each
 // with its own level and an 8 KB queue in PSRAM. The drain task copies each line into the queue of every viewer whose
-// level it passes (the web server's own tags capped at info: logging_core_live_cap) and calls that viewer's wake; a full
+// level it passes (the network-path tags capped at info: logging_core_net_cap) and calls that viewer's wake; a full
 // queue drops the line for that viewer only and counts it, and lines the full transit ring refused are reported to
-// every open viewer (logging_viewers_add_dropped). The reader takes lines off its queue on its own task. The highest open level is a channel of its own for the generation
-// gate (logging_viewers_max_changed): with no viewer it is off, so lines nobody else wants are never formatted.
+// every open viewer (logging_viewers_add_dropped). The reader takes lines off its queue on its own task. The highest
+// open level is a channel of its own for the generation gate (logging_viewers_max_changed): with no viewer it is off,
+// so lines nobody else wants are never formatted.
 //
 // Locks: s_lock guards the slots (open, level) and is held by the drain while it copies a line (no blocking inside);
 // s_gate_lock keeps gate updates in order, so the last one carries the levels in force. Nothing here logs.
@@ -182,7 +183,7 @@ void logging_viewers_fanout(const logging_line_t *line)
         logging_viewer_t *v = &s_viewers[i];
         logging_ring_slot_t slot;
 
-        if (!v->open || line->level > logging_core_live_cap(line->tag, v->level)) {
+        if (!v->open || line->level > logging_core_net_cap(line->tag, v->level)) {
             continue;
         }
         if (!logging_ring_reserve(&v->ring, len, &slot)) {

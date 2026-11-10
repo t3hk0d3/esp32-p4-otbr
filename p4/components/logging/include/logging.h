@@ -49,6 +49,7 @@ typedef enum {
     LOGGING_SYSLOG_RESOLVING,
     LOGGING_SYSLOG_SENDING,
     LOGGING_SYSLOG_UNRESOLVED,
+    LOGGING_SYSLOG_NO_SOCKET, /**< Resolved, but no UDP socket could be made (lwIP out of sockets or memory). */
 } logging_syslog_state_t;
 
 typedef struct {

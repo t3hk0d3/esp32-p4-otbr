@@ -34,7 +34,10 @@ esp_log_level_t logging_core_gate(const logging_settings_t *s, const char *tag, 
 /** Whether a line passes its component's level and the channel's level. */
 bool logging_core_passes(esp_log_level_t line, esp_log_level_t component, esp_log_level_t channel);
 
-/** Add or replace an override. INVALID_ARG: bad tag (empty, "*", 24+ bytes) or level; NO_MEM: set is full. */
+/**
+ * Add or replace an override. INVALID_ARG: bad tag (empty, "*", 24+ bytes, or anything but printable ASCII without
+ * spaces, quotes and backslashes) or level; NO_MEM: set is full.
+ */
 esp_err_t logging_core_set_component(logging_settings_t *s, const char *tag, esp_log_level_t level);
 
 /** Remove an override. NOT_FOUND when there is none. */
@@ -65,16 +68,32 @@ _Static_assert(sizeof(logging_levels_t) == sizeof(uint32_t), "logging_levels_t m
 /** The channel levels of `s` and `viewers_max`, packed. */
 logging_levels_t logging_core_levels(const logging_settings_t *s, esp_log_level_t viewers_max);
 
-/** Highest level a channel other than the UART wants: JTAG, syslog and the viewers. */
-esp_log_level_t logging_core_nonuart_max(logging_levels_t lv);
+/**
+ * Whether `tag` belongs to the network path (prefixes httpd, esp.emac, esp_eth, esp_netif, lwip): ESP-IDF's web
+ * server, Ethernet driver, esp_netif and lwIP, which log while a live frame or a syslog datagram goes out or its ACK or
+ * ICMP answer comes in. NULL: false.
+ */
+bool logging_core_net_path_tag(const char *tag);
 
 /**
- * Highest level a live viewer at `viewer` gets of `tag`: the viewer's level, except for the web server's own tags
- * (those starting with "httpd") which are capped at info. The web server logs debug lines while it sends to the
- * viewers, outside the sink guard; sent to a debug viewer they would make more sends, without end (Ruling R13).
- * UART, JTAG and syslog are not capped: they send from the drain task, a sink.
+ * Highest level syslog or a live viewer at `level` gets of `tag`: `level`, except for the network-path tags
+ * (logging_core_net_path_tag), which are capped at info. Their debug lines, sent over the network, would make more
+ * frames and so more lines, without end (Rulings R13, R14). The UART and USB-JTAG are not capped: they do not use the
+ * network.
  */
-esp_log_level_t logging_core_live_cap(const char *tag, esp_log_level_t viewer);
+esp_log_level_t logging_core_net_cap(const char *tag, esp_log_level_t level);
+
+/**
+ * Highest level a channel other than the UART wants of `tag`: JTAG, and syslog and the viewers capped by
+ * logging_core_net_cap. NULL `tag`: uncapped.
+ */
+esp_log_level_t logging_core_nonuart_max(logging_levels_t lv, const char *tag);
+
+/**
+ * `lv` with the JTAG level off while no USB host is there (`host` false): the capture then formats no line for
+ * USB-JTAG alone, and the drain counts nothing against it.
+ */
+logging_levels_t logging_core_jtag_gate(logging_levels_t lv, bool host);
 
 #define LOGGING_ROUTE_UART (1u << 0) /**< Hand the line to ESP-IDF's writer (the UART), which applies the tag level. */
 #define LOGGING_ROUTE_RING (1u << 1) /**< Format the line into the transit ring for the other channels. */
@@ -92,10 +111,11 @@ unsigned logging_capture_route(esp_log_level_t level, esp_log_level_t uart_level
 #define LOGGING_WANT_LIVE (1u << LOGGING_CH_COUNT) /**< logging_core_wanting: the live viewers. */
 
 /**
- * The channels other than the UART that want a line of `level`: bit (1 << channel), plus LOGGING_WANT_LIVE for the
- * viewers. Counts a line the full ring refused against each of them.
+ * The channels other than the UART that want a line of `level` from `tag`: bit (1 << channel), plus LOGGING_WANT_LIVE
+ * for the viewers; syslog and the viewers capped by logging_core_net_cap. Counts a line the full ring refused against
+ * each of them.
  */
-unsigned logging_core_wanting(esp_log_level_t level, logging_levels_t lv);
+unsigned logging_core_wanting(esp_log_level_t level, const char *tag, logging_levels_t lv);
 
 /**
  * Parse the arguments of the console command `log` (argv[0] is "log") and apply them to `inout`:
@@ -115,7 +135,8 @@ typedef struct {
 } logging_tagset_t;
 
 /**
- * Remember a tag. True only when it was newly added; false when known, invalid (empty, 24+ bytes) or the set is full.
+ * Remember a tag. True only when it was newly added; false when known, invalid (as for logging_core_set_component) or
+ * the set is full.
  * One writer at a time; the new entry is written before `count` publishes it (release), so readers need no lock.
  */
 bool logging_tagset_add(logging_tagset_t *set, const char *tag);

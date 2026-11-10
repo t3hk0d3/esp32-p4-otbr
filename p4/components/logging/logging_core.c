@@ -11,12 +11,35 @@ static bool level_ok(esp_log_level_t level)
     return level >= ESP_LOG_NONE && level <= ESP_LOG_VERBOSE;
 }
 
+/** 1 to 23 bytes of printable ASCII without spaces, quotes or backslashes: a tag never needs escaping in JSON. */
 static bool tag_ok(const char *tag)
 {
-    size_t len = tag ? strlen(tag) : 0;
+    size_t len = tag ? strnlen(tag, LOGGING_TAG_MAX) : 0;
 
-    return len > 0 && len < LOGGING_TAG_MAX;
+    if (len == 0 || len >= LOGGING_TAG_MAX) {
+        return false;
+    }
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char) tag[i];
+
+        if (c <= ' ' || c > '~' || c == '"' || c == '\'' || c == '\\') {
+            return false;
+        }
+    }
+    return true;
 }
+
+/**
+ * Tags of the network path: lines they log while a live viewer's frame or a syslog datagram goes out (or its TCP ACK
+ * or ICMP answer comes in) would make more frames, without end (Rulings R13, R14). Prefixes, matched at the start.
+ */
+static const char *const NET_PATH_TAGS[] = {
+    "httpd",     // esp_http_server: httpd, httpd_txrx (per send and receive), httpd_ws, httpd_sess, httpd_parse, ...
+    "esp.emac",  // Ethernet MAC: "receive len=" per received frame; esp.emac.dma
+    "esp_eth",   // esp_eth ("link is not up, can't transmit" per frame), esp_eth.netif.netif_glue
+    "esp_netif", // esp_netif_lwip (verbose per API call), esp_netif_handlers, esp_netif_br_glue
+    "lwip",      // lwIP's own debug output (CONFIG_LWIP_DEBUG_ESP_LOG: per packet), lwip_arch
+};
 
 const char *logging_level_name(esp_log_level_t level)
 {
@@ -205,21 +228,42 @@ logging_levels_t logging_core_levels(const logging_settings_t *s, esp_log_level_
     return lv;
 }
 
-esp_log_level_t logging_core_nonuart_max(logging_levels_t lv)
+bool logging_core_net_path_tag(const char *tag)
 {
-    uint8_t max = lv.viewers;
-
-    for (int ch = 0; ch < LOGGING_CH_COUNT; ch++) {
-        if (ch != LOGGING_CH_UART && lv.channel[ch] > max) {
-            max = lv.channel[ch];
+    if (!tag) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(NET_PATH_TAGS) / sizeof(NET_PATH_TAGS[0]); i++) {
+        if (strncmp(tag, NET_PATH_TAGS[i], strlen(NET_PATH_TAGS[i])) == 0) {
+            return true;
         }
     }
-    return (esp_log_level_t) max;
+    return false;
 }
 
-esp_log_level_t logging_core_live_cap(const char *tag, esp_log_level_t viewer)
+esp_log_level_t logging_core_net_cap(const char *tag, esp_log_level_t level)
 {
-    return tag && strncmp(tag, "httpd", 5) == 0 && viewer > ESP_LOG_INFO ? ESP_LOG_INFO : viewer;
+    return level > ESP_LOG_INFO && logging_core_net_path_tag(tag) ? ESP_LOG_INFO : level;
+}
+
+esp_log_level_t logging_core_nonuart_max(logging_levels_t lv, const char *tag)
+{
+    uint8_t net = lv.viewers > lv.channel[LOGGING_CH_SYSLOG] ? lv.viewers : lv.channel[LOGGING_CH_SYSLOG];
+    uint8_t jtag = lv.channel[LOGGING_CH_JTAG];
+
+    // The tag is looked at only when syslog or a viewer wants debug or verbose: the common case costs no string compare.
+    if (tag && net > ESP_LOG_INFO) {
+        net = (uint8_t) logging_core_net_cap(tag, (esp_log_level_t) net);
+    }
+    return (esp_log_level_t)(jtag > net ? jtag : net);
+}
+
+logging_levels_t logging_core_jtag_gate(logging_levels_t lv, bool host)
+{
+    if (!host) {
+        lv.channel[LOGGING_CH_JTAG] = ESP_LOG_NONE;
+    }
+    return lv;
 }
 
 unsigned logging_capture_route(esp_log_level_t level, esp_log_level_t uart_level, esp_log_level_t nonuart_max,
@@ -242,19 +286,20 @@ unsigned logging_capture_route(esp_log_level_t level, esp_log_level_t uart_level
     return route;
 }
 
-unsigned logging_core_wanting(esp_log_level_t level, logging_levels_t lv)
+unsigned logging_core_wanting(esp_log_level_t level, const char *tag, logging_levels_t lv)
 {
     unsigned want = 0;
 
     if (level == ESP_LOG_NONE) {
         return 0;
     }
-    for (int ch = 0; ch < LOGGING_CH_COUNT; ch++) {
-        if (ch != LOGGING_CH_UART && level <= lv.channel[ch]) {
-            want |= 1u << ch;
-        }
+    if (level <= lv.channel[LOGGING_CH_JTAG]) {
+        want |= 1u << LOGGING_CH_JTAG;
     }
-    if (level <= lv.viewers) {
+    if (level <= logging_core_net_cap(tag, (esp_log_level_t) lv.channel[LOGGING_CH_SYSLOG])) {
+        want |= 1u << LOGGING_CH_SYSLOG;
+    }
+    if (level <= logging_core_net_cap(tag, (esp_log_level_t) lv.viewers)) {
         want |= LOGGING_WANT_LIVE;
     }
     return want;
@@ -327,7 +372,8 @@ static esp_err_t console_tag(int argc, char **argv, logging_settings_t *s, const
         return console_fail(err, "too many overrides (32); remove one with: log tag <tag> default", ret);
     }
     if (ret != ESP_OK) {
-        return console_fail(err, "bad tag (1 to 23 bytes, not *)", ESP_ERR_INVALID_ARG);
+        return console_fail(err, "bad tag (1 to 23 printable characters, no spaces or quotes, not *)",
+                            ESP_ERR_INVALID_ARG);
     }
     return ESP_OK;
 }
