@@ -32,6 +32,10 @@ With a dongle running Thread, **No radio** means it is unplugged: plug it back i
   the board goes back to one port with DHCP and reboots.
 - **No IP address.** Check the cable and the switch port (and its VLANs in split mode). The console command `net show`
   prints the interfaces and their addresses.
+- **Dates show "clock not set".** The board has not reached a time server since it was powered up. On **Device >
+  Ethernet**, the Time section says why: **Off** (sync is turned off), or **Server not answering** (the server is
+  wrong or unreachable; with a static address, Automatic also needs a DNS server to find `pool.ntp.org`). See
+  [Time](networking.md#time).
 - **Home Assistant can't connect, or doesn't list the board.** See [Home Assistant](home-assistant.md#troubleshooting).
 - **The Thread pages say "radio not available"** (or Home Assistant gets 503): the radio is in fault, see above.
   **"sniffer active"**: a packet capture is running; stop it on the Packet capture page.

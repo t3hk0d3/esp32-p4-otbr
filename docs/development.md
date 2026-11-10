@@ -154,6 +154,19 @@ Checks beyond the automated tests, and what has not been run on hardware yet. Th
 - The CH34x status-packet decoding (`uart_errors`) follows the ch34x driver's own defines
   (`CH34X_UART_STATE_TRANSIENT_MASK`, byte 0) and is not confirmed against a datasheet.
 
+### Time sync (not yet run on hardware)
+
+Spec `docs/superpowers/specs/2026-11-10-time-sync-design.md` section 8. One batched pass:
+
+1. Power-up on the home network: the clock is set within seconds; `source` matches what the router hands out.
+2. Zigbee `started` shows a real date although the stack started before the first sync.
+3. Soft restart: the clock stays valid; Last synced reads "Before the last restart" until the next answer.
+4. A custom server that does not exist: **Server not answering** after a minute, the clock keeps running. Two quick
+   saves in a row: the last one wins.
+5. Off: no NTP packets on the wire (capture on the switch).
+6. Split mode with servers on both leases: which lease wins, and whether `dhcp_iface` names it. A DHCP renewal does not
+   restart the sync (`synced` stays).
+
 ### Radios
 
 The on-board tests are in `p4/pytest/test_channels.py` (the C6 alone) and `p4/pytest/test_dongle.py` (marker

@@ -7,6 +7,12 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+### Added
+
+- Time sync: the board sets its clock from NTP, from the server the DHCP lease names, else `pool.ntp.org`, or a custom
+  server. A Time section on the Ethernet page shows the board time and sync state; `GET`/`PUT /device/time`. Zigbee
+  status times are real dates, also for events before the first sync.
+
 ## [0.5.0] - 2026-11-10
 
 ### Added
