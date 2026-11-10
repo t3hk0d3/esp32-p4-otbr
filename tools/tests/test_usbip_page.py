@@ -317,20 +317,20 @@ class TestPageShows:
             "t.el('toggle').click(); t.el('dOk').click(); await t.advance(100);"
             "const texts = ['devName', 'devMaker', 'devWhy', 'clientAddr', 'err409Text'].map((i) => t.el(i).textContent);"
             "const kv = t.el('devKv').allText();"
-            "const imgs = Object.values(t.doc.byId).filter((e) => e.findAll((x) => x.tag === 'img').length);"
-            "return [texts, kv, imgs.length];"
+            "return [texts, kv, t.doc.markupWrites];"
         )
         assert r[0] == [EVIL] * 5
         assert EVIL in r[1]
-        assert r[2] == 0
+        assert r[2] == []
 
     def test_blocked_reason_stays_text(self):
         # On markup in the blocked reason: the note holds it as text.
         r = scenario(
             setup({**BLOCKED, "reason": EVIL})
-            + "return t.el('blockedText').textContent;"
+            + "return [t.el('blockedText').textContent, t.doc.markupWrites];"
         )
-        assert EVIL in r
+        assert EVIL in r[0]
+        assert r[1] == []
 
     def test_unsupported_device_shows_the_reason(self):
         # On a hub: the reason shows in the device card, and the client box says there is no client.
