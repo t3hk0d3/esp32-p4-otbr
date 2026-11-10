@@ -274,6 +274,32 @@ TEST_CASE("syslog level above off with an empty target: ESP_ERR_INVALID_ARG, fie
     TEST_ASSERT_EQUAL_STRING("channels.syslog.target", field);
 }
 
+TEST_CASE("component named \"*\": ESP_ERR_INVALID_ARG, field components.*", "[logging]")
+{
+    logging_settings_t s = fresh();
+    const char *field = NULL;
+
+    strcpy(s.components[0].tag, "*");
+    s.components[0].level = ESP_LOG_DEBUG;
+    s.n_components = 1;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, logging_core_validate(&s, &field));
+    TEST_ASSERT_EQUAL_STRING("components.*", field);
+}
+
+TEST_CASE("duplicate component tag: ESP_ERR_INVALID_ARG, field components.<tag>", "[logging]")
+{
+    logging_settings_t s = fresh();
+    const char *field = NULL;
+
+    logging_core_set_component(&s, "wifi", ESP_LOG_WARN);
+    logging_core_set_component(&s, "ziggurat", ESP_LOG_DEBUG);
+    s.components[2] = s.components[1];
+    s.components[2].level = ESP_LOG_ERROR;
+    s.n_components = 3;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, logging_core_validate(&s, &field));
+    TEST_ASSERT_EQUAL_STRING("components.ziggurat", field);
+}
+
 /* ---- logging_tagset_add / logging_tagset_list ---- */
 
 TEST_CASE("new tag: remembered, listed in insertion order", "[logging]")

@@ -40,7 +40,8 @@ esp_err_t logging_core_set_component(logging_settings_t *s, const char *tag, esp
 esp_err_t logging_core_remove_component(logging_settings_t *s, const char *tag);
 
 /**
- * Check a whole settings struct. On INVALID_ARG `*field` (may be NULL) names the culprit: "channels.<name>.level",
+ * Check a whole settings struct, including what logging_core_set_component would refuse: a component named "*" and a
+ * tag listed twice. On INVALID_ARG `*field` (may be NULL) names the culprit: "channels.<name>.level",
  * "channels.syslog.target", "components.*" or "components.<tag>". The string is static and rewritten by the next
  * call, so copy it at once; callers serialise validation.
  */

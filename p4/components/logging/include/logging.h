@@ -66,6 +66,32 @@ typedef struct {
     const char *text; /**< Not NUL-terminated; valid until the next read on that viewer. */
 } logging_line_t;
 
+/** Called with a tag's new effective level (what esp_log_level_set got for it). */
+typedef void (*logging_level_cb_t)(esp_log_level_t effective);
+
+/**
+ * Load the settings from NVS (defaults when there are none, or a warning and defaults when the stored ones are of
+ * another version, size or invalid) and set the ESP-IDF log levels from them. Call once, early in app_main.
+ */
+esp_err_t logging_init(void);
+
+/** A copy of the settings in force. ESP_ERR_INVALID_STATE before logging_init. */
+esp_err_t logging_get_settings(logging_settings_t *out);
+
+/**
+ * Validate, put in force and store a whole settings struct; concurrent calls are serialised (the last one wins whole).
+ * Listeners whose tag's effective level changed are then called on this task, after the internal lock is released.
+ * ESP_ERR_INVALID_ARG: invalid, nothing changed; `*bad_field` (may be NULL) names the field, valid until the next
+ * failed logging_apply. ESP_FAIL: the NVS write failed, the settings are in force anyway (until reboot).
+ */
+esp_err_t logging_apply(const logging_settings_t *settings, const char **bad_field);
+
+/**
+ * Call `cb` whenever the effective level of `tag` changes (up to 4 listeners). Not called at registration: the
+ * baseline is the level in force then. ESP_ERR_NO_MEM when full, ESP_ERR_INVALID_STATE before logging_init.
+ */
+esp_err_t logging_level_listener_add(const char *tag, logging_level_cb_t cb);
+
 #ifdef __cplusplus
 }
 #endif

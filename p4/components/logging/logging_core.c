@@ -135,8 +135,12 @@ esp_err_t logging_core_validate(const logging_settings_t *s, const char **field)
     for (int i = 0; i < s->n_components && !bad; i++) {
         const logging_component_t *c = &s->components[i];
         bool terminated = memchr(c->tag, '\0', sizeof(c->tag)) != NULL;
+        bool ok = terminated && level_ok(c->level) && tag_ok(c->tag) && strcmp(c->tag, "*") != 0;
 
-        if (!terminated || !level_ok(c->level) || !tag_ok(c->tag)) {
+        for (int j = 0; j < i && ok; j++) {
+            ok = strcmp(s->components[j].tag, c->tag) != 0;
+        }
+        if (!ok) {
             snprintf(component_field, sizeof(component_field), "components.%.*s", LOGGING_TAG_MAX - 1, c->tag);
             bad = component_field;
         }
