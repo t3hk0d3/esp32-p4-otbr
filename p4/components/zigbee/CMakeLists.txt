@@ -6,7 +6,7 @@
 # SRCS / PRIV_INCLUDE_DIRS (which would make ESP-IDF warn that the file and the directory belong to openthread):
 # target_sources / target_include_directories add them after the registration.
 set(spinel_dir "${IDF_PATH}/components/openthread/openthread/src/lib/spinel")
-set(pure_srcs "ccm.c" "heap_stats.c" "kick.c" "link.c" "spinel_client.c" "zlog_map.c")
+set(pure_srcs "ccm.c" "heap_stats.c" "kick.c" "link.c" "spinel_client.c" "zlog_map.c" "zlog_ring.c")
 
 if(IDF_TARGET STREQUAL "linux")
     # Host tests build the pure files only; the cargo step needs the riscv toolchain and stays off the host.

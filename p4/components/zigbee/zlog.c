@@ -11,16 +11,17 @@
 #include <inttypes.h>
 #include <stdatomic.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "board_cores.h"
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "logging.h"
 #include "zigbee_priv.h"
 #include "zigbee_zlog_map.h"
+#include "zigbee_zlog_ring.h"
 
 // The patch's exports and import (declared in no generated header).
 void ziggurat_log_set_level(uint8_t level);
@@ -28,74 +29,34 @@ void ziggurat_log_set_level(uint8_t level);
 static const char *TAG = "ziggurat";
 
 #define ZLOG_RING_SIZE 16384 // a power of two
-#define ZLOG_LINE_MAX 512
 #define ZLOG_DRAIN_MS 20
 #define ZLOG_DRAIN_STACK 4096
 #define ZLOG_DRAIN_PRIORITY 2
 
-static uint8_t s_ring[ZLOG_RING_SIZE];
-static atomic_uint s_head; // written by the producer only
-static atomic_uint s_tail; // written by the drain task only
-static atomic_uint s_dropped;
+// The ring's memory and the drain's line buffer are allocated by zigbee_zlog_start_drain (the first bind), so a board
+// that never binds ziggurat spends only these few words. Until then ziggurat_platform_log drops and counts.
+static zigbee_zlog_ring_t s_ring;
+static char *s_line; // ZIGBEE_ZLOG_LINE_MAX + 1
 static atomic_uchar s_level = ATOMIC_VAR_INIT(3); // the mapped level (info until the listener's first call)
-
-static void ring_put(uint32_t at, const void *src, size_t n)
-{
-    for (size_t i = 0; i < n; i++) {
-        s_ring[(at + i) & (ZLOG_RING_SIZE - 1)] = ((const uint8_t *)src)[i];
-    }
-}
-
-static void ring_get(uint32_t at, void *dst, size_t n)
-{
-    for (size_t i = 0; i < n; i++) {
-        ((uint8_t *)dst)[i] = s_ring[(at + i) & (ZLOG_RING_SIZE - 1)];
-    }
-}
 
 // Any context, ziggurat's critical sections included: copies and returns.
 void ziggurat_platform_log(uint8_t level, const uint8_t *msg, size_t len)
 {
-    if (len > ZLOG_LINE_MAX) {
-        len = ZLOG_LINE_MAX;
-    }
-    const uint32_t head = atomic_load_explicit(&s_head, memory_order_relaxed);
-    const uint32_t tail = atomic_load_explicit(&s_tail, memory_order_acquire);
-    const size_t need = 3 + len;
-
-    if (ZLOG_RING_SIZE - (head - tail) < need) {
-        atomic_fetch_add_explicit(&s_dropped, 1, memory_order_relaxed);
-        return;
-    }
-    const uint8_t hdr[3] = {level, (uint8_t)(len & 0xff), (uint8_t)(len >> 8)};
-
-    ring_put(head, hdr, 3);
-    ring_put(head + 3, msg, len);
-    atomic_store_explicit(&s_head, head + need, memory_order_release);
+    zigbee_zlog_ring_put(&s_ring, level, msg, len);
 }
 
 static void drain_task(void *arg)
 {
-    static char line[ZLOG_LINE_MAX + 1];
     uint32_t reported = 0;
 
     for (;;) {
-        uint32_t tail = atomic_load_explicit(&s_tail, memory_order_relaxed);
-        const uint32_t head = atomic_load_explicit(&s_head, memory_order_acquire);
+        uint8_t level;
+        size_t len;
 
-        while (tail != head) {
-            uint8_t hdr[3];
-
-            ring_get(tail, hdr, 3);
-            const size_t len = hdr[1] | (hdr[2] << 8);
-
-            ring_get(tail + 3, line, len);
-            line[len] = '\0';
-            tail += 3 + len;
-            atomic_store_explicit(&s_tail, tail, memory_order_release);
-            ESP_LOG_LEVEL(zigbee_zlog_to_esp(hdr[0]), TAG, "%s", line);
+        while (zigbee_zlog_ring_get(&s_ring, &level, s_line, &len)) {
+            ESP_LOG_LEVEL(zigbee_zlog_to_esp(level), TAG, "%s", s_line);
         }
-        const uint32_t dropped = atomic_load_explicit(&s_dropped, memory_order_relaxed);
+        const uint32_t dropped = zigbee_zlog_ring_dropped(&s_ring);
 
         if (dropped != reported) {
             ESP_LOGW(TAG, "%" PRIu32 " lines dropped (ring full)", dropped - reported);
@@ -125,9 +86,32 @@ esp_err_t zigbee_zlog_start_drain(void)
     static TaskHandle_t task;
 
     if (task == NULL) {
-        ESP_RETURN_ON_FALSE(xTaskCreatePinnedToCore(drain_task, "zlog", ZLOG_DRAIN_STACK, NULL, ZLOG_DRAIN_PRIORITY, &task,
-                                                    MGMT_CORE) == pdPASS,
-                            ESP_ERR_NO_MEM, TAG, "zlog task");
+        // PSRAM first: the image runs from PSRAM (XIP) and ziggurat's own heap is there, so the producer's copy in
+        // ziggurat's critical sections touches the same memory ziggurat already uses with interrupts masked. Internal RAM
+        // only when PSRAM is full.
+        uint8_t *ring = heap_caps_malloc(ZLOG_RING_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+        if (s_line == NULL) {
+            s_line = heap_caps_malloc(ZIGBEE_ZLOG_LINE_MAX + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        }
+        if (ring == NULL) {
+            ring = heap_caps_malloc(ZLOG_RING_SIZE, MALLOC_CAP_8BIT);
+        }
+        if (s_line == NULL) {
+            s_line = heap_caps_malloc(ZIGBEE_ZLOG_LINE_MAX + 1, MALLOC_CAP_8BIT);
+        }
+        if (ring == NULL || s_line == NULL) {
+            heap_caps_free(ring);
+            return ESP_ERR_NO_MEM;
+        }
+        zigbee_zlog_ring_init(&s_ring, ring, ZLOG_RING_SIZE); // before the producer (the zigbee task) exists
+        if (xTaskCreatePinnedToCore(drain_task, "zlog", ZLOG_DRAIN_STACK, NULL, ZLOG_DRAIN_PRIORITY, &task, MGMT_CORE) !=
+                pdPASS) {
+            zigbee_zlog_ring_init(&s_ring, NULL, 0); // a retry allocates again
+            heap_caps_free(ring);
+            ESP_LOGE(TAG, "zlog task: no memory");
+            return ESP_ERR_NO_MEM;
+        }
     }
     return ESP_OK;
 }
