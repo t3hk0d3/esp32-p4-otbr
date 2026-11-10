@@ -47,6 +47,7 @@
 #define ZIGBEE_FLAG_TIMER (1u << 0)
 #define ZIGBEE_FLAG_WAKE (1u << 1)
 #define ZIGBEE_FLAG_TICK (1u << 2)
+#define ZIGBEE_FLAG_LOGLEVEL (1u << 3)
 
 // Outbound queue to the sender: ZIGBEE_LINK_QUEUE_DEPTH counted frames plus hellos and closes.
 #define ZIGBEE_OUT_DEPTH (ZIGBEE_LINK_QUEUE_DEPTH + 8)
@@ -177,3 +178,12 @@ esp_err_t zigbee_ws_start_sender(void);
 void zigbee_status_set_state(zigbee_state_t state, const char *reason);
 // The channel id (attach): zigbee_channel() answers it from then on.
 void zigbee_status_note_channel(const char *id);
+
+/* ---- zlog.c ---- */
+
+// app_main (zigbee_register): follows the log level of the tag "ziggurat". Not before logging_init.
+esp_err_t zigbee_zlog_init(void);
+// The first bind: the task that prints ziggurat's lines.
+esp_err_t zigbee_zlog_start_drain(void);
+// Zigbee task: gives ziggurat the stored level (after ziggurat_start, and on ZIGBEE_FLAG_LOGLEVEL).
+void zigbee_zlog_apply(void);

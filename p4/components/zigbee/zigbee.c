@@ -510,6 +510,7 @@ static void start_if_due(void)
     taskEXIT_CRITICAL(&g_zigbee_status_lock);
     ESP_LOGI(TAG, "starting ziggurat");
     ziggurat_start();
+    zigbee_zlog_apply();
     atomic_store(&z->started, true); // the WebSocket accepts clients from now on
 }
 
@@ -548,6 +549,9 @@ static void run_mailbox(void)
     }
     if (z->start_ran && (flags & ZIGBEE_FLAG_TIMER)) {
         zigbee_platform_timer_due();
+    }
+    if (z->start_ran && (flags & ZIGBEE_FLAG_LOGLEVEL)) {
+        zigbee_zlog_apply();
     }
     if (z->start_ran && (flags & ZIGBEE_FLAG_WAKE)) {
         ziggurat_process();
@@ -662,6 +666,7 @@ static esp_err_t ensure_up(void)
         ESP_RETURN_ON_ERROR(esp_timer_start_periodic(z->tick, TICK_US), TAG, "tick start");
     }
     ESP_RETURN_ON_ERROR(zigbee_ws_start_sender(), TAG, "sender task");
+    ESP_RETURN_ON_ERROR(zigbee_zlog_start_drain(), TAG, "log task");
     static TaskHandle_t task;
 
     if (task == NULL) {
@@ -717,5 +722,10 @@ esp_err_t zigbee_register(void)
 
     ESP_RETURN_ON_ERROR(radio_mux_register_instance(&inst), TAG, "registering the ziggurat instance");
     s_registered = true;
+    const esp_err_t log_err = zigbee_zlog_init();
+
+    if (log_err != ESP_OK) {
+        ESP_LOGW(TAG, "ziggurat's log level will not follow the log settings: %s", esp_err_to_name(log_err));
+    }
     return ESP_OK;
 }

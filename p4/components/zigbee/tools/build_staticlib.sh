@@ -15,6 +15,9 @@
 #   - The esp-idf feature allocates through heap_caps_aligned_alloc / heap_caps_realloc / heap_caps_free; they are
 #     renamed to zigbee_heap_* (implemented by the zigbee component, which owns the placement policy).
 #   - The build fails if the archive still imports any other heap_caps_* or malloc, calloc, realloc, free.
+#   - Every patches/*.patch (sorted) is applied to the source copy with patch -p1 --forward; the build fails if one does
+#     not apply. patches/ziggurat-ot-log.patch adds the tracing subscriber: the archive then imports
+#     ziggurat_platform_log and exports ziggurat_log_set_level, both checked.
 set -euo pipefail
 
 component="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -74,6 +77,14 @@ work="$out/work"
 rm -rf "$work"
 mkdir -p "$work" "$out/cargo-home"
 tar -C "$src" --exclude=.git --exclude=target -cf - . | tar -C "$work" -xf -
+
+# Our patches to the copy, in name order (the submodule stays at its pinned commit, clean).
+shopt -s nullglob
+for patch_file in "$component"/patches/*.patch; do
+    patch -p1 --forward --silent -d "$work" <"$patch_file" || die "$(basename "$patch_file") does not apply to the ziggurat source"
+    echo "applied $(basename "$patch_file")"
+done
+shopt -u nullglob
 
 cd "$component" # rust-toolchain.toml applies here
 if command -v rustup >/dev/null && rustup target list --installed 2>/dev/null | grep -qx "$target"; then
@@ -136,4 +147,7 @@ echo "$imports" | sed 's/^/  /'
 forbidden="$(grep -E '^(heap_caps_.*|malloc|calloc|realloc|free)$' <<<"$imports" || true)"
 [[ -z "$forbidden" ]] || die "the archive imports allocator symbols the IDF heap rename leaves out: $(tr '\n' ' ' <<<"$forbidden")"
 grep -qx zigbee_heap_aligned_alloc <<<"$imports" || die "the heap rename did not apply (no zigbee_heap_aligned_alloc import)"
+grep -qx ziggurat_platform_log <<<"$imports" || die "the log patch did not apply (no ziggurat_platform_log import)"
+grep -qx ziggurat_log_set_level <<<"$(symbols --defined-only)" \
+    || die "the log patch did not apply (no ziggurat_log_set_level export)"
 echo "built $lib"
