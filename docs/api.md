@@ -258,6 +258,7 @@ Concepts, channels and levels are in [Logging](logging.md), the internals in
 
 ```json
 {
+  "max_level": "verbose",
   "channels": {
     "uart": {"level": "info"},
     "jtag": {"level": "info", "host": false},

@@ -516,8 +516,8 @@ esp_err_t logging_drain_start(logging_ring_t *ring, TaskHandle_t *task)
 
     s_jtag_installed = err == ESP_OK;
     if (!s_jtag_installed) {
-        // Once, at boot, before the capture starts (UART only). The JTAG channel then counts every line as dropped
-        // and reports no host; this line is what tells the two apart.
+        // Once, at boot, before the capture starts (UART only). The JTAG channel then skips every line (nothing
+        // counted) and reports no host; this line is what tells the two apart.
         ESP_LOGE(TAG, "USB-Serial-JTAG driver install failed (%s): USB-JTAG gets no lines this boot",
                  esp_err_to_name(err));
         s_target_ops.jtag_write = NULL;

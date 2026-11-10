@@ -543,7 +543,7 @@ static void render_logging(metrics_writer_t *w, const metrics_logging_t *l)
         labelled_u64(w, "br_log_lines_sent_total", "channel", channels[i], l->sent[i]);
     }
     labelled_u64(w, "br_log_lines_sent_total", "channel", "live", l->live_sent);
-    family(w, "br_log_lines_dropped_total", "counter", "Log lines a channel wanted but dropped (buffer full, no host).");
+    family(w, "br_log_lines_dropped_total", "counter", "Log lines a channel wanted but dropped (buffer or queue full, send failed).");
     for (size_t i = 0; i < METRICS_LOG_CHANNELS; i++) {
         labelled_u64(w, "br_log_lines_dropped_total", "channel", channels[i], l->dropped[i]);
     }

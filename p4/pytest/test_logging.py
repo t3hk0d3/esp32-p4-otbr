@@ -776,6 +776,9 @@ class TestConsoleCommand:
 
     def test_console_log_command(self, send, base_url, logging_settings):
         # On `log`: the table is printed. On each form: applied like PUT. On bad input: usage, nothing changed.
+        logging_settings(
+            DEFAULTS
+        )  # the assertions below start from the documented defaults
         send("log", rb"log: channel +level +sent +dropped")
         send("log", rb"log: default \(everything else\): info")
 

@@ -312,6 +312,32 @@ class TestLogsPage:
         assert r == [True, "true", False]
 
     # --- Channels
+    def test_after_a_failed_load_and_a_refused_put_the_next_change_still_goes_out(self):
+        # GET fails (no settings shown), then a PUT is refused: the page says so and keeps sending later changes.
+        r = run(
+            "globalThis.bad = 'channels.uart.level';"
+            " t.el('ch-uart').value = 'debug'; t.el('ch-uart').fire('change'); await t.advance(100);"
+            " const note = t.el('lg-note').textContent; globalThis.bad = null; globalThis.st = 0;"
+            " t.el('ch-jtag').value = 'warning'; t.el('ch-jtag').fire('change'); await t.advance(100);"
+            " return [note.length > 0, globalThis.puts];",
+            setup="globalThis.st = 500;",
+        )
+        assert r == [
+            True,
+            [
+                {"channels": {"uart": {"level": "debug"}}},
+                {"channels": {"jtag": {"level": "warning"}}},
+            ],
+        ]
+
+    def test_a_component_edit_before_the_settings_loaded_is_refused_not_queued(self):
+        r = run(
+            "t.el('cp-new').value = 'ziggurat'; t.el('cp-add').click(); await t.advance(100);"
+            " return [globalThis.puts || [], t.el('lg-note').textContent];",
+            setup="globalThis.st = 500;",
+        )
+        assert r == [[], "The settings are not loaded yet; reload the page."]
+
     def test_a_channel_level_change_puts_only_that_field(self):
         r = run(
             "t.el('ch-uart').value = 'debug'; t.el('ch-uart').fire('change'); await t.advance(100);"

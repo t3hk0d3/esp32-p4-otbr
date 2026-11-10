@@ -324,7 +324,14 @@ function load() {
   });
 }
 
-/* `makeBody()` is called when the PUT is due, so it sees the reply of the one before. */
+/* The controls back to what the board has, once there is a reply to show (none while the first GET failed). */
+function restore() {
+  if (current)
+    render(current);
+}
+
+/* `makeBody()` is called when the PUT is due, so it sees the reply of the one before. A step that fails, or throws,
+ * says so and leaves the queue resolved: the next change still goes out. */
 function put(makeBody) {
   queue = queue.then(function() {
     return kit.request('PUT', '/device/logging', {
@@ -339,11 +346,14 @@ function put(makeBody) {
             return;
           }
           say(L.putError(r.status, r.body, C.errorMessage), true);
-          render(current); // the controls go back to what the board has
+          restore(); // the controls go back to what the board has
         }, function(e) {
           say(e.message, true);
-          render(current);
+          restore();
         });
+  }).catch(function(e) {
+    say(e.message, true);
+    restore();
   });
   return queue;
 }
@@ -357,7 +367,14 @@ function putChannel(name, field, value) {
 }
 
 /* `change(set)` gets the override set of the last reply when the PUT is due, so queued edits build on each other. */
-function putComponents(change) { return put(function() { return {components : change(current.components)}; }); }
+/* An override set exists only once the board's settings are loaded; before that the edit is refused, not queued. */
+function putComponents(change) {
+  if (!current) {
+    say('The settings are not loaded yet; reload the page.', true);
+    return queue;
+  }
+  return put(function() { return {components : change(current.components)}; });
+}
 
 function checkTarget() {
   var input = $('sys-target');
@@ -374,7 +391,8 @@ function addComponent() {
     say('A component is the log tag: up to 23 characters, no spaces or quotes.', true);
     return;
   }
-  if (!Object.prototype.hasOwnProperty.call(current.components, tag) && Object.keys(current.components).length > 32) {
+  if (current && !Object.prototype.hasOwnProperty.call(current.components, tag) &&
+      Object.keys(current.components).length > 32) {
     say('Up to 32 components can have their own level.', true);
     return;
   }
