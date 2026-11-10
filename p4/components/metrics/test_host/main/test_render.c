@@ -740,3 +740,67 @@ TEST_CASE("Zigbee series: written after the routing families", "[metrics]")
     TEST_ASSERT_TRUE(zigbee > routing);
     free(out);
 }
+
+/* ---- Logging ---- */
+
+TEST_CASE("Logging series: lines sent per channel, live from live_sent", "[metrics]")
+{
+    with_sample();
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE otbr_log_lines_sent_total counter"));
+    TEST_ASSERT_TRUE(has_line(out, "otbr_log_lines_sent_total{channel=\"uart\"} 100"));
+    TEST_ASSERT_TRUE(has_line(out, "otbr_log_lines_sent_total{channel=\"jtag\"} 40"));
+    TEST_ASSERT_TRUE(has_line(out, "otbr_log_lines_sent_total{channel=\"syslog\"} 30"));
+    TEST_ASSERT_TRUE(has_line(out, "otbr_log_lines_sent_total{channel=\"live\"} 20"));
+    free(out);
+}
+
+TEST_CASE("Logging series: lines dropped per channel, live from live_dropped", "[metrics]")
+{
+    with_sample();
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE otbr_log_lines_dropped_total counter"));
+    TEST_ASSERT_TRUE(has_line(out, "otbr_log_lines_dropped_total{channel=\"uart\"} 0"));
+    TEST_ASSERT_TRUE(has_line(out, "otbr_log_lines_dropped_total{channel=\"jtag\"} 5"));
+    TEST_ASSERT_TRUE(has_line(out, "otbr_log_lines_dropped_total{channel=\"syslog\"} 6"));
+    TEST_ASSERT_TRUE(has_line(out, "otbr_log_lines_dropped_total{channel=\"live\"} 3"));
+    free(out);
+}
+
+TEST_CASE("Logging series: otbr_log_viewers is a gauge of the connected live clients", "[metrics]")
+{
+    with_sample();
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "# TYPE otbr_log_viewers gauge"));
+    TEST_ASSERT_TRUE(has_line(out, "otbr_log_viewers 2"));
+    free(out);
+}
+
+TEST_CASE("Logging series without a viewer or a line: written, all zero", "[metrics]")
+{
+    with_sample();
+    memset(&s_in.device.logging, 0, sizeof(s_in.device.logging));
+    char *out = render();
+
+    TEST_ASSERT_TRUE(has_line(out, "otbr_log_viewers 0"));
+    TEST_ASSERT_TRUE(has_line(out, "otbr_log_lines_sent_total{channel=\"live\"} 0"));
+    TEST_ASSERT_TRUE(has_line(out, "otbr_log_lines_dropped_total{channel=\"live\"} 0"));
+    free(out);
+}
+
+TEST_CASE("Logging series: written after the routing families, before Zigbee", "[metrics]")
+{
+    with_zigbee();
+    char *out = render();
+    const char *routing = strstr(out, "# TYPE br_bgp_session_resets_total ");
+    const char *logging = strstr(out, "# TYPE otbr_log_lines_sent_total ");
+    const char *zigbee = strstr(out, "# TYPE zigbee_frames_total ");
+
+    TEST_ASSERT_NOT_NULL(logging);
+    TEST_ASSERT_TRUE(logging > routing);
+    TEST_ASSERT_TRUE(zigbee > logging);
+    free(out);
+}

@@ -532,6 +532,25 @@ static void render_routing(metrics_writer_t *w, const routing_metrics_view_t *r)
     }
 }
 
+// ---- logging ----
+
+static void render_logging(metrics_writer_t *w, const metrics_logging_t *l)
+{
+    static const char *const channels[METRICS_LOG_CHANNELS] = {"uart", "jtag", "syslog"};
+
+    family(w, "otbr_log_lines_sent_total", "counter", "Log lines written per channel (live: queued for a viewer).");
+    for (size_t i = 0; i < METRICS_LOG_CHANNELS; i++) {
+        labelled_u64(w, "otbr_log_lines_sent_total", "channel", channels[i], l->sent[i]);
+    }
+    labelled_u64(w, "otbr_log_lines_sent_total", "channel", "live", l->live_sent);
+    family(w, "otbr_log_lines_dropped_total", "counter", "Log lines a channel wanted but dropped (buffer full, no host).");
+    for (size_t i = 0; i < METRICS_LOG_CHANNELS; i++) {
+        labelled_u64(w, "otbr_log_lines_dropped_total", "channel", channels[i], l->dropped[i]);
+    }
+    labelled_u64(w, "otbr_log_lines_dropped_total", "channel", "live", l->live_dropped);
+    single(w, "otbr_log_viewers", "gauge", "Live log clients connected.", l->viewers);
+}
+
 // ---- zigbee ----
 
 static void render_zigbee(metrics_writer_t *w, const metrics_zigbee_t *z)
@@ -571,6 +590,7 @@ esp_err_t metrics_render(metrics_writer_t *w, const metrics_input_t *in)
     if (in->routing) {
         render_routing(w, in->routing);
     }
+    render_logging(w, &in->device->logging);
     if (in->device->zigbee.active) {
         render_zigbee(w, &in->device->zigbee);
     }

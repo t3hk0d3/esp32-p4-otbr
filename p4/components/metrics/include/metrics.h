@@ -25,6 +25,18 @@ typedef struct {
     bool client_connected;
 } metrics_zigbee_t;
 
+/** Log channels, in this order: uart, jtag, syslog (logging_channel_t). */
+#define METRICS_LOG_CHANNELS 3
+
+/** Logging figures (a copy of logging_status_t's), always written. */
+typedef struct {
+    uint32_t sent[METRICS_LOG_CHANNELS];    /**< Lines written per channel. */
+    uint32_t dropped[METRICS_LOG_CHANNELS]; /**< Lines a channel wanted but did not get. */
+    uint32_t live_sent;    /**< Lines queued for at least one live viewer. */
+    uint32_t live_dropped; /**< Lines a live viewer wanted but did not get. */
+    uint8_t viewers;       /**< Live log clients connected. */
+} metrics_logging_t;
+
 /** Figures that need no OpenThread lock, gathered by the caller. */
 typedef struct {
     int mode;                /**< br_core_mode_t: STARTING, BR_RUNNING, SNIFFER, RADIO_FAULT, NO_RADIO */
@@ -40,6 +52,7 @@ typedef struct {
     bool eth_up;
     bool trial_pending;
     metrics_zigbee_t zigbee;
+    metrics_logging_t logging;
 } metrics_device_t;
 
 /** Receives each chunk of the body, in order; a non-ESP_OK result stops the body. */
