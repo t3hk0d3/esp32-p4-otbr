@@ -226,13 +226,13 @@ def test_dongle_unplug_leaves_thread(hybrid, base_url):
     """With Thread on the C6 and Zigbee on the dongle, a person unplugs and replugs the dongle: Thread stays
     BR_RUNNING throughout; Zigbee shows no_radio while it is out and runs again after the replug."""
     hybrid(THREAD_ON_C6)
-    print("\nUnplug the USB dongle now.")
+    print("\nUnplug the USB dongle now.", flush=True)
     deadline = time.monotonic() + 120
     while zigbee_status(base_url)["state"] != "no_radio":
         assert time.monotonic() < deadline, "the dongle was not unplugged within 120 s"
         assert status(base_url)["mode"] == "BR_RUNNING"
         time.sleep(1)
-    print("Plug it back in now.")
+    print("Plug it back in now.", flush=True)
     deadline = time.monotonic() + 180
     while zigbee_status(base_url)["state"] != EXPECTED_STATE:
         assert time.monotonic() < deadline, (
