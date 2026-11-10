@@ -12,6 +12,7 @@
 #include "usbip_core.h"
 #include "usbip_engine.h"
 #include "usbip_proto.h"
+#include "usbip_status.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,13 +67,33 @@ const usbip_engine_ops_t *usbip_usb_ops(void);
 // reported.
 esp_err_t usbip_usb_open(usbip_dev_rec_t *rec, const uint8_t **cfg, size_t *cfg_len, char *why, size_t cap);
 
-// Releases what is still claimed and closes the device. Stop the engine first: cfg becomes invalid. No-op without a
-// device. A close esp-usb refuses keeps the device (logged); calling it again retries.
-void usbip_usb_close(void);
+// Releases what is still claimed and closes the device. Stop the engine first: cfg becomes invalid. ESP_OK when no
+// device is held afterwards (also without one). A close esp-usb refuses keeps the device (logged) and returns its
+// error; calling it again retries.
+esp_err_t usbip_usb_close(void);
 
 // The open device's manufacturer, product and serial strings (ASCII; other characters as '?'), each into a buffer of
 // cap bytes; empty strings without a device or a descriptor.
 void usbip_usb_strings(char *manufacturer, char *product, char *serial, size_t cap);
+
+/* ---- network side (net.c) ---- */
+
+// Eventfds net.c creates (its wake-up); the eventfd VFS must have room for them before usbip_net_start.
+#define USBIP_EVENTFD_COUNT 1
+
+// Creates the events queue (USBIP_USB_EVENTS_LEN), sets the USB side's wake-up, starts the USB side (usbip_usb_start)
+// and the network task: the TCP USBIP_PORT listener (any address; netcfg's NETCFG_SVC_USBIP rules per connection), the
+// connections and the one session. The network task is the only caller of the engine and of the USB side's other
+// functions. ESP_ERR_INVALID_STATE when called twice.
+esp_err_t usbip_net_start(void);
+
+// Ends the session if one runs (asynchronously: the network task closes it). Any task; not the OpenThread or esp_timer
+// task (it writes an eventfd).
+void usbip_net_kick(void);
+
+// Fills the device, client, state, reason, counters, sessions, refused, memory and last_error fields of out under the
+// module's lock; leaves the other fields alone. Before usbip_net_start: no device, no client, zeros.
+void usbip_net_snapshot(usbip_status_t *out);
 
 #ifdef __cplusplus
 }

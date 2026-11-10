@@ -615,10 +615,10 @@ esp_err_t usbip_usb_open(usbip_dev_rec_t *rec, const uint8_t **cfg, size_t *cfg_
     return ESP_OK;
 }
 
-void usbip_usb_close(void)
+esp_err_t usbip_usb_close(void)
 {
     if (s_dev == NULL) {
-        return;
+        return ESP_OK;
     }
     for (int i = 0; i < 256; i++) {
         if (claimed_get((uint8_t)i)) {
@@ -630,7 +630,7 @@ void usbip_usb_close(void)
     if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
         // Kept: the next close tries again (open refuses meanwhile). A pending root port power-on waits for it.
         ESP_LOGE(TAG, "closing the device: %s", esp_err_to_name(err));
-        return;
+        return err;
     }
     // s_new_addr stays: if the device is still there (an open that failed), its unplug comes as DEV_REMOVED and is
     // reported as USBIP_EV_DEV_GONE. A device that went while open cleared it on DEV_GONE.
@@ -639,6 +639,7 @@ void usbip_usb_close(void)
     memset(s_claimed, 0, sizeof(s_claimed));
     atomic_store(&s_dev_open, false);
     usb_host_client_unblock(s_client); // a pending root port power-on can go ahead
+    return ESP_OK;
 }
 
 // UTF-16LE string descriptor to ASCII; other characters as '?'.
