@@ -86,7 +86,8 @@ static char s_bad_field[sizeof("components.") + LOGGING_TAG_MAX];
 #define CEILING_BUILD (CONFIG_LOG_MAXIMUM_LEVEL < ESP_LOG_VERBOSE ? (esp_log_level_t) CONFIG_LOG_MAXIMUM_LEVEL : ESP_LOG_VERBOSE)
 #endif
 static esp_log_level_t s_ceiling = CEILING_BUILD;
-static uint32_t s_levels_word; // logging_levels_t.word
+uint32_t logging_levels_word;  // logging_levels_t.word (logging_priv.h)
+bool logging_levels_published; // set with the first publish (logging_priv.h)
 static uint32_t s_generation;
 
 void logging_set_ops(const logging_ops_t *ops)
@@ -117,7 +118,8 @@ void logging_reset(void)
     s_viewers_max = ESP_LOG_NONE;
     memset(s_listeners, 0, sizeof(s_listeners));
     s_n_listeners = 0;
-    __atomic_store_n(&s_levels_word, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&logging_levels_word, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&logging_levels_published, false, __ATOMIC_RELEASE);
     __atomic_store_n(&s_generation, 0, __ATOMIC_RELEASE);
 }
 
@@ -136,7 +138,8 @@ static void set_levels(void)
 
         s_ops->level_set(tag, logging_core_gate(&s_settings, tag, s_viewers_max));
     }
-    __atomic_store_n(&s_levels_word, lv.word, __ATOMIC_RELEASE);
+    __atomic_store_n(&logging_levels_word, lv.word, __ATOMIC_RELEASE);
+    __atomic_store_n(&logging_levels_published, true, __ATOMIC_RELEASE);
 }
 
 /**
@@ -327,7 +330,7 @@ void logging_viewers_max_changed(esp_log_level_t viewers_max)
 
 logging_levels_t logging_levels(void)
 {
-    logging_levels_t lv = {.word = __atomic_load_n(&s_levels_word, __ATOMIC_ACQUIRE)};
+    logging_levels_t lv = {.word = __atomic_load_n(&logging_levels_word, __ATOMIC_ACQUIRE)};
 
     return lv;
 }

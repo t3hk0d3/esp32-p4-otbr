@@ -10,8 +10,9 @@
 // for the log mutex); never takes the settings mutex (lines are logged while it is held): the levels come from
 // logging_levels(), one atomic load.
 //
-// Constrained contexts pass straight through to ESP-IDF, as does the time before logging_start: an ISR, the flash
-// cache disabled, the scheduler not running or suspended (esp_log_util_is_constrained, ESP-IDF's own test). With
+// Constrained contexts pass straight through to ESP-IDF, as does the time before logging_start, at or below the UART
+// level (logging_core_passthrough_uart): an ISR, the flash cache disabled, the scheduler not running or suspended
+// (esp_log_util_is_constrained, ESP-IDF's own test). With
 // CONFIG_LOG_IN_IRAM ESP-IDF's log path lives in IRAM, so the two wrappers do too (IRAM_ATTR) and touch nothing
 // outside IRAM/DRAM before that test: a disabled ESP_LOGx in IRAM-safe code keeps working while the cache is off.
 
@@ -209,7 +210,15 @@ void IRAM_ATTR __wrap_esp_log_va(esp_log_config_t config, const char *tag, const
 {
     // Nothing outside IRAM/DRAM before this test (see the top of the file).
     if (!__atomic_load_n(&s_ready, __ATOMIC_ACQUIRE) || esp_log_util_is_constrained()) {
-        __real_esp_log_va(config, tag, format, args);
+        // ESP-IDF's writer checks only the tag's gate, which a viewer or another channel may have raised above the
+        // UART level: without this, the Ethernet DMA's cache syncs (tag "cache", verbose, in a critical section) went
+        // to the UART synchronously at every frame once a verbose viewer was open, and starved emac_rx.
+        logging_levels_t lv = {.word = __atomic_load_n(&logging_levels_word, __ATOMIC_ACQUIRE)};
+
+        if (logging_core_passthrough_uart(config.opts.log_level, lv,
+                                          __atomic_load_n(&logging_levels_published, __ATOMIC_ACQUIRE))) {
+            __real_esp_log_va(config, tag, format, args);
+        }
         return;
     }
     route_line(config, tag, format, args);

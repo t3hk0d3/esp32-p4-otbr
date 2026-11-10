@@ -105,6 +105,18 @@ esp_log_level_t logging_core_nonuart_max(logging_levels_t lv, const char *tag);
  */
 logging_levels_t logging_core_jtag_gate(logging_levels_t lv, bool host);
 
+/**
+ * Whether a line that bypasses the capture (a constrained context, or before logging_start) goes on to ESP-IDF's own
+ * UART writer: always before the levels are published (`published` false, the boot as before), then only at or below
+ * the UART level. ESP-IDF's writer checks just the tag's gate, which the other channels and the viewers can raise
+ * above the UART level. Inline: the capture calls it in IRAM with the cache possibly off.
+ */
+static inline __attribute__((always_inline)) bool logging_core_passthrough_uart(esp_log_level_t level,
+                                                                                logging_levels_t lv, bool published)
+{
+    return !published || level <= (esp_log_level_t) lv.channel[LOGGING_CH_UART];
+}
+
 #define LOGGING_ROUTE_UART (1u << 0) /**< Hand the line to ESP-IDF's writer (the UART), which applies the tag level. */
 #define LOGGING_ROUTE_RING (1u << 1) /**< Format the line into the transit ring for the other channels. */
 

@@ -652,3 +652,34 @@ TEST_CASE("levels above the ceiling: clamp lowers each to the ceiling, the rest 
     TEST_ASSERT_EQUAL(ESP_LOG_WARN, s.components[0].level);
     TEST_ASSERT_EQUAL(ESP_LOG_INFO, s.components[1].level);
 }
+
+/* ---- logging_core_passthrough_uart ---- */
+
+TEST_CASE("pass-through line before the levels are published: goes to ESP-IDF's writer whatever its level",
+          "[logging]")
+{
+    logging_levels_t lv = {.word = 0};
+
+    TEST_ASSERT_TRUE(logging_core_passthrough_uart(ESP_LOG_VERBOSE, lv, false));
+    TEST_ASSERT_TRUE(logging_core_passthrough_uart(ESP_LOG_ERROR, lv, false));
+}
+
+TEST_CASE("pass-through line once published, UART info and a verbose viewer: verbose dropped, info and error kept",
+          "[logging]")
+{
+    logging_levels_t lv = {.word = 0};
+
+    lv.channel[LOGGING_CH_UART] = ESP_LOG_INFO;
+    lv.viewers = ESP_LOG_VERBOSE;
+    TEST_ASSERT_FALSE(logging_core_passthrough_uart(ESP_LOG_VERBOSE, lv, true));
+    TEST_ASSERT_FALSE(logging_core_passthrough_uart(ESP_LOG_DEBUG, lv, true));
+    TEST_ASSERT_TRUE(logging_core_passthrough_uart(ESP_LOG_INFO, lv, true));
+    TEST_ASSERT_TRUE(logging_core_passthrough_uart(ESP_LOG_ERROR, lv, true));
+}
+
+TEST_CASE("pass-through line once published with the UART off: dropped", "[logging]")
+{
+    logging_levels_t lv = {.word = 0};
+
+    TEST_ASSERT_FALSE(logging_core_passthrough_uart(ESP_LOG_ERROR, lv, true));
+}

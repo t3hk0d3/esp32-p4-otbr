@@ -59,6 +59,13 @@ void logging_viewers_max_changed(esp_log_level_t viewers_max);
  */
 logging_levels_t logging_levels(void);
 
+/**
+ * The word logging_levels() loads, and whether logging_init has published it yet. Plain .bss in internal DRAM: the
+ * capture's pass-through path reads them where the cache may be off (logging_core_passthrough_uart).
+ */
+extern uint32_t logging_levels_word;
+extern bool logging_levels_published;
+
 /** Goes up by one on every successful logging_apply: the drain task re-reads the settings when it changes. */
 uint32_t logging_settings_generation(void);
 

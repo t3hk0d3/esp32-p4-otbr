@@ -344,7 +344,9 @@ The guide is [Logging](../logging.md); the API is in [HTTP API](../api.md#loggin
   channel wants is formatted once into a 16 KB transit ring in internal RAM, and the drain task (`log_out`, core 1,
   below the HTTP server's priority) writes it to USB-JTAG and syslog and queues it for each live viewer.
 - Lines logged in a constrained context (an interrupt, the flash cache off, the scheduler suspended or not running) and
-  before the capture starts go to the UART only.
+  before the capture starts go to the UART only, and only at or below the UART level: ESP-IDF's writer checks just the
+  tag's gate, which a verbose viewer raises. Without that check, the Ethernet DMA's verbose cache-sync lines (tag
+  `cache`) went to the 115200-baud UART on every frame and starved the Ethernet receive task.
 - OpenThread's own log level follows the `OPENTHREAD` component, and Ziggurat's follows `ziggurat`, so neither formats
   lines nobody will see. OpenThread's lines on the UART now read `I (123) OPENTHREAD: ...`, like every other tag.
 - A line is cut at 512 bytes, 256 for OpenThread, on a UTF-8 character boundary, marked `…[cut]`.
