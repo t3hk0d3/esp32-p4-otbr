@@ -42,7 +42,7 @@ States (`state` in the API and on the page):
 
 | State | Meaning |
 | --- | --- |
-| `off` | USB/IP is off (or switched on and the board not yet rebooted: `pending_reboot`). |
+| `off` | USB/IP is off (or switched on and the board not yet rebooted: `pending_reboot`; or on but failed to start at boot: `reason` says why, reboot to try again). |
 | `blocked` | It is on, but a USB channel holds Thread or Zigbee; `reason` says which. |
 | `no_device` | Nothing is plugged into the USB-A port. |
 | `unsupported` | A device is plugged in but cannot be exported; `reason` says why (a hub, more than 15 endpoints, the device failed to open). |
@@ -63,6 +63,9 @@ sudo usbip detach -p <port>
 local port number to give to `detach`. The `usbip` tool comes with the `usbip` or `linux-tools` package of your
 distribution. Add `vhci-hcd` to `/etc/modules-load.d/` to load it at boot.
 
+If a retry loop or unit keeps the device attached ([Keeping it attached](#keeping-it-attached)), stop it before you
+detach, or it attaches again within seconds.
+
 Once attached, the device appears on the client like a local one, for example as `/dev/ttyUSB0` or `/dev/ttyACM0` for
 a serial adapter.
 
@@ -75,7 +78,8 @@ usbip list -r <board>
 usbip attach -r <board> -b 1-1
 ```
 
-and `usbip detach` (see `usbip port`) to release it.
+and `usbip detach` (see `usbip port`) to release it. Stop a retry loop first
+([Keeping it attached](#keeping-it-attached)), or it attaches again within seconds.
 
 ## Keeping it attached
 
@@ -124,6 +128,8 @@ device stays out of reach of any other computer.
 - Transfers over 16 KB are refused. Configuration descriptors up to 1024 bytes are read
   (`CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE`).
 - A device with more than 15 endpoints, counting alternate setting 0 of every interface, is not exported.
+- Interrupt transfers longer than 32 packets fail (`-EPROTO`), for example over 256 bytes on a full-speed HID device
+  with 8-byte packets: the USB host driver schedules at most 32 packets per interrupt transfer.
 - One device and one client at a time.
 
 Memory: the transfers in flight use internal RAM, at most 80 KB in all. Reads (IN) share 32 KB; every endpoint can
