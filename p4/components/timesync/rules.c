@@ -151,13 +151,15 @@ bool timesync_rules_servers_equal(const timesync_servers_t *a, const timesync_se
     return true;
 }
 
-timesync_state_t timesync_rules_state(bool enabled, int64_t since_start_us, bool answered_since_start, bool any_reachable)
+timesync_state_t timesync_rules_state(bool enabled, int64_t since_start_us, bool answered_since_start, bool any_reachable,
+                                      int64_t since_answer_us)
 {
     if (!enabled) {
         return TIMESYNC_STATE_OFF;
     }
     if (answered_since_start) {
-        return any_reachable ? TIMESYNC_STATE_SYNCED : TIMESYNC_STATE_UNREACHABLE;
+        const bool stale = since_answer_us >= TIMESYNC_STALE_US;
+        return any_reachable && !stale ? TIMESYNC_STATE_SYNCED : TIMESYNC_STATE_UNREACHABLE;
     }
     return since_start_us < TIMESYNC_ANSWER_TIMEOUT_US ? TIMESYNC_STATE_WAITING : TIMESYNC_STATE_UNREACHABLE;
 }

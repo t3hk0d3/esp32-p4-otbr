@@ -45,6 +45,7 @@ static int64_t s_last_sync_us = -1;  // the last answer since boot; -1 none
 static bool s_answered_since_start;
 static bool s_any_reachable;
 static int8_t s_answered = -1;
+static bool s_retry; // the task's: the last start failed and is tried again at the next upkeep
 
 static TaskHandle_t s_task;
 
@@ -109,9 +110,15 @@ static void restart(const timesync_servers_t *want)
     s_any_reachable = false;
     s_answered = -1;
     taskEXIT_CRITICAL(&s_lock);
+    s_retry = false;
     if (want->count == 0) {
         ESP_LOGI(TAG, "off");
         return;
+    }
+    // lwIP keeps a slot's name and resolved address across a stop and a start: clear the slots not used now, or it
+    // keeps rotating to a server of the previous list.
+    for (uint8_t i = want->count; i < TIMESYNC_MAX_SERVERS; i++) {
+        esp_sntp_setserver(i, NULL);
     }
     // s_servers is written only here, by this task, so its names stay put while lwIP holds pointers to them.
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(
@@ -120,7 +127,8 @@ static void restart(const timesync_servers_t *want)
     config.sync_cb = on_sync;
     const esp_err_t err = esp_netif_sntp_init(&config);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_netif_sntp_init: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "esp_netif_sntp_init: %s, retried in %d s", esp_err_to_name(err), UPKEEP_MS / 1000);
+        s_retry = true;
         return;
     }
     ESP_LOGI(TAG, "asking %s%s%s (%s)", s_servers.addr[0], want->count > 1 ? ", " : "",
@@ -170,6 +178,10 @@ static void timesync_task(void *arg)
             if (!timesync_rules_servers_equal(&want, &have) || (bits & BIT_CONFIG)) {
                 restart(&want);
             }
+        } else if (s_retry) {
+            const timesync_servers_t again = s_servers;
+
+            restart(&again);
         }
         if (s_servers.count > 0) {
             poll_reachability();
@@ -306,5 +318,6 @@ void timesync_get_status(timesync_status_t *out)
     const int64_t now = (int64_t)time(NULL);
     out->now = timesync_rules_clock_valid(now) ? now : 0;
     out->synced_age_s = timesync_rules_age_s(now_us, last_sync_us);
-    out->state = timesync_rules_state(out->config.enabled, now_us - start_us, answered, reachable);
+    out->state = timesync_rules_state(out->config.enabled, now_us - start_us, answered, reachable,
+                                      last_sync_us < 0 ? -1 : now_us - last_sync_us);
 }

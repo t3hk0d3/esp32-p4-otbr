@@ -26,8 +26,18 @@ void timesync_rules_choose(const timesync_config_t *cfg, const timesync_dhcp_t *
 /** Same servers in the same order and the same source. */
 bool timesync_rules_servers_equal(const timesync_servers_t *a, const timesync_servers_t *b);
 
-/** The state (spec 4.2) from: enabled, time since the last start, an answer since then, any server still reachable. */
-timesync_state_t timesync_rules_state(bool enabled, int64_t since_start_us, bool answered_since_start, bool any_reachable);
+/**
+ * Without an answer for this long the state is unreachable whatever the reachability register says: lwIP shifts that
+ * register only when it sends, and a server whose name no longer resolves is never sent to. Three hourly polls.
+ */
+#define TIMESYNC_STALE_US (3LL * 3600 * 1000 * 1000)
+
+/**
+ * The state (spec 4.2) from: enabled, time since the last start, an answer since then, any server still reachable,
+ * and time since the last answer (-1: none since boot).
+ */
+timesync_state_t timesync_rules_state(bool enabled, int64_t since_start_us, bool answered_since_start, bool any_reachable,
+                                      int64_t since_answer_us);
 
 /** The epoch seconds of the moment at_uptime_us, given the clock now; 0 when now_epoch is not valid. */
 int64_t timesync_rules_epoch_at(int64_t now_epoch, int64_t now_uptime_us, int64_t at_uptime_us);

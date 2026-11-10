@@ -186,27 +186,38 @@ TEST_CASE("Servers, other order or other source: not equal", "[timesync]")
 
 TEST_CASE("State, disabled: off", "[timesync]")
 {
-    TEST_ASSERT_EQUAL(TIMESYNC_STATE_OFF, timesync_rules_state(false, S(600), true, true));
+    TEST_ASSERT_EQUAL(TIMESYNC_STATE_OFF, timesync_rules_state(false, S(600), true, true, S(60)));
 }
 
 TEST_CASE("State, enabled, no answer, 59 s: waiting", "[timesync]")
 {
-    TEST_ASSERT_EQUAL(TIMESYNC_STATE_WAITING, timesync_rules_state(true, S(59), false, false));
+    TEST_ASSERT_EQUAL(TIMESYNC_STATE_WAITING, timesync_rules_state(true, S(59), false, false, -1));
 }
 
 TEST_CASE("State, enabled, no answer, 60 s: unreachable", "[timesync]")
 {
-    TEST_ASSERT_EQUAL(TIMESYNC_STATE_UNREACHABLE, timesync_rules_state(true, S(60), false, false));
+    TEST_ASSERT_EQUAL(TIMESYNC_STATE_UNREACHABLE, timesync_rules_state(true, S(60), false, false, -1));
 }
 
 TEST_CASE("State, answered and a server reachable: synced", "[timesync]")
 {
-    TEST_ASSERT_EQUAL(TIMESYNC_STATE_SYNCED, timesync_rules_state(true, S(5000), true, true));
+    TEST_ASSERT_EQUAL(TIMESYNC_STATE_SYNCED, timesync_rules_state(true, S(5000), true, true, S(60)));
 }
 
 TEST_CASE("State, answered earlier and every server now unreachable: unreachable", "[timesync]")
 {
-    TEST_ASSERT_EQUAL(TIMESYNC_STATE_UNREACHABLE, timesync_rules_state(true, S(5000), true, false));
+    TEST_ASSERT_EQUAL(TIMESYNC_STATE_UNREACHABLE, timesync_rules_state(true, S(5000), true, false, S(60)));
+}
+
+TEST_CASE("State, answered 3 h ago, register still non-zero (DNS lost): unreachable", "[timesync]")
+{
+    // lwIP shifts the reachability register only when it sends; a hostname that stops resolving sends nothing.
+    TEST_ASSERT_EQUAL(TIMESYNC_STATE_UNREACHABLE, timesync_rules_state(true, S(20000), true, true, S(3 * 3600)));
+}
+
+TEST_CASE("State, answered 1 h ago and reachable: synced", "[timesync]")
+{
+    TEST_ASSERT_EQUAL(TIMESYNC_STATE_SYNCED, timesync_rules_state(true, S(20000), true, true, S(3600)));
 }
 
 /* ---- epoch at, age, clock valid ---- */
