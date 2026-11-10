@@ -53,6 +53,8 @@
 #include "thread_json.h"
 #include "zigbee.h"
 #include "zigbee_json.h"
+#include "usbip.h"
+#include "usbip_json.h"
 #include "netnames.h"
 #include "radio_mux.h"
 #include "rcp_proxy.h"
@@ -1758,6 +1760,77 @@ static esp_err_t zigbee_get_handler(httpd_req_t *req)
     return err;
 }
 
+/* ---- /device/usbip ---- */
+
+static esp_err_t usbip_get_handler(httpd_req_t *req)
+{
+    usbip_status_t *st = malloc(sizeof(*st));
+    char *body = malloc(USBIP_JSON_MAX);
+    esp_err_t err;
+    size_t len;
+
+    if (!st || !body) {
+        err = send_error(req, 500, "no_memory", "out of memory", false);
+    } else {
+        usbip_get_status(st);
+        if (usbip_json_status(st, body, USBIP_JSON_MAX, &len) != ESP_OK) {
+            err = send_error(req, 500, "internal", "the status does not fit its buffer", false);
+        } else {
+            err = send_json(req, body);
+        }
+    }
+    free(st);
+    free(body);
+    return err;
+}
+
+// {"enabled": bool} stores the flag (the verdict decides: nothing to do, reboot, or refused); {"kick": true} drops the
+// client and answers {} (it is not a setting, so there is no reboot to report).
+static esp_err_t usbip_put_handler(httpd_req_t *req)
+{
+    const int length_status = device_api_length_check(req->content_len, USBIP_JSON_PUT_MAX);
+
+    if (length_status != 0) {
+        return send_error(req, length_status, length_status == 413 ? "payload_too_large" : "length_required",
+                          "send the change as a JSON body", true);
+    }
+    char *body = read_small_body(req);
+
+    if (!body) {
+        return send_error(req, 400, "invalid_request", "the body could not be read", true);
+    }
+    usbip_put_kind_t kind;
+    bool enabled = false;
+    const esp_err_t parse_err = usbip_json_put_parse(body, &kind, &enabled);
+
+    free(body);
+    if (parse_err != ESP_OK) {
+        return send_error(req, 400, "bad_value", "send exactly {\"enabled\": true|false} or {\"kick\": true}", false);
+    }
+    if (kind == USBIP_PUT_KICK) {
+        usbip_kick(); // INVALID_STATE (USB/IP not active): there is no client to drop, which is still a 200
+        return send_json(req, "{}");
+    }
+    char detail[RADIO_MUX_REASON_MAX + RADIO_MUX_ID_MAX] = "";
+    const usbip_set_verdict_t v = usbip_set_enabled(enabled, device_api_op_long_running(), detail, sizeof(detail));
+
+    switch (v) {
+    case USBIP_SET_REFUSE_IN_USE:
+        return send_error(req, 409, "usb_channel_in_use", detail, false);
+    case USBIP_SET_REFUSE_BUSY:
+        return send_error(req, 409, "busy", "an update or firmware push is running or waits for its reboot", false);
+    case USBIP_SET_REBOOT: {
+        const esp_err_t err = send_json(req, "{\"reboot\":true}");
+
+        reboot_gate_restart(REBOOT_DELAY_MS); // stored: the flag takes effect at boot
+        return err;
+    }
+    case USBIP_SET_NOOP:
+    default:
+        return send_json(req, "{\"reboot\":false}");
+    }
+}
+
 /* ---- /device/names ---- */
 
 #define NAMES_BODY_MAX 512
@@ -2573,6 +2646,8 @@ esp_err_t device_api_register(httpd_handle_t server)
         {"/device/network", HTTP_PUT, network_put_handler},
         {"/device/network/confirm", HTTP_POST, network_confirm_post_handler},
         {"/device/zigbee", HTTP_GET, zigbee_get_handler},
+        {"/device/usbip", HTTP_GET, usbip_get_handler},
+        {"/device/usbip", HTTP_PUT, usbip_put_handler},
         {"/device/names", HTTP_GET, names_get_handler},
         {"/device/names", HTTP_PUT, names_put_handler},
         {"/device/time", HTTP_GET, time_get_handler},

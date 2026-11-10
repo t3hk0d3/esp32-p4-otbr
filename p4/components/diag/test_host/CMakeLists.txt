@@ -8,6 +8,7 @@ set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/.." "${CMAKE_CURRENT_LIST_DI
                          "${CMAKE_CURRENT_LIST_DIR}/../../self_update" # device_api (update_json.c)
                          "${CMAKE_CURRENT_LIST_DIR}/../../logging" # device_api (logging_json.c)
                          "${CMAKE_CURRENT_LIST_DIR}/../../timesync" # device_api (time_json.c)
+                         "${CMAKE_CURRENT_LIST_DIR}/../../usbip" # device_api (usbip_json.c)
                          "${CMAKE_CURRENT_LIST_DIR}/../../../../common/rcp_sync_proto")
 set(COMPONENTS main)
 
