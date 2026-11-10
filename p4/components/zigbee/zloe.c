@@ -143,10 +143,10 @@ static void post_peer(const mdns_result_t *r, uint32_t scope)
 
     for (const mdns_ip_addr_t *a = r->addr; a != NULL && n < PEER_MAX_ADDRS; a = a->next) {
         if (a->addr.type == ESP_IPADDR_TYPE_V6) {
-            memcpy(addrs[n++], a->addr.u_addr.ip6.addr, 16);
+            memcpy(addrs[n], a->addr.u_addr.ip6.addr, 16);
+            n += zigbee_zloe_keep_link_local(&addrs[n], 1); // the filter first: routable addresses must not fill the array
         }
     }
-    n = zigbee_zloe_keep_link_local(addrs, n);
     if (n == 0) {
         return;
     }
