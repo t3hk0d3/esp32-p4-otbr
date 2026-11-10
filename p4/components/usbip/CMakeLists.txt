@@ -7,6 +7,7 @@ if(IDF_TARGET STREQUAL "linux")
     return()
 endif()
 
-# Target-only sources (usb_side.c, net.c, usbip.c) join here as they are added.
-idf_component_register(SRCS ${pure_srcs}
-                       INCLUDE_DIRS "include")
+# Target-only sources (net.c, usbip.c join here as they are added): esp-usb, sockets, NVS.
+idf_component_register(SRCS ${pure_srcs} "usb_side.c"
+                       INCLUDE_DIRS "include"
+                       PRIV_REQUIRES board_cores esp_timer freertos heap log espressif__usb)
