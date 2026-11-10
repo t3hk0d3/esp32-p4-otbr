@@ -3,8 +3,8 @@ docs/superpowers/specs/2026-11-10-logging-design.md). Hardware-gated: run in the
 
 Rig: the board alone, running as a border router with a stored dataset (the live lines come from OpenThread at debug
 level). The syslog test needs the test host reachable from the board over UDP (no firewall on the listener's port);
-the 403 test needs the VLAN rig (-m vlan_switch). Every test puts the logging settings back to the defaults. No test
-erases NVS: the board keeps the Thread dataset of the shared rig.
+the 403 test needs the VLAN rig (-m vlan_switch). Every test puts the logging settings and the Thread console's
+setting back as it found them. No test erases NVS: the board keeps the Thread dataset of the shared rig.
 """
 
 import asyncio
@@ -94,9 +94,29 @@ def ws_url(board_ip):
     return f"ws://{board_ip}/device/logging/ws"
 
 
+def settings_body(state):
+    """The PUT body that sets what a GET reply shows (its stored part: levels, target, components)."""
+    channels = state["channels"]
+    return {
+        "channels": {
+            "uart": {"level": channels["uart"]["level"]},
+            "jtag": {"level": channels["jtag"]["level"]},
+            "syslog": {
+                "level": channels["syslog"]["level"],
+                "target": channels["syslog"]["target"],
+            },
+        },
+        "components": state["components"],
+    }
+
+
 @pytest.fixture
 def logging_settings(base_url):
-    """put(body): PUT /device/logging, expect 200, return the reply. The defaults are put back afterwards."""
+    """put(body): PUT /device/logging, expect 200, return the reply. The settings the test found (read before it)
+    are put back afterwards, whatever they were: the board is shared."""
+    r = requests.get(f"{base_url}/device/logging", timeout=10)
+    assert r.status_code == requests.codes.ok, r.text
+    prior = settings_body(r.json())
 
     def put(body):
         r = requests.put(f"{base_url}/device/logging", json=body, timeout=10)
@@ -105,20 +125,25 @@ def logging_settings(base_url):
 
     yield put
     with contextlib.suppress(requests.RequestException):
-        requests.put(f"{base_url}/device/logging", json=DEFAULTS, timeout=10)
+        requests.put(f"{base_url}/device/logging", json=prior, timeout=10)
 
 
 @pytest.fixture
 def console_ws(base_url, board_ip):
-    """The Thread console turned on for the test (off again afterwards), as the URL of its WebSocket.
+    """The Thread console turned on for the test (afterwards back to on or off, as the test found it), as the URL of
+    its WebSocket.
 
     It is the deterministic line source of these tests: every command sent over it is logged by the board at info
     under the tag `ot_console` ("console <peer>: <first word> (<n> bytes)", ot_console.c), the moment it arrives.
     """
+    r = requests.get(f"{base_url}/device/console", timeout=10)
+    assert r.status_code == requests.codes.ok, r.text
+    prior = r.json()["enabled"]
     r = requests.put(f"{base_url}/device/console", json={"enabled": True}, timeout=10)
     assert r.status_code == requests.codes.ok, r.text
     yield f"ws://{board_ip}/device/console/ws"
-    requests.put(f"{base_url}/device/console", json={"enabled": False}, timeout=10)
+    with contextlib.suppress(requests.RequestException):
+        requests.put(f"{base_url}/device/console", json={"enabled": prior}, timeout=10)
 
 
 async def poke(session, console_url, command="state"):
@@ -372,6 +397,8 @@ class TestSettings:
             ({"components": {"ziggurat": "loud"}}, "components.ziggurat"),
             ({"components": {"*": "loud"}}, "components.*"),
             ({"components": {"x" * 24: "info"}}, f"components.{'x' * 24}"),
+            ({"components": {'a"b': "info"}}, 'components.a"b'),
+            ({"components": {"a b": "info"}}, "components.a b"),
             ({"components": {f"t{i}": "info" for i in range(33)}}, "components"),
             ({"components": ["ziggurat"]}, "components"),
             ([], "body"),
