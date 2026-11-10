@@ -10,8 +10,8 @@ on (see [Radios and USB/IP](#radios-and-usbip)).
 !!! warning "No authentication, no encryption"
     Anyone who can reach TCP port 3240 on the board can take the device and talk to it. There is no password, no
     encryption and no allowlist. Turn USB/IP on only on a network you trust, keep the board's management interface
-    off untrusted networks (see [Networking](networking.md#modes)), and turn it off when you are done. The server
-    refuses connections from the Thread mesh.
+    off untrusted networks (see [Networking](networking.md#single-port-or-split-vlans)), and turn it off when you are
+    done. The server refuses connections from the Thread mesh.
 
 ## Turning it on
 
