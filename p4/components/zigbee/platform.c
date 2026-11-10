@@ -111,38 +111,10 @@ int32_t ziggurat_platform_ccm_crypt(bool encrypt, const uint8_t *key, const uint
 
 /* ---- the host link ---- */
 
+// The satellite's bootstrap is the stack's only client.
 bool ziggurat_platform_host_send(const uint8_t *data, size_t len)
 {
-    zigbee_t *z = &g_zigbee;
-
-    if (zigbee_link_take_hello(&z->link, data, len)) {
-        z->hello = zigbee_frame_copy(data, len); // the first frame is the stack's hello, sent first to later clients
-        if (z->hello == NULL) {
-            ESP_LOGW(TAG, "no memory to keep the hello");
-        }
-    }
-    if (!zigbee_link_host_send(&z->link, len)) {
-        return false; // full: ziggurat_host_send_ready follows once the sender has taken frames off
-    }
-    const int fd = zigbee_link_client(&z->link);
-
-    if (fd < 0) {
-        return true; // no client: dropped (and not counted by the link)
-    }
-    // Generation and slot are taken together here, on the one task that changes them.
-    const zigbee_out_t item = {
-        .kind = ZIGBEE_OUT_FRAME,
-        .counted = true,
-        .fd = fd,
-        .sid = z->link_sid,
-        .gen = zigbee_link_generation(&z->link),
-        .frame = zigbee_frame_copy(data, len),
-    };
-
-    if (item.frame == NULL || !zigbee_out_post(&item)) {
-        zigbee_link_sent(&z->link); // the slot was counted but nothing went into the queue
-        ESP_LOGW(TAG, "outbound frame of %u bytes dropped (no memory)", (unsigned)len);
-    }
+    zigbee_satellite_on_frame(&g_zigbee.satellite, data, len);
     return true;
 }
 

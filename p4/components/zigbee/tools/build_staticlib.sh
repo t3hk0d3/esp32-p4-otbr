@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build ziggurat's MCU staticlib (crates/ziggurat-ot of the submodule, --features esp-idf) for the ESP32-P4 and fix it up
+# Build ziggurat's MCU staticlib (crates/ziggurat-ot of the submodule, --features esp-idf,zloe) for the ESP32-P4 and fix it up
 # for linking into the firmware. The CMake step in build_ziggurat.cmake runs this.
 # Usage: tools/build_staticlib.sh <out dir>
 # Writes <out dir>/libziggurat_ot.a and <out dir>/ziggurat.h (cbindgen's header); the scratch (source copy, cargo cache,
@@ -68,7 +68,7 @@ build_crate() {
     sed -i 's/| "riscv32imac" |/| "riscv32imac" | "riscv32imafc" |/' "$radium/build.rs"
     grep -q '"riscv32imafc"' "$radium/build.rs" || { echo "the radium patch did not apply" >&2; return 1; }
     # The patch makes cargo rewrite that one Cargo.lock entry (of the copy), hence no --locked on the build.
-    cargo ${CARGO_TOOLCHAIN:+"$CARGO_TOOLCHAIN"} build --release --target "$TARGET" --features esp-idf \
+    cargo ${CARGO_TOOLCHAIN:+"$CARGO_TOOLCHAIN"} build --release --target "$TARGET" --features esp-idf,zloe \
         --config "patch.crates-io.radium.path=\"$radium\""
 }
 

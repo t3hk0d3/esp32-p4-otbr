@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 /** A buffer that holds the body for any status: the longest strings, every escape, every number at its widest. */
-#define ZIGBEE_JSON_MAX 1536
+#define ZIGBEE_JSON_MAX 3072
 
 /**
  * The /device/zigbee body: {channel, firmware, state, reason, client, last_client, radio, counters, heap, started}.

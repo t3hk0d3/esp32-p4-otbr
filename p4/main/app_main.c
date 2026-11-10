@@ -49,12 +49,7 @@ static bool syslog_clock(struct timeval *out)
 static esp_err_t register_extra_handlers(httpd_handle_t server)
 {
     ESP_RETURN_ON_ERROR(device_api_register(server), TAG, "device_api_register");
-    const esp_err_t err = zigbee_register_ws(server);
-
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "zigbee_register_ws: %s, no /zigbee", esp_err_to_name(err));
-    }
-    return ESP_OK;
+    return ESP_OK; // no /zigbee on this spike build: the satellite has no WebSocket client
 }
 
 // Drivers allocate their interrupts on the core that installs them: the Ethernet driver and the netifs (netcfg) are set up

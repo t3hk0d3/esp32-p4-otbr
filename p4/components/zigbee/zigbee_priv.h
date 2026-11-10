@@ -30,6 +30,7 @@
 #include "zigbee_heap_stats.h"
 #include "zigbee_kick.h"
 #include "zigbee_link.h"
+#include "zigbee_satellite.h"
 #include "zigbee_spinel.h"
 
 // radio_mux_ev_t types of our own in the zigbee task's queue (outside radio_mux_ev_type_t's values).
@@ -61,6 +62,8 @@ typedef enum {
     ZIGBEE_MSG_CONNECT,    // a WebSocket client finished its handshake; frame: its address (text)
     ZIGBEE_MSG_DISCONNECT, // the socket of a session closed
     ZIGBEE_MSG_FRAME,      // a binary frame from a socket
+    ZIGBEE_MSG_ZLOE_DATAGRAM, // a datagram from the backbone (zloe.c)
+    ZIGBEE_MSG_ZLOE_PEER,     // a node discovery resolved (zloe.c)
 } zigbee_msg_kind_t;
 
 typedef struct {
@@ -92,6 +95,7 @@ typedef struct {
     esp_timer_handle_t timer;   // ziggurat's one-shot timer
     esp_timer_handle_t tick;    // periodic: the spinel client's deadlines
     zigbee_spinel_t *spinel;
+    zigbee_satellite_t satellite; // the zigbee task's
     atomic_bool up; // all of the above exist and both tasks run
 
     _Atomic(radio_mux_chan_t *) ch; // the attached channel (kept after GONE: slots are still released through it)
@@ -178,6 +182,16 @@ esp_err_t zigbee_ws_start_sender(void);
 void zigbee_status_set_state(zigbee_state_t state, const char *reason);
 // The channel id (attach): zigbee_channel() answers it from then on.
 void zigbee_status_note_channel(const char *id);
+
+/* ---- zloe.c ---- */
+
+extern const zigbee_satellite_ops_t g_zigbee_satellite_ops;
+// The first bind: the task that owns the backbone's PCB and mDNS.
+esp_err_t zigbee_zloe_start(void);
+// Zigbee task: a ZIGBEE_MSG_ZLOE_* message.
+void zigbee_zloe_on_msg(const zigbee_msg_t *m);
+// Zigbee task, each tick: the satellite's state and peers into the status.
+void zigbee_zloe_publish_status(void);
 
 /* ---- zlog.c ---- */
 

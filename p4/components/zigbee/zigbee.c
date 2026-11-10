@@ -511,6 +511,7 @@ static void start_if_due(void)
     ESP_LOGI(TAG, "starting ziggurat");
     ziggurat_start();
     zigbee_zlog_apply();
+    zigbee_satellite_start(&z->satellite);
     atomic_store(&z->started, true); // the WebSocket accepts clients from now on
 }
 
@@ -547,6 +548,10 @@ static void run_mailbox(void)
     if (flags & ZIGBEE_FLAG_TICK) {
         zigbee_spinel_on_tick(z->spinel);
     }
+    if (z->start_ran && (flags & ZIGBEE_FLAG_TICK)) {
+        zigbee_satellite_on_tick(&z->satellite);
+        zigbee_zloe_publish_status();
+    }
     if (z->start_ran && (flags & ZIGBEE_FLAG_TIMER)) {
         zigbee_platform_timer_due();
     }
@@ -572,6 +577,10 @@ static void run_mailbox(void)
                 break;
             case ZIGBEE_MSG_FRAME:
                 on_frame(&m);
+                break;
+            case ZIGBEE_MSG_ZLOE_DATAGRAM:
+            case ZIGBEE_MSG_ZLOE_PEER:
+                zigbee_zloe_on_msg(&m);
                 break;
             }
         }
@@ -639,6 +648,7 @@ static esp_err_t ensure_up(void)
         z->spinel = heap_caps_calloc(1, sizeof(*z->spinel), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         ESP_RETURN_ON_FALSE(z->spinel, ESP_ERR_NO_MEM, TAG, "spinel client");
         zigbee_spinel_init(z->spinel, &ops, &sink);
+        zigbee_satellite_init(&z->satellite, &g_zigbee_satellite_ops, NULL);
         zigbee_link_init(&z->link, ZIGBEE_LINK_QUEUE_DEPTH);
         publish_link();
     }
@@ -665,7 +675,7 @@ static esp_err_t ensure_up(void)
         ESP_RETURN_ON_ERROR(esp_timer_create(&args, &z->tick), TAG, "tick timer");
         ESP_RETURN_ON_ERROR(esp_timer_start_periodic(z->tick, TICK_US), TAG, "tick start");
     }
-    ESP_RETURN_ON_ERROR(zigbee_ws_start_sender(), TAG, "sender task");
+    ESP_RETURN_ON_ERROR(zigbee_zloe_start(), TAG, "ZLOE task"); // the satellite has no WebSocket client, so no sender
     ESP_RETURN_ON_ERROR(zigbee_zlog_start_drain(), TAG, "log task");
     static TaskHandle_t task;
 

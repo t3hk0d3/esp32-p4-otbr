@@ -78,6 +78,36 @@ static void write_radio(json_out_t *w, const zigbee_status_t *st)
     json_out_raw(w, "}");
 }
 
+static void write_satellite(json_out_t *w, const zigbee_satellite_status_t *sat)
+{
+    char hex[17];
+
+    json_out_raw(w, "{\"state\":");
+    json_out_str(w, sat->state);
+    key(w, "reason");
+    json_out_str(w, sat->reason);
+    key(w, "nwk");
+    json_out_uint(w, sat->nwk);
+    json_out_raw(w, ",\"peers\":[");
+    for (uint8_t p = 0; p < sat->peer_count; p++) {
+        for (int i = 0; i < 8; i++) {
+            snprintf(&hex[i * 2], 3, "%02x", sat->peers[p].eui64[7 - i]);
+        }
+        json_out_raw(w, p == 0 ? "{\"eui64\":" : ",{\"eui64\":");
+        json_out_str(w, hex);
+        key(w, "nwk");
+        json_out_uint(w, sat->peers[p].nwk);
+        key(w, "live");
+        json_out_raw(w, sat->peers[p].live ? "true" : "false");
+        key(w, "lqi");
+        json_out_uint(w, sat->peers[p].lqi);
+        key(w, "last_rx_age_ms");
+        json_out_uint(w, sat->peers[p].last_rx_age_ms);
+        json_out_raw(w, "}");
+    }
+    json_out_raw(w, "]}");
+}
+
 esp_err_t zigbee_json_status(const zigbee_status_t *st, char *buf, size_t cap, size_t *len)
 {
     json_out_t w;
@@ -113,6 +143,8 @@ esp_err_t zigbee_json_status(const zigbee_status_t *st, char *buf, size_t cap, s
     key(&w, "peak");
     json_out_u64(&w, st->heap.peak);
     json_out_raw(&w, "}");
+    key(&w, "satellite");
+    write_satellite(&w, &st->satellite);
     key(&w, "started");
     if (st->stack_started) {
         epoch(&w, st->started);

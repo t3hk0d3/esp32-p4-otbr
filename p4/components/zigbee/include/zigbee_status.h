@@ -24,6 +24,23 @@ typedef enum {
     ZIGBEE_STATE_INCOMPATIBLE, // the RCP cannot serve ziggurat (protocol version, radio caps); `reason` says why
 } zigbee_state_t;
 
+#define ZIGBEE_ZLOE_PEERS_MAX 8
+
+// The ZLOE satellite (spike).
+typedef struct {
+    char state[24];
+    char reason[64]; // why it failed
+    uint16_t nwk;
+    uint8_t peer_count;
+    struct {
+        uint8_t eui64[8]; // wire order
+        uint16_t nwk;
+        bool live;
+        uint8_t lqi;
+        uint32_t last_rx_age_ms; // UINT32_MAX: it never sent a datagram
+    } peers[ZIGBEE_ZLOE_PEERS_MAX];
+} zigbee_satellite_status_t;
+
 typedef struct {
     char channel[ZIGBEE_CHANNEL_ID_MAX]; // the channel id; "" when no channel is in mode ziggurat
     char firmware[ZIGBEE_TEXT_MAX];      // the mux's firmware record of the channel ("spinel <version> <chip>"); ""
@@ -52,6 +69,7 @@ typedef struct {
     struct {
         size_t current, peak; // bytes of the stack's PSRAM heap in use
     } heap;
+    zigbee_satellite_status_t satellite;
     bool stack_started; // ziggurat_start ran (once per boot)
     int64_t started;    // when it ran, seconds since the epoch; 0 when not started or the clock was not set
 } zigbee_status_t;
