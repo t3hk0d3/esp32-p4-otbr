@@ -1561,3 +1561,123 @@ class TestRebootNoteDialog:
         # On the page's code texts: no hybrid_not_supported entry (the board no longer sends it).
         src = (FRONTEND / "static" / "radios.js").read_text()
         assert "hybrid_not_supported" not in src
+
+
+# While USB/IP is on (spec 2026-11-10 section 4): the USB channels are `unavailable` with a channel_reason, and the
+# snapshot says "usbip": true.
+USBIP_REASON = "USB is exported over USB/IP"
+SLZB_EXT = {**SLZB, "channel_reason": USBIP_REASON}
+OLLY_EXT = {
+    **OLLY,
+    "mode": "unavailable",
+    "state": "idle",
+    "channel_reason": USBIP_REASON,
+}
+SNAP_USBIP = {"usbip": True, "channels": [C6, OLLY_EXT, SLZB_EXT]}
+USBIP_RUNNING = {
+    "mode": "BR_RUNNING",
+    "otbr_channel": "builtin-c6",
+    "fault_reason": None,
+}
+
+
+def links(row_js):
+    return f"{row_js}.findAll((e) => e.tag === 'a').map((a) => [a.attrs.href, a.textContent])"
+
+
+@needs_node
+class TestUsbipOn:
+    """RadiosLogic.external, RadiosPage while "usbip" is true"""
+
+    def test_external_is_a_usb_channel_while_usbip_is_on(self):
+        # On the snapshot with usbip true: the USB rows are external, the C6 is not; without the flag none is.
+        assert logic_of(
+            f"[L.external({json.dumps(SNAP_USBIP)}, {json.dumps(SLZB_EXT)}),"
+            f" L.external({json.dumps(SNAP_USBIP)}, {json.dumps(C6)}),"
+            f" L.external({json.dumps(SNAP)}, {json.dumps(SLZB)})]"
+        ) == [True, False, False]
+
+    def test_usb_rows_show_the_reason_with_a_link_to_the_usbip_page(self):
+        # On a USB row while USB/IP is on: its activity cell holds the reason and a link to /usbip.html.
+        r = scenario(
+            setup(SNAP_USBIP, USBIP_RUNNING)
+            + f"const row = {rows_js()}[2];"
+            + f"return [row.children[4].allText(), {links('row.children[4]')}, row.children[3].allText()];"
+        )
+        assert USBIP_REASON in r[0]
+        assert r[1] == [["/usbip.html", "Open USB/IP"]]
+        assert "Unplugged" not in r[2]
+
+    def test_other_rows_have_no_usbip_link(self):
+        # On the C6 row: no link to the USB/IP page.
+        r = scenario(
+            setup(SNAP_USBIP, USBIP_RUNNING) + f"return {links(rows_js() + '[0]')};"
+        )
+        assert r == []
+
+    def test_usb_row_keeps_the_stored_mode_in_words(self):
+        # On the SLZB-06 (stored rcp-proxy): the mode cell says the stored mode applies again after USB/IP.
+        r = scenario(
+            setup(SNAP_USBIP, USBIP_RUNNING)
+            + f"return {rows_js()}[2].children[2].allText();"
+        )
+        assert "RCP proxy" in r
+        assert "USB/IP" in r
+
+    def test_mode_selector_is_disabled_for_usb_channels(self):
+        # On a USB row's dialog: every mode card is disabled and says why; on the C6 the first three are not.
+        r = scenario(
+            setup(SNAP_USBIP, USBIP_RUNNING)
+            + open_row(2)
+            + "const usb = t.el('track').children.map((c) => [c.disabled, c.allText().includes('USB/IP')]);"
+            "t.el('mCancel').click();"
+            + open_row(0)
+            + "const c6 = t.el('track').children.map((c) => c.disabled);"
+            "return [usb, c6];"
+        )
+        assert all(d and why for d, why in r[0])
+        assert r[1][:3] == [
+            False,
+            False,
+            False,
+        ]  # ziggurat is not in this snapshot's build
+
+    def test_dialog_explains_and_links_instead_of_unplugged(self):
+        # On a USB row's dialog: the note gives the reason (not "Unplugged") and the link to USB/IP shows.
+        r = scenario(
+            setup(SNAP_USBIP, USBIP_RUNNING)
+            + open_row(2)
+            + "return [t.el('mUnavailable').hidden(), t.el('mUnavailable').textContent, t.el('mUsbipLink').hidden()];"
+        )
+        assert r[0] is False
+        assert USBIP_REASON in r[1]
+        assert "Unplugged" not in r[1]
+        assert r[2] is False
+
+    def test_dialog_of_the_c6_hides_the_usbip_link(self):
+        # On the C6's dialog: no link.
+        r = scenario(
+            setup(SNAP_USBIP, USBIP_RUNNING)
+            + open_row(0)
+            + "return t.el('mUsbipLink').hidden();"
+        )
+        assert r is True
+
+    def test_line_settings_can_still_be_saved_without_a_mode(self):
+        # On changing only the baud of a USB channel: the PUT carries the baud and no mode.
+        r = scenario(
+            setup(SNAP_USBIP, USBIP_RUNNING)
+            + "const sent = []; t.put = (u, b) => { sent.push(b); return {status: 200, body: {}}; };"
+            + open_row(2)
+            + "t.el('baudSel').value = '230400'; t.el('mSave').click(); await t.advance(100); return sent;"
+        )
+        assert r == [{"baud": 230400}]
+
+    def test_without_usbip_an_unplugged_stick_is_unchanged(self):
+        # On the plain snapshot: the unplugged SLZB-06 shows Unplugged and no link.
+        r = scenario(
+            setup()
+            + f"const row = {rows_js()}[2];"
+            + f"return [row.children[3].allText(), {links('row.children[4]')}];"
+        )
+        assert r == ["Unplugged", []]

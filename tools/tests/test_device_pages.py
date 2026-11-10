@@ -16,6 +16,7 @@ WEB_API = (
 
 DEVICE_MENU = [
     ["/radios.html", "Radios"],
+    ["/usbip.html", "USB/IP"],
     ["/ethernet.html", "Ethernet"],
     ["/firmware.html", "Firmware"],
     ["/logs.html", "Logs"],

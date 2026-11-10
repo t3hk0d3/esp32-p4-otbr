@@ -943,3 +943,35 @@ tr:hover td { background: var(--primary-light); }
     .lg-livehead .btn { min-height: 44px; }
     .lg-fs .lg-out { height: calc(100vh - 120px); }
 }
+
+/* USB/IP page (usbip.html) */
+.u-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.u-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.u-switch-row p { font-size: 13px; color: var(--text-light); margin-top: 4px; max-width: 560px; }
+.u-toggle { position: relative; width: 52px; height: 28px; flex-shrink: 0; border: 0; border-radius: 14px; background: #c9c9c9; cursor: pointer; transition: background .15s; }
+.u-toggle::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: left .15s; }
+.u-toggle[aria-checked="true"] { background: var(--primary); }
+.u-toggle[aria-checked="true"]::after { left: 27px; }
+.u-toggle:disabled { opacity: 0.55; cursor: not-allowed; }
+.u-dev { display: flex; gap: 14px; align-items: flex-start; }
+.u-dev svg { width: 40px; height: 40px; color: var(--primary); flex-shrink: 0; }
+.u-dev svg.dim { color: var(--text-muted); }
+.u-dev b { font-size: 15px; display: block; }
+.u-kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; font-size: 13px; margin-top: 10px; }
+.u-kv dt { color: var(--text-light); }
+.u-kv dd { font-family: ui-monospace, Menlo, monospace; }
+.u-empty { font-size: 13px; color: var(--text-muted); }
+.u-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.u-stat { background: var(--bg); border-radius: 6px; padding: 10px 12px; }
+.u-stat span { font-size: 12px; color: var(--text-light); display: block; }
+.u-stat b { font-size: 18px; }
+.u-stat small { font-size: 11px; color: var(--text-muted); }
+.u-cmd { background: #1e1e1e; color: #e6e6e6; border-radius: 6px; padding: 10px 12px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; overflow-x: auto; white-space: pre; }
+.u-cmd .c { color: #8a8a8a; }
+.u-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+.u-warn { background: var(--primary-light); color: #8a4700; border-radius: 6px; padding: 10px 12px; font-size: 13px; margin-top: 12px; }
+.u-err { background: #fdecea; color: #8a1c1c; border-radius: 6px; padding: 10px 12px; font-size: 13px; margin-top: 12px; }
+@media (max-width: 760px) {
+    .u-grid { grid-template-columns: 1fr; }
+    .u-stats { grid-template-columns: repeat(2, 1fr); }
+}
