@@ -7,6 +7,8 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-10
+
 ### Added
 
 - Update from GitHub: the board checks the latest release (`versions.txt`) and installs it, the bundle first, then the
@@ -59,6 +61,13 @@ release's `versions.txt`.
   reason, and the Radios page says where Thread is.
 - OpenThread accepts any RCP with the ot-br-posix capability set (ack timeout, tx retries, CSMA backoff, tx security,
   tx timing), not the fixed set the C6 reports.
+
+### Fixed
+
+- Routing: "OMR prefix in use" (`status.omr_prefix` in `GET /device/routing`) is the OMR prefix OpenThread favors on the
+  network, which can be another border router's; it was always the board's own. The board's own prefix moves to the new
+  `status.own_omr_prefix`, and the Routing page shows it as "This router's prefix" when it is not the one in use. While
+  the border router is not running, the prefix in use reads unknown (`null`).
 
 ## [0.4.0] - 2026-11-05
 
@@ -220,7 +229,8 @@ on-board ESP32-C6 as the radio co-processor over SPI.
 
 See `docs/troubleshooting.md` for the full list.
 
-[Unreleased]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.2.0...v0.2.1
