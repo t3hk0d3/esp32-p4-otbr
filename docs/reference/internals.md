@@ -335,6 +335,11 @@ The guide is [Logging](../logging.md); the API is in [HTTP API](../api.md#loggin
   OpenThread's lines are formatted whole and handed to the same path (tag `OPENTHREAD`), as are Ziggurat's (`ziggurat`).
 - ESP-IDF's per-tag level is the **gate**: a tag's component level, capped by the highest level any channel or viewer
   wants. A line above it is not formatted at all, which is why `debug` and `verbose` cost nothing while nobody asks.
+- Above the gate sits the build's **ceiling** (`CONFIG_LOG_MAXIMUM_LEVEL`): Info in a release build, so `debug` and
+  `verbose` calls are compiled out; Verbose in a test build (`p4/sdkconfig.defaults.test`). `logging_level_ceiling()`
+  reports it, `logging_apply` and the live viewers refuse levels above it, and `logging_init` lowers stored ones to it
+  (a board that ran a test build keeps its NVS until the next change). `logging_capture.c` stops a build whose ceiling
+  doesn't match `OTBR_TEST_BUILD`.
 - A line at or below the UART level goes to ESP-IDF's own UART writer, synchronously and unchanged. A line some other
   channel wants is formatted once into a 16 KB transit ring in internal RAM, and the drain task (`log_out`, core 1,
   below the HTTP server's priority) writes it to USB-JTAG and syslog and queues it for each live viewer.

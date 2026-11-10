@@ -300,6 +300,21 @@ TEST_CASE("open with a level outside off..verbose: NULL, nothing opened", "[logg
     teardown();
 }
 
+TEST_CASE("build ceiling info: open at debug returns NULL; a viewer at info cannot move to debug", "[logging]")
+{
+    setup();
+    logging_set_ceiling(ESP_LOG_INFO);
+    TEST_ASSERT_NULL(logging_viewer_open(ESP_LOG_DEBUG, wake, NULL));
+    TEST_ASSERT_EQUAL(0, status().viewers);
+    logging_viewer_t *v = logging_viewer_open(ESP_LOG_INFO, wake, NULL);
+
+    TEST_ASSERT_NOT_NULL(v);
+    logging_viewer_set_level(v, ESP_LOG_DEBUG);
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, logging_levels().viewers);
+    logging_viewer_close(v);
+    teardown();
+}
+
 TEST_CASE("open and close many times: each close frees the slot and the queue", "[logging]")
 {
     setup();

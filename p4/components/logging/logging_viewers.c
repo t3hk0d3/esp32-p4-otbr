@@ -59,9 +59,10 @@ static void ensure_locks(void)
     }
 }
 
+/** Off up to the build's ceiling: a level above it would pull nothing more (those calls are compiled out). */
 static bool level_valid(esp_log_level_t level)
 {
-    return level >= ESP_LOG_NONE && level <= ESP_LOG_VERBOSE;
+    return level >= ESP_LOG_NONE && level <= logging_level_ceiling();
 }
 
 /** Hand the highest open level to the settings code, which recomputes and publishes every gate. */

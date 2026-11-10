@@ -1,0 +1,4 @@
+# Applied on top of sdkconfig.defaults by make build-test only (tools/build_all.sh --test), into its own p4/sdkconfig.test.
+# Logging: every level is compiled in, so the per-channel and per-component levels can go up to Verbose at runtime
+# (spec "Debug ceiling": +49 KB of app, +5.4 KB of DIRAM). The runtime levels still default to Info.
+CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE=y

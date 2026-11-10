@@ -76,9 +76,11 @@ on its own, and the log can be read live in the browser or later from a syslog s
   ESP-IDF's uptime ms (`CONFIG_LOG_TIMESTAMP_SOURCE` unchanged). The target may be an IPv4 address, `[IPv6]:port`, or a hostname.
 - **Defaults** (a fresh board behaves as today): UART Info, USB-JTAG Info, syslog Off with no target, component default
   Info, no component overrides.
-- **Debug ceiling:** the build keeps Debug and Verbose calls (`CONFIG_LOG_MAXIMUM_LEVEL` raised to Verbose). Runtime
-  levels still default to Info. The app is 2.3 MB of an 8 MB slot; the cost in flash and in CPU (a level check on
-  every Debug call that used to be compiled out) is measured before it is accepted. If Verbose costs too much, Debug.
+- **Debug ceiling:** test builds only (user decision 2026-11-10, after implementation). `make build-test` keeps Debug
+  and Verbose calls (`CONFIG_LOG_MAXIMUM_LEVEL` Verbose, from `p4/sdkconfig.defaults.test` into its own
+  `p4/sdkconfig.test`; +49 KB of app); a release build stays at Info. The ceiling is `logging_level_ceiling()`, shown
+  as `max_level` in `GET /device/logging`: levels above it are refused (PUT, console, live viewer), stored ones are
+  lowered to it at boot, and the Logs page offers only levels up to it. Runtime levels still default to Info.
 - **OpenThread's level follows its component level**: the `OPENTHREAD` component level (min with the highest channel
   level) is set with `otLoggingSetLevel`, so OpenThread does not format lines nobody will see.
 - **ziggurat's tracing** joins the stream under tag `ziggurat`, done properly from the spike (lock-free ring because

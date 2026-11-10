@@ -52,6 +52,16 @@ esp_err_t logging_core_remove_component(logging_settings_t *s, const char *tag);
 esp_err_t logging_core_validate(const logging_settings_t *s, const char **field);
 
 /**
+ * Whether any level in `s` is above `ceiling` (the highest level the build compiles in, logging_level_ceiling()).
+ * INVALID_ARG names the first one in `*field` (may be NULL), as logging_core_validate does: "channels.<name>.level",
+ * "components.*" or "components.<tag>"; the string is static and rewritten by the next call.
+ */
+esp_err_t logging_core_above(const logging_settings_t *s, esp_log_level_t ceiling, const char **field);
+
+/** Lower every level in `s` above `ceiling` to `ceiling`. True when one was lowered. */
+bool logging_core_clamp(logging_settings_t *s, esp_log_level_t ceiling);
+
+/**
  * Channel levels the capture and the drain read without a lock: one 32-bit word, published atomically by the settings
  * code on every change (logging_levels() in logging_priv.h).
  */

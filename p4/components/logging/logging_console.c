@@ -54,6 +54,7 @@ static int cmd_show(void)
     printf("log: usb-jtag host: %s\n", status.jtag_host ? "reading" : "none");
     printf("log: live viewers: %u, lines sent %u, dropped %u\n", (unsigned) status.viewers,
            (unsigned) status.live_sent, (unsigned) status.live_dropped);
+    printf("log: highest level in this build: %s\n", logging_level_name(logging_level_ceiling()));
     printf("log: default (everything else): %s\n", logging_level_name(s_settings.default_level));
     for (int i = 0; i < s_settings.n_components; i++) {
         printf("log: override %s: %s\n", s_settings.components[i].tag,
@@ -79,8 +80,9 @@ static int cmd_set(int argc, char **argv)
     case ESP_OK:
         break;
     case ESP_ERR_INVALID_ARG:
-        printf("log: refused, %s is invalid (syslog needs a target before its level can be raised)\n",
-               field ? field : "a field");
+        printf("log: refused, %s is invalid (at most %s in this build; syslog needs a target before its level can be "
+               "raised)\n",
+               field ? field : "a field", logging_level_name(logging_level_ceiling()));
         return 1;
     default:
         printf("log: in force, but not stored (lost at reboot)\n");

@@ -158,6 +158,17 @@ class TestLogsLogic:
     def test_tag_valid(self, tag, ok):
         assert lg(f"L.tagValid({json.dumps(tag)})") is ok
 
+    @pytest.mark.parametrize(
+        "max_level, levels",
+        [
+            ("info", ["off", "error", "warning", "info"]),
+            ("verbose", ["off", "error", "warning", "info", "debug", "verbose"]),
+            (None, ["off", "error", "warning", "info", "debug", "verbose"]),
+        ],
+    )
+    def test_levels_up_to_stops_at_the_boards_max_level(self, max_level, levels):
+        assert lg(f"L.levelsUpTo({json.dumps(max_level)})") == levels
+
 
 REPLY = {
     "channels": {
@@ -249,6 +260,31 @@ class TestLogsPage:
     ):
         r = run("return t.el('lg-note').textContent;", setup="globalThis.st = 403;")
         assert "device API" in r
+
+    def test_load_from_a_release_build_offers_levels_up_to_info_and_says_why(self):
+        r = run(
+            "const opts = (id) => t.el(id).children.map(o => o.value);"
+            " return [opts('ch-uart'), opts('cp-lv-ziggurat'), opts('cp-new-lv'), opts('live-lv'),"
+            " t.el('cp-new-lv').value, t.el('lv-ceiling').hidden(), t.el('lv-ceiling').textContent];",
+            setup="globalThis.rep.max_level = 'info'; globalThis.rep.components.ziggurat = 'info';",
+        )
+        upto_info = ["off", "error", "warning", "info"]
+        assert r == [
+            upto_info,
+            upto_info,
+            upto_info,
+            ["error", "warning", "info"],
+            "info",
+            False,
+            "This firmware logs up to Info; Debug and Verbose need a test build.",
+        ]
+
+    def test_load_from_a_test_build_offers_every_level_without_a_hint(self):
+        r = run(
+            "return [t.el('ch-uart').children.length, t.el('cp-new-lv').value, t.el('lv-ceiling').hidden()];",
+            setup="globalThis.rep.max_level = 'verbose';",
+        )
+        assert r == [6, "debug", True]
 
     def test_folding_a_card_opens_it_and_a_second_click_folds_it(self):
         r = run(

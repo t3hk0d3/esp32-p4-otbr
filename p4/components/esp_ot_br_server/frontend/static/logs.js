@@ -23,6 +23,12 @@ var STATES = {
 
 function levelName(level) { return NAMES[level] || String(level); }
 
+/* The levels from off up to `max` (the board's max_level: what its build compiles in); all of them for anything else. */
+function levelsUpTo(max) {
+  var i = LEVELS.indexOf(max);
+  return i < 0 ? LEVELS.slice() : LEVELS.slice(0, i + 1);
+}
+
 function parsePort(text) {
   if (!/^[0-9]+$/.test(text))
     return null;
@@ -146,7 +152,7 @@ function putError(status, body, errorMessage) {
   return errorMessage(status, body);
 }
 
-return {LEVELS : LEVELS, levelName : levelName, targetParse : targetParse, targetValid : targetValid,
+return {LEVELS : LEVELS, levelName : levelName, levelsUpTo : levelsUpTo, targetParse : targetParse, targetValid : targetValid,
         summaryChannels : summaryChannels, summaryComponents : summaryComponents, withComponent : withComponent,
         withoutComponent : withoutComponent, tagValid : tagValid, classify : classify, filter : filter, matches : matches,
         channelStatus : channelStatus, putError : putError, TARGET_HELP : TARGET_HELP};
@@ -166,6 +172,7 @@ var FLUSH_MS = 50;
 var FILTER_MS = 150;
 var TARGET_HINT = 'UDP, port 514 if omitted. IPv6: [fd00::1]:514';
 var current = null; // the last reply of GET/PUT /device/logging
+var maxLevel = 'verbose'; // the board's max_level: a release build compiles in up to info
 var queue = Promise.resolve(); // one PUT at a time, so a second change builds on the first one's reply
 var polls = 0;
 var ws = null;
@@ -185,10 +192,26 @@ function option(value, label) {
 }
 
 function fillLevels(sel, withOff) {
-  L.LEVELS.forEach(function(l) {
+  L.levelsUpTo(maxLevel).forEach(function(l) {
     if (withOff || l !== 'off')
       sel.appendChild(option(l, L.levelName(l)));
   });
+}
+
+/* The static level menus again, for a new max_level; a choice above it becomes max_level. */
+function limitLevels(max) {
+  maxLevel = max;
+  [ [ 'ch-uart', true ], [ 'ch-jtag', true ], [ 'ch-syslog', true ], [ 'cp-new-lv', true ], [ 'live-lv', false ] ]
+      .forEach(function(p) {
+        var sel = $(p[0]);
+        var was = sel.value;
+        kit.clear(sel);
+        fillLevels(sel, p[1]);
+        sel.value = L.levelsUpTo(max).indexOf(was) < 0 ? max : was;
+      });
+  var hint = $('lv-ceiling');
+  hint.classList.toggle('hidden', max === 'verbose');
+  hint.textContent = 'This firmware logs up to ' + L.levelName(max) + '; Debug and Verbose need a test build.';
 }
 
 function say(text, isError) { kit.note('lg-note', text, isError); }
@@ -239,6 +262,9 @@ function componentRow(tag, level) {
 
 function render(reply) {
   current = reply;
+  var max = L.levelsUpTo(reply.max_level).length < L.LEVELS.length ? reply.max_level : 'verbose';
+  if (max !== maxLevel)
+    limitLevels(max);
   var ch = reply.channels;
   [ [ 'ch-uart', 'uart' ], [ 'ch-jtag', 'jtag' ], [ 'ch-syslog', 'syslog' ] ].forEach(function(p) {
     $(p[0]).value = ch[p[1]].level;

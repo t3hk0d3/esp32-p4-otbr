@@ -79,13 +79,20 @@ typedef void (*logging_level_cb_t)(esp_log_level_t effective);
  */
 esp_err_t logging_init(void);
 
+/**
+ * The highest level this build compiles in (CONFIG_LOG_MAXIMUM_LEVEL): ESP_LOG_INFO in a release build, ESP_LOG_VERBOSE
+ * in a test build. logging_apply refuses levels above it; stored ones above it are lowered to it at logging_init; live
+ * viewers cannot open or move above it.
+ */
+esp_log_level_t logging_level_ceiling(void);
+
 /** A copy of the settings in force. ESP_ERR_INVALID_STATE before logging_init. */
 esp_err_t logging_get_settings(logging_settings_t *out);
 
 /**
  * Validate, put in force and store a whole settings struct; concurrent calls are serialised (the last one wins whole).
  * Listeners whose tag's effective level changed are then called on this task, after the internal lock is released.
- * ESP_ERR_INVALID_ARG: invalid, nothing changed; `*bad_field` (may be NULL) names the field, valid until the next
+ * ESP_ERR_INVALID_ARG: invalid or a level above logging_level_ceiling(), nothing changed; `*bad_field` (may be NULL) names the field, valid until the next
  * failed logging_apply. ESP_FAIL: the NVS write failed, the settings are in force anyway (until reboot).
  */
 esp_err_t logging_apply(const logging_settings_t *settings, const char **bad_field);
@@ -135,7 +142,7 @@ size_t logging_known_tags(const char **out, size_t cap);
 typedef struct logging_viewer logging_viewer_t;
 
 /**
- * Open a viewer at `level` (ESP_LOG_NONE..ESP_LOG_VERBOSE): from now on every captured line at or below it (and its
+ * Open a viewer at `level` (ESP_LOG_NONE..logging_level_ceiling()): from now on every captured line at or below it (and its
  * component's level) is queued for it, and `wake(ctx)` (may be NULL) is called after each line queued. `wake` runs on
  * the drain task with the viewers' lock held: it must not block, log, touch lwIP or call a logging_viewer_ function.
  * The generation gate is recomputed (the highest open viewer level counts as a channel). The queue is
@@ -144,7 +151,7 @@ typedef struct logging_viewer logging_viewer_t;
  */
 logging_viewer_t *logging_viewer_open(esp_log_level_t level, void (*wake)(void *ctx), void *ctx);
 
-/** Change a viewer's level (ignored outside ESP_LOG_NONE..ESP_LOG_VERBOSE); the gate is recomputed. */
+/** Change a viewer's level (ignored outside ESP_LOG_NONE..logging_level_ceiling()); the gate is recomputed. */
 void logging_viewer_set_level(logging_viewer_t *viewer, esp_log_level_t level);
 
 /**

@@ -38,7 +38,7 @@ help: ## List the targets
 build: ## Release build of c6_updater, c6_rcp, c6_installer and p4
 	$(IDF) tools/build_all.sh
 
-build-test: ## Test build (adds the test-only console commands; never ship it)
+build-test: ## Test build (test-only console commands, Debug/Verbose logging compiled in; never ship it)
 	$(IDF) tools/build_all.sh --test
 
 reconfigure: ## Refresh the P4 version stamp (the -dirty flag is as of the last configure)

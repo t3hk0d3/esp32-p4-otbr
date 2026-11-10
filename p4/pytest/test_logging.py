@@ -322,6 +322,8 @@ class TestSettings:
             "syslog": ("off", ""),
             "components": {"*": "info"},
         }
+        # make test-target runs a build-test image: every level compiled in.
+        assert state["max_level"] == "verbose"
         assert state["channels"]["syslog"]["state"] == "off"
         assert isinstance(state["channels"]["jtag"]["host"], bool)
         assert isinstance(state["known_tags"], list)

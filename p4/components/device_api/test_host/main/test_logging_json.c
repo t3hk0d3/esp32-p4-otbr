@@ -4,6 +4,7 @@
 #include "logging.h"
 #include "logging_core.h"
 #include "logging_json.h"
+#include "logging_priv.h"
 
 static logging_settings_t defaults(void)
 {
@@ -22,7 +23,7 @@ TEST_CASE("Logging GET on defaults: every channel, the default component, empty 
     char buf[1024];
 
     TEST_ASSERT_GREATER_THAN(0, device_api_logging_json(buf, sizeof(buf), &s, &st, NULL, 0));
-    TEST_ASSERT_EQUAL_STRING("{\"channels\":{\"uart\":{\"level\":\"info\"},"
+    TEST_ASSERT_EQUAL_STRING("{\"max_level\":\"verbose\",\"channels\":{\"uart\":{\"level\":\"info\"},"
                              "\"jtag\":{\"level\":\"info\",\"host\":false},"
                              "\"syslog\":{\"level\":\"off\",\"target\":\"\",\"state\":\"off\"}},"
                              "\"components\":{\"*\":\"info\"},\"known_tags\":[],\"viewers\":0,"
@@ -47,7 +48,7 @@ TEST_CASE("Logging GET with settings and status: overrides, known tags, state, v
     logging_core_set_component(&s, "ziggurat", ESP_LOG_DEBUG);
     logging_core_set_component(&s, "OPENTHREAD", ESP_LOG_INFO);
     TEST_ASSERT_GREATER_THAN(0, device_api_logging_json(buf, sizeof(buf), &s, &st, known, 2));
-    TEST_ASSERT_EQUAL_STRING("{\"channels\":{\"uart\":{\"level\":\"info\"},"
+    TEST_ASSERT_EQUAL_STRING("{\"max_level\":\"verbose\",\"channels\":{\"uart\":{\"level\":\"info\"},"
                              "\"jtag\":{\"level\":\"info\",\"host\":true},"
                              "\"syslog\":{\"level\":\"warning\",\"target\":\"192.168.1.10:514\",\"state\":\"sending\"}},"
                              "\"components\":{\"*\":\"warning\",\"ziggurat\":\"debug\",\"OPENTHREAD\":\"info\"},"
@@ -90,6 +91,20 @@ TEST_CASE("Logging GET at its largest: fits DEVICE_API_LOGGING_JSON_MAX", "[devi
         }
     }
     TEST_ASSERT_GREATER_THAN(0, device_api_logging_json(buf, sizeof(buf), &s, &st, known, LOGGING_KNOWN_TAGS_MAX));
+}
+
+TEST_CASE("Logging GET in a release build: max_level info", "[device_api]")
+{
+    logging_settings_t s = defaults();
+    logging_status_t st = {0};
+    char buf[1024];
+
+    logging_set_ceiling(ESP_LOG_INFO);
+    int len = device_api_logging_json(buf, sizeof(buf), &s, &st, NULL, 0);
+
+    logging_set_ceiling(ESP_LOG_VERBOSE);
+    TEST_ASSERT_GREATER_THAN(0, len);
+    TEST_ASSERT_EQUAL_STRING_LEN("{\"max_level\":\"info\",\"channels\":", buf, strlen("{\"max_level\":\"info\",\"channels\":"));
 }
 
 TEST_CASE("Logging GET into a small buffer: -1", "[device_api]")
@@ -418,6 +433,26 @@ TEST_CASE("Logs WebSocket connect with a bad level: invalid, level untouched", "
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, device_api_logs_query_level("level=loud", &level));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, device_api_logs_query_level("level=", &level));
     TEST_ASSERT_EQUAL(ESP_LOG_ERROR, level);
+}
+
+TEST_CASE("Logs WebSocket level above the build's ceiling (info): connect and text frame invalid, level untouched",
+          "[device_api]")
+{
+    static const char frame[] = "{\"level\":\"debug\"}";
+    esp_log_level_t level = ESP_LOG_WARN;
+    esp_err_t on_connect;
+    esp_err_t on_frame;
+    esp_err_t at_info;
+
+    logging_set_ceiling(ESP_LOG_INFO);
+    on_connect = device_api_logs_query_level("level=debug", &level);
+    on_frame = device_api_logs_level_frame(frame, strlen(frame), &level);
+    at_info = device_api_logs_query_level("level=info", &level);
+    logging_set_ceiling(ESP_LOG_VERBOSE);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, on_connect);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, on_frame);
+    TEST_ASSERT_EQUAL(ESP_OK, at_info);
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, level);
 }
 
 TEST_CASE("Logs WebSocket text frame {\"level\":\"warning\"}: level warning", "[device_api]")

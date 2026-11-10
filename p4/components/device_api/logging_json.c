@@ -36,7 +36,9 @@ int device_api_logging_json(char *out, size_t cap, const logging_settings_t *set
     const unsigned state = (unsigned) status->syslog;
 
     json_out_init(&w, out, cap);
-    json_out_raw(&w, "{\"channels\":{\"uart\":{\"level\":");
+    json_out_raw(&w, "{\"max_level\":");
+    json_out_str(&w, logging_level_name(logging_level_ceiling()));
+    json_out_raw(&w, ",\"channels\":{\"uart\":{\"level\":");
     json_out_str(&w, logging_level_name(settings->channel[LOGGING_CH_UART]));
     json_out_raw(&w, "},\"jtag\":{\"level\":");
     json_out_str(&w, logging_level_name(settings->channel[LOGGING_CH_JTAG]));
@@ -97,6 +99,18 @@ static esp_err_t bad_component(const char *tag, const char **bad_field)
 static esp_err_t level_of(const cJSON *item, esp_log_level_t *out)
 {
     return cJSON_IsString(item) ? logging_level_parse(item->valuestring, out) : ESP_ERR_INVALID_ARG;
+}
+
+/** A live viewer's level: a level name up to the build's ceiling; INVALID_ARG for anything else (`*out` untouched). */
+static esp_err_t level_named(const char *name, esp_log_level_t *out)
+{
+    esp_log_level_t level;
+
+    if (logging_level_parse(name, &level) != ESP_OK || level > logging_level_ceiling()) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out = level;
+    return ESP_OK;
 }
 
 static esp_err_t parse_channels(const cJSON *channels, logging_settings_t *s, const char **bad_field)
@@ -320,14 +334,14 @@ esp_err_t device_api_logs_query_level(const char *query, esp_log_level_t *out)
         *out = ESP_LOG_INFO;
         return ESP_OK;
     }
-    return err == ESP_OK ? logging_level_parse(name, out) : ESP_ERR_INVALID_ARG;
+    return err == ESP_OK ? level_named(name, out) : ESP_ERR_INVALID_ARG;
 }
 
 esp_err_t device_api_logs_level_frame(const char *frame, size_t len, esp_log_level_t *out)
 {
     cJSON *json = cJSON_ParseWithLength(frame, len);
     const cJSON *level = cJSON_IsObject(json) ? cJSON_GetObjectItemCaseSensitive(json, "level") : NULL;
-    esp_err_t err = level_of(level, out);
+    esp_err_t err = cJSON_IsString(level) ? level_named(level->valuestring, out) : ESP_ERR_INVALID_ARG;
 
     cJSON_Delete(json);
     return err;

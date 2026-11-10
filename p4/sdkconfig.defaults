@@ -23,9 +23,8 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 # No secondary console: the logging component owns USB-Serial-JTAG (it installs the driver and writes log lines there
 # at the JTAG channel's level); the console stays on UART0.
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
-# Logging: every level is compiled in, so the per-channel and per-component levels can go up to Verbose at runtime
-# (spec "Debug ceiling"). The runtime levels still default to Info (CONFIG_LOG_DEFAULT_LEVEL, the logging settings).
-CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE=y
+# Logging: a release build compiles in up to Info (the ESP-IDF default), so Debug and Verbose calls cost no flash or
+# time; a test build (make build-test) adds them through sdkconfig.defaults.test.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=5120
 # VFS slots: console, three SPIFFS mounts, OpenThread eventfd, and room for more
 CONFIG_VFS_MAX_COUNT=12

@@ -592,3 +592,63 @@ TEST_CASE("net cap on any other tag: the level as it is", "[logging]")
     TEST_ASSERT_FALSE(logging_core_net_path_tag(NULL));
     TEST_ASSERT_EQUAL(ESP_LOG_DEBUG, logging_core_net_cap(NULL, ESP_LOG_DEBUG));
 }
+
+/* ---- logging_core_above, logging_core_clamp ---- */
+
+TEST_CASE("settings at or below the ceiling: above returns ESP_OK, clamp changes nothing", "[logging]")
+{
+    logging_settings_t s;
+    logging_settings_t before;
+    const char *field = NULL;
+
+    logging_core_defaults(&s);
+    logging_core_set_component(&s, "ziggurat", ESP_LOG_INFO);
+    before = s;
+    TEST_ASSERT_EQUAL(ESP_OK, logging_core_above(&s, ESP_LOG_INFO, &field));
+    TEST_ASSERT_NULL(field);
+    TEST_ASSERT_FALSE(logging_core_clamp(&s, ESP_LOG_INFO));
+    TEST_ASSERT_EQUAL_MEMORY(&before, &s, sizeof(s));
+}
+
+TEST_CASE("a level above the ceiling: above names channels.<name>.level, components.* or components.<tag>",
+          "[logging]")
+{
+    logging_settings_t s;
+    const char *field = NULL;
+
+    logging_core_defaults(&s);
+    s.channel[LOGGING_CH_JTAG] = ESP_LOG_DEBUG;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, logging_core_above(&s, ESP_LOG_INFO, &field));
+    TEST_ASSERT_EQUAL_STRING("channels.jtag.level", field);
+
+    logging_core_defaults(&s);
+    s.default_level = ESP_LOG_VERBOSE;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, logging_core_above(&s, ESP_LOG_INFO, &field));
+    TEST_ASSERT_EQUAL_STRING("components.*", field);
+
+    logging_core_defaults(&s);
+    logging_core_set_component(&s, "OPENTHREAD", ESP_LOG_WARN);
+    logging_core_set_component(&s, "ziggurat", ESP_LOG_DEBUG);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, logging_core_above(&s, ESP_LOG_INFO, &field));
+    TEST_ASSERT_EQUAL_STRING("components.ziggurat", field);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, logging_core_above(&s, ESP_LOG_INFO, NULL));
+    TEST_ASSERT_EQUAL(ESP_OK, logging_core_above(&s, ESP_LOG_VERBOSE, NULL));
+}
+
+TEST_CASE("levels above the ceiling: clamp lowers each to the ceiling, the rest kept, returns true", "[logging]")
+{
+    logging_settings_t s;
+
+    logging_core_defaults(&s);
+    s.channel[LOGGING_CH_UART] = ESP_LOG_VERBOSE;
+    s.default_level = ESP_LOG_DEBUG;
+    logging_core_set_component(&s, "OPENTHREAD", ESP_LOG_WARN);
+    logging_core_set_component(&s, "ziggurat", ESP_LOG_DEBUG);
+    TEST_ASSERT_TRUE(logging_core_clamp(&s, ESP_LOG_INFO));
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, s.channel[LOGGING_CH_UART]);
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, s.channel[LOGGING_CH_JTAG]);
+    TEST_ASSERT_EQUAL(ESP_LOG_NONE, s.channel[LOGGING_CH_SYSLOG]);
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, s.default_level);
+    TEST_ASSERT_EQUAL(ESP_LOG_WARN, s.components[0].level);
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, s.components[1].level);
+}

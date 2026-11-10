@@ -36,8 +36,12 @@
 #if CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG
 #error "The secondary console owns USB-Serial-JTAG, which the logging component needs for its JTAG channel (CONFIG_ESP_CONSOLE_SECONDARY_NONE in p4/sdkconfig.defaults): p4/sdkconfig predates p4/sdkconfig.defaults (an existing sdkconfig keeps its values): delete p4/sdkconfig and build again (docs/development.md)."
 #endif
-#if CONFIG_LOG_MAXIMUM_LEVEL < 5
-#error "Debug and verbose log calls are compiled out, so no channel can reach those levels (CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE in p4/sdkconfig.defaults): p4/sdkconfig predates p4/sdkconfig.defaults (an existing sdkconfig keeps its values): delete p4/sdkconfig and build again (docs/development.md)."
+// Debug and Verbose are compiled in for test builds only (p4/sdkconfig.defaults.test into p4/sdkconfig.test).
+#if defined(OTBR_TEST_BUILD) && CONFIG_LOG_MAXIMUM_LEVEL < 5
+#error "A test build compiles every log level in (CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE in p4/sdkconfig.defaults.test): build with make build-test, which configures p4/sdkconfig.test from both defaults files; an older p4/sdkconfig.test keeps its values: delete it and build again (docs/development.md)."
+#endif
+#if !defined(OTBR_TEST_BUILD) && CONFIG_LOG_MAXIMUM_LEVEL > 3
+#error "A release build compiles log levels up to Info only (Debug and Verbose belong to make build-test): p4/sdkconfig predates p4/sdkconfig.defaults (an existing sdkconfig keeps its values): delete p4/sdkconfig and build again (docs/development.md)."
 #endif
 #if CONFIG_LWIP_MAX_UDP_PCBS < 32
 #error "CONFIG_LWIP_MAX_UDP_PCBS is below the UDP PCBs the board can hold at once (syslog's socket among them; the sum is in p4/sdkconfig.defaults): p4/sdkconfig predates p4/sdkconfig.defaults (an existing sdkconfig keeps its values): delete p4/sdkconfig and build again (docs/development.md)."

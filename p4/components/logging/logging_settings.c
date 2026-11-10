@@ -78,6 +78,14 @@ static size_t s_n_listeners;
 static uint8_t s_blob[LOGGING_BLOB_SIZE];
 static char s_bad_field[sizeof("components.") + LOGGING_TAG_MAX];
 // Read by the capture without any lock (it must never take s_lock); written under s_lock (or before it exists).
+// The highest level compiled in: Info in a release build, Verbose in a test build (p4/sdkconfig.defaults.test). Host
+// tests start at Verbose and lower it with logging_set_ceiling.
+#if CONFIG_IDF_TARGET_LINUX
+#define CEILING_BUILD ESP_LOG_VERBOSE
+#else
+#define CEILING_BUILD (CONFIG_LOG_MAXIMUM_LEVEL < ESP_LOG_VERBOSE ? (esp_log_level_t) CONFIG_LOG_MAXIMUM_LEVEL : ESP_LOG_VERBOSE)
+#endif
+static esp_log_level_t s_ceiling = CEILING_BUILD;
 static uint32_t s_levels_word; // logging_levels_t.word
 static uint32_t s_generation;
 
@@ -86,8 +94,19 @@ void logging_set_ops(const logging_ops_t *ops)
     s_ops = ops;
 }
 
+void logging_set_ceiling(esp_log_level_t ceiling)
+{
+    s_ceiling = ceiling;
+}
+
+esp_log_level_t logging_level_ceiling(void)
+{
+    return s_ceiling;
+}
+
 void logging_reset(void)
 {
+    s_ceiling = CEILING_BUILD;
     if (s_lock) {
         vSemaphoreDelete(s_lock);
         vSemaphoreDelete(s_notify_lock);
@@ -177,6 +196,13 @@ static void load(void)
     if (logging_core_validate(&s_settings, &field) != ESP_OK) {
         ESP_LOGW(TAG, "stored settings invalid at %s, using defaults", field);
         logging_core_defaults(&s_settings);
+        return;
+    }
+    // Stored by a test build: this build compiles nothing above the ceiling, so those levels become the ceiling (in
+    // force only; NVS keeps them until the next apply).
+    if (logging_core_clamp(&s_settings, s_ceiling)) {
+        ESP_LOGW(TAG, "stored levels above %s lowered to %s (this build has no lower levels)",
+                 logging_level_name(s_ceiling), logging_level_name(s_ceiling));
     }
 }
 
@@ -234,7 +260,7 @@ esp_err_t logging_apply(const logging_settings_t *settings, const char **bad_fie
         return ESP_ERR_INVALID_STATE;
     }
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (logging_core_validate(settings, &field) != ESP_OK) {
+    if (logging_core_validate(settings, &field) != ESP_OK || logging_core_above(settings, s_ceiling, &field) != ESP_OK) {
         strlcpy(s_bad_field, field ? field : "", sizeof(s_bad_field));
         if (bad_field) {
             *bad_field = s_bad_field;

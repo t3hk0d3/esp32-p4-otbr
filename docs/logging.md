@@ -28,7 +28,9 @@ while a live viewer at `debug` sees all of ziggurat's debug lines.
 - Up to 32 components can have their own level. A tag is up to 23 characters, without spaces or quotes. The Logs page
   suggests the tags the board has seen since it started.
 - The live log has no setting of its own: each viewer picks its own level (`info` unless it asks for another).
-- `debug` and `verbose` cost nothing until a channel and a component both ask for them.
+- `debug` and `verbose` exist only in a test build (`make build-test`). A release build compiles log calls in up to
+  `info`, so a level above that is refused (the Logs page doesn't offer it, `GET /device/logging` reports `max_level`).
+  Levels a test build stored are lowered to `info` when a release build starts.
 
 ## Channels
 
@@ -98,6 +100,8 @@ From a terminal, with `websocat`:
 ```
 websocat 'ws://<board>/device/logging/ws?level=debug'
 ```
+
+(`debug` on a test build; a release build refuses a level above `info`.)
 
 ## Console command
 

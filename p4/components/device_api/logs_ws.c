@@ -48,7 +48,8 @@ _Static_assert(2 * SLOTS <= 32, "drain and tick bits share one notification word
 #define FWD_PRIORITY 5
 #define DRAIN_BIT(i) (1u << (i))
 #define TICK_BIT(i) (1u << (SLOTS + (i)))
-#define LEVEL_HELP "# ignored: send {\"level\":\"off|error|warning|info|debug|verbose\"}"
+#define LEVEL_HELP                                                                                                     \
+    "# ignored: send {\"level\":\"off|error|warning|info|debug|verbose\"}, up to max_level of GET /device/logging"
 
 // One socket. Slots and their timers are static and never freed: a wake or a tick queued before the socket closed
 // finds the slot inactive (or reused, then it drains the new session, which is harmless) instead of freed memory.

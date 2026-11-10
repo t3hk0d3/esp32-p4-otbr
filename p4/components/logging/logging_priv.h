@@ -40,6 +40,9 @@ typedef struct {
 /** Replace the ops (host tests). Call before logging_init. */
 void logging_set_ops(const logging_ops_t *ops);
 
+/** Set the level ceiling logging_level_ceiling() reports (host tests; logging_reset restores the build's). */
+void logging_set_ceiling(esp_log_level_t ceiling);
+
 /** Back to the uninitialised state: settings, listeners and viewers_max forgotten (host tests). */
 void logging_reset(void);
 

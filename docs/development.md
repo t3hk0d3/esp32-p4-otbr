@@ -36,14 +36,17 @@ and CP210x drivers, esp-serial-flasher) build this copy. Its changes are in the 
 
 ## sdkconfig
 
-`p4/sdkconfig` (like the C6 projects' `sdkconfig`) is generated from `sdkconfig.defaults` and not tracked. ESP-IDF
-applies the defaults only to options the existing `sdkconfig` does not set, so `make build` and `make build-test`
-delete a project's `sdkconfig` when one of its `sdkconfig.defaults*` files is newer and let ESP-IDF generate it again.
+`p4/sdkconfig` (like the C6 projects' `sdkconfig`) is generated from `sdkconfig.defaults` and not tracked.
+`make build-test` configures the P4 into its own `p4/sdkconfig.test`, from `sdkconfig.defaults` plus
+`sdkconfig.defaults.test` (Debug and Verbose logging compiled in); switching between the two rebuilds everything. ESP-IDF
+applies the defaults only to options the existing file does not set, so `make build` and `make build-test` delete
+that file when one of the defaults files it is made from is newer and let ESP-IDF generate it again.
 Local `menuconfig` changes are lost then; keep them in the defaults. A plain `idf.py build` does not do this: after
 pulling a change to the defaults, delete `sdkconfig` yourself. `routing/task.c` stops the build with an `#error` when
 the socket limit (`CONFIG_LWIP_MAX_SOCKETS`) is below what the image needs, and `logging/logging_capture.c` does the
-same for a stale `sdkconfig` that still has the secondary console on USB-Serial-JTAG, debug and verbose compiled out
-(`CONFIG_LOG_MAXIMUM_LEVEL` below 5), log version 2 or fewer than 32 UDP PCBs.
+same for a stale `sdkconfig` that still has the secondary console on USB-Serial-JTAG, log version 2 or fewer than 32
+UDP PCBs, and for a log ceiling that doesn't match the build (`CONFIG_LOG_MAXIMUM_LEVEL` above Info in a release
+build, below Verbose in a test build).
 
 ## Testing
 

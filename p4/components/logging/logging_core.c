@@ -188,6 +188,60 @@ esp_err_t logging_core_validate(const logging_settings_t *s, const char **field)
     return ESP_OK;
 }
 
+esp_err_t logging_core_above(const logging_settings_t *s, esp_log_level_t ceiling, const char **field)
+{
+    static char component_field[sizeof("components.") + LOGGING_TAG_MAX];
+    static char channel_field[sizeof("channels.syslog.level")];
+    const char *bad = NULL;
+
+    for (int ch = 0; ch < LOGGING_CH_COUNT && !bad; ch++) {
+        if (s->channel[ch] > ceiling) {
+            snprintf(channel_field, sizeof(channel_field), "channels.%s.level", CHANNEL_NAMES[ch]);
+            bad = channel_field;
+        }
+    }
+    if (!bad && s->default_level > ceiling) {
+        bad = "components.*";
+    }
+    for (int i = 0; i < s->n_components && !bad; i++) {
+        if (s->components[i].level > ceiling) {
+            snprintf(component_field, sizeof(component_field), "components.%.*s", LOGGING_TAG_MAX - 1,
+                     s->components[i].tag);
+            bad = component_field;
+        }
+    }
+    if (bad) {
+        if (field) {
+            *field = bad;
+        }
+        return ESP_ERR_INVALID_ARG;
+    }
+    return ESP_OK;
+}
+
+bool logging_core_clamp(logging_settings_t *s, esp_log_level_t ceiling)
+{
+    bool changed = false;
+
+    for (int ch = 0; ch < LOGGING_CH_COUNT; ch++) {
+        if (s->channel[ch] > ceiling) {
+            s->channel[ch] = ceiling;
+            changed = true;
+        }
+    }
+    if (s->default_level > ceiling) {
+        s->default_level = ceiling;
+        changed = true;
+    }
+    for (int i = 0; i < s->n_components; i++) {
+        if (s->components[i].level > ceiling) {
+            s->components[i].level = ceiling;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 bool logging_tagset_add(logging_tagset_t *set, const char *tag)
 {
     size_t count = set->count; // only the writer changes it

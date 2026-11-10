@@ -359,6 +359,39 @@ TEST_CASE("apply invalid settings: returns ESP_ERR_INVALID_ARG with the field, n
     TEST_ASSERT_EQUAL_MEMORY(&s, &got, sizeof(s));
 }
 
+TEST_CASE("apply above the build's ceiling (info): ESP_ERR_INVALID_ARG with the field, nothing stored or applied",
+          "[logging]")
+{
+    setup();
+    logging_set_ceiling(ESP_LOG_INFO);
+    TEST_ASSERT_EQUAL(ESP_OK, logging_init());
+    forget_level_calls();
+    logging_settings_t s = defaults();
+    logging_settings_t got;
+    logging_settings_t want = defaults();
+    const char *field = NULL;
+
+    logging_core_set_component(&s, "ziggurat", ESP_LOG_DEBUG);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, logging_apply(&s, &field));
+    TEST_ASSERT_EQUAL_STRING("components.ziggurat", field);
+    TEST_ASSERT_EQUAL(0, s_fake.sets);
+    TEST_ASSERT_EQUAL(0, s_fake.level_calls);
+    TEST_ASSERT_EQUAL(ESP_OK, logging_get_settings(&got));
+    TEST_ASSERT_EQUAL_MEMORY(&want, &got, sizeof(got));
+}
+
+TEST_CASE("apply at the build's ceiling (info): accepted", "[logging]")
+{
+    setup();
+    logging_set_ceiling(ESP_LOG_INFO);
+    TEST_ASSERT_EQUAL(ESP_OK, logging_init());
+    logging_settings_t s = defaults();
+
+    logging_core_set_component(&s, "ziggurat", ESP_LOG_INFO);
+    TEST_ASSERT_EQUAL(ESP_OK, logging_apply(&s, NULL));
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, logging_level_ceiling());
+}
+
 TEST_CASE("apply on NVS write failure: returns ESP_FAIL, levels still applied", "[logging]")
 {
     setup();
@@ -536,6 +569,31 @@ TEST_CASE("init on a stored blob that fails validation: defaults applied, warnin
     TEST_ASSERT_EQUAL(ESP_OK, logging_get_settings(&got));
     TEST_ASSERT_EQUAL_MEMORY(&want, &got, sizeof(got));
     TEST_ASSERT_EQUAL(1, s_warnings);
+}
+
+TEST_CASE("init on a stored blob with levels above the build's ceiling (info): lowered to info, warning logged once",
+          "[logging]")
+{
+    setup();
+    logging_set_ceiling(ESP_LOG_INFO);
+    logging_settings_t s = defaults();
+    logging_settings_t got;
+    logging_settings_t want;
+
+    s.channel[LOGGING_CH_UART] = ESP_LOG_VERBOSE;
+    logging_core_set_component(&s, "ziggurat", ESP_LOG_DEBUG);
+    logging_core_set_component(&s, "OPENTHREAD", ESP_LOG_WARN);
+    want = s;
+    want.channel[LOGGING_CH_UART] = ESP_LOG_INFO;
+    want.components[0].level = ESP_LOG_INFO;
+    store_blob(LOGGING_BLOB_VERSION, &s, LOGGING_BLOB_SIZE);
+    init_counting_warnings();
+    TEST_ASSERT_EQUAL(ESP_OK, logging_get_settings(&got));
+    TEST_ASSERT_EQUAL_MEMORY(&want, &got, sizeof(got));
+    TEST_ASSERT_EQUAL(ESP_LOG_INFO, level_of("ziggurat"));
+    TEST_ASSERT_EQUAL(ESP_LOG_WARN, level_of("OPENTHREAD"));
+    TEST_ASSERT_EQUAL(1, s_warnings);
+    TEST_ASSERT_EQUAL(0, s_fake.sets);
 }
 
 /* ---- logging_viewers_max_changed ---- */

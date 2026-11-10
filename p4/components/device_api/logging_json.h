@@ -23,10 +23,11 @@ extern "C" {
 
 /**
  * The GET and PUT /device/logging body:
- * {"channels":{"uart":{"level":L},"jtag":{"level":L,"host":bool},"syslog":{"level":L,"target":"host[:port]","state":
+ * {"max_level":L,"channels":{"uart":{"level":L},"jtag":{"level":L,"host":bool},"syslog":{"level":L,"target":"host[:port]","state":
  * "off|resolving|sending|unresolved"}},"components":{"*":L,"<tag>":L,...},"known_tags":["<tag>",...],"viewers":n,
  * "counters":{"uart":{"sent":n,"dropped":n},"jtag":{...},"syslog":{...},"live":{"sent":n,"dropped":n}}}.
- * Returns its length, or -1 when `cap` is too small.
+ * max_level is the highest level this build compiles in (logging_level_ceiling()). Returns its length, or -1 when `cap`
+ * is too small.
  */
 int device_api_logging_json(char *out, size_t cap, const logging_settings_t *settings, const logging_status_t *status,
                             const char **known, size_t n_known);
@@ -35,7 +36,7 @@ int device_api_logging_json(char *out, size_t cap, const logging_settings_t *set
  * Apply a PUT /device/logging body over `inout`: any subset of channels.<uart|jtag|syslog>.level,
  * channels.syslog.target and components. `components` replaces the override set; its "*" key sets default_level (left
  * as it is when absent); a tag (or "*") listed twice is refused. Fields GET returns but PUT does not take (host,
- * state, known_tags, viewers, counters) and unknown keys, at the top level or in a channel, are ignored, so a client
+ * state, known_tags, viewers, counters, max_level) and unknown keys, at the top level or in a channel, are ignored, so a client
  * can send back what GET gave it. The target's syntax is checked here; the rest of the rules (a syslog level above off
  * needs a target) by logging_apply. ESP_ERR_INVALID_ARG: `*bad_field` names the field ("body", "channels",
  * "channels.<name>", "channels.<name>.level", "channels.syslog.target", "components", "components.<tag>"), valid until
@@ -54,13 +55,14 @@ int device_api_logs_dropped(char *out, size_t cap, uint32_t n);
 
 /**
  * The client's level from the WebSocket URL's query: `level=<off|error|warning|info|debug|verbose>`, info when there is
- * no query or no level. ESP_ERR_INVALID_ARG for any other value (`*out` untouched).
+ * no query or no level. ESP_ERR_INVALID_ARG for any other value or a level above logging_level_ceiling() (`*out`
+ * untouched).
  */
 esp_err_t device_api_logs_query_level(const char *query, esp_log_level_t *out);
 
 /**
  * A text frame from the client: {"level":"<name>"} (`len` bytes, not NUL-terminated). ESP_ERR_INVALID_ARG for anything
- * else (`*out` untouched).
+ * else or a level above logging_level_ceiling() (`*out` untouched).
  */
 esp_err_t device_api_logs_level_frame(const char *frame, size_t len, esp_log_level_t *out);
 
