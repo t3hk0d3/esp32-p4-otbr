@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include <string.h>
 
 #include "unity.h"
@@ -204,6 +203,35 @@ TEST_CASE("On an unknown interface or alt: lists nothing", "[usbip]")
 
     TEST_ASSERT_EQUAL_UINT(0, usbip_core_endpoints(cfg_bt, sizeof(cfg_bt), 5, 0, ep, 4));
     TEST_ASSERT_EQUAL_UINT(0, usbip_core_endpoints(cfg_bt, sizeof(cfg_bt), 1, 7, ep, 4));
+}
+
+TEST_CASE("On a high-speed endpoint with additional transactions: mps keeps only the packet size bits", "[usbip]")
+{
+    const uint8_t cfg[] = {
+        9, 2, W(25), 1, 1, 0, 0x80, 50,
+        9, 4, 0, 0, 1, 0xff, 0, 0, 0,
+        7, 5, 0x81, 3, W(0x1000 | 0x0800 | 64), 1,
+    };
+    usbip_ep_info_t ep[1];
+
+    TEST_ASSERT_EQUAL_UINT(1, usbip_core_endpoints(cfg, sizeof(cfg), 0, 0, ep, 1));
+    TEST_ASSERT_EQUAL_UINT16(64, ep[0].mps);
+}
+
+TEST_CASE("On a short endpoint descriptor: dev_record and endpoints both skip it", "[usbip]")
+{
+    // 16 bulk endpoints, the last one with bLength 6: only 15 count.
+    uint8_t cfg[200];
+    size_t len = make_cfg(cfg, 16);
+    usbip_dev_rec_t r;
+    usbip_ep_info_t ep[16];
+
+    cfg[len - 7] = 6;
+    len -= 1; // the shortened descriptor ends the configuration
+    cfg[2] = (uint8_t)len;
+    cfg[3] = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, usbip_core_dev_record(dev_desc_plain, cfg, len, 2, 2, &r, NULL, 0));
+    TEST_ASSERT_EQUAL_UINT(15, usbip_core_endpoints(cfg, len, 0, 0, ep, 16));
 }
 
 /* ---- usbip_core_classify_setup ---- */

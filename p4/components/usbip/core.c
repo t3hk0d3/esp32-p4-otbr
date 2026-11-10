@@ -44,6 +44,11 @@ static size_t cfg_total(const uint8_t *cfg, size_t cfg_len)
     return total;
 }
 
+static bool is_ep_desc(const uint8_t *d)
+{
+    return d[1] == DESC_ENDPOINT && d[0] >= 7;
+}
+
 const char *usbip_state_name(usbip_state_t s)
 {
     switch (s) {
@@ -61,13 +66,6 @@ const char *usbip_state_name(usbip_state_t s)
         return "attached";
     }
     return "unknown";
-}
-
-static void set_why(char *why, size_t cap, const char *fmt, unsigned n)
-{
-    if (why != NULL && cap > 0) {
-        snprintf(why, cap, fmt, n);
-    }
 }
 
 esp_err_t usbip_core_dev_record(const uint8_t dev_desc[18], const uint8_t *cfg, size_t cfg_len, uint8_t addr,
@@ -99,7 +97,7 @@ esp_err_t usbip_core_dev_record(const uint8_t dev_desc[18], const uint8_t *cfg, 
                     r.num_ifaces++;
                 }
             }
-        } else if (cfg[o + 1] == DESC_ENDPOINT && alt0) {
+        } else if (is_ep_desc(&cfg[o]) && alt0) {
             eps++;
         }
     }
@@ -110,7 +108,10 @@ esp_err_t usbip_core_dev_record(const uint8_t dev_desc[18], const uint8_t *cfg, 
         return ESP_ERR_NOT_SUPPORTED;
     }
     if (eps > USBIP_EP_MAX) {
-        set_why(why, cap, "%u endpoints in the active configuration, at most 15 are supported", eps);
+        if (why != NULL && cap > 0) {
+            snprintf(why, cap, "%u endpoints in the active configuration, at most %d are supported", eps,
+                     USBIP_EP_MAX);
+        }
         return ESP_ERR_NOT_SUPPORTED;
     }
 
@@ -141,12 +142,12 @@ size_t usbip_core_endpoints(const uint8_t *cfg, size_t cfg_len, uint8_t iface, u
     for (size_t o = 0; o < total; o += cfg[o]) {
         if (cfg[o + 1] == DESC_INTERFACE && cfg[o] >= 9) {
             match = cfg[o + 2] == iface && cfg[o + 3] == alt;
-        } else if (cfg[o + 1] == DESC_ENDPOINT && cfg[o] >= 7 && match) {
+        } else if (is_ep_desc(&cfg[o]) && match) {
             if (out != NULL && n < cap) {
                 out[n] = (usbip_ep_info_t) {
                     .addr = cfg[o + 2],
                     .type = cfg[o + 3] & 0x3,
-                    .mps = (uint16_t)(cfg[o + 4] | (cfg[o + 5] << 8)),
+                    .mps = (uint16_t)((cfg[o + 4] | (cfg[o + 5] << 8)) & 0x7ff),
                 };
             }
             n++;
