@@ -382,7 +382,13 @@ reason, spec reference.
    `.dash-*` classes and styles `.tile-head h3`. Page tests: `tools/tests/test_status_page.py`,
    `tools/tests/test_zigbee_page.py`. (docs/superpowers/specs/2026-11-06-zigbee-mode-design.md,
    docs/superpowers/specs/2026-11-07-unified-dashboard-design.md)
-35. Applied (hybrid mode, Tasks 3 and 4). Frontend: `radios.html` gains `#zigbeeNote` under the otbr panel;
+35. Applied (time sync, Task 4). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 36 -> 38 (`GET` and `PUT
+   /device/time`, two slots of headroom kept). (docs/superpowers/specs/2026-11-10-time-sync-design.md)
+36. Applied (time sync, Task 5). Frontend: `ethernet.html` gains the Time section after Hostname and a hidden
+   "Time server" row (`if-<iface>-ntprow`) on each interface card; new `static/time.js` (`TimeLogic`, `TimePage`) fills
+   both from `GET /device/time` and saves with `PUT /device/time`. Page tests: `tools/tests/test_time_page.py`.
+   (docs/superpowers/specs/2026-11-10-time-sync-design.md)
+37. Applied (hybrid mode, Tasks 3 and 4). Frontend: `radios.html` gains `#zigbeeNote` under the otbr panel;
    `static/radios.js` gains `RadiosLogic.rebootNote` (a save that enters or leaves Zigbee reboots the board and Thread
    with it), shown in `#zigbeeNote`, or in `#otbrNote` when otbr is picked on the radio that runs Zigbee; the
    `hybrid_not_supported` text is gone. `index.html` gains `#zg-shared` (with a link to the Radios page) above

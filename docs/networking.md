@@ -1,6 +1,6 @@
 # Networking
 
-Everything on **Device > Ethernet**: how the board sits on your network, its names, and Thread over Ethernet.
+Everything on **Device > Ethernet**: how the board sits on your network, its names, its clock, and Thread over Ethernet.
 
 ## Single port or split VLANs
 
@@ -87,6 +87,48 @@ renewal on save, so the router learns the name without the address changing. Wit
 DHCP and the setting has no effect.
 
 `net reset` touches neither section.
+
+## Time
+
+The board has no battery clock, so it learns the date from a time server ([NTP](glossary.md)) after every
+power-up. With the clock set, status pages show real dates, for example when a Zigbee client connected or when radio
+firmware was installed, and syslog lines carry a timestamp. Without it they read "clock not set". The board keeps UTC;
+the web UI shows times in your browser's time zone.
+
+The **Time** section at the end of the Ethernet page shows the board time, whether it is synced, when it last synced,
+and which server it asks:
+
+<img src="images/ethernet-time.png" width="640" alt="The Time section of the Ethernet page with a Synced chip: board time, last synced 2 minutes ago, server 162.159.200.1 with an answered chip, from your router (DHCP on Management); Set the clock from the network ticked, Automatic picked, and the Discard and Save buttons">
+
+| Choice | Server used |
+| --- | --- |
+| **Automatic** (default) | the NTP server your router hands out with the DHCP lease (up to two); if it hands out none, `pool.ntp.org` |
+| **Custom server** | the hostname or IP address you enter, and only that one: no fall-back |
+| Off (untick **Set the clock from the network**) | none: the board sends no NTP traffic |
+
+A save takes effect at once, without a reboot. The clock survives a reboot or an update; after a power loss it is
+unset until the first answer, usually a few seconds after the board gets an address.
+
+What leaves the board: NTP requests (UDP port 123) to the server in use, about once an hour. With Automatic and a
+router that names no server, that is `pool.ntp.org` on the internet; set a custom server or turn sync off if the board
+must not reach the internet.
+
+- **Chips:** **Synced**; **Waiting for server** (just started); **Server not answering** (no answer for a minute, or
+  the servers stopped answering; the clock keeps running from the last answer); **Clock not set**; **Off**.
+- **Split mode:** the board takes the servers from whichever lease names them; the section says which interface, and
+  that interface's card shows them in a **Time server** row.
+- **Static address:** there is no lease, so Automatic uses `pool.ntp.org`, which needs a DNS server in the static
+  settings.
+
+From a script:
+
+```sh
+curl http://esp-otbr.local/device/time
+curl -X PUT -H 'Content-Type: application/json' \
+     -d '{"enabled": true, "mode": "custom", "server": "ntp.home.lan"}' http://esp-otbr.local/device/time
+```
+
+Fields and errors: [API](api.md#device-api).
 
 ## TREL (Thread over Ethernet)
 

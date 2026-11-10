@@ -11,9 +11,9 @@ const FRONTEND = path.join(__dirname, '..', '..', 'p4', 'components', 'esp_ot_br
 const Common = require(path.join(FRONTEND, 'static', 'device_common.js'));
 const SCRIPTS = {radios: 'radios', index: 'status', ethernet: 'ethernet', routing: 'routing', firmware: 'firmware', capture: 'capture',
                  diagnostics: 'diagnostics', names: 'names', leader: 'leader',
-                 topology: 'topology', console: 'console', zigbee: 'zigbee'};
+                 topology: 'topology', console: 'console', zigbee: 'zigbee', time: 'time'};
 /* Scripts that live on another script's page: the names section is part of the Ethernet page, the Leader card of Network. */
-const HTML = {names: 'ethernet', leader: 'network'};
+const HTML = {names: 'ethernet', leader: 'network', time: 'ethernet'};
 
 class El {
   constructor(doc, tag, id, classes) {
@@ -315,6 +315,13 @@ const NAMES = {
   dhcp_name_default: 'esp-otbr', mode: 'single'
 };
 
+/* GET /device/time: synced from the two servers the management lease names. */
+const TIME = {
+  enabled: true, mode: 'auto', server: '', state: 'synced', now: 1800000000, synced_age_s: 240, source: 'dhcp',
+  servers: [{address: '10.0.10.1', answered: true}, {address: '10.0.10.2', answered: false}],
+  dhcp_servers: ['10.0.10.1', '10.0.10.2'], dhcp_iface: 'mgmt'
+};
+
 /* GET /device/thread with the stored adjustment 0 (weight 65 = base 65) and GET /node as a router under a leader of 65. */
 const THREAD = {leader_weight_adjustment: 0, leader_weight: 65, leader_weight_base: 65};
 const NODE = {state: 'router', leaderData: {weighting: 65, leaderRouterId: 11, partitionId: 1745592081}};
@@ -332,4 +339,4 @@ const IPADDR = {error: 0, message: 'OK', result: [
 /* Deep copy of a fixture, with `patch` merged at the top level. */
 function fixture(obj, patch) { return Object.assign(JSON.parse(JSON.stringify(obj)), patch || {}); }
 
-module.exports = {makeEnv, STATUS, DIAG, NETWORK, NAMES, THREAD, NODE, PROPS, IPADDR, fixture, Common};
+module.exports = {makeEnv, STATUS, DIAG, NETWORK, NAMES, TIME, THREAD, NODE, PROPS, IPADDR, fixture, Common};

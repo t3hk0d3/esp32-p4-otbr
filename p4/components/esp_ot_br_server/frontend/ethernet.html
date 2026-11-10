@@ -87,6 +87,9 @@
                 <div class="hidden" id="if-single-confrow" style="display: contents">
                     <dt>Configured</dt><dd class="mono" id="if-single-conf"></dd>
                 </div>
+                <div class="hidden" id="if-single-ntprow" style="display: contents">
+                    <dt>Time server</dt><dd><span class="mono" id="if-single-ntp"></span> DHCP</dd>
+                </div>
                 <dt>IPv6</dt><dd class="mono lines" id="if-single-ipv6">-</dd>
             </dl>
             <p class="iface-role hidden" id="if-single-summary"></p>
@@ -142,6 +145,9 @@
                 <div class="hidden" id="if-mgmt-confrow" style="display: contents">
                     <dt>Configured</dt><dd class="mono" id="if-mgmt-conf"></dd>
                 </div>
+                <div class="hidden" id="if-mgmt-ntprow" style="display: contents">
+                    <dt>Time server</dt><dd><span class="mono" id="if-mgmt-ntp"></span> DHCP</dd>
+                </div>
                 <dt>IPv6</dt><dd class="mono lines" id="if-mgmt-ipv6">-</dd>
             </dl>
             <p class="iface-role hidden" id="if-mgmt-summary"></p>
@@ -196,6 +202,9 @@
                 <dt>IPv4</dt><dd><span class="mono" id="if-thread_bb-ipv4">-</span> <span id="if-thread_bb-src"></span></dd>
                 <div class="hidden" id="if-thread_bb-confrow" style="display: contents">
                     <dt>Configured</dt><dd class="mono" id="if-thread_bb-conf"></dd>
+                </div>
+                <div class="hidden" id="if-thread_bb-ntprow" style="display: contents">
+                    <dt>Time server</dt><dd><span class="mono" id="if-thread_bb-ntp"></span> DHCP</dd>
                 </div>
                 <dt>IPv6</dt><dd class="mono lines" id="if-thread_bb-ipv6">-</dd>
             </dl>
@@ -373,11 +382,56 @@
             </div>
         </div>
     </section>
+
+    <section id="timeSection" aria-labelledby="timeTitle">
+        <div class="section-head">
+            <h2 class="section-title" id="timeTitle">Time</h2>
+            <span class="chip" id="tm-chip">-</span>
+        </div>
+        <div class="card">
+            <p class="iface-role">The board has no battery clock. It asks a time server after every power-up, so that
+                status pages and syslog show real dates.</p>
+            <dl class="facts">
+                <dt>Board time</dt><dd><span id="tm-now">-</span> <span class="form-hint">(your time zone; the board
+                    keeps UTC)</span></dd>
+                <dt>Last synced</dt><dd id="tm-last">-</dd>
+                <dt>Server</dt><dd><span id="tm-servers">-</span><span class="was" id="tm-source"></span></dd>
+            </dl>
+            <div class="names-form">
+                <fieldset>
+                    <legend>Time server</legend>
+                    <label class="check-row" for="tm-enabled"><input type="checkbox" id="tm-enabled"> Set the clock
+                        from the network (NTP)</label>
+                    <div class="seg" role="group" aria-label="Time server" id="tm-mode">
+                        <button type="button" id="tm-auto" aria-pressed="true">Automatic</button>
+                        <button type="button" id="tm-custom" aria-pressed="false">Custom server</button>
+                    </div>
+                    <p class="form-hint" id="tm-hint-auto">Automatic uses the server your router hands out. If it
+                        hands out none, the board asks <span class="mono">pool.ntp.org</span>.</p>
+                    <p class="form-hint hidden" id="tm-hint-off">Off: the board never contacts a time server.</p>
+                    <div class="hidden" id="tm-server-field">
+                        <input type="text" id="tm-server" size="30" autocomplete="off" spellcheck="false"
+                            aria-label="Custom time server">
+                        <p class="form-hint">A hostname or an IP address. The board uses only this server and does
+                            not fall back to another.</p>
+                        <p class="form-hint" id="tm-dhcp-hint"></p>
+                    </div>
+                    <div class="error-text" id="tm-server-err" role="alert"></div>
+                </fieldset>
+                <div class="actions-end">
+                    <button class="btn btn-outline" id="tm-discard" type="button" disabled>Discard</button>
+                    <button class="btn btn-primary" id="tm-save" type="button" disabled>Save</button>
+                </div>
+                <div class="form-hint" id="tm-msg" role="status" aria-live="polite"></div>
+            </div>
+        </div>
+    </section>
 </div>
 <div class="footer">Free software under the GNU AGPL v3 or later. <a href="https://github.com/t3hk0d3/esp32-p4-otbr">Source code</a></div>
 <script src="/static/api.js"></script>
 <script src="/static/device_common.js"></script>
 <script src="/static/ethernet.js"></script>
 <script src="/static/names.js"></script>
+<script src="/static/time.js"></script>
 </body>
 </html>

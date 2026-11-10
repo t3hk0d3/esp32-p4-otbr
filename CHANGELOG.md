@@ -9,6 +9,9 @@ release's `versions.txt`.
 
 ### Added
 
+- Time sync: the board sets its clock from NTP, from the server the DHCP lease names, else `pool.ntp.org`, or a custom
+  server. A Time section on the Ethernet page shows the board time and sync state; `GET`/`PUT /device/time`. Zigbee
+  status times are real dates, also for events before the first sync.
 - Thread and Zigbee together: one radio can run the Thread border router while the other runs the Zigbee coordinator,
   in either order. `PUT /device/channels/{id}` no longer answers 409 `hybrid_not_supported`. Starting or stopping Zigbee
   still reboots the board, and Thread with it; the Radios page says so before saving. Moving Thread onto the radio that

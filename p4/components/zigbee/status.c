@@ -3,31 +3,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "esp_heap_caps.h"
 #include "radio_mux.h"
+#include "timesync.h"
 #include "zigbee_priv.h"
-
-#define EPOCH_VALID 1577836800 // 2020-01-01: an earlier clock was never set (as the mux's)
 
 _Static_assert(ZIGBEE_CHANNEL_ID_MAX == RADIO_MUX_ID_MAX, "channel ids are the mux's");
 
 portMUX_TYPE g_zigbee_status_lock = portMUX_INITIALIZER_UNLOCKED;
 zigbee_status_t g_zigbee_status = {.state = ZIGBEE_STATE_IDLE};
+zigbee_status_times_t g_zigbee_status_times = {.client_since_us = -1, .last_client_left_us = -1, .started_us = -1};
 
 // The channel in mode ziggurat, found once per boot: entering or leaving the mode reboots (reboot_on_change), so it
 // does not change while the board runs. 0: not looked up yet; 1: none; 2: s_chan holds it (never written again).
 static portMUX_TYPE s_chan_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_chan[ZIGBEE_CHANNEL_ID_MAX];
 static atomic_int s_chan_state;
-
-int64_t zigbee_now_epoch(void)
-{
-    const time_t t = time(NULL);
-
-    return t >= EPOCH_VALID ? (int64_t)t : 0;
-}
 
 // The instance's state names in the orchestrator's read API (the same as /device/zigbee's).
 static const char *const state_names[] = {
@@ -111,13 +103,23 @@ static void firmware_text(const radio_mux_firmware_t *fw, char *out, size_t cap)
              fw->rec.chip[0] ? " " : "", fw->rec.chip);
 }
 
+// Epoch seconds of a moment recorded as uptime; 0 when it never happened or the clock is not set.
+static int64_t date_of(int64_t uptime_us)
+{
+    return uptime_us < 0 ? 0 : timesync_epoch_at(uptime_us);
+}
+
 void zigbee_get_status(zigbee_status_t *out)
 {
     taskENTER_CRITICAL(&g_zigbee_status_lock);
     *out = g_zigbee_status;
+    const zigbee_status_times_t times = g_zigbee_status_times;
     out->heap.current = g_zigbee_heap.current;
     out->heap.peak = g_zigbee_heap.peak;
     taskEXIT_CRITICAL(&g_zigbee_status_lock);
+    out->client_since = date_of(times.client_since_us);
+    out->last_client_left = date_of(times.last_client_left_us);
+    out->started = date_of(times.started_us);
 
     const char *id = zigbee_channel();
 

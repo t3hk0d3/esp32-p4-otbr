@@ -129,6 +129,14 @@ extern zigbee_t g_zigbee;
 // Status (status.c), under g_zigbee_status_lock. g_zigbee_heap is the staticlib's heap accounting (platform.c).
 extern portMUX_TYPE g_zigbee_status_lock;
 extern zigbee_status_t g_zigbee_status;
+// When the status's moments happened, as esp_timer_get_time() (-1: never), under g_zigbee_status_lock. zigbee_get_status
+// turns them into dates (timesync_epoch_at), so a moment before the clock was first set still gets its real date.
+typedef struct {
+    int64_t client_since_us;
+    int64_t last_client_left_us;
+    int64_t started_us;
+} zigbee_status_times_t;
+extern zigbee_status_times_t g_zigbee_status_times;
 extern zigbee_heap_stats_t g_zigbee_heap;
 // One short statement on the status under its lock (several: take the lock around them).
 #define ZIGBEE_STATUS(...)                           \
@@ -166,7 +174,6 @@ esp_err_t zigbee_ws_start_sender(void);
 
 /* ---- status.c ---- */
 
-int64_t zigbee_now_epoch(void);
 void zigbee_status_set_state(zigbee_state_t state, const char *reason);
 // The channel id (attach): zigbee_channel() answers it from then on.
 void zigbee_status_note_channel(const char *id);

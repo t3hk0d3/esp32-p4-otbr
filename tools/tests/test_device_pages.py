@@ -33,7 +33,7 @@ THREAD_MENU = [
 
 # page -> (script, endpoints its script names)
 # Scripts of sections that share a page, loaded after the page's own script.
-EXTRA_SCRIPTS = {"ethernet": ["names"]}
+EXTRA_SCRIPTS = {"ethernet": ["names", "time"]}
 # Scripts of sections a page mounts, loaded before the page's own script (which starts the page as it loads).
 SECTION_SCRIPTS = {"index": ["zigbee"]}
 
@@ -62,7 +62,7 @@ PAGES = {
     "diagnostics": ("diagnostics", ["/device/diag"]),
     # /ping is the Thread web GUI's, registered in esp_br_web_api.h like /get_properties above.
     "topology": ("topology", ["/device/topology", "/ping"]),
-    "ethernet": ("ethernet", ["/device/network", "/device/names"]),
+    "ethernet": ("ethernet", ["/device/network", "/device/names", "/device/time"]),
     "routing": ("routing", ["/device/routing", "/device/status"]),
     "firmware": (
         "firmware",
