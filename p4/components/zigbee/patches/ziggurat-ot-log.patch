@@ -1,4 +1,4 @@
-From f727f2743124911dde30fe403dc588efdd32507b Mon Sep 17 00:00:00 2001
+From 9f49ac1fc8279ea2d5907cbae00757607a5d26e2 Mon Sep 17 00:00:00 2001
 From: Igor Yamolov <clouster@yandex.ru>
 Date: Mon, 9 Nov 2026 14:13:33 +0100
 Subject: [PATCH] Add a tracing subscriber that hands events to
@@ -13,11 +13,11 @@ it: it can be called inside a critical section.
 The level is set at runtime with ziggurat_log_set_level (0 off .. 5 trace) and
 checked on every event.
 ---
- crates/ziggurat-ot/Cargo.lock |  1 +
- crates/ziggurat-ot/Cargo.toml |  2 +
- crates/ziggurat-ot/src/lib.rs |  2 +
- crates/ziggurat-ot/src/log.rs | 99 +++++++++++++++++++++++++++++++++++
- 4 files changed, 104 insertions(+)
+ crates/ziggurat-ot/Cargo.lock |   1 +
+ crates/ziggurat-ot/Cargo.toml |   2 +
+ crates/ziggurat-ot/src/lib.rs |   2 +
+ crates/ziggurat-ot/src/log.rs | 103 ++++++++++++++++++++++++++++++++++
+ 4 files changed, 108 insertions(+)
  create mode 100644 crates/ziggurat-ot/src/log.rs
 
 diff --git a/crates/ziggurat-ot/Cargo.lock b/crates/ziggurat-ot/Cargo.lock
@@ -33,7 +33,7 @@ index e4524da..75ecfa4 100644
   "ziggurat-ieee-802154",
   "ziggurat-ncp-api",
 diff --git a/crates/ziggurat-ot/Cargo.toml b/crates/ziggurat-ot/Cargo.toml
-index 7497aae..c6c7331 100644
+index 7497aae..f3f9fe5 100644
 --- a/crates/ziggurat-ot/Cargo.toml
 +++ b/crates/ziggurat-ot/Cargo.toml
 @@ -23,6 +23,8 @@ embassy-time = "0.5"
@@ -67,10 +67,10 @@ index 259aab3..b6f6f19 100644
      heap::init();
 diff --git a/crates/ziggurat-ot/src/log.rs b/crates/ziggurat-ot/src/log.rs
 new file mode 100644
-index 0000000..75f2568
+index 0000000..09e326f
 --- /dev/null
 +++ b/crates/ziggurat-ot/src/log.rs
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,103 @@
 +//! A minimal `tracing` subscriber that formats each event and hands
 +//! it to the platform (`ziggurat_platform_log`). The level is set at runtime with
 +//! `ziggurat_log_set_level` (0 off, 1 error, 2 warn, 3 info, 4 debug, 5 trace).
@@ -85,7 +85,8 @@ index 0000000..75f2568
 +use tracing::{Event, Level, Metadata, Subscriber};
 +
 +unsafe extern "C" {
-+    /// One formatted log line (no newline). May be called inside a critical section.
++    /// One formatted log line (no newline). May be called inside a critical section, so it must
++    /// not block or take locks.
 +    fn ziggurat_platform_log(level: u8, msg: *const u8, len: usize);
 +}
 +
@@ -115,10 +116,13 @@ index 0000000..75f2568
 +impl Write for Line {
 +    fn write_str(&mut self, s: &str) -> fmt::Result {
 +        let room = self.buf.len() - self.len;
-+        let n = s.len().min(room);
++        let mut n = s.len().min(room);
++        while !s.is_char_boundary(n) {
++            n -= 1;
++        }
 +        self.buf[self.len..self.len + n].copy_from_slice(&s.as_bytes()[..n]);
 +        self.len += n;
-+        Ok(()) // a long line is cut, never an error
++        Ok(()) // a long line is cut (on a character boundary), never an error
 +    }
 +}
 +
