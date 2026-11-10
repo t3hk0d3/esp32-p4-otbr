@@ -30,6 +30,7 @@ static const char *TAG = "timesync";
 #define TASK_STACK 3072
 #define TASK_PRIORITY 2
 #define UPKEEP_MS 10000 // state upkeep (reachability) between notifications
+#define ANSWER_SETTLE_MS 50 // after an answer, before reading reachability (see the task loop)
 
 #define BIT_CONFIG BIT0
 #define BIT_DHCP BIT1
@@ -184,6 +185,12 @@ static void timesync_task(void *arg)
             restart(&again);
         }
         if (s_servers.count > 0) {
+            if (bits & BIT_ANSWERED) {
+                // lwIP calls the sync callback (sntp_process) before it sets the answering server's reachability bit;
+                // this task runs on the other core and would read the register in between (seen on the board: 10 s of
+                // "unreachable" right after a sync). Let lwIP's thread finish the receive first.
+                vTaskDelay(pdMS_TO_TICKS(ANSWER_SETTLE_MS));
+            }
             poll_reachability();
         }
     }
