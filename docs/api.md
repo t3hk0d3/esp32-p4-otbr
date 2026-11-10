@@ -423,15 +423,16 @@ The board can export the device on its USB-A port with USB/IP (TCP 3240); see [U
   epoch seconds, 0 when the clock is not set). `speed` is `low`, `full`, `high` or `unknown`.
 - `counters` and `memory` (bytes) count since boot.
 
-`PUT /device/usbip` takes `{"enabled": true|false}`, answered `{"reboot": true}` when the board reboots, or
-`{"kick": true}`, which drops the current client and answers `{}` (also without a session; not stored).
+`PUT /device/usbip {"enabled": true|false}` answers `{"reboot": true}` when the board reboots, and `{"reboot": false}`
+when the value is the stored one already. `PUT /device/usbip {"kick": true}` drops the current client and answers `{}`
+(also without a session; not stored).
 
 | Reply | Meaning |
 | --- | --- |
 | 200 | applied |
 | 400 `bad_value` | the body is not one of the two forms |
 | 409 `usb_channel_in_use` | switching on while a USB channel's stored mode is `otbr` or `ziggurat`; `detail` is "`<id>` runs `<mode>`: move it or switch it off first" |
-| 409 `busy` | a long operation (update, firmware push, move) runs |
+| 409 `busy` | "an update or firmware push is running or waits for its reboot" |
 
 ### Zigbee coordinator (experimental)
 

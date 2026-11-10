@@ -10,7 +10,7 @@ on (see [Radios and USB/IP](#radios-and-usbip)).
 !!! warning "No authentication, no encryption"
     Anyone who can reach TCP port 3240 on the board can take the device and talk to it. There is no password, no
     encryption and no allowlist. Turn USB/IP on only on a network you trust, keep the board's management interface
-    off untrusted networks (use split mode with a VLAN for management), and turn it off when you are done. The server
+    off untrusted networks (see [Networking](networking.md#modes)), and turn it off when you are done. The server
     refuses connections from the Thread mesh.
 
 ## Turning it on
@@ -21,7 +21,7 @@ On the **USB/IP** page (Device menu) use the switch, or `PUT /device/usbip` with
 Turning it on is refused with 409 `usb_channel_in_use` while a USB channel's stored mode is `otbr` or `ziggurat`
 (`"<id> runs <mode>: move it or switch it off first"`): move Thread or Zigbee to the C6 or switch the dongle off on the
 [Radios page](radios.md#the-radios-page) first. A long operation (an update, a firmware push, a move of Thread)
-answers 409 `busy`; try again afterwards.
+answers 409 `busy` ("an update or firmware push is running or waits for its reboot"); try again afterwards.
 
 If the board boots with USB/IP on and a USB channel holds `otbr` or `ziggurat`, Thread or Zigbee wins: the status
 shows the state `blocked` with the reason, and nothing is exported.
@@ -45,7 +45,7 @@ States (`state` in the API and on the page):
 | `off` | USB/IP is off (or switched on and the board not yet rebooted: `pending_reboot`). |
 | `blocked` | It is on, but a USB channel holds Thread or Zigbee; `reason` says which. |
 | `no_device` | Nothing is plugged into the USB-A port. |
-| `unsupported` | A device is plugged in but cannot be exported; `reason` says why (a hub, more than 15 non-control endpoints, the device failed to open). |
+| `unsupported` | A device is plugged in but cannot be exported; `reason` says why (a hub, more than 15 endpoints, the device failed to open). |
 | `exportable` | The device is ready and no client holds it. |
 | `attached` | A client holds the device. |
 
@@ -63,8 +63,8 @@ sudo usbip detach -p <port>
 local port number to give to `detach`. The `usbip` tool comes with the `usbip` or `linux-tools` package of your
 distribution. Add `vhci-hcd` to `/etc/modules-load.d/` to load it at boot.
 
-Once attached, the device appears under `/dev` like a local one (`/dev/ttyUSB0`, `/dev/ttyACM0`) and tools such as
-`esptool` or `cc2538-bsl` work with it.
+Once attached, the device appears on the client like a local one, for example as `/dev/ttyUSB0` or `/dev/ttyACM0` for
+a serial adapter.
 
 ## Attaching from Windows
 
@@ -80,14 +80,18 @@ and `usbip detach` (see `usbip port`) to release it.
 ## Keeping it attached
 
 After an unplug or a reset of the device the attach is gone and the client must attach again; nothing does that for
-you. For a job that resets the device (reflashing, a bootloader switch), run a retry loop while you work:
+you. For a job that resets the device (reflashing, a bootloader switch), run a retry loop while you work. It attaches
+only when the board's device is not already attached here (`usbip port` lists an attached device as
+`usbip://<board>:3240/1-1`):
 
 ```
-while true; do sudo usbip attach -r <board> -b 1-1; sleep 3; done
+while true; do
+  usbip port | grep -q "<board>:3240/1-1" || sudo usbip attach -r <board> -b 1-1
+  sleep 3
+done
 ```
 
-(attach fails while the device is attached or not yet offered, which is harmless; stop it with Ctrl-C). For a device
-that should always be there, a systemd unit on the client:
+Stop it with Ctrl-C. For a device that should always be there, a systemd unit on the client does the same:
 
 ```
 # /etc/systemd/system/usbip-attach.service
@@ -95,10 +99,11 @@ that should always be there, a systemd unit on the client:
 Description=Attach the USB device of the board over USB/IP
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 ExecStartPre=/usr/sbin/modprobe vhci-hcd
-ExecStart=/usr/sbin/usbip attach -r <board> -b 1-1
+ExecStart=/bin/sh -c 'usbip port | grep -q "<board>:3240/1-1" || exec usbip attach -r <board> -b 1-1'
 Restart=always
 RestartSec=5
 
@@ -106,18 +111,19 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-`usbip attach` returns as soon as the device is attached, so the unit restarts it every 5 s: while the device is
-still attached the command fails harmlessly, and after an unplug or a reset it attaches again. Adjust the path of
-`usbip` (`which usbip`).
+The command exits as soon as the device is attached, so the unit runs it again every 5 s: nothing happens while the
+device is attached, and after an unplug or a reset it attaches again. Adjust the path of `usbip` (`which usbip`) if
+needed. **Stop the unit or the loop before you detach or kick**, otherwise it attaches again within seconds and the
+device stays out of reach of any other computer.
 
 ## Limits
 
-- No isochronous transfers: audio devices, webcams and Bluetooth SCO voice do not work. Bluetooth data does.
+- No isochronous transfers: isochronous transfers, as used by audio devices, webcams and Bluetooth SCO voice, are not supported.
 - No hubs. A hub on the port is `unsupported`.
 - One configuration. `SET_CONFIGURATION` to another value than the active one is refused.
 - Transfers over 16 KB are refused. Configuration descriptors up to 1024 bytes are read
   (`CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE`).
-- A device with more than 15 non-control endpoints is not exported.
+- A device with more than 15 endpoints, counting alternate setting 0 of every interface, is not exported.
 - One device and one client at a time.
 
 Memory: the transfers in flight use internal RAM, at most 32 KB plus, in the worst case, one transfer of up to 16 KB
@@ -134,8 +140,8 @@ Devices that stall or never answer a control transfer end the session, and the b
   switch-on (409 `usb_channel_in_use`) links to the Radios page.
 - The **device card** shows the product, ids, speed and state, with the reason when `unsupported` or `blocked`.
 - The **client card** shows the address and since when, with a **Kick** button that ends the session.
-- **Counters** (sessions, refused connections, submits, completed, errors, unlinks, bytes, sessions ended for overload)
-  and the memory in use and its peaks. They count since boot.
+- Four tiles show **Sessions**, **Transfers**, **From device** and **Buffers in use**. The numbers count since boot;
+  the API has the full set.
 - **How to attach** shows the client commands with the board's address.
 
 ## Radios and USB/IP
