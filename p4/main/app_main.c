@@ -29,6 +29,7 @@
 #include "routing.h"
 #include "storage.h"
 #include "supervisor.h"
+#include "usbip.h"
 #include "zigbee.h"
 
 static const char *TAG = "app";
@@ -156,9 +157,9 @@ void app_main(void)
         ESP_LOGE(TAG, "ot_console_init: %s, the Thread console is unavailable", esp_err_to_name(err));
     }
     // One eventfd VFS for OpenThread's eventfds, the radio mux's (one per channel it can have open) and the RCP proxy's
-    // kick eventfd, before the mux and the proxy create theirs and before net_init_task starts OpenThread.
+    // kick eventfd and USB/IP's wake-up, before they create theirs and before net_init_task starts OpenThread.
     err = esp_vfs_eventfd_register(&(const esp_vfs_eventfd_config_t) {
-        .max_fds = BR_CORE_EVENTFD_COUNT + RADIO_MUX_EVENTFD_COUNT + RCP_PROXY_EVENTFD_COUNT,
+        .max_fds = BR_CORE_EVENTFD_COUNT + RADIO_MUX_EVENTFD_COUNT + RCP_PROXY_EVENTFD_COUNT + USBIP_EVENTFDS,
     });
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_vfs_eventfd_register: %s, no radio channels and no OpenThread", esp_err_to_name(err));
@@ -195,7 +196,13 @@ void app_main(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "zigbee_register: %s, no ziggurat mode", esp_err_to_name(err));
     }
-    // The radio channel mux: the only USB host and C6 SPI owner. Instances register before it starts.
+    // USB/IP or the radio mux owns the USB port, by the stored flag: before the mux starts, so it knows whether to run
+    // its USB transport. Flag off: one NVS read and nothing else.
+    err = usbip_boot();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "usbip_boot: %s, USB/IP is off", esp_err_to_name(err));
+    }
+    // The radio channel mux: the only USB host (unless USB/IP owns the port) and C6 SPI owner. Instances register before it starts.
     err = radio_mux_start();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "radio_mux_start: %s, no USB radios", esp_err_to_name(err));

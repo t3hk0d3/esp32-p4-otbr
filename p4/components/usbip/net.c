@@ -658,7 +658,9 @@ static void answer_import(pending_t *p)
     s_dirty = true;
     taskENTER_CRITICAL(&s_lock);
     strlcpy(s_pub.client, client, sizeof(s_pub.client));
-    s_pub.client_since = (int64_t)time(NULL);
+    // 0 while the clock is unset (before 2020-01-01), as zigbee reports it.
+    const time_t now = time(NULL);
+    s_pub.client_since = now < 1577836800 ? 0 : (int64_t)now;
     taskEXIT_CRITICAL(&s_lock);
     ESP_LOGI(TAG, "session %lu: %s imported %s (%04x:%04x)", (unsigned long)s_sessions, client, USBIP_BUSID,
              s_dev.vid, s_dev.pid);

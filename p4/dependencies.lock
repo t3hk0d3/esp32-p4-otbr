@@ -302,6 +302,6 @@ direct_dependencies:
 - espressif/usb_host_ch34x_vcp
 - espressif/usb_host_cp210x_vcp
 - idf
-manifest_hash: 46f8b319f938e0647989184bb2c799efaba51f479c3eac29032506f6bac00eb5
+manifest_hash: 044a6cc192afa021f69eb0161be77829887f14b4abf1da6408794004237b4e9e
 target: esp32p4
 version: 3.0.0
