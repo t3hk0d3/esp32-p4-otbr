@@ -10,6 +10,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include "esp_log.h"
+#include "esp_private/log_level.h" // esp_log_level_get_timeout
 #include "openthread/logging.h"
 #include "logging.h"
 #include "logging_text.h"
@@ -45,7 +46,9 @@ void __wrap_otPlatLog(otLogLevel log_level, otLogRegion log_region, const char *
     (void)log_region;
     const esp_log_level_t level = br_core_ot_log_to_esp(log_level);
 
-    if (level > esp_log_level_get(OT_LOG_TAG)) {
+    // The bounded lookup esp_log_va itself uses (waits at most 10 ms for the log mutex; esp_log_level_get waits
+    // forever): this runs on the OpenThread task.
+    if (level > esp_log_level_get_timeout(OT_LOG_TAG)) {
         return;
     }
     char text[OT_LINE_MAX];
