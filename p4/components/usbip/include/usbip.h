@@ -33,7 +33,7 @@ bool usbip_active(void);
 // Stores the flag when the verdict is USBIP_SET_REBOOT (the caller reboots; this never does). long_op: a long
 // operation runs (it blocks enabling). USBIP_SET_REFUSE_IN_USE fills detail with
 // "<channel id> runs <mode>: move it or switch it off first". detail may be NULL. An NVS failure on the store is
-// reported as USBIP_SET_REFUSE_BUSY after logging (nothing stored).
+// reported as USBIP_SET_STORE_FAILED after logging (nothing stored).
 usbip_set_verdict_t usbip_set_enabled(bool on, bool long_op, char *detail, size_t cap);
 
 // Ends the running session, if any. ESP_ERR_INVALID_STATE when USB/IP is not active.

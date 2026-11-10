@@ -83,6 +83,7 @@ typedef enum {
     USBIP_SET_REBOOT,
     USBIP_SET_REFUSE_IN_USE,
     USBIP_SET_REFUSE_BUSY,
+    USBIP_SET_STORE_FAILED, // the flag could not be stored (NVS): nothing changed
 } usbip_set_verdict_t;
 
 // The state's name as the API shows it: off, blocked, no_device, unsupported, exportable, attached.

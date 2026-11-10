@@ -932,7 +932,7 @@ static void timers(void)
             // The port went off but the device never went away: never offer it on an unpowered port. Closing it lets
             // the USB task power the port on once esp-usb frees it; it comes back as a new device.
             ESP_LOGW(TAG, "the device did not reset after the session and the root port is still off: closing it");
-            note_error("the device did not reset after the session: closed until the root port is on again");
+            note_error("the device did not reset after the session: closed; replug it if it does not come back");
             s_has_dev = false;
             s_cfg = NULL;
             s_cfg_len = 0;

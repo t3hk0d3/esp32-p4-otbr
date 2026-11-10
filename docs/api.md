@@ -435,6 +435,7 @@ when the value is the stored one already. `PUT /device/usbip {"kick": true}` dro
 | 400 `bad_value` | the body is not one of the two forms |
 | 409 `usb_channel_in_use` | switching on while a USB channel's stored mode is `otbr` or `ziggurat`; `detail` is "`<id>` runs `<mode>`: move it or switch it off first" |
 | 409 `busy` | "an update or firmware push is running or waits for its reboot" |
+| 500 `store_failed` | the setting could not be written to flash; nothing changed |
 
 ### Zigbee coordinator (experimental)
 

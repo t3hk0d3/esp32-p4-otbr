@@ -126,7 +126,7 @@ usbip_set_verdict_t usbip_set_enabled(bool on, bool long_op, char *detail, size_
 
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "storing the enabled flag: %s", esp_err_to_name(err));
-        return USBIP_SET_REFUSE_BUSY;
+        return USBIP_SET_STORE_FAILED;
     }
     atomic_store(&s_enabled, on);
     return v;
