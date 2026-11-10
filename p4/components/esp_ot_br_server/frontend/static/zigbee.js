@@ -26,6 +26,17 @@ function radioName(channel) {
   return channel ? 'USB radio ' + channel : '-';
 }
 
+/** The warning when Thread (its channel as the Thread cards show it) and Zigbee (/device/zigbee) share an 802.15.4
+ *  channel; "" when they differ or either is unknown. */
+function sharedChannelText(threadChannel, z) {
+  var t = parseInt(threadChannel, 10);
+  var zc = z && z.radio ? z.radio.channel : NaN;
+  if (isNaN(t) || typeof zc !== 'number' || t !== zc)
+    return '';
+  return 'Thread and Zigbee both use channel ' + t + '. They share the air, so each slows the other under load: ' +
+         'move one of them to another channel.';
+}
+
 /** Epoch seconds as a local date and time; 0 means the clock was not set when it happened. */
 function epochText(t) {
   if (t === null || t === undefined)
@@ -83,6 +94,7 @@ function heroFor(z) {
 return {
   pollMs : pollMs,
   radioName : radioName,
+  sharedChannelText : sharedChannelText,
   epochText : epochText,
   zhaPath : zhaPath,
   hex16 : hex16,
@@ -99,6 +111,20 @@ var C = typeof DeviceCommon !== 'undefined' ? DeviceCommon : require('./device_c
 var L = ZigbeeLogic;
 var $ = kit.$, el = kit.el, setText = kit.setText, show = kit.show;
 var lastState = null;
+var lastZ = null;          // the last /device/zigbee answer while it runs, for the shared-channel notice
+var threadChannel = null; // Thread's channel from the Thread cards (setThreadChannel), null while Thread is off
+
+function renderShared() {
+  var text = L.sharedChannelText(threadChannel, lastZ);
+  show('zg-shared', !!text);
+  setText('zg-shared-text', text);
+}
+
+/* StatusPage's Thread refresh: Thread's channel ("15", "-"), or null while Thread does not run. */
+function setThreadChannel(ch) {
+  threadChannel = ch;
+  renderShared();
+}
 
 function facts(id, rows) {
   var dl = $(id);
@@ -113,6 +139,7 @@ function dash(v, fn) { return v === null || v === undefined ? '-' : fn ? fn(v) :
 
 function render(z) {
   lastState = z.state;
+  lastZ = z;
   var h = L.heroFor(z);
   show('zigbee-off', false);
   show('zigbee-on', true);
@@ -150,11 +177,14 @@ function render(z) {
   setText('zg-heap-use', 'in use by the coordinator, peak ' + C.bytesText(z.heap.peak));
   facts('zg-fw', [ [ 'Radio', z.firmware || '-', 'zg-mono' ] ]);
   setText('zg-note', '');
+  renderShared();
 }
 
 /* No radio runs the coordinator: the placeholder instead of the content. */
 function renderNone() {
   lastState = null;
+  lastZ = null;
+  renderShared();
   show('zigbee-off', true);
   show('zigbee-on', false);
   setText('zg-note', '');
@@ -203,7 +233,15 @@ function bindCopy() { $('zg-copy').addEventListener('click', copyPath); }
 /* The poll period for StatusPage's poller: quick while the coordinator starts. */
 function pollMs() { return L.pollMs(lastState); }
 
-return {render : render, renderNone : renderNone, clear : clear, refresh : refresh, bindCopy : bindCopy, pollMs : pollMs};
+return {
+  render : render,
+  renderNone : renderNone,
+  clear : clear,
+  refresh : refresh,
+  bindCopy : bindCopy,
+  pollMs : pollMs,
+  setThreadChannel : setThreadChannel
+};
 }
 
 if (typeof module !== 'undefined' && module.exports) {

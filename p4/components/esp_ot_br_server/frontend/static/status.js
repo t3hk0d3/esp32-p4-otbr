@@ -454,6 +454,7 @@ function threadOff() {
   pskc = '-';
   showPskc();
   kit.clear($('addr-body'));
+  zigbee.setThreadChannel(null);
 }
 
 function showPskc() {
@@ -481,6 +482,7 @@ function renderThread(r) {
   setText('t-id-otver', v.otver);
   pskc = v.pskc;
   showPskc();
+  zigbee.setThreadChannel(v.joined ? v.channel : null);
 }
 
 function renderAddresses(list) {
