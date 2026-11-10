@@ -1,10 +1,10 @@
 # Hybrid mode: Thread and Zigbee at once, on separate radios: design
 
-Status: approved by the user, 2026-11-10, with the three decisions of section 9 as recommended. The user asked for hybrid mode on 2026-11-09 and for this design after
-PR #42 (channel/mode orchestrator) merged. A spike on 2026-11-10 (section 2) ran both stacks together on the board.
-Branch `feat/hybrid-mode`, one PR. It changes one rule of `2026-11-08-channel-mode-orchestrator-design.md` (section
-4.3: "Thread and Zigbee never both bound") and the "No hybrid" limit of `docs/zigbee.md`. Everything else in those
-designs stands.
+Status: approved by the user, 2026-11-10, with the three decisions of section 9 as recommended. The user asked for
+hybrid mode on 2026-11-09 and for this design after PR #42 (channel/mode orchestrator) merged. A spike on 2026-11-10
+(section 2) ran both stacks together on the board. Branch `feat/hybrid-mode`, one PR. It changes one rule of
+`2026-11-08-channel-mode-orchestrator-design.md` (section 4.3: "Thread and Zigbee never both bound") and the "No
+hybrid" limit of `docs/zigbee.md`. Everything else in those designs stands.
 
 ## 1. Intent
 
@@ -43,7 +43,7 @@ Goals:
   the C6 and Zigbee on the dongle, or the reverse).
 - Keep every other binding rule: one mode per channel, one Thread, one Zigbee, the firmware fit, the proxy's port rule.
 - Keep each stack's behaviour on loss, reset and maintenance of its own radio as it is today.
-- Tell the user when both networks share an 802.15.4 channel (section 5.3; the form is open decision 1).
+- Tell the user when both networks share an 802.15.4 channel (section 5.3; decision 1).
 - Tests and docs that match.
 
 Non-goals:
@@ -154,7 +154,7 @@ On the board (batched pass, RF rule):
 1. Same-channel notice (5.3): a warning in the Zigbee section of the Dashboard, linking the Radios page. No refusal: ZHA
    picks the Zigbee channel after the bind.
 2. Both assignments are supported and tested: Thread on the C6 with Zigbee on the dongle, and the reverse.
-3. Downgrade (section 6): documented in CHANGELOG and  as "turn Zigbee off before going back to an older
+3. Downgrade (section 6): documented in CHANGELOG and `docs/zigbee.md` as "turn Zigbee off before going back to an older
    firmware"; no load-path guard.
 
 ## 10. Left to the builder
