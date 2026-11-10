@@ -407,6 +407,9 @@ reason, spec reference.
    `static/style.css` adds the `.lg-*` rules (foldable cards, level colours, fullscreen). Page tests:
    `tools/tests/test_logs_page.py`, `tools/tests/test_device_pages.py`. (docs/superpowers/specs/2026-11-10-logging-design.md,
    Web UI)
+40. Applied (USB/IP, Task 10). `esp_ot_br_server/src/esp_br_web.c`: `EXTRA_HANDLER_SLOTS` 41 -> 43 (on top of patch
+   38). `device_api` adds `GET`/`PUT /device/usbip`: 39 routes (both WebSockets included) plus `/zigbee` and the
+   catch-all, two slots of headroom kept. (docs/superpowers/specs/2026-11-10-usbip-design.md)
 
 ### REST guard classification (patches 2 and 9)
 
