@@ -66,6 +66,7 @@ static const char *TAG = "br_core";
 #define LEADER_NVS_KEY "leader_adj"
 #define FAULT_INCOMPATIBLE MODE_FSM_FAULT_INCOMPATIBLE
 #define TREL_SET_LOCK_MS 1000
+#define OT_LOG_LOCK_MS 1000
 #define TREL_QUERY_MS 3000 // how long a peer query collects answers (esp mdns sends it about once a second)
 #define TREL_QUERY_DELAY_MS 100 // after an address event: a burst of them gets one query
 
@@ -489,6 +490,9 @@ static esp_err_t init_openthread(void)
     ESP_RETURN_ON_ERROR(esp_openthread_init(&s_platform_config), TAG, "esp_openthread_init");
     esp_openthread_mux_init_done(); // from now on a reset after GONE is answered as done (mux_spinel_interface.cpp)
     g_core.ot_initialised = true;
+    esp_openthread_lock_acquire(portMAX_DELAY);
+    br_core_ot_log_apply_locked(); // the OPENTHREAD component level, before OpenThread's first lines
+    esp_openthread_lock_release();
     set_vendor_sw_version();
 #if CONFIG_OPENTHREAD_RADIO_TREL
     esp_openthread_lock_acquire(portMAX_DELAY);
@@ -535,6 +539,9 @@ static void ot_task(void *arg)
     }
     maybe_start_bringup();
     xSemaphoreGive(g_core.mutex);
+    esp_openthread_lock_acquire(portMAX_DELAY);
+    br_core_ot_log_apply_locked(); // a level change that came in before ot_ready was set
+    esp_openthread_lock_release();
     ESP_LOGI(TAG, "OpenThread initialised on %s", radio_mux_chan_id(core_radio_chan()));
     g_core.loop_running = true;
     xSemaphoreGive(g_core.init_done); // core_radio_ot_start; br_core_start waits for br_radio's after_channel_op
@@ -634,6 +641,7 @@ esp_err_t br_core_start(esp_netif_t *backbone)
                         g_core.sessions_done, ESP_ERR_NO_MEM, TAG, "no memory");
     // Only now: the status and session calls (the HTTP server already runs) use the objects above once this is set.
     g_core.started = true;
+    br_core_ot_log_start();
 
     // mDNS first (normally started earlier by app_main): it answers while the radio boots.
     // Not essential for the radio: without mDNS the board is reachable by its address, and an early return here would leave
@@ -737,6 +745,27 @@ static bool ot_callable(void)
 
     xSemaphoreGive(g_core.mutex);
     return callable;
+}
+
+// Called by the OPENTHREAD level listener on the task that applied the settings (never the OpenThread task). While
+// OpenThread is down the level only stays stored: ot_task applies it once OpenThread is up (after the init and again
+// once ot_ready is set, so a change in between is not lost).
+void core_ot_log_push(void)
+{
+    if (!ot_callable() || !br_core_ot_session_begin()) {
+        return;
+    }
+    if (!ot_callable()) { // a radio fault came in between
+        br_core_ot_session_end();
+        return;
+    }
+    if (esp_openthread_lock_acquire(pdMS_TO_TICKS(OT_LOG_LOCK_MS))) {
+        br_core_ot_log_apply_locked();
+        esp_openthread_lock_release();
+    } else {
+        ESP_LOGW(TAG, "OpenThread log level: OpenThread busy, applied at the next start");
+    }
+    br_core_ot_session_end();
 }
 
 #if CONFIG_OPENTHREAD_RADIO_TREL
