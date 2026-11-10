@@ -14,7 +14,9 @@ release's `versions.txt`.
   reboots the board and is refused while a USB channel runs `otbr` or `ziggurat` (409 `usb_channel_in_use`). While on,
   the USB channels are `unavailable` and their mode changes get 409 `usbip_enabled`. No isochronous transfers, no hubs,
   one configuration, no authentication or encryption. New `GET`/`PUT /device/usbip`, a USB/IP page and the `usbip`
-  flag in `GET /device/channels`. See `docs/usbip.md`. Not yet checked on a board.
+  flag in `GET /device/channels`. Transfers of up to 120 KB, with USB transfer buffers in PSRAM
+  (`CONFIG_USB_HOST_DWC_DMA_CAP_MEMORY_IN_PSRAM`, which also moves the USB radio channels' buffers), so USB flash
+  drives work. See `docs/usbip.md`. Checked on a board with a USB serial radio dongle.
 - Logging: one log stream (ESP-IDF components, OpenThread and Ziggurat) out on four channels with their own levels:
   UART (as before), USB-JTAG (header pins 27/28, needs a USB breakout), syslog over UDP (RFC 5424, `host[:port]`, a
   hostname is looked up again) and a live log in the browser (at most 2 viewers, each with its own level). Per-component
@@ -39,7 +41,7 @@ release's `versions.txt`.
 
 - OpenThread's lines on the UART now have the format of every other tag: `I (123) OPENTHREAD: ...` instead of
   `I(123) OPENTHREAD:...`. Scripts that match the old form need the new one.
-- lwIP UDP PCBs 16 → 32 (the sum of their users is in `p4/sdkconfig.defaults`), lwIP sockets 24 → 25 (syslog). An
+- lwIP UDP PCBs 16 → 32 (the sum of their users is in `p4/sdkconfig.defaults`), lwIP sockets 24 → 27 (syslog, USB/IP). An
   existing `p4/sdkconfig` keeps the old values and the build stops with an `#error`: delete `p4/sdkconfig` after
   pulling and build again (`make build` does it by itself).
 

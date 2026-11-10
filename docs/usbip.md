@@ -125,39 +125,29 @@ device stays out of reach of any other computer.
 - No isochronous transfers: isochronous transfers, as used by audio devices, webcams and Bluetooth SCO voice, are not supported.
 - No hubs. A hub on the port is `unsupported`.
 - One configuration. `SET_CONFIGURATION` to another value than the active one is refused.
-- Transfers over 16 KB are refused. Configuration descriptors up to 1024 bytes are read
-  (`CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE`). This breaks USB storage as Linux sets it up (reads of up to
-  120 KB): see [USB flash drives](#usb-flash-drives).
+- Transfers over 120 KB are refused (Linux USB storage reads up to 120 KB by default). Configuration descriptors up
+  to 1024 bytes are read (`CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE`).
 - A client's port reset is acknowledged but not carried out on the device. A device that needs a real reset to
-  recover from an error (USB storage after a failed transfer) stays stuck until the session ends: detach, then kick
-  (the board power-cycles the port) and attach again.
+  recover from an error stays stuck until the session ends: detach, then kick (the board power-cycles the port) and
+  attach again.
 - A device with more than 15 endpoints, counting alternate setting 0 of every interface, is not exported.
 - Interrupt transfers longer than 32 packets fail (`-EPROTO`), for example over 256 bytes on a full-speed HID device
   with 8-byte packets: the USB host driver schedules at most 32 packets per interrupt transfer.
 - One device and one client at a time.
 
-Memory: the transfers in flight use internal RAM, at most 80 KB in all. Reads (IN) share 32 KB; every endpoint can
-always have one transfer of up to 2 KB in flight, and a larger first transfer (a 16 KB write, for example) goes when it
-fits under the 80 KB. A transfer is also refused (`-ENOMEM`) when it would leave less than 48 KB of internal DMA memory
-free. Requests that wait for the device queue in PSRAM, up to 1 MB per session; beyond that the session ends (counter
+Memory: transfer buffers live in PSRAM, at most 408 KB in flight. Reads (IN) share 256 KB; every endpoint can always
+have one transfer of up to 2 KB in flight, and a larger first transfer (a 120 KB write, for example) goes when it fits
+under the 408 KB. A transfer is also refused (`-ENOMEM`) when it would leave less than 1 MB of PSRAM free. Requests
+that wait for the device queue in PSRAM, up to 1 MB per session; beyond that the session ends (counter
 `sessions_ended_overload`).
 
 Devices that stall or never answer a control transfer end the session, and the board resets them.
 
 ## USB flash drives
 
-Not a target use, but it works with one setting on the client. Linux reads a disk in chunks of up to 120 KB, and the
-first such read fails and leaves the drive stuck (see [Limits](#limits)). Lower the disk's request size to 16 KB as
-soon as it appears, before udev's own probe (`blkid`, in rule file 60) reads it. A rule that runs earlier should do
-it (not tested; the test below wrote the same sysfs value from a script that won the race):
-
-```
-# /etc/udev/rules.d/10-usbip-storage.rules (match your drive's vendor id)
-ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ATTRS{idVendor}=="8564", ATTR{queue/max_sectors_kb}="16"
-```
-
-Tested once (2026-11-10) with a high-speed 16 GB JetFlash: partition table, read-only mount and file reads work at
-about 2.7 MB/s; writes were not tried. Every 16 KB costs a few network round trips, so expect a few MB/s at best.
+Not a target use, but they work: transfers of up to 120 KB cover what Linux reads at a time, so no client setup is
+needed. Expect a few MB/s: every transfer costs network round trips (2.7 MB/s measured with 16 KB transfers, before the
+limit was raised).
 
 ## The USB/IP page
 

@@ -305,25 +305,31 @@ interface the way CLEAR_FEATURE does (6.4).
 
 ### 8.1 Memory
 
-DMA buffers stay in internal RAM *(my call: moving them to PSRAM is a global setting that also moves the CDC drivers'
-buffers, which this feature does not need)*. A client can queue many URBs (Linux `cdc_acm` keeps 16 reads pending,
+DMA buffers live in PSRAM (`CONFIG_USB_HOST_DWC_DMA_CAP_MEMORY_IN_PSRAM`; the P4's USB DMA reaches it) *(user's
+call 2026-11-10, after the hardware pass: it reverses the earlier "internal RAM" call. The setting is global, so the
+USB serial radio channels' buffers move too; esp-usb rounds every buffer to the cache line and cache-syncs it, as it
+already did for the P4's cached internal RAM)*. One transfer may carry up to 120 KB (`USBIP_XFER_MAX`), Linux
+`usb-storage`'s default read size, so USB flash drives work without client setup; esp-usb's per-transfer limit is
+130048 bytes on the worst endpoint. A client can queue many URBs (Linux `cdc_acm` keeps 16 reads pending,
 `btusb` keeps several bulk and interrupt reads pending forever), so the board bounds what is in flight and never lets
 one endpoint's pending reads starve another endpoint:
 
-- **In-flight transfer buffers** (internal, DMA): IN endpoints share at most 32 KB and 32 transfers *(my call;
-  measured on board in the hardware pass and adjusted once)*. All buffers in flight together stay at or below 80 KB
-  (`USBIP_INFLIGHT_HARD` = 32 KB IN shared + one 16 KB transfer + 16 × 2 KB small reserves) *(review fix: the
-  earlier unbounded per-endpoint reserve could reach about 244 KB, more than the board's free internal heap)*.
+- **In-flight transfer buffers** (PSRAM, DMA): IN endpoints share at most 256 KB (`USBIP_INFLIGHT_BYTES`) and 32
+  transfers. All buffers in flight together stay at or below 408 KB (`USBIP_INFLIGHT_HARD` = 256 KB IN shared + one
+  120 KB transfer + 16 × 2 KB small reserves) *(review fix: the earlier unbounded per-endpoint reserve could reach
+  about 244 KB; raised from 32 / 16 / 80 KB when the buffers moved to PSRAM)*.
 - **Small reserve**: every endpoint, EP0 included, is always granted a first transfer of up to 2 KB
   (`USBIP_RESERVE_SMALL`), whatever else is in flight. This is what keeps a Bluetooth adapter's always-pending
   bulk/interrupt reads from blocking the HCI command on EP0 or the bulk OUT.
-- **Large reserve**: a larger first transfer (OUT, EP0, or an IN that does not fit the shared 32 KB) is granted while
-  the *charged* bytes stay at or below 80 KB. Charged bytes count each endpoint as max(its bytes in flight, 2 KB), so
-  an idle endpoint's small reserve is always kept free. Shared and small grants alone stay at or below 64 KB, so one
-  16 KB OUT or EP0 transfer always fits once no other large transfer is in flight; otherwise it waits in its FIFO and
+- **Large reserve**: a larger first transfer (OUT, EP0, or an IN that does not fit the shared 256 KB) is granted
+  while the *charged* bytes stay at or below 408 KB. Charged bytes count each endpoint as max(its bytes in flight,
+  2 KB), so an idle endpoint's small reserve is always kept free. Shared and small grants alone stay at or below
+  288 KB, so one 120 KB OUT or EP0 transfer always fits once no other large transfer is in flight; otherwise it waits in its FIFO and
   goes when a completion frees the bytes (every completion drains the FIFOs).
-- **Heap floor**: the USB side refuses a DMA buffer (the client gets `-ENOMEM`) that would leave less than 48 KB of
-  internal DMA memory free (`USBIP_DMA_FREE_FLOOR`).
+- **Heap floor**: the USB side refuses a DMA buffer (the client gets `-ENOMEM`) that would leave less than 1 MB of
+  DMA-capable PSRAM free (`USBIP_PSRAM_FREE_FLOOR`).
+- **Reply ring**: replies the socket does not take wait in a 768 KB PSRAM ring, which holds every IN completion that
+  can be in flight (checked at compile time), so a burst never reads as a client that does not read.
 - **Waiting URBs**: a SUBMIT that does not fit waits in a per-endpoint FIFO in PSRAM (its header and OUT data) and is
   submitted, in order, when that endpoint gets a slot. The socket is always read, so an UNLINK is never stuck behind
   a SUBMIT.
@@ -333,8 +339,8 @@ one endpoint's pending reads starve another endpoint:
 ```
 slot granted to SUBMIT for endpoint E with size N when:
     E has no transfer in flight and N <= 2 KB                                    # small reserve
-    or (E is IN and bytes in flight + N <= 32 KB and transfers in flight < 32)   # shared; OUT: one at a time
-    or (E has no transfer in flight and charged bytes after the grant <= 80 KB)  # large reserve
+    or (E is IN and bytes in flight + N <= 256 KB and transfers in flight < 32)  # shared; OUT: one at a time
+    or (E has no transfer in flight and charged bytes after the grant <= 408 KB) # large reserve
 otherwise: append to E's PSRAM FIFO
 on each completion on E: free its slot, then grant slots to E's FIFO head first, then other FIFOs round-robin
 ```
