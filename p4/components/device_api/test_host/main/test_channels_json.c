@@ -875,7 +875,6 @@ TEST_CASE("On each verdict: its status and code", "[device_api]")
         {RADIO_MUX_REFUSE_NOT_AVAILABLE, 409, "not_available"},
         {RADIO_MUX_REFUSE_INCOMPATIBLE, 409, "incompatible"},
         {RADIO_MUX_REFUSE_MODE_TAKEN, 409, "mode_taken"},
-        {RADIO_MUX_REFUSE_HYBRID, 409, "hybrid_not_supported"},
         {RADIO_MUX_REFUSE_UNKNOWN_CHANNEL, 404, "unknown_channel"},
         {RADIO_MUX_REFUSE_FAILED, 500, "failed"},
         {RADIO_MUX_REFUSE_PROBE_FAILED, 409, "probe_failed"},

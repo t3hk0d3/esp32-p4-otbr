@@ -149,21 +149,98 @@ TEST_CASE("On a registered limit-1 mode already used by another channel: returns
     TEST_ASSERT_EQUAL(RADIO_MUX_APPLY, radio_mux_orch_check_bind(&zig, c, N_CHANS, 2, MODE_ZIGGURAT, false, NULL));
 }
 
-TEST_CASE("On otbr while a ziggurat consumer is active, or ziggurat while otbr is active: returns "
-          "RADIO_MUX_REFUSE_HYBRID", "[radio_mux]")
+// The real Zigbee instance: needs spinel, one channel, binding or unbinding it reboots.
+static radio_mux_rules_t hybrid_rules(void)
 {
-    radio_mux_rules_t zig = ziggurat_rules();
+    radio_mux_rules_t r = ziggurat_rules();
+
+    r.rules[0].reboot_on_change = true;
+    return r;
+}
+
+TEST_CASE("On ziggurat on the dongle while Thread runs on the C6: returns RADIO_MUX_APPLY_REBOOT", "[radio_mux]")
+{
+    radio_mux_rules_t zig = hybrid_rules();
     radio_mux_chan_view_t c[N_CHANS];
 
-    // ziggurat requested on the dongle while the c6 is otbr
     three_channels(c);
-    TEST_ASSERT_EQUAL(RADIO_MUX_REFUSE_HYBRID, radio_mux_orch_check_bind(&zig, c, N_CHANS, 1, MODE_ZIGGURAT, false, NULL));
-    // otbr requested on the c6 while the dongle runs ziggurat
+    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY_REBOOT, radio_mux_orch_check_bind(&zig, c, N_CHANS, 1, MODE_ZIGGURAT, false, NULL));
+}
+
+TEST_CASE("On otbr on the C6 (off) while Zigbee runs on the dongle: returns RADIO_MUX_MOVE from nowhere (a start)",
+          "[radio_mux]")
+{
+    radio_mux_rules_t zig = hybrid_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    size_t from = 99;
+
+    three_channels(c);
     c[0].mode = RADIO_MUX_MODE_OFF;
     c[1].mode = MODE_ZIGGURAT;
-    TEST_ASSERT_EQUAL(RADIO_MUX_REFUSE_HYBRID, radio_mux_orch_check_bind(&zig, c, N_CHANS, 0, RADIO_MUX_MODE_OTBR, false, NULL));
-    // A channel leaving ziggurat for otbr is not a hybrid: nothing else runs ziggurat (a plain start of otbr).
-    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_orch_check_bind(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, false, NULL));
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_orch_check_bind(&zig, c, N_CHANS, 0, RADIO_MUX_MODE_OTBR, false, &from));
+    TEST_ASSERT_EQUAL(N_CHANS, from);
+}
+
+TEST_CASE("On otbr on the dongle that runs Zigbee while Thread runs on the C6: returns RADIO_MUX_APPLY_REBOOT from the "
+          "C6", "[radio_mux]")
+{
+    radio_mux_rules_t zig = hybrid_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    size_t from = 99;
+
+    three_channels(c);
+    c[1].mode = MODE_ZIGGURAT;
+    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY_REBOOT,
+                      radio_mux_orch_check_bind(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, false, &from));
+    TEST_ASSERT_EQUAL(0, from);
+}
+
+TEST_CASE("On otbr on the dongle that runs Zigbee while no channel runs Thread: returns RADIO_MUX_APPLY_REBOOT from "
+          "nowhere", "[radio_mux]")
+{
+    radio_mux_rules_t zig = hybrid_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    size_t from = 99;
+
+    three_channels(c);
+    c[0].mode = RADIO_MUX_MODE_OFF;
+    c[1].mode = MODE_ZIGGURAT;
+    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY_REBOOT,
+                      radio_mux_orch_check_bind(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, false, &from));
+    TEST_ASSERT_EQUAL(N_CHANS, from);
+}
+
+TEST_CASE("On ziggurat on the C6 while Thread runs on the C6 and nothing runs Zigbee: returns RADIO_MUX_APPLY_REBOOT",
+          "[radio_mux]")
+{
+    radio_mux_rules_t zig = hybrid_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+
+    three_channels(c);
+    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY_REBOOT, radio_mux_orch_check_bind(&zig, c, N_CHANS, 0, MODE_ZIGGURAT, false, NULL));
+}
+
+TEST_CASE("On ziggurat on the dongle while Zigbee runs on the C6: returns RADIO_MUX_REFUSE_MODE_TAKEN", "[radio_mux]")
+{
+    radio_mux_rules_t zig = hybrid_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+
+    three_channels(c);
+    c[0].mode = MODE_ZIGGURAT;
+    TEST_ASSERT_EQUAL(RADIO_MUX_REFUSE_MODE_TAKEN,
+                      radio_mux_orch_check_bind(&zig, c, N_CHANS, 1, MODE_ZIGGURAT, false, NULL));
+}
+
+TEST_CASE("On otbr on the dongle (off) while Thread runs on the C6 and nothing runs Zigbee: returns RADIO_MUX_MOVE "
+          "from the C6", "[radio_mux]")
+{
+    radio_mux_rules_t zig = hybrid_rules();
+    radio_mux_chan_view_t c[N_CHANS];
+    size_t from = 99;
+
+    three_channels(c);
+    TEST_ASSERT_EQUAL(RADIO_MUX_MOVE, radio_mux_orch_check_bind(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, false, &from));
+    TEST_ASSERT_EQUAL(0, from);
 }
 
 TEST_CASE("On otbr while another channel stores ziggurat but no ziggurat consumer is registered: not a hybrid",
@@ -254,21 +331,6 @@ TEST_CASE("On leaving otbr for a mode whose registration reboots: returns RADIO_
     zig.rules[0].reboot_on_change = true;
     three_channels(c);
     TEST_ASSERT_EQUAL(RADIO_MUX_APPLY_REBOOT, radio_mux_orch_check_bind(&zig, c, N_CHANS, 0, MODE_ZIGGURAT, false, NULL));
-}
-
-TEST_CASE("On otbr for a channel leaving a mode whose registration reboots: returns RADIO_MUX_APPLY_REBOOT, not a start",
-          "[radio_mux]")
-{
-    radio_mux_rules_t zig = ziggurat_rules();
-    radio_mux_chan_view_t c[N_CHANS];
-    size_t from = 99;
-
-    zig.rules[0].reboot_on_change = true;
-    three_channels(c);
-    c[0].mode = RADIO_MUX_MODE_OFF;
-    c[1].mode = MODE_ZIGGURAT;
-    TEST_ASSERT_EQUAL(RADIO_MUX_APPLY_REBOOT, radio_mux_orch_check_bind(&zig, c, N_CHANS, 1, RADIO_MUX_MODE_OTBR, false, &from));
-    TEST_ASSERT_EQUAL(99, from); // no move: nothing probes the channel the consumer still holds
 }
 
 TEST_CASE("On otbr for a channel leaving a mode that does not reboot: still RADIO_MUX_MOVE from no source (a start)",

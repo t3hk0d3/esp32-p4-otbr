@@ -71,7 +71,7 @@ const char *device_api_channel_port_conflict(const radio_mux_snapshot_t *s, cons
 
 /**
  * HTTP status and error code of a radio_mux_set verdict: APPLY and APPLY_REBOOT 200, MOVE 202 (code NULL); 400
- * bad_value; 404 unknown_channel; 409 unavailable, not_available, incompatible, mode_taken, hybrid_not_supported,
+ * bad_value; 404 unknown_channel; 409 unavailable, not_available, incompatible, mode_taken,
  * probe_failed, busy; 500 failed (also for a value out of range).
  */
 void device_api_channel_refusal(radio_mux_verdict_t v, int *status, const char **code);
