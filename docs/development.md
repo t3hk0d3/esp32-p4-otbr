@@ -314,10 +314,11 @@ core dump over USB with `idf.py -C p4 coredump-info`.
 ## CI and releases
 
 `.github/workflows/build.yml` runs on every push to `master` and every pull request, in the `espressif/idf` container of
-`IDF_VERSION`: `make test-host`, `make test-tools`, `make build`, `make test-vendored` and `make package`. The workflow keeps
+`IDF_VERSION`: `make test-host`, `make test-tools`, `make build-release`, `make test-vendored` and `make package`. The workflow keeps
 the packaged files as the `firmware` artifact of the run. No board is involved; the on-board tests stay on the bench.
-A pull request that changes only documentation (Markdown files, `docs/`, `mkdocs.yml`, `tools/docs_hooks.py`, the docs
-workflow) skips the tests and the build; the skipped jobs still pass as status checks. Pushes always build.
+A pull request that changes only documentation (Markdown files, `docs/` except `docs/assets/flasher.js` and
+`docs/overrides/flash.html`, `mkdocs.yml`, `tools/docs_hooks.py`, the docs workflow) skips the tests and the build; the
+skipped jobs still pass as status checks. Pushes always build.
 
 `make sizes` (also run by the workflow, into the job summary) lists each image's size, its flash region and the space left
 there. The run keeps the numbers as the `sizes` artifact; on a pull request a follow-up job compares them with the

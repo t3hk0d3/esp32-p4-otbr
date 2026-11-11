@@ -107,9 +107,10 @@ if [[ ! -f "$root/p4/CMakeLists.txt" ]]; then
     echo "skipping p4 (not present)"
 elif [[ $all_targets == 1 ]]; then
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    pair_list="$("$root/tools/targets.py" list)" # not in a process substitution: its failure must stop the script
     while read -r pair; do
         build_p4 "$pair" "$stamp"
-    done < <("$root/tools/targets.py" list)
+    done <<<"$pair_list"
 else
     build_p4 "$target" ""
 fi

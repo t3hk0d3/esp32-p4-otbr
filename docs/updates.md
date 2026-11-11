@@ -48,8 +48,9 @@ power-cycle the board, which then starts the previous one.
     curl -X POST -d '{"url": "https://host/<board_id>_<chip_id>.ota"}' http://<board>/device/ota/url
     ```
 
-    `GET /device/update` names the file in `bundle`. From a checkout: `make ota BOARD=<board>` builds the bundle and
-    uploads it.
+    `GET /device/update` names the file in `bundle`. From a checkout: `make build`, then `make ota BOARD=<board>`
+    packs that build and uploads it. For a board that isn't the default target, pass `BOARD_ID=<board_id> CHIP_ID=<chip_id>`
+    to both.
 
 ## Radio firmware
 

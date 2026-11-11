@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 REGISTRY = ROOT / "p4" / "targets" / "targets.json"
 COMMON_DEFAULTS = "p4/sdkconfig.defaults"
+FILE_NAME_MAX = 64  # the longest release file name a board accepts: FILE_MAX in self_update_core.c
 
 
 def load(path=REGISTRY):
@@ -31,6 +32,11 @@ def load(path=REGISTRY):
         if target["board"] not in data["boards"] or target["chip"] not in data["chips"]:
             raise ValueError(
                 f"target {target['board']}/{target['chip']} uses an unknown id"
+            )
+        file_name = f"{target['board']}_{target['chip']}.ota"
+        if len(file_name) > FILE_NAME_MAX:
+            raise ValueError(
+                f"release file name '{file_name}' is longer than {FILE_NAME_MAX} characters"
             )
     if data["default"] not in data["targets"]:
         raise ValueError("the default target is not in the target list")

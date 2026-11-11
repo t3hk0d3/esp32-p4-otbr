@@ -545,7 +545,7 @@ class TestTemplate:
 
     def test_loads_the_pinned_libraries(self):
         html = template()
-        assert "https://unpkg.com/esptool-js@0.6.0/bundle.js" in html
+        assert "https://unpkg.com/esptool-js@0.7.0/bundle.js" in html
         assert "https://unpkg.com/spark-md5@3.0.2/spark-md5.min.js" in html
 
     def test_the_guide_uses_the_template(self):

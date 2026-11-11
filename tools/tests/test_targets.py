@@ -111,6 +111,22 @@ def test_load_rejects_an_id_with_an_underscore(tmp_path):
         targets.load(path)
 
 
+def test_load_rejects_a_target_whose_file_name_a_board_would_refuse(tmp_path):
+    sys.path.insert(0, str(TOOL.parent))
+    try:
+        import targets
+    finally:
+        sys.path.pop(0)
+    bad = json.loads(json.dumps(REGISTRY))
+    long_board = "B" * 60
+    bad["boards"][long_board] = {"name": "Long"}
+    bad["targets"].append({"board": long_board, "chip": "C1"})
+    path = tmp_path / "targets.json"
+    path.write_text(json.dumps(bad))
+    with pytest.raises(ValueError, match="longer than 64"):
+        targets.load(path)
+
+
 def test_the_real_registry_is_consistent():
     result = subprocess.run(
         [sys.executable, str(TOOL), "resolve"],

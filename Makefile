@@ -26,8 +26,8 @@ SITE ?= site
 
 IDF := $(if $(shell command -v idf.py),,. "$(IDF_EXPORT)" >/dev/null &&)
 # The firmware target (BOARD_ID and CHIP_ID, both or neither for the default one) as key=value words from tools/targets.py.
-target_info := $(shell tools/targets.py resolve $(BOARD_ID) $(CHIP_ID) 2>&1)
-$(if $(filter 0,$(.SHELLSTATUS)),,$(error $(target_info)))
+# Resolved at its first use and kept, so goals that need no target (help, clean, docs) don't depend on the registry.
+target_info = $(eval target_info := $(shell tools/targets.py resolve $(BOARD_ID) $(CHIP_ID) 2>&1))$(if $(filter 0,$(.SHELLSTATUS)),,$(error $(target_info)))$(target_info)
 target_var = $(patsubst $(1)=%,%,$(filter $(1)=%,$(target_info)))
 target_build_dir = $(CURDIR)/$(call target_var,build_dir)
 target_bundle = $(DIST)/$(if $(filter $(call target_var,build_dir),p4/build),otbr.bundle,$(call target_var,board_id)_$(call target_var,chip_id).ota)
