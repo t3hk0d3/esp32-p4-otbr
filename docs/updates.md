@@ -2,7 +2,7 @@
 
 The board runs two pieces of firmware, both updated over the network on **Device > Firmware**:
 
-- **Border Router**: the P4's firmware and the web UI, one file per board and chip, named
+- **Border Router**: the P4's firmware and the web UI, one file per board and chip ([firmware target](glossary.md)), named
   `<board_id>_<chip_id>.ota`. An update reboots the board.
 - **Radio Co-Processor**: the C6's radio firmware, `c6_rcp.bin`. An update restarts the radio, not the board.
 

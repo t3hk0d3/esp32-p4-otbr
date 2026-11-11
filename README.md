@@ -7,8 +7,8 @@ border router, the ESP32-C6 on the same board is the 802.15.4 radio, and the boa
 Ethernet. You don't need a Raspberry Pi, USB dongles or Wi-Fi, and it can be powered over PoE.
 
 Plug a radio dongle into its USB port and the same board becomes a small radio hub: Thread on either radio, a Zigbee
-coordinator for ZHA (experimental), or a radio served to another host over the network, each switched from the
-browser.
+coordinator for ZHA (experimental) beside it, or a radio served to another host over the network, each switched from
+the browser. Or export the USB port itself to a PC over the network with USB/IP.
 
 Get the board from [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.htm),
 [AliExpress](https://a.aliexpress.com/_Ev2qYJC) or [Amazon](https://a.co/d/0hmmgSAF).
@@ -36,11 +36,17 @@ Get the board from [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.
 - **Zigbee coordinator (experimental).** A radio in Zigbee mode runs the Ziggurat stack on the P4 and serves Home
   Assistant's ZHA over a WebSocket (`ws://<board>/zigbee`), with its own section on the Dashboard and metrics in
   `/metrics`. [Zigbee](docs/zigbee.md)
+- **Thread and Zigbee together.** Run the Thread border router on one radio and the Zigbee coordinator on the other,
+  in either order. The Dashboard warns when both networks sit on the same 802.15.4 channel.
+  [Thread and Zigbee together](docs/zigbee.md#thread-and-zigbee-together)
+- **USB/IP server.** Use the device on the board's USB port from a Linux or Windows PC, as if it were plugged in there:
+  a radio dongle, a serial adapter or a USB flash drive. Off by default. [USB/IP](docs/usbip.md)
 - **Shares a radio over the network.** In `rcp-proxy` mode a channel's bytes go to one peer over TCP or UDP, listening
   or dialling out, so an OpenThread or Zigbee host elsewhere can use the board's radio.
 - **Updates itself from GitHub.** One click on the Firmware page checks the latest release and installs it: the
   firmware and the web UI together with automatic rollback, then the radio firmware if it changed, then one reboot.
-  You can still upload images from the browser. [Updates](docs/updates.md)
+  Each board takes the file built for its own chip revision. You can still upload images from the browser.
+  [Updates](docs/updates.md)
 - **Radio firmware updates without a reboot.** A push to the C6 restarts whatever runs on it (Thread, Zigbee or the
   proxy) on the new firmware and only answers once it runs again, or says why it didn't.
 - **Routes the mesh without prefix delegation.** No DHCPv6-PD from your ISP or router? Pick your own OMR prefix (a GUA
@@ -51,7 +57,8 @@ Get the board from [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.
   hops. Works with any TREL-capable border router on the same Ethernet link (the Thread backbone VLAN in split mode). On
   by default, switched live on the Ethernet page.
 - **Built for your network.** An optional VLAN split mode puts management and the Thread backbone on separate VLANs,
-  and confirm-or-revert means a bad network setting can't lock you out.
+  and confirm-or-revert means a bad network setting can't lock you out. The clock is set from NTP: the server your
+  DHCP lease names, `pool.ntp.org` or your own. [Networking](docs/networking.md)
 - **Sees what is on the air.** Sniffer mode streams 802.15.4 traffic as pcap straight into Wireshark, and the Thread
   Console runs OpenThread CLI commands on the board from the browser.
 - **Fixes its own radio.** With three optional jumper wires, the board repairs the C6 radio by itself and captures its
@@ -59,6 +66,8 @@ Get the board from [Waveshare](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.
 - **Shows what it is doing.** The device pages and `/device/diag` report CPU load per core and task, memory, chip
   temperature and OpenThread lock timings, and `/metrics` exports them with the Thread and Zigbee figures to
   Prometheus.
+- **Logs where you want them.** Levels per component, syslog to your server and a live log in the browser.
+  [Logging](docs/logging.md)
 
 ## Compared with the usual setups
 
@@ -75,7 +84,7 @@ down, the others keep the network reachable.
 | Radio placement | ✅ anywhere with Ethernet | ❌ at the Home Assistant host, on a USB extension cable | ✅ anywhere with Ethernet |
 | Routing to the mesh without DHCPv6-PD | ✅ custom OMR prefix announced over BGP or RIPng | ❌ PD, or a static route on your router | ❌ PD, or a static route on your router |
 | Link between border router and radio | ✅ on-board SPI | ✅ USB serial (passthrough needed in a VM) | ❌ spinel over TCP, sensitive to network delay |
-| Second radio | ✅ a USB dongle for Thread, Zigbee (experimental) or a network RCP proxy; Thread moves between radios live | ❌ one radio per add-on | ❌ one radio per add-on |
+| Second radio | ✅ a USB dongle for Thread, Zigbee (experimental) or a network RCP proxy; Thread and Zigbee run at the same time, and Thread moves between radios live | ❌ one radio per add-on | ❌ one radio per add-on |
 | Packet capture, radio recovery, diagnostics | ✅ built in | ❌ separate tools | ❌ separate tools |
 | Runs without a Home Assistant host | ✅ yes | ❌ no | ❌ no |
 
@@ -102,7 +111,8 @@ You need [the board](https://www.waveshare.com/esp32-p4-wifi6-poe-eth.htm), a 2.
 connector, a USB-C cable for the first flash, and Ethernet.
 
 1. Flash the board over USB-C from Chrome or Edge with the
-   [browser flasher](https://t3hk0d3.github.io/esp32-p4-otbr/flash/): nothing to install.
+   [browser flasher](https://t3hk0d3.github.io/esp32-p4-otbr/flash/): nothing to install. It reads the chip revision
+   and picks the firmware built for it.
 2. Open the board's web page (`http://esp-otbr-<last six hex digits of the MAC>.local/`, or its IP address) and, on
    the Firmware page, upload the radio firmware from the
    [latest release](https://github.com/t3hk0d3/esp32-p4-otbr/releases/latest): `c6_installer.bin` once on a new

@@ -111,6 +111,22 @@
 @media (max-width: 860px) { .otbr-home .trio { grid-template-columns: minmax(0, 1fr); } }
 .otbr-home .diag-note { text-align: center; color: var(--quiet); font-size: 14.5px; margin-top: 12px; }
 @media (max-width: 900px) { .otbr-home .radios-diag { overflow-x: auto; } .otbr-home .radios-diag svg { width: 900px; max-width: none; } }
+.otbr-home .tag.new { color: var(--air); border-color: color-mix(in srgb, var(--air) 45%, transparent); }
+.otbr-home a.inline { color: var(--air); text-decoration: none; white-space: nowrap; }
+.otbr-home a.inline::after { content: " ↓"; }
+
+/* advanced features */
+.otbr-home .feats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.otbr-home .feat { display: flex; flex-direction: column; gap: 10px; padding: 24px; border-radius: 22px; background: var(--bg-2); border: 1px solid var(--line); text-decoration: none; min-width: 0; transition: border-color .2s, transform .2s; }
+.otbr-home .feat:hover { border-color: color-mix(in srgb, var(--air) 50%, var(--line)); transform: translateY(-2px); }
+.otbr-home .feat .ico { width: 36px; height: 36px; fill: none; stroke: var(--air); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.otbr-home .feat h3 { font-size: 19px; font-weight: 650; }
+.otbr-home .feat p { color: var(--quiet); font-size: 14.5px; flex: 1; }
+.otbr-home .feat .more { font: 500 12.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--air); }
+.otbr-home .feat .more::after { content: " →"; }
+@media (max-width: 1000px) { .otbr-home .feats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .otbr-home .feats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .otbr-home .feats { grid-template-columns: minmax(0, 1fr); } }
 
 /* comparison */
 .otbr-home .cmp { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
@@ -144,4 +160,4 @@
 .otbr-home .buy a { color: var(--ink); }
 .otbr-home .note { color: #5b6770; font-size: 13px; }
 
-@media (prefers-reduced-motion: reduce) { .otbr-home .shots img { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .otbr-home .shots img, .otbr-home .feat { transition: none; } .otbr-home .feat:hover { transform: none; } }

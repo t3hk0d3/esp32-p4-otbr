@@ -11,11 +11,11 @@ Using the board:
 
 - [Web UI tour](web-ui.md): every page of the board's web UI and what it is for.
 - [Radios and USB dongles](radios.md): Thread, Zigbee or RCP proxy on the C6 or a dongle; moving Thread between radios.
-- [Zigbee coordinator](zigbee.md) (experimental): the board as a Zigbee coordinator for ZHA.
+- [Zigbee coordinator](zigbee.md) (experimental): the board as a Zigbee coordinator for ZHA, alone or beside Thread.
 - [USB/IP server](usbip.md): export the device on the USB-A port to a PC over the network.
 - [Networking](networking.md): single port or split VLANs, confirm-or-revert, names, Thread over Ethernet (TREL).
 - [Routing to the mesh](routing.md): DHCPv6 prefix delegation, a custom OMR prefix, BGP and RIPng.
-- [Updates](updates.md): from GitHub in one click, or from files.
+- [Updates](updates.md): from GitHub in one click, or from files; each board takes the file built for its chip.
 - [Packet capture](sniffer.md): 802.15.4 captures into Wireshark.
 - [Topology and console](topology.md): the mesh map and the OpenThread command line in the browser.
 - [Monitoring](diagnostics.md): the Diagnostics page; [Prometheus metrics](metrics.md) for history and alerts.

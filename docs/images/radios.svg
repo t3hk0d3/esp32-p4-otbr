@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 392" width="1120" height="392" role="img"
-     aria-label="The built-in ESP32-C6 and a USB radio dongle connect to the ESP32-P4, which runs each radio as Thread, Zigbee, an RCP proxy or off. Thread serves Home Assistant and Matter controllers; the on-board Zigbee coordinator serves ZHA, and Zigbee2MQTT reaches a dongle through the proxy. Thread and Zigbee run one at a time; a proxy runs beside either.">
+     aria-label="The built-in ESP32-C6 and a USB radio dongle connect to the ESP32-P4, which runs each radio as Thread, Zigbee, an RCP proxy or off. Thread serves Home Assistant and Matter controllers; the on-board Zigbee coordinator serves ZHA, and Zigbee2MQTT reaches a dongle through the proxy. Thread and Zigbee run side by side, one on each radio; a proxy runs beside either.">
   <!-- Generated for the documentation. Teal is radio (Thread), yellow Zigbee, copper wire. -->
   <style>
     :root { --bg: #eef2f4; --box: #ffffff; --line: #c3ced6; --ink: #17222c; --quiet: #5d6b77;
@@ -61,5 +61,5 @@
   <rect class="box b-zig" x="800" y="279" width="290" height="62" rx="12"/>
   <text class="t1" x="816" y="306.0" text-anchor="start">ZHA or Zigbee2MQTT</text>
   <text class="t2" x="816" y="326.0" text-anchor="start">ZHA on board · Z2M through the proxy</text>
-  <text class="t2" x="550" y="372" text-anchor="middle">Thread and the on-board Zigbee coordinator run one at a time; a proxy runs beside either.</text>
+  <text class="t2" x="550" y="372" text-anchor="middle">Thread and the on-board Zigbee coordinator run side by side, one on each radio; a proxy runs beside either.</text>
 </svg>

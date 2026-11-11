@@ -15,12 +15,23 @@
 :   An 802.15.4 frequency, 11 to 26. These pages say **Thread channel** or **Zigbee channel**. (The board's API also
     calls each *radio* a "channel"; the guides say **radio** for that.)
 
+**Chip revision**
+:   The silicon revision of the board's P4, such as v1.3 or v3.1. It decides which firmware file fits: chips below v3
+    take the `ESP32-P4-rev1.3` firmware, chips of v3.1 and later take `ESP32-P4-rev3.0`. Chips of v3.0 get no
+    firmware. The [browser flasher](flash.md) reads it for you. See also *Firmware target*.
+
 **Dataset**
 :   Everything that defines a Thread network: its name, Thread channel, network key, PAN ID and a few more IDs. Every
     border router of a network has the same dataset. Copying it to a board puts the board on that network.
 
 **ESP-Hosted**
 :   Espressif's factory firmware on the board's C6, which this project replaces once at the first install.
+
+**Firmware target**
+:   A board and a chip the firmware is built for, named `<board_id>_<chip_id>`, for example
+    `ESP32-P4-WIFI6-POE-ETH_ESP32-P4-rev1.3`. From v0.6.0 on, each release has an update file (`.ota`) and a full
+    flash image (`full_....zip`) per target, and a board updates from the file of its own target. Older releases have
+    only `otbr.bundle` and `p4-flash.zip`, for chips below v3. See [Updates](updates.md).
 
 **Leader**
 :   The one router in a Thread network that keeps the network's shared data. Any router can take the role.
@@ -80,6 +91,10 @@
 **ULA**
 :   Unique local address: a private IPv6 prefix (`fd00::/8`). The board makes one for the Thread network when no
     other prefix is available.
+
+**USB/IP**
+:   A protocol that carries a USB device's traffic over the network, so a PC uses a device plugged into another
+    machine as if it were its own. See [USB/IP server](usbip.md).
 
 **Updater**
 :   The small program on the C6 that receives new radio firmware from the P4.
