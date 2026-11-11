@@ -34,9 +34,10 @@
 }
 
 .fl *, .fl *::before, .fl *::after { box-sizing: border-box; }
-.fl-wrap { max-width: 1200px; margin: 0 auto; padding: 36px 16px 56px; display: flex; flex-wrap: wrap; align-items: center; gap: 40px; }
+.fl-wrap { max-width: 1200px; margin: 0 auto; padding: 36px 16px 56px; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 40px; }
 .fl-flow, .fl-board { flex: 1 1 400px; min-width: 0; }
-.fl-flow { display: flex; flex-direction: column; gap: 24px; }
+/* Anchored at the top, level with the board: centred, the steps would move with each stage's height. */
+.fl-flow { display: flex; flex-direction: column; gap: 24px; padding-top: 24px; }
 .fl-board svg { width: 100%; max-height: 560px; display: block; }
 .fl section { display: flex; flex-direction: column; gap: 20px; align-items: flex-start; }
 .fl [hidden] { display: none !important; }
