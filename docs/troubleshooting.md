@@ -36,6 +36,9 @@ With a dongle running Thread, **No radio** means it is unplugged: plug it back i
   Ethernet**, the Time section says why: **Off** (sync is turned off), or **Server not answering** (the server is
   wrong or unreachable; with a static address, Automatic also needs a DNS server to find `pool.ntp.org`). See
   [Time](networking.md#time).
+- **The Dashboard warns that Thread and Zigbee share a channel.** Both networks are on the same 802.15.4 channel: they
+  work, but each slows the other under load. Move one of them, Thread with a new dataset or Zigbee by forming its
+  network again in ZHA. See [Thread and Zigbee together](zigbee.md#thread-and-zigbee-together).
 - **Home Assistant can't connect, or doesn't list the board.** See [Home Assistant](home-assistant.md#troubleshooting).
 - **The Thread pages say "radio not available"** (or Home Assistant gets 503): the radio is in fault, see above.
   **"sniffer active"**: a packet capture is running; stop it on the Packet capture page.
@@ -58,11 +61,13 @@ With a dongle running Thread, **No radio** means it is unplugged: plug it back i
 ## Known limitations
 
 - **No login and no encryption.** Anyone on the network can reconfigure the board, read the Thread network key or update
-  its firmware. Put it on a network you trust; in [split mode](networking.md) keep the management VLAN private.
+  its firmware. The [USB/IP server](usbip.md), when on, hands the USB device to whoever attaches first. Put the board
+  on a network you trust; in [split mode](networking.md) keep the management VLAN private.
 - **Prefix delegation makes Thread devices reachable from the internet** unless your router's IPv6 firewall blocks it.
 - **Updates interrupt Thread.** A radio firmware update stops this border router for a few seconds, a board update
   reboots it. Other border routers keep the network up meanwhile.
 - **Not yet run on hardware:** way C of the first install, and way A against an untouched factory C6 (it ran against a
-  stand-in). Several boards on one network have not been tested together.
+  stand-in). The firmware for P4 chips of revision v3.1 and later is built but not yet run on such a chip. Several
+  boards on one network have not been tested together.
 - **mDNS names:** another device that claims the board's `.local` name can make it rename itself (standard mDNS); see
   [Networking](networking.md#mdns).

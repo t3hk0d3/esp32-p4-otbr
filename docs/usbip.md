@@ -1,7 +1,7 @@
 # USB/IP server
 
-The board can export the device on its USB-A port over the network with USB/IP. A computer on the same network
-attaches to it and sees the device as if it were plugged in locally. The typical use is a short job on a device that is
+The board can export the device on its USB-A port over the network with [USB/IP](glossary.md). A computer on the
+same network attaches to it and sees the device as if it were plugged in locally. The typical use is a short job on a device that is
 plugged into the board and out of reach of your PC, for example reflashing a radio dongle.
 
 The feature is **off by default**. It uses the USB-A port, so a radio dongle there is no longer a radio while USB/IP is

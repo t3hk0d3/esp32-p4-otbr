@@ -282,7 +282,7 @@ b += box(
 b += text(
     550,
     372,
-    "Thread and the on-board Zigbee coordinator run one at a time; a proxy runs beside either.",
+    "Thread and the on-board Zigbee coordinator run side by side, one on each radio; a proxy runs beside either.",
     "t2",
     "middle",
 )
@@ -290,7 +290,7 @@ svg(
     "radios.svg",
     1120,
     392,
-    "The built-in ESP32-C6 and a USB radio dongle connect to the ESP32-P4, which runs each radio as Thread, Zigbee, an RCP proxy or off. Thread serves Home Assistant and Matter controllers; the on-board Zigbee coordinator serves ZHA, and Zigbee2MQTT reaches a dongle through the proxy. Thread and Zigbee run one at a time; a proxy runs beside either.",
+    "The built-in ESP32-C6 and a USB radio dongle connect to the ESP32-P4, which runs each radio as Thread, Zigbee, an RCP proxy or off. Thread serves Home Assistant and Matter controllers; the on-board Zigbee coordinator serves ZHA, and Zigbee2MQTT reaches a dongle through the proxy. Thread and Zigbee run side by side, one on each radio; a proxy runs beside either.",
     b,
 )
 

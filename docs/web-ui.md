@@ -15,6 +15,7 @@ The menu has three parts:
 | | **Commissioner**, **Addresses**, **Tools** | Upstream OpenThread pages: commission a device by joiner credentials, add on-mesh prefixes, ping | |
 | | **Console** | The board's OpenThread command line in the browser | [Topology and console](topology.md#thread-console) |
 | **Device** | **Radios** | What each radio runs: Thread, Zigbee, RCP proxy or off | [Radios](radios.md) |
+| | **USB/IP** | Export the device on the USB-A port to a PC over the network | [USB/IP server](usbip.md) |
 | | **Ethernet** | Single or split (VLAN) setup, addresses, names, time server, Thread over Ethernet | [Networking](networking.md) |
 | | **Firmware** | Updates from GitHub, uploads, radio recovery | [Updates](updates.md) |
 | | **Logs** | Log levels per component, the syslog target, the live log | [Logging](logging.md) |
@@ -37,7 +38,9 @@ The Dashboard has three sections:
 - **Thread:** while the border router runs, the network (name, Thread channel, PAN ID), this board's role, the radio
   firmware, the address to enter in Home Assistant, prefix delegation, packet capture and the board's Thread addresses.
 - **Zigbee:** while a radio runs the Zigbee coordinator, its state, the `ws://` address for ZHA with a Copy button, the
-  connected client and the network ZHA formed. See [Zigbee coordinator](zigbee.md).
+  connected client and the network ZHA formed. See [Zigbee coordinator](zigbee.md). With Thread on the other radio, it
+  warns when both networks use the same 802.15.4 channel (see
+  [Thread and Zigbee together](zigbee.md#thread-and-zigbee-together)).
 
 A section whose stack is not running says so in one line and links the Radios page. A problem shows in red, with what
 to do and a link to the page that fixes it (see [Troubleshooting](troubleshooting.md)).
