@@ -8,6 +8,8 @@ set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../common/rcp_sync_proto" "$
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/../tools/version.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/../tools/test_build.cmake)
+# OTBR_BOARD_ID and OTBR_CHIP_ID (the firmware target) as C macros; make build and tools/build_all.sh pass them.
+include(${CMAKE_CURRENT_LIST_DIR}/../tools/target.cmake)
 # OpenThread reaches its radio through the radio mux: a generated copy of IDF's openthread component (EXTRA_COMPONENT_DIRS).
 include(${CMAKE_CURRENT_LIST_DIR}/../tools/ot_radio_port.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/../tools/c6_updater_images.cmake)

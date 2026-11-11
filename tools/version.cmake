@@ -1,6 +1,8 @@
 # Sets PROJECT_VER to <UTC build timestamp YYYYMMDDTHHMMSSZ>-<7-hex git hash>[-dirty].
 # Include from a project's top-level CMakeLists.txt before project().
 # "dirty" means tracked files differ from HEAD; untracked files are ignored.
+# The stamp is the configure time, unless the CMake variable OTBR_BUILD_STAMP is set (tools/build_all.sh --all-targets sets
+# one for all P4 builds of a release, so that their versions are equal); an empty value counts as not set.
 # Fails the configure step if the result is longer than 30 characters.
 # A new commit (or checkout, reset) triggers a reconfigure, hence a fresh stamp: the files that move with HEAD are added to
 # CMAKE_CONFIGURE_DEPENDS (HEAD, the loose ref of the current branch, packed-refs, the HEAD reflog; a detached HEAD is
@@ -8,7 +10,11 @@
 # rewrites on every status): it is as of the last configure.
 set(_ver_repo_root "${CMAKE_CURRENT_LIST_DIR}/..")
 
-string(TIMESTAMP _ver_stamp "%Y%m%dT%H%M%SZ" UTC)
+if(OTBR_BUILD_STAMP)
+    set(_ver_stamp "${OTBR_BUILD_STAMP}")
+else()
+    string(TIMESTAMP _ver_stamp "%Y%m%dT%H%M%SZ" UTC)
+endif()
 
 execute_process(
     COMMAND git rev-parse --short=7 HEAD

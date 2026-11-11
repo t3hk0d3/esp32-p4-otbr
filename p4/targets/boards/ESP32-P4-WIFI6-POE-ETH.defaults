@@ -1,0 +1,2 @@
+# Board overlay: what this board has, whatever its chip revision.
+CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y

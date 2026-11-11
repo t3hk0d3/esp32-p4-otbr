@@ -1,7 +1,6 @@
-# Chip and flash (Phase 0: board is ESP32-P4 rev v1.3, 32 MB flash, 32 MB PSRAM)
+# Chip (the chip revision range is in the chip overlay p4/targets/chips/<chip_id>.defaults, the flash size in the board
+# overlay p4/targets/boards/<board_id>.defaults; tools/targets.py lists the order they are applied in)
 CONFIG_IDF_TARGET="esp32p4"
-CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
-CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 
 # PSRAM, code and rodata executed from PSRAM so flash erase/write never stalls the cores (spec 5.11)
