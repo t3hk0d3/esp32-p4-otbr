@@ -125,11 +125,12 @@ docs: ## Build the documentation site into SITE (default site/); MKDOCS=<mkdocs 
 docs-serve: ## Preview the documentation site at http://127.0.0.1:8000 (the browser flasher has no firmware there)
 	$(MKDOCS) serve
 
-docs-firmware: ## Put the latest release's P4 images and the browser flasher manifest into SITE/firmware (needs gh)
+docs-firmware: ## Put the latest release's P4 images of every target and the browser flasher's index into SITE/firmware (needs gh)
+	rm -rf $(SITE)/firmware $(SITE)/.firmware-zips
 	mkdir -p $(SITE)/firmware
-	gh release download --repo t3hk0d3/esp32-p4-otbr --pattern p4-flash.zip --dir $(SITE)/firmware --clobber
-	cd $(SITE)/firmware && unzip -o -q p4-flash.zip && rm -f p4-flash.zip
-	tools/flash_manifest.py $(SITE)/firmware "$$(gh release view --repo t3hk0d3/esp32-p4-otbr --json tagName --jq .tagName)"
+	gh release download --repo t3hk0d3/esp32-p4-otbr --pattern 'full_*.zip' --pattern p4-flash.zip --dir $(SITE)/.firmware-zips
+	tools/flash_manifest.py $(SITE)/.firmware-zips $(SITE)/firmware "$$(gh release view --repo t3hk0d3/esp32-p4-otbr --json tagName --jq .tagName)"
+	rm -rf $(SITE)/.firmware-zips
 
 test: test-host test-tools test-vendored ## All host-side tests (no board)
 

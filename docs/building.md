@@ -36,8 +36,13 @@ The P4 build embeds the C6 updater, bootloader and partition table (used by the 
 | `c6_updater/build/` | C6 bootloader, partition table and updater (only needed for the USB-UART first install) |
 | `c6_installer/build/c6_installer.bin` | one-time C6 installer for a factory C6 (ESP-Hosted): carries the three `c6_updater` images; its version is the C6 base version |
 
-`make bundle` packs the web UI and the P4 app into `dist/otbr.bundle` for an OTA update; `make package` collects every
-release file into `dist/` (see [Development](development.md#ci-and-releases)).
+`make build` builds the default firmware target, `ESP32-P4-WIFI6-POE-ETH` with `ESP32-P4-rev1.3` (chips below v3). For
+another one, name both ids: `make build BOARD_ID=ESP32-P4-WIFI6-POE-ETH CHIP_ID=ESP32-P4-rev3.0` (chips v3.1 and later)
+builds into its own directory, and `make flash`, `make bundle` and `make ota` take the same two variables.
+`make build-release` builds every target.
+
+`make bundle` packs the web UI and the P4 app into `dist/otbr.bundle` for an OTA update (`dist/<board_id>_<chip_id>.ota`
+for another target); `make package` collects every release file into `dist/` (see [Development](development.md#ci-and-releases)).
 
 ## Versions
 
@@ -64,5 +69,5 @@ This writes bootloader, partition table, application and the web UI image. A boa
 move the partition table. Erasing the flash also deletes the stored Thread dataset and network configuration. The C6 is
 not touched by a P4 flash: see [First install](first-install.md) for a new board.
 
-Without a checkout, use `p4-flash.zip` from a release: unpack it and run
+Without a checkout, use `full_<board_id>_<chip_id>.zip` of your chip from a release: unpack it and run
 `esptool --chip esp32p4 -p /dev/ttyACM0 write-flash @flash_args` inside the directory.

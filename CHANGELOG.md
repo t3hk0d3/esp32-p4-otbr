@@ -39,6 +39,11 @@ release's `versions.txt`.
 
 ### Changed
 
+- The browser flasher is a page of its own on esptool-js instead of ESP Web Tools: **Detect board** reads the chip
+  revision and picks the firmware built for it, **Install** writes it with an MD5 check of each image, and a live board
+  follows each step. **Choose firmware by hand** is the fallback when the chip can't be read. A chip no published
+  firmware covers is told so and left unchanged. The site publishes `firmware/targets.json` and the images of each
+  target.
 - OpenThread's lines on the UART now have the format of every other tag: `I (123) OPENTHREAD: ...` instead of
   `I(123) OPENTHREAD:...`. Scripts that match the old form need the new one.
 - lwIP UDP PCBs 16 → 32 (the sum of their users is in `p4/sdkconfig.defaults`), lwIP sockets 24 → 27 (syslog, USB/IP). An
