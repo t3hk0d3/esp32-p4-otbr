@@ -163,3 +163,8 @@ Thread network, and the mesh can route around weak radio hops. Thread devices th
 
 <img src="images/ethernet-trel.png" width="640" alt="TREL card on the Ethernet page: active on the Thread backbone, the Off/On switch on On, 1 peer, sent and received packet counters, and the peer table with its extended address, network (this), preference 15.4 100% and TREL 100%, and address">
 
+## USB/IP
+
+With the [USB/IP server](usbip.md) on, the board listens on TCP port 3240. In `single` mode it listens on the one
+interface; in `split` mode on `mgmt` only, and a connection on `thread_bb` is refused. Connections from the Thread mesh
+are refused. There is no authentication or encryption: keep the port off untrusted networks.

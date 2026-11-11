@@ -603,6 +603,28 @@ TEST_CASE("On the give-up reason: names the number of resets", "[radio_mux]")
     TEST_ASSERT_EQUAL_STRING(want, RADIO_MUX_USB_DEAD_REASON);
 }
 
+TEST_CASE("On a USB channel with the port external and a mode change: refused", "[radio_mux]")
+{
+    TEST_ASSERT_TRUE(radio_mux_usb_external_refuses(true, RADIO_MUX_KIND_USB, true));
+}
+
+TEST_CASE("On a USB channel with the port external and only line or proxy settings: not refused", "[radio_mux]")
+{
+    TEST_ASSERT_FALSE(radio_mux_usb_external_refuses(true, RADIO_MUX_KIND_USB, false));
+}
+
+TEST_CASE("On the built-in channel with the port external: not refused", "[radio_mux]")
+{
+    TEST_ASSERT_FALSE(radio_mux_usb_external_refuses(true, RADIO_MUX_KIND_BUILTIN, true));
+    TEST_ASSERT_FALSE(radio_mux_usb_external_refuses(true, RADIO_MUX_KIND_BUILTIN, false));
+}
+
+TEST_CASE("With the port not external: not refused", "[radio_mux]")
+{
+    TEST_ASSERT_FALSE(radio_mux_usb_external_refuses(false, RADIO_MUX_KIND_USB, true));
+    TEST_ASSERT_FALSE(radio_mux_usb_external_refuses(false, RADIO_MUX_KIND_USB, false));
+}
+
 void app_main(void)
 {
     UNITY_BEGIN();

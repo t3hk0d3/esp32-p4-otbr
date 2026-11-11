@@ -109,3 +109,24 @@ TEST_CASE("On a local address on an Ethernet interface: the connection is not re
 {
     TEST_ASSERT_FALSE(netcfg_mesh_refused(false));
 }
+
+TEST_CASE("On a USB/IP connection in single mode: it is allowed", "[netcfg]")
+{
+    TEST_ASSERT_TRUE(netcfg_policy_allows(NETCFG_MODE_SINGLE, NETCFG_SIDE_MGMT, NETCFG_SVC_USBIP));
+}
+
+TEST_CASE("On a USB/IP connection arriving on mgmt in split mode: it is allowed", "[netcfg]")
+{
+    TEST_ASSERT_TRUE(netcfg_policy_allows(NETCFG_MODE_SPLIT, NETCFG_SIDE_MGMT, NETCFG_SVC_USBIP));
+}
+
+TEST_CASE("On a USB/IP connection arriving on thread_bb in split mode: it is refused", "[netcfg]")
+{
+    TEST_ASSERT_FALSE(netcfg_policy_allows(NETCFG_MODE_SPLIT, NETCFG_SIDE_THREAD, NETCFG_SVC_USBIP));
+}
+
+TEST_CASE("On a USB/IP source on the Thread mesh: it is refused in every mode", "[netcfg]")
+{
+    TEST_ASSERT_FALSE(netcfg_policy_conn_allowed(NETCFG_MODE_SINGLE, true, NETCFG_SIDE_MGMT, true, NETCFG_SVC_USBIP));
+    TEST_ASSERT_FALSE(netcfg_policy_conn_allowed(NETCFG_MODE_SPLIT, true, NETCFG_SIDE_MGMT, true, NETCFG_SVC_USBIP));
+}

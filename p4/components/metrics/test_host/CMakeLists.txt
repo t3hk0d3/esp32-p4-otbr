@@ -5,6 +5,7 @@ set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/.." "${CMAKE_CURRENT_LIST_DI
                          "${CMAKE_CURRENT_LIST_DIR}/../../self_update" # device_api (update_json.c)
                          "${CMAKE_CURRENT_LIST_DIR}/../../logging" # device_api (logging_json.c)
                          "${CMAKE_CURRENT_LIST_DIR}/../../timesync" # device_api (time_json.c)
+                         "${CMAKE_CURRENT_LIST_DIR}/../../usbip" # device_api (usbip_json.c)
                          "${CMAKE_CURRENT_LIST_DIR}/../../device_api" "${CMAKE_CURRENT_LIST_DIR}/../../br_core"
                          "${CMAKE_CURRENT_LIST_DIR}/../../rcp_sync"
                          "${CMAKE_CURRENT_LIST_DIR}/../../netnames" "${CMAKE_CURRENT_LIST_DIR}/../../netcfg"

@@ -369,6 +369,7 @@ void radio_mux_get_snapshot(radio_mux_snapshot_t *out)
     out->n_modes = 0;
     out->available_modes = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF);
     out->reboot_modes = 0;
+    out->usb_external = atomic_load(&g_mux.usb_external);
     if (!atomic_load(&g_mux.started)) {
         return;
     }
@@ -462,6 +463,24 @@ radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req
     if (!id || !req || !atomic_load(&g_mux.started)) {
         return RADIO_MUX_REFUSE_FAILED;
     }
+    if (req->has_mode && atomic_load(&g_mux.usb_external)) {
+        radio_mux_kind_t kind = RADIO_MUX_KIND_BUILTIN;
+        bool found = false;
+
+        mux_lock();
+        for (size_t i = 0; i < RADIO_MUX_CHANNELS_MAX; i++) {
+            if (g_mux.chans[i].used && strcmp(g_mux.chans[i].id, id) == 0) {
+                kind = g_mux.chans[i].kind;
+                found = true;
+                break;
+            }
+        }
+        mux_unlock();
+        // Before the mode checks, and nothing is stored. An unknown id is the owner's 404.
+        if (found && radio_mux_usb_external_refuses(true, kind, true)) {
+            return RADIO_MUX_REFUSE_USB_EXTERNAL;
+        }
+    }
     esp_err_t (*mover)(const char *, const char *, char *, size_t) = atomic_load(&g_mux.mover);
     mux_call_t *call = call_new(id);
 
@@ -507,6 +526,20 @@ radio_mux_verdict_t radio_mux_set(const char *id, const radio_mux_set_req_t *req
         snprintf(moved_from, cap, "%s", from);
     }
     return RADIO_MUX_MOVE; // the move stores the modes; it carries no line or rcp_proxy settings (handle_set)
+}
+
+esp_err_t radio_mux_set_usb_external(const char *reason)
+{
+    ESP_RETURN_ON_FALSE(reason, ESP_ERR_INVALID_ARG, TAG, "no reason");
+    ESP_RETURN_ON_FALSE(!atomic_load(&g_mux.started), ESP_ERR_INVALID_STATE, TAG, "after the start");
+    snprintf(g_mux.usb_ext_reason, sizeof(g_mux.usb_ext_reason), "%s", reason);
+    atomic_store(&g_mux.usb_external, true);
+    return ESP_OK;
+}
+
+bool radio_mux_usb_external(void)
+{
+    return atomic_load(&g_mux.usb_external);
 }
 
 bool radio_mux_started(void)

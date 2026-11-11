@@ -50,6 +50,11 @@ function modeAvailable(mode, snapshot) {
 
 function present(ch) { return ch.mode !== 'unavailable'; }
 
+var USBIP_REASON = 'USB is exported over USB/IP';
+
+/* Is this channel's USB port exported over USB/IP? The snapshot says so ("usbip": true) for every USB channel. */
+function external(snapshot, ch) { return !!snapshot && snapshot.usbip === true && !!ch.usb; }
+
 /* The mode a channel is set to: the stored one while it is unplugged. */
 function currentMode(ch) { return present(ch) ? ch.mode : ch.stored_mode; }
 
@@ -107,6 +112,8 @@ function rebootNote(snapshot, ch, pick, status) {
 
 /* Why a mode card of this channel can't be picked ('' when it can). */
 function cardWhy(mode, ch, snapshot) {
+  if (external(snapshot, ch))
+    return 'USB/IP is on: turn it off to change the mode.';
   if (!modeAvailable(mode, snapshot))
     return 'Not in this build';
   if (!present(ch)) {
@@ -156,11 +163,18 @@ function activityText(ch) {
 }
 
 /* Everything a table row shows: {gone, icon, modeText, modeSub, fwText, fwSub, state, activity}. */
-function rowView(ch) {
+function rowView(ch, snapshot) {
   var gone = !present(ch);
   var m = modeOf(ch.mode);
-  var v = {gone : gone, state : stateView(ch), activity : activityText(ch), modeSub : ''};
-  if (gone) {
+  var v = {gone : gone, state : stateView(ch), activity : activityText(ch), modeSub : '', external : false};
+  if (external(snapshot, ch)) {
+    // The stored mode and settings are kept; they apply again once USB/IP is off.
+    v.external = true;
+    v.icon = modeOf(ch.stored_mode).icon;
+    v.modeText = modeOf(ch.stored_mode).name + ' (when USB/IP is off)';
+    v.state = {text : 'USB/IP', tone : ''};
+    v.activity = ch.channel_reason || USBIP_REASON;
+  } else if (gone) {
     v.icon = 'i-gone';
     v.modeText = modeOf(ch.stored_mode).name + ' (when back)';
   } else if (ch.mode === 'off' && ch.stored_mode !== 'off') {
@@ -309,6 +323,8 @@ return {
   modeOf : modeOf,
   modeAvailable : modeAvailable,
   present : present,
+  external : external,
+  USBIP_REASON : USBIP_REASON,
   currentMode : currentMode,
   findChannel : findChannel,
   labelOf : labelOf,
@@ -364,7 +380,7 @@ function sub(text, cls) { return el('span', text, 'sub' + (cls ? ' ' + cls : '')
 /* ---- the table ---- */
 
 function renderRow(ch) {
-  var v = L.rowView(ch);
+  var v = L.rowView(ch, snap);
   var tr = doc.createElement('tr');
   tr.className = v.gone ? 'gone' : '';
   var modeCell = el('span', null, 'mode-cell');
@@ -387,7 +403,17 @@ function renderRow(ch) {
   tr.appendChild(fwTd);
   tr.appendChild(modeTd);
   tr.appendChild(cell([ el('span', v.state.text, 'chip' + (v.state.tone ? ' ' + v.state.tone : '')) ]));
-  tr.appendChild(cell([ sub(v.activity) ]));
+  var activity = [ sub(v.activity) ];
+  if (v.external) {
+    var link = el('a', 'Open USB/IP');
+    link.setAttribute('href', '/usbip.html');
+    link.addEventListener('click', function(ev) {
+      if (ev && ev.stopPropagation)
+        ev.stopPropagation(); // the row opens the dialog; the link goes to the page
+    });
+    activity.push(link);
+  }
+  tr.appendChild(cell(activity));
   tr.appendChild(cell([ cfg ]));
   tr.addEventListener('click', function() { openDialog(ch.id); });
   return tr;
@@ -609,10 +635,15 @@ function openDialog(id) {
   setText('mTitle', ch.label);
   setText('mSub', L.subtitle(ch));
   var gone = !L.present(ch);
+  var ext = L.external(snap, ch);
   show('mUnavailable', gone);
-  setText('mUnavailable', gone ? 'Unplugged. Changes are stored and apply when it is plugged in again; the mode can ' +
-                                     'only be changed while it is plugged in.'
-                               : '');
+  show('mUsbipLink', ext);
+  setText('mUnavailable',
+          ext ? (ch.channel_reason || L.USBIP_REASON) + '. Its mode and settings are kept and apply again once USB/IP ' +
+                    'is off; the mode cannot be changed meanwhile.'
+              : gone ? 'Unplugged. Changes are stored and apply when it is plugged in again; the mode can ' +
+                           'only be changed while it is plugged in.'
+                     : '');
   show('mForget', gone);
   show('panelLine', !!ch.usb);
   if (ch.usb) {

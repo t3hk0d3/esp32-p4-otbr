@@ -55,6 +55,15 @@ Open **Device > Radios** (`http://<board>/radios.html`).
 
 <img src="images/radios-configure.png" width="480" alt="Configure dialog of the USB dongle: the mode cards Off (selected), Thread border router, RCP proxy and Zigbee in a carousel, the serial line with Baud 460800 and Hardware flow control (not supported by this USB bridge), Cancel and Save">
 
+## USB/IP
+
+With the [USB/IP server](usbip.md) on, the USB-A port is exported to the network and no radio runs on it. The USB
+channels are listed as `unavailable` with the reason "USB is exported over USB/IP" (the Radios page links to the
+USB/IP page); `PUT /device/channels/{id}` with a `mode` is refused with 409 `usbip_enabled`. Baud, flow control and
+proxy settings and "Forget this radio" still work. Their stored modes apply again when USB/IP is turned off. USB/IP
+cannot be turned on while a USB channel stores `otbr` or `ziggurat` (409 `usb_channel_in_use`). `GET /device/channels`
+has a top-level `usbip` flag.
+
 ## Moving Thread to another radio
 
 To move the Thread border router from the C6 to a dongle (or back): open **Configure** on the radio that should run it,

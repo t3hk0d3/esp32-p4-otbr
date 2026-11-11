@@ -100,7 +100,7 @@ TEST_CASE("On a ready channel whose instance runs: channel_state ready, its mode
 
     TEST_ASSERT_GREATER_THAN(0, render_one(&c));
     TEST_ASSERT_EQUAL_STRING("\"channel_state\":\"ready\",\"channel_reason\":null,\"mode_state\":\"running\","
-                             "\"mode_reason\":null}],\"modes\":[]}", orchestrator_fields());
+                             "\"mode_reason\":null}],\"usbip\":false,\"modes\":[]}", orchestrator_fields());
 }
 
 TEST_CASE("On an absent dongle stored in otbr: channel_state absent, Thread's state and reason", "[device_api]")
@@ -115,7 +115,7 @@ TEST_CASE("On an absent dongle stored in otbr: channel_state absent, Thread's st
     strcpy(c.mode_reason, "radio unplugged (usb-10c4-ea60-abc123)");
     TEST_ASSERT_GREATER_THAN(0, render_one(&c));
     TEST_ASSERT_EQUAL_STRING("\"channel_state\":\"absent\",\"channel_reason\":null,\"mode_state\":\"no_radio\","
-                             "\"mode_reason\":\"radio unplugged (usb-10c4-ea60-abc123)\"}],\"modes\":[]}",
+                             "\"mode_reason\":\"radio unplugged (usb-10c4-ea60-abc123)\"}],\"usbip\":false,\"modes\":[]}",
                              orchestrator_fields());
 }
 
@@ -129,7 +129,7 @@ TEST_CASE("On the C6 in its boot steps: channel_state reinit with the work, noth
     c.mode_state[0] = '\0';
     TEST_ASSERT_GREATER_THAN(0, render_one(&c));
     TEST_ASSERT_EQUAL_STRING("\"channel_state\":\"reinit\",\"channel_reason\":\"boot steps\",\"mode_state\":null,"
-                             "\"mode_reason\":null}],\"modes\":[]}", orchestrator_fields());
+                             "\"mode_reason\":null}],\"usbip\":false,\"modes\":[]}", orchestrator_fields());
 }
 
 TEST_CASE("On the C6 in a firmware fault: channel_state fault with its reason", "[device_api]")
@@ -143,7 +143,7 @@ TEST_CASE("On the C6 in a firmware fault: channel_state fault with its reason", 
     strcpy(c.mode_reason, "no rcp firmware");
     TEST_ASSERT_GREATER_THAN(0, render_one(&c));
     TEST_ASSERT_EQUAL_STRING("\"channel_state\":\"fault\",\"channel_reason\":\"no RCP firmware on the C6\","
-                             "\"mode_state\":\"fault\",\"mode_reason\":\"no rcp firmware\"}],\"modes\":[]}",
+                             "\"mode_state\":\"fault\",\"mode_reason\":\"no rcp firmware\"}],\"usbip\":false,\"modes\":[]}",
                              orchestrator_fields());
 }
 
@@ -169,7 +169,7 @@ TEST_CASE("On Thread with no channel stored in otbr: modes lists it with channel
         .mode = RADIO_MUX_MODE_OTBR, .chan = -1, .reboot_on_change = false,
     };
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
-    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\",\"otbr\",\"rcp-proxy\"],\"channels\":[],\"modes\":["
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\",\"otbr\",\"rcp-proxy\"],\"channels\":[],\"usbip\":false,\"modes\":["
                              "{\"mode\":\"otbr\",\"channel\":null,\"state\":\"no_radio\","
                              "\"reason\":\"no channel in otbr\",\"reboot_on_change\":false}]}", body);
 }
@@ -234,7 +234,7 @@ TEST_CASE("On the registry snapshot: the C6 has the spec's fields in order, usb 
         "\"counters\":{\"frames_in\":10,\"frames_out\":9,\"bytes_in\":1000,\"bytes_out\":900,\"drops\":1,\"resets\":2,"
         "\"rx_errors\":3,\"uart_errors\":4},"
         "\"channel_state\":\"ready\",\"channel_reason\":null,\"mode_state\":\"running\",\"mode_reason\":null}],"
-        "\"modes\":[]}",
+        "\"usbip\":false,\"modes\":[]}",
         body);
 }
 
@@ -255,7 +255,7 @@ TEST_CASE("On the registry snapshot: a dongle in rcp-proxy has usb, the proxy's 
         "\"counters\":{\"frames_in\":0,\"frames_out\":0,\"bytes_in\":0,\"bytes_out\":0,\"drops\":0,\"resets\":0,"
         "\"rx_errors\":0,\"uart_errors\":0},"
         "\"channel_state\":\"ready\",\"channel_reason\":null,\"mode_state\":\"connected\",\"mode_reason\":null}],"
-        "\"modes\":[]}",
+        "\"usbip\":false,\"modes\":[]}",
         body);
 }
 
@@ -282,7 +282,7 @@ TEST_CASE("On no channel (before the mux starts): an empty list", "[device_api]"
 
     memset(&s, 0, sizeof(s));
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
-    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[],\"channels\":[],\"modes\":[]}", body);
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[],\"channels\":[],\"usbip\":false,\"modes\":[]}", body);
 }
 
 TEST_CASE("On a build with every consumer: available_modes lists off, otbr, ziggurat, rcp-proxy in enum order",
@@ -293,7 +293,7 @@ TEST_CASE("On a build with every consumer: available_modes lists off, otbr, zigg
     memset(&s, 0, sizeof(s));
     s.available_modes = MODES_BUILT_IN | RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_ZIGGURAT);
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
-    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\",\"otbr\",\"ziggurat\",\"rcp-proxy\"],\"channels\":[],\"modes\":[]}",
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\",\"otbr\",\"ziggurat\",\"rcp-proxy\"],\"channels\":[],\"usbip\":false,\"modes\":[]}",
                              body);
 }
 
@@ -304,7 +304,7 @@ TEST_CASE("On only off set: available_modes renders [\"off\"]", "[device_api]")
     memset(&s, 0, sizeof(s));
     s.available_modes = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF);
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
-    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\"],\"channels\":[],\"modes\":[]}", body);
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\"],\"channels\":[],\"usbip\":false,\"modes\":[]}", body);
 }
 
 TEST_CASE("On unavailable and invalid bits set: they are never listed", "[device_api]")
@@ -315,7 +315,7 @@ TEST_CASE("On unavailable and invalid bits set: they are never listed", "[device
     s.available_modes = RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_OFF) | RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_UNAVAILABLE) |
                         RADIO_MUX_MODE_BIT(RADIO_MUX_MODE_INVALID);
     TEST_ASSERT_GREATER_THAN(0, device_api_channels_json(body, sizeof(body), &s));
-    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\"],\"channels\":[],\"modes\":[]}", body);
+    TEST_ASSERT_EQUAL_STRING("{\"available_modes\":[\"off\"],\"channels\":[],\"usbip\":false,\"modes\":[]}", body);
 }
 
 TEST_CASE("On an unplugged dongle: mode unavailable, stored_mode the mode it returns to", "[device_api]")
@@ -880,6 +880,7 @@ TEST_CASE("On each verdict: its status and code", "[device_api]")
         {RADIO_MUX_REFUSE_PROBE_FAILED, 409, "probe_failed"},
         {RADIO_MUX_REFUSE_BUSY, 409, "busy"},
         {RADIO_MUX_REFUSE_PENDING, 503, "mux_busy"},
+        {RADIO_MUX_REFUSE_USB_EXTERNAL, 409, "usbip_enabled"},
     };
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
@@ -903,6 +904,26 @@ TEST_CASE("On a change the mux took but did not answer in time: 503 mux_busy, th
 {
     TEST_ASSERT_EQUAL_STRING("the radio mux is busy; a settings change may still apply, a start, move or stop will not",
                              device_api_channel_refusal_detail(RADIO_MUX_REFUSE_PENDING));
+}
+
+TEST_CASE("On a change refused because USB/IP owns the port: 409 usbip_enabled with the fixed detail", "[device_api]")
+{
+    TEST_ASSERT_EQUAL_STRING("the USB port is exported over USB/IP",
+                             device_api_channel_refusal_detail(RADIO_MUX_REFUSE_USB_EXTERNAL));
+}
+
+TEST_CASE("On the channels body: usbip is true while the port is external, false otherwise", "[device_api]")
+{
+    static radio_mux_snapshot_t s;
+
+    memset(&s, 0, sizeof(s));
+    s.available_modes = MODES_BUILT_IN;
+    TEST_ASSERT_TRUE(device_api_channels_json(body, sizeof(body), &s) > 0);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"usbip\":false"));
+    s.usb_external = true;
+    TEST_ASSERT_TRUE(device_api_channels_json(body, sizeof(body), &s) > 0);
+    TEST_ASSERT_NOT_NULL(strstr(body, "\"usbip\":true"));
+    TEST_ASSERT_NULL(strstr(body, "\"usbip\":false"));
 }
 
 TEST_CASE("On a verdict out of range: 500 failed", "[device_api]")

@@ -14,9 +14,10 @@
 extern "C" {
 #endif
 
-// lwIP sockets the proxy holds at most: two channels in rcp-proxy at once (the C6 and the one open USB device), each
-// with a TCP listener, its client and one connection being refused.
-#define RCP_PROXY_SOCKETS 6
+// lwIP sockets one channel in rcp-proxy holds at most: a TCP listener, its client and one connection being refused.
+#define RCP_PROXY_CHANNEL_SOCKETS 3
+// lwIP sockets the proxy holds at most: two channels in rcp-proxy at once (the C6 and the one open USB device).
+#define RCP_PROXY_SOCKETS (2 * RCP_PROXY_CHANNEL_SOCKETS)
 // Eventfds the proxy creates (its kick eventfd); app_main adds it to the eventfd VFS registration.
 #define RCP_PROXY_EVENTFD_COUNT 1
 

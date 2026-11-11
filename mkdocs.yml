@@ -62,6 +62,7 @@ nav:
       - Web UI tour: web-ui.md
       - Radios and USB dongles: radios.md
       - Zigbee coordinator: zigbee.md
+      - USB/IP server: usbip.md
       - Networking: networking.md
       - Routing to the mesh: routing.md
       - Updates: updates.md

@@ -240,6 +240,8 @@ typedef struct {
     const radio_mux_builtin_t *builtin;      // the board's built-in RCP (radio_mux_set_builtin), or NULL
     radio_mux_rules_t rules;
     atomic_bool started;
+    atomic_bool usb_external;                // radio_mux_set_usb_external: set before the start, never cleared
+    char usb_ext_reason[RADIO_MUX_REASON_MAX]; // its reason: written before the start, read-only after
     esp_err_t (*_Atomic mover)(const char *from, const char *to, char *reason, size_t cap);
     uint32_t gen; // owner: the generation of the last attach or lease (radio_mux_gen_next), on any transport
 } mux_t;

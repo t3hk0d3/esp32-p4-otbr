@@ -12,7 +12,8 @@ bool netcfg_policy_allows(netcfg_mode_t mode, netcfg_side_t side, netcfg_service
         return true;
     }
     if (side == NETCFG_SIDE_MGMT) {
-        return svc == NETCFG_SVC_GUI || svc == NETCFG_SVC_DEVICE_API || svc == NETCFG_SVC_REST_READ || svc == NETCFG_SVC_RCP_PROXY;
+        return svc == NETCFG_SVC_GUI || svc == NETCFG_SVC_DEVICE_API || svc == NETCFG_SVC_REST_READ || svc == NETCFG_SVC_RCP_PROXY ||
+               svc == NETCFG_SVC_USBIP;
     }
     return svc == NETCFG_SVC_REST_READ || svc == NETCFG_SVC_REST_WRITE || svc == NETCFG_SVC_RCP_PROXY;
 }

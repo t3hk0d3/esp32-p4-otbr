@@ -11,7 +11,7 @@ const FRONTEND = path.join(__dirname, '..', '..', 'p4', 'components', 'esp_ot_br
 const Common = require(path.join(FRONTEND, 'static', 'device_common.js'));
 const SCRIPTS = {radios: 'radios', index: 'status', ethernet: 'ethernet', routing: 'routing', firmware: 'firmware', capture: 'capture',
                  diagnostics: 'diagnostics', names: 'names', leader: 'leader',
-                 topology: 'topology', console: 'console', zigbee: 'zigbee', logs: 'logs', time: 'time'};
+                 topology: 'topology', console: 'console', zigbee: 'zigbee', logs: 'logs', time: 'time', usbip: 'usbip'};
 /* Scripts that live on another script's page: the names section is part of the Ethernet page, the Leader card of Network. */
 const HTML = {names: 'ethernet', leader: 'network', time: 'ethernet'};
 
@@ -61,6 +61,17 @@ class El {
     this._id = v;
     this.doc.byId[v] = this;
   }
+  /* Markup writes are recorded (and the test asserts there are none): a page must use textContent. '' only clears. */
+  set innerHTML(v) { this._markup('innerHTML', v); }
+  set outerHTML(v) { this._markup('outerHTML', v); }
+  insertAdjacentHTML(where, v) { this._markup('insertAdjacentHTML', v); }
+  _markup(how, v) {
+    if (String(v) === '') {
+      this.children = [];
+      return;
+    }
+    this.doc.markupWrites.push(how + ': ' + v);
+  }
   set className(v) { this.classes = new Set(String(v).split(/\s+/).filter(Boolean)); }
   get className() { return Array.from(this.classes).join(' '); }
   get firstChild() { return this.children[0] || null; }
@@ -100,6 +111,7 @@ class Doc {
   constructor(html) {
     this.byId = {};
     this.absent = new Set();
+    this.markupWrites = [];
     this.hidden = false;
     this.listeners = {};
     this.activeElement = null;

@@ -22,8 +22,8 @@ below, any of them can answer 500 `internal` or `no_memory`.
 | `GET /device/radio/log` | jumper: the newest 16 KB of the C6 console (`text/plain`) | 412 `no_jumper` |
 | `GET /device/diag` | per-core load, per-task CPU/stack/affinity, memory, OpenThread lock stats, uptime, reset reason, chip temperature (`chip_temperature_c`, die temperature in °C with one decimal, `null` when unavailable) | |
 | `GET /device/network` | active config (with `trel`), pending trial with remaining time, interface state | |
-| `PUT /device/network` | store a trial network config and reboot into it; a body that changes only `trel` is applied at once without a trial (`{"status":"applied"}`; `{"status":"saved","detail":...}` when Thread is not running or busy and it applies at the next start; see [TREL](networking.md#trel-thread-over-ethernet)) | 400 `invalid_config` (`detail` names the field, `trel` when not a boolean), `length_required`, `invalid_request`; 409 `busy` (also a `trel`-only change while a trial runs); 413 `payload_too_large`; 503 `not_started`; 500 `store_failed` |
-| `POST /device/network/confirm` | commit the trial config | 409 `no_trial`; 403 `wrong_interface`; 500 `store_failed` |
+| `PUT /device/network` | store a trial network config and reboot into it; a body that changes only `trel` is applied at once without a trial (`{"status":"applied"}`; `{"status":"saved","detail":...}` when Thread is not running or busy and it applies at the next start; see [TREL](networking.md#trel-thread-over-ethernet)) | 400 `invalid_config` (`detail` names the field, `trel` when not a boolean), `length_required`, `invalid_request`; 409 `busy` (also a `trel`-only change while a trial runs); 413 `payload_too_large`; 503 `not_started`; 500 `storage_failed` |
+| `POST /device/network/confirm` | commit the trial config | 409 `no_trial`; 403 `wrong_interface`; 500 `storage_failed` |
 | `GET /device/names` | network names: `hostname`, `hostname_default`, `hostname_live` (differs after an mDNS conflict rename), `ha_name_follows_hostname`, `ha_name`, `ha_name_effective`, `http_advert`, `http_advert_available` (false in split mode), `dhcp_name`, `dhcp_name_default`, `mode` | |
 | `PUT /device/names` | body `{hostname, ha_name_follows_hostname, ha_name, http_advert, dhcp_name}` (all required; empty hostname / DHCP name = default); applied live, no reboot; replies the GET body plus `applied` and, when a live step failed, `detail` | 400 `invalid_config` with `field` (`hostname`, `ha_name`, `dhcp_name`, or a missing / wrongly typed key, `body` for no JSON object), `length_required`, `invalid_request`; 413 `payload_too_large`; 500 `storage_failed` |
 | `GET /device/time` | clock and NTP sync: `enabled`, `mode` (`auto` \| `custom`), `server` (the custom server; may be empty in `auto`), `state` (`off`, `waiting`: no answer yet and under a minute since the start or the last save; `synced`; `unreachable`: no answer for a minute, or every server in use stopped answering), `now` (board time, epoch seconds; `null` when the clock is not set, before 2020), `synced_age_s` (seconds since the last answer; `null` when none since boot), `source` (`custom`, `dhcp`, `default` = `pool.ntp.org`, `null` when off), `servers` (`[{address, answered}]`, the servers in use, `answered` on the one that answered last), `dhcp_servers` (what the DHCP lease names, up to two, whatever the mode), `dhcp_iface` (`single`, `mgmt`, `thread_bb` or `null` when not known) | |
@@ -301,7 +301,7 @@ longer accepted) and a USB dongle (`usb-<vid>-<pid>`, plus `-<serial>` when the 
 reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /device/channels` answers
 
 ```
-{"available_modes": ["off", "otbr", "rcp-proxy", "ziggurat"],
+{"available_modes": ["off", "otbr", "rcp-proxy", "ziggurat"], "usbip": false,
  "channels": [
   {"id": "builtin-c6", "kind": "builtin", "label": "ESP32-C6 (built-in)", "mode": "otbr", "stored_mode": "otbr",
    "state": "running", "error": null, "line": {"baud": 460800, "flow_control": false}, "usb": null,
@@ -330,6 +330,8 @@ reports one). Concepts, modes and behaviour are in [Radios](radios.md). `GET /de
  ]}
 ```
 
+- `usbip` is `true` while the [USB/IP server](usbip.md) is on: the USB channels are then `unavailable` with
+  `channel_reason` "USB is exported over USB/IP".
 - `available_modes` are the modes the build offers (those with a registered instance: `off`, `otbr`, `rcp-proxy` and
   `ziggurat`).
 - `mode` is what the channel does now: `unavailable` (reported only: not detected, unplugged, no driver), `off`,
@@ -380,6 +382,7 @@ settings are stored and applied at once, also for an unplugged radio.
 | 409 `mode_taken` | the mode is at its channel limit (one radio runs Thread, one runs Zigbee; both may run at once on different radios) |
 | 409 `probe_failed` | the target of a move or start did not answer as a spinel RCP, or runs `rcp-proxy` ("set it off first"); nothing changed |
 | 409 `port_taken` | the channel would listen in `rcp-proxy` on the adapter and port another channel stored in `rcp-proxy` listens on (also an unplugged one); `detail` names the port and that channel; nothing changed |
+| 409 `usbip_enabled` | a mode change on a USB channel while USB/IP is on (line and proxy settings are still accepted) |
 | 409 `busy` | an update, a firmware push, a recovery or another move runs, a mode is changed during a move, or the board is stopping or starting OpenThread on its radio (after an unplug, a plug-in) |
 | 500 `failed` | the mux is not started, storage failed or a probe took too long |
 | 503 `mux_busy` | the radio mux took the change but did not answer within 5 s; a mode, speed or proxy change may still be applied, a start, move or stop will not (read the channel again) |
@@ -393,6 +396,46 @@ switch back, a PUT of `otbr` on the target retries and one on another channel mo
 the board reboots. A refused stop leaves the
 channel `running` in `otbr` with `error` `drain_timeout`. Poll
 `GET /device/channels` after a 202. While OpenThread starts on its channel, that channel shows `starting`.
+
+### USB/IP
+
+The board can export the device on its USB-A port with USB/IP (TCP 3240); see [USB/IP server](usbip.md).
+`GET /device/usbip` answers:
+
+```
+{"enabled": true, "active": true, "pending_reboot": false,
+ "state": "attached", "reason": null,
+ "port": 3240, "interface": "mgmt",
+ "device": {"busid": "1-1", "vid": "10c4", "pid": "ea60", "bcd_device": "0100", "class": "00",
+            "speed": "full", "manufacturer": "Silicon Labs", "product": "CP2102N USB to UART Bridge Controller",
+            "serial": "abc123", "interfaces": 1, "endpoints": 2},
+ "client": {"addr": "192.168.10.20:51322", "since": 1762790000},
+ "counters": {"sessions": 3, "refused": 1, "submits": 12000, "completed": 11950, "errors": 2, "unlinks": 48,
+              "bytes_in": 1048576, "bytes_out": 65536, "sessions_ended_overload": 0},
+ "memory": {"inflight_bytes": 4096, "inflight_peak": 16384, "waiting_bytes": 0, "waiting_peak": 2048},
+ "last_error": null}
+```
+
+- `enabled` is the stored value, `active` whether USB/IP owns the port this boot, `pending_reboot` when they differ
+  (except after a failed start, below).
+- `state` is `off`, `blocked`, `no_device`, `unsupported`, `exportable` or `attached`; `reason` explains `blocked` and
+  `unsupported` and is `null` otherwise. When USB/IP is on but failed to start at boot, `state` is `off`, `reason` and
+  `last_error` are `"USB/IP failed to start: <error>"` and `pending_reboot` is `false` (`true` once it is turned off).
+- `interface` is `single` or `mgmt`. `device` is `null` without a device, `client` without a session (`since` in
+  epoch seconds, 0 when the clock is not set). `speed` is `low`, `full`, `high` or `unknown`.
+- `counters` and `memory` (bytes) count since boot.
+
+`PUT /device/usbip {"enabled": true|false}` answers `{"reboot": true}` when the board reboots, and `{"reboot": false}`
+when the value is the stored one already. `PUT /device/usbip {"kick": true}` drops the current client and answers `{}`
+(also without a session; not stored).
+
+| Reply | Meaning |
+| --- | --- |
+| 200 | applied |
+| 400 `bad_value` | the body is not one of the two forms |
+| 409 `usb_channel_in_use` | switching on while a USB channel's stored mode is `otbr` or `ziggurat`; `detail` is "`<id>` runs `<mode>`: move it or switch it off first" |
+| 409 `busy` | "an update or firmware push is running or waits for its reboot" |
+| 500 `storage_failed` | the setting could not be written to flash; nothing changed |
 
 ### Zigbee coordinator (experimental)
 

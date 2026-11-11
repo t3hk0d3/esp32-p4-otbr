@@ -65,6 +65,11 @@ typedef struct {
 } radio_mux_chan_view_t;
 
 typedef enum {
+    RADIO_MUX_KIND_BUILTIN,
+    RADIO_MUX_KIND_USB,
+} radio_mux_kind_t;
+
+typedef enum {
     RADIO_MUX_APPLY,
     RADIO_MUX_APPLY_REBOOT,
     RADIO_MUX_MOVE,
@@ -79,7 +84,12 @@ typedef enum {
     RADIO_MUX_REFUSE_PROBE_FAILED,    // a move of otbr: the target's RCP probe failed, nothing changed (409 probe_failed)
     RADIO_MUX_REFUSE_BUSY,            // the channel or OpenThread is busy (a move or a radio job runs): try again (409)
     RADIO_MUX_REFUSE_PENDING,         // posted, but the owner did not answer in time: the change may still be applied (503)
+    RADIO_MUX_REFUSE_USB_EXTERNAL,    // a mode on a USB channel while USB/IP owns the USB port (409 usbip_enabled)
 } radio_mux_verdict_t;
+
+// Whether a change is refused because the USB port is owned outside the mux (USB/IP): a mode change on a USB channel.
+// Line and proxy settings (mode_change false) and the built-in channel are never refused.
+bool radio_mux_usb_external_refuses(bool external, radio_mux_kind_t kind, bool mode_change);
 
 typedef enum {
     RADIO_MUX_PROXY_LISTEN,
