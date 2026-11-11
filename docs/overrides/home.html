@@ -197,7 +197,7 @@
     <div class="tile w2 half">
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
       <h3>Room to grow.</h3>
-      <p>For power users: a USB radio dongle for Thread or Zigbee, a radio shared over the network, Prometheus metrics, BGP and RIPng routing, VLANs, live packet capture and deep diagnostics.</p>
+      <p>For power users: USB radio dongles, Zigbee, BGP routing, VLANs, packet capture, metrics and more. <a class="inline" href="#advanced">See all of it</a></p>
     </div>
     <div class="tile w2">
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
@@ -214,7 +214,7 @@
     <p class="lede">Plug a radio stick into the USB port and give each radio a job. Switch it from the browser.</p>
   </div>
   <figure class="radios-diag">
-    <svg viewBox="0 0 1100 380" role="img" aria-label="The built-in ESP32-C6 and a USB radio dongle connect to the ESP32-P4, which runs each radio as Thread, Zigbee, a network proxy or off. Thread serves Home Assistant (Thread and ESPHome devices) and Matter controllers. The on-board Zigbee coordinator serves Home Assistant's ZHA; Zigbee2MQTT reaches a dongle through the proxy. Thread and the on-board Zigbee coordinator run one at a time; a proxy runs beside either.">
+    <svg viewBox="0 0 1100 380" role="img" aria-label="The built-in ESP32-C6 and a USB radio dongle connect to the ESP32-P4, which runs each radio as Thread, Zigbee, a network proxy or off. Thread serves Home Assistant (Thread and ESPHome devices) and Matter controllers. The on-board Zigbee coordinator serves Home Assistant's ZHA; Zigbee2MQTT reaches a dongle through the proxy. Thread and the on-board Zigbee coordinator run side by side, one on each radio; a proxy runs beside either.">
       <g class="rd-radio">
         <rect class="thread" x="40" y="70" width="240" height="90" rx="18"/>
         <g class="rd-ico thread" transform="translate(60 101) scale(1.15)"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/></g>
@@ -254,7 +254,7 @@
       </g>
     </svg>
   </figure>
-  <p class="diag-note">Thread and the on-board Zigbee coordinator run one at a time for now. A proxy runs beside either.</p>
+  <p class="diag-note">Thread and the on-board Zigbee coordinator run side by side, one on each radio. A proxy runs beside either.</p>
   <div class="trio">
     <div class="tile">
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg>
@@ -264,13 +264,95 @@
     <div class="tile">
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14L5 19h14"/></svg>
       <h3>Zigbee too. <span class="tag">beta</span></h3>
-      <p>A radio in Zigbee mode is a coordinator for Home Assistant's ZHA.</p>
+      <p>A radio in Zigbee mode is a coordinator for Home Assistant's ZHA, with Thread on the other radio.</p>
     </div>
     <div class="tile">
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 12h7"/></svg>
       <h3>Share a radio.</h3>
       <p>Serve a radio to another machine over the network, whatever firmware it runs.</p>
     </div>
+  </div>
+</section>
+
+<section class="wrap" id="advanced">
+  <div class="head">
+    <p class="eyebrow">For power users</p>
+    <h2>Everything<br>under the hood.</h2>
+    <p class="lede">Off until you need it. Each one is a few clicks in the web UI.</p>
+  </div>
+  <div class="feats">
+    <a class="feat" href="{{ 'usbip/' | url }}">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v13"/><path d="M9 6l3-3 3 3"/><path d="M12 12l-5-3V6.5M12 10l5-3V5"/><rect x="5.5" y="5" width="3" height="2" rx=".5"/><circle cx="17" cy="4" r="1.2"/><circle cx="12" cy="18.5" r="2.5"/></svg>
+      <h3>USB/IP server <span class="tag new">new</span></h3>
+      <p>Use the device on the board's USB port from a Linux or Windows PC, as if it were plugged in there.</p>
+      <span class="more">USB/IP server</span>
+    </a>
+    <a class="feat" href="{{ 'routing/' | url }}">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="18" r="2"/><path d="M7 18h3a4 4 0 0 0 4-4V10a4 4 0 0 1 4-4h2"/><path d="M17 3l3 3-3 3"/></svg>
+      <h3>Routes to the mesh</h3>
+      <p>Announce the mesh's prefix with BGP or RIPng, take one by DHCPv6 prefix delegation, or set your own.</p>
+      <span class="more">Routing</span>
+    </a>
+    <a class="feat" href="{{ 'networking/#single-port-or-split-vlans' | url }}">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></svg>
+      <h3>Split VLANs</h3>
+      <p>Keep management and the Thread backbone apart. Confirm-or-revert undoes a change that locks you out.</p>
+      <span class="more">Networking</span>
+    </a>
+    <a class="feat" href="{{ 'networking/#trel-thread-over-ethernet' | url }}">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="9" width="12" height="9" rx="1.5"/><path d="M9 9V6h6v3M9 13v2M12 13v2M15 13v2M12 18v3"/></svg>
+      <h3>Thread over Ethernet</h3>
+      <p>Border routers on the same network link up over TREL, so radio islands join into one mesh.</p>
+      <span class="more">TREL</span>
+    </a>
+    <a class="feat" href="{{ 'topology/' | url }}">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="18" r="2.2"/><circle cx="19" cy="18" r="2.2"/><path d="M11 7l-5 9M13 7l5 9M7.2 18h9.6"/></svg>
+      <h3>Mesh map</h3>
+      <p>Every router and child with link quality, vendor, model and firmware, named from any border router's records.</p>
+      <span class="more">Topology</span>
+    </a>
+    <a class="feat" href="{{ 'topology/#thread-console' | url }}">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12 15h5"/></svg>
+      <h3>Thread console</h3>
+      <p>OpenThread's command line in the browser: state, router table, ping, DNS browse.</p>
+      <span class="more">Console</span>
+    </a>
+    <a class="feat" href="{{ 'sniffer/' | url }}">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h3l2-6 4 12 3-9 2 3h4"/></svg>
+      <h3>Packet capture</h3>
+      <p>Record a Thread or Zigbee channel's radio traffic into Wireshark, live or as a file.</p>
+      <span class="more">Packet capture</span>
+    </a>
+    <a class="feat" href="{{ 'diagnostics/' | url }}">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/></svg>
+      <h3>Diagnostics</h3>
+      <p>CPU load per core, memory, chip temperature, the OpenThread lock and every task, live.</p>
+      <span class="more">Monitoring</span>
+    </a>
+    <a class="feat" href="{{ 'metrics/' | url }}">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16h16"/><path d="M7 15l4-5 3 3 5-6"/></svg>
+      <h3>Prometheus metrics</h3>
+      <p>Device, Thread, routing and Zigbee figures for history and alerts, with ready-made alert rules.</p>
+      <span class="more">Metrics</span>
+    </a>
+    <a class="feat" href="{{ 'logging/' | url }}">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11l3 3v13H5z"/><path d="M8 10h8M8 13.5h8M8 17h5"/></svg>
+      <h3>Logging <span class="tag new">new</span></h3>
+      <p>Levels per component, syslog to your server and a live log in the browser.</p>
+      <span class="more">Logging</span>
+    </a>
+    <a class="feat" href="{{ 'updates/' | url }}">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>
+      <h3>Updates from GitHub</h3>
+      <p>Board and radio firmware from the latest release in one click, or from files you choose.</p>
+      <span class="more">Updates</span>
+    </a>
+    <a class="feat" href="{{ 'api/' | url }}">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4c-2 0-3 1-3 3v2c0 1.5-1 3-2 3 1 0 2 1.5 2 3v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2c0 1.5 1 3 2 3-1 0-2 1.5-2 3v2c0 2-1 3-3 3"/></svg>
+      <h3>HTTP API</h3>
+      <p>Every setting and status the web UI uses, as JSON, for your scripts and integrations.</p>
+      <span class="more">API reference</span>
+    </a>
   </div>
 </section>
 
