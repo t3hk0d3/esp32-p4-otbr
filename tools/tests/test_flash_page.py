@@ -234,10 +234,12 @@ class TestDetectConnectionFails:
 
 
 class TestChooseByHand:
-    def test_warns_that_a_wrong_choice_does_not_boot(self):
-        words = text_of("manual")
-        assert "wrong choice writes" in words
-        assert "won't start" in words
+    def test_the_v3_choice_says_v3_1_and_later(self):
+        # the label is the registry's chip name: v3.0 gets no firmware
+        registry = json.loads((REPO / "p4" / "targets" / "targets.json").read_text())
+        name = registry["chips"][V3]["name"]
+        assert "v3.1 and later" in name
+        assert "v3.x" not in name
 
     def test_offers_no_install_before_a_chip_is_picked(self):
         assert run(INIT + "t.flow.chooseByHand();")["view"]["canInstall"] is False
@@ -441,6 +443,11 @@ class TestWithoutFirmware:
     def test_a_blocked_esptool_says_so(self):
         assert run(INIT, noEsptool=True)["view"]["stage"] == "unavailable"
 
+    def test_a_blocked_md5_library_says_so_before_any_erase(self):
+        result = run(INIT, noMd5=True)
+        assert result["view"]["stage"] == "unavailable"
+        assert "erase" not in result["events"]
+
 
 class TestStartOver:
     def test_from_detected_releases_the_port(self):
@@ -451,6 +458,16 @@ class TestStartOver:
 
     def test_returns_to_idle(self):
         assert run(DETECT + "await t.flow.restart();")["view"]["stage"] == "idle"
+
+    def test_clears_the_erase_choice(self):
+        view = run(DETECT + "t.flow.setErase(true); await t.flow.restart();")["view"]
+        assert view["erase"] is False
+
+    def test_a_second_board_is_not_erased_from_the_first_boards_tick(self):
+        events = run(
+            DETECT + "t.flow.setErase(true); await t.flow.restart();" + INSTALL
+        )["events"]
+        assert "erase" not in events
 
 
 class TestLiveBoard:

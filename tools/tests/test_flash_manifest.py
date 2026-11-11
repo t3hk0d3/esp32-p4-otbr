@@ -43,7 +43,7 @@ V3_ENTRY = {
     "board": BOARD,
     "board_name": f"Waveshare {BOARD}",
     "chip": V3,
-    "chip_name": "ESP32-P4 revision v3.x",
+    "chip_name": "ESP32-P4 revision v3.1 and later",
     "min_rev": 301,
     "max_rev": 399,
     "manifest": f"{BOARD}/{V3}/manifest.json",

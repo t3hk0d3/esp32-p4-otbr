@@ -16,7 +16,7 @@ function target(board, chip) {
   const v1 = chip === V1;
   return {
     board, board_name: board === BOARD ? 'Waveshare ' + BOARD : 'Second board',
-    chip, chip_name: v1 ? 'ESP32-P4 revision v1.x' : 'ESP32-P4 revision v3.x',
+    chip, chip_name: v1 ? 'ESP32-P4 revision v1.x' : 'ESP32-P4 revision v3.1 and later',
     min_rev: v1 ? 0 : 301, max_rev: v1 ? 199 : 399,
     manifest: board + '/' + chip + '/manifest.json', version: 'v9.9.9',
   };
@@ -30,7 +30,7 @@ const PARTS = [
 ];
 
 /*
- * options: targets (the published list, null for no targets.json), revision, chipName, mac, noSerial, noEsptool,
+ * options: targets (the published list, null for no targets.json), revision, chipName, mac, noSerial, noEsptool, noMd5,
  * cancelPicker, failConnect, failErase, failWrite (Error text, thrown half way through the second part),
  * failDownload (a file name), failDisconnect.
  */
@@ -142,7 +142,7 @@ function makeFlow(options) {
         throw new Error('blocked');
       return {ESPLoader, Transport};
     },
-    md5: (data) => 'md5-of-' + data.length,
+    md5: o.noMd5 ? null : (data) => 'md5-of-' + data.length,
     sleep: async (ms) => log('sleep:' + ms),
     addUnloadListener: (fn) => { listeners.beforeunload = fn; },
   });

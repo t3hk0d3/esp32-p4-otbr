@@ -257,6 +257,11 @@
         emit({stage: 'empty'});
         return;
       }
+      if (!deps.md5) {
+        /* the checksum library failed to load: found out here, not half way through a write */
+        emit({stage: 'unavailable'});
+        return;
+      }
       try {
         esptool = await deps.loadEsptool();
       } catch (e) {
@@ -283,7 +288,7 @@
       },
       async restart() {
         await resetAndRelease();
-        emit({stage: 'idle', revision: null, candidates: [], board: null, chip: null, percent: 0, part: '', file: ''});
+        emit({stage: 'idle', revision: null, candidates: [], board: null, chip: null, erase: false, percent: 0, part: '', file: ''});
       },
     };
     return flow;
@@ -402,7 +407,7 @@
       base: options.base,
       fetch: (url) => root.fetch(url),
       loadEsptool: () => import(options.esptool),
-      md5: (data) => root.SparkMD5.ArrayBuffer.hash(data),
+      md5: root.SparkMD5 ? (data) => root.SparkMD5.ArrayBuffer.hash(data) : null,
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       addUnloadListener: (fn) => root.addEventListener('beforeunload', fn),
     });
