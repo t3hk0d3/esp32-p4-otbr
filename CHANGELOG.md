@@ -9,6 +9,12 @@ release's `versions.txt`.
 
 ### Added
 
+- Firmware targets, a board (`board_id`) and a chip (`chip_id`) each: chips of revision v3.1 and later are supported
+  (`ESP32-P4-rev3.0`), next to those below v3 (`ESP32-P4-rev1.3`, the default). Each release carries
+  `<board_id>_<chip_id>.ota` and `full_<board_id>_<chip_id>.zip` per target. `otbr.bundle` and `p4-flash.zip` stay for
+  boards on older firmware, which update from them. A board on this firmware or later updates from the file of its own
+  target. Build one with `make build BOARD_ID=<board_id> CHIP_ID=<chip_id>`. Chips of v3.0 get no firmware. Not yet
+  tried on a v3 chip.
 - USB/IP server: the device on the USB-A port is exported over the network (TCP 3240, bus id `1-1`, one client) and
   attaches on Linux (`usbip attach -r <board> -b 1-1`) or Windows (usbip-win2). Off by default; turning it on or off
   reboots the board and is refused while a USB channel runs `otbr` or `ziggurat` (409 `usb_channel_in_use`). While on,
