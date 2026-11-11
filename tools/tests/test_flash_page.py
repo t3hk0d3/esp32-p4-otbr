@@ -25,6 +25,7 @@ INIT = "await t.flow.init();"
 DETECT = INIT + "await t.flow.detect();"
 INSTALL = DETECT + "await t.flow.install();"
 INSTALL_KEEP = DETECT + "t.flow.setErase(false); await t.flow.install();"
+INSTALL_ERASE = DETECT + "t.flow.setErase(true); await t.flow.install();"
 BY_HAND = (
     INIT
     + f"t.flow.chooseByHand(); t.flow.pickChip('{V3}'); t.flow.setErase(false); await t.flow.install();"
@@ -316,17 +317,41 @@ class TestInstallSuccess:
 
 class TestInstallErase:
     def test_erase_chosen_erases_before_writing(self):
-        events = run(DETECT + "t.flow.setErase(true); await t.flow.install();")[
-            "events"
-        ]
+        events = run(INSTALL_ERASE)["events"]
         assert events.index("erase") < events.index("write")
 
     def test_erase_chosen_shows_the_erasing_stage(self):
-        result = run(DETECT + "t.flow.setErase(true); await t.flow.install();")
+        result = run(INSTALL_ERASE)
         assert result["viewWhileErasing"]["stage"] == "erasing"
 
     def test_erase_not_chosen_does_not_erase(self):
         assert "erase" not in run(INSTALL_KEEP)["events"]
+
+    def test_the_box_starts_unticked(self):
+        assert run(DETECT)["view"]["erase"] is False
+
+    def test_the_box_has_no_checked_attribute_in_the_template(self):
+        boxes = re.findall(r'<input[^>]*data-check="erase"[^>]*>', template())
+        assert len(boxes) == 2
+        assert not [box for box in boxes if "checked" in box.replace("data-check", "")]
+
+    def test_install_without_touching_the_box_does_not_erase(self):
+        assert "erase" not in run(INSTALL)["events"]
+
+    def test_install_by_hand_without_touching_the_box_does_not_erase(self):
+        body = (
+            INIT
+            + f"t.flow.chooseByHand(); t.flow.pickChip('{V3}'); await t.flow.install();"
+        )
+        result = run(body)
+        assert "write" in result["events"]
+        assert "erase" not in result["events"]
+
+    def test_the_label_says_when_to_tick_it(self):
+        for stage in ("detected", "manual"):
+            assert "Tick this on a new board or one that ran other firmware" in text_of(
+                stage
+            )
 
 
 class TestInstallDownloadFails:
@@ -367,21 +392,21 @@ class TestInstallDownloadFails:
 )
 class TestInstallWriteFails:
     def test_says_the_board_may_not_start(self, failure):
-        assert run(INSTALL, **failure)["view"]["stage"] == "write_failed"
+        assert run(INSTALL_ERASE, **failure)["view"]["stage"] == "write_failed"
         assert "may not start" in text_of("write_failed")
 
     def test_offers_to_install_again(self, failure):
         assert "install" in actions("write_failed")
 
     def test_releases_the_port(self, failure):
-        assert released(run(INSTALL, **failure))
+        assert released(run(INSTALL_ERASE, **failure))
 
     def test_install_again_asks_for_the_port(self, failure):
-        body = INSTALL + "t.events.length = 0; await t.flow.install();"
+        body = INSTALL_ERASE + "t.events.length = 0; await t.flow.install();"
         assert run(body, **failure)["events"][0] == "requestPort"
 
     def test_stops_warning_before_the_tab_is_closed(self, failure):
-        body = INSTALL + "t.warned = t.unloadWarns();"
+        body = INSTALL_ERASE + "t.warned = t.unloadWarns();"
         assert run(body, **failure)["warned"] is False
 
 

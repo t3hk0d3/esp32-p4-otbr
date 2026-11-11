@@ -20,7 +20,7 @@ try again, or use **Choose firmware by hand**. A wrong choice writes without an 
 install again with the other one to fix it.
 
 It writes the same images as the release's `full_<board_id>_<chip_id>.zip` for your chip (bootloader, partition table,
-OTA data, app, web UI) at the offsets of its `flash_args`. Erase the flash first on a new board or one that ran other
-firmware. On a board in service leave that off, since erasing also deletes the stored Thread dataset and network
+OTA data, app, web UI) at the offsets of its `flash_args`. Tick **Erase the flash first** on a new board or one that ran
+other firmware. It starts off: on a board in service leave it off, since erasing also deletes the stored Thread dataset and network
 configuration. The C6 radio is not touched; upload `c6_installer.bin` (factory C6 only) and `c6_rcp.bin` from the same
 release on the board's Firmware page.

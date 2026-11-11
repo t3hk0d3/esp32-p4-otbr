@@ -32,8 +32,8 @@ The connectors you need:
 ## 1. Flash the P4
 
 Connect the board's P4 USB-C port to your computer, then open [Flash in the browser](flash.md). Press **Detect board**,
-then **Install**. The page reads the chip revision and picks the firmware built for it. On a new board, keep
-**Erase the flash first** on.
+then **Install**. The page reads the chip revision and picks the firmware built for it. On a new board, tick
+**Erase the flash first**.
 
 ??? note "Other ways to flash"
     - With `esptool`: unpack `full_ESP32-P4-WIFI6-POE-ETH_<chip_id>.zip` from the release and run, inside it,

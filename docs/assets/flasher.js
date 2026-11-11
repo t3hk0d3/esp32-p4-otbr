@@ -41,7 +41,7 @@
 
   function createFlow(deps) {
     const state = {
-      stage: 'loading', targets: [], candidates: [], board: null, chip: null, erase: true, revision: null, chipName: '',
+      stage: 'loading', targets: [], candidates: [], board: null, chip: null, erase: false, revision: null, chipName: '',
       log: [], percent: 0, part: '', file: '', host: '',
     };
     let esptool = null;
