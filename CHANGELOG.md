@@ -7,6 +7,8 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-11
+
 ### Added
 
 - Firmware targets, a board (`board_id`) and a chip (`chip_id`) each: chips of revision v3.1 and later are supported
@@ -278,7 +280,8 @@ on-board ESP32-C6 as the radio co-processor over SPI.
 
 See `docs/troubleshooting.md` for the full list.
 
-[Unreleased]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.2.1...v0.3.0
