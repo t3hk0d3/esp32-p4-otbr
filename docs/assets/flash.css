@@ -46,6 +46,9 @@
 .fl a { color: inherit; }
 .fl .mono { font-family: var(--mono); }
 .fl-note { font-size: 14.5px; }
+.fl-waiting { display: flex; align-items: center; gap: 10px; }
+.fl-spinner { flex: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--air); animation: fl-spin .8s linear infinite; }
+@keyframes fl-spin { to { transform: rotate(360deg); } }
 .fl p.fl-warn { color: var(--warn); }
 .fl-actions { display: flex; flex-wrap: wrap; gap: 12px; }
 .fl-log { font-size: 14.5px; color: var(--soft); display: flex; flex-direction: column; gap: 4px; min-height: 96px; overflow-wrap: anywhere; }
@@ -106,6 +109,6 @@
 .fl .lab.on { opacity: 1; }
 
 @media (prefers-reduced-motion: reduce) {
-  .fl .scan.on, .fl .trace.run, .fl .ring.on { animation: none; }
+  .fl .scan.on, .fl .trace.run, .fl .ring.on, .fl-spinner { animation: none; }
   .fl .chip, .fl .trace { transition: none; }
 }

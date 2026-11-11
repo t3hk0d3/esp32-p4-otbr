@@ -394,6 +394,13 @@ class TestBoardAddress:
     def test_says_it_is_waiting_for_the_address(self):
         assert 'data-if="addressWaiting"' in panel("done")
 
+    def test_shows_a_spinner_while_waiting(self):
+        note = re.search(
+            r'<p [^>]*data-if="addressWaiting".*?</p>', panel("done"), re.DOTALL
+        ).group(0)
+        assert 'class="fl-spinner"' in note
+        assert 'aria-hidden="true"' in note
+
 
 class TestInstallErase:
     def test_erase_chosen_erases_before_writing(self):
