@@ -94,11 +94,11 @@ jobs:
           cd p4/components/zigbee
           "$HOME/.cargo/bin/rustup" toolchain install
           "$HOME/.cargo/bin/rustup" target add riscv32imafc-unknown-none-elf
-      - name: Build c6_updater, c6_rcp, c6_installer, p4
+      - name: Build c6_updater, c6_rcp, c6_installer, p4 (every firmware target)
         run: |
           # version.cmake reads the git hash; the checkout belongs to another user than the container's root
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          make build
+          make build-release
       - name: Vendored REST host tests
         run: make test-vendored
       - name: Package
@@ -204,10 +204,15 @@ jobs:
             echo
             echo "## Files"
             echo
-            echo "- \`otbr.bundle\`: P4 app and web UI, for an OTA update (Device > Firmware page or \`POST /device/ota\`)."
+            echo "- \`otbr.bundle\`: P4 app and web UI of the default target, for an OTA update (Device > Firmware page or \`POST /device/ota\`)."
+            # one pair of files per firmware target (board and chip), whatever targets this release has
+            for ota in dist/*.ota; do
+              name="$(basename "$ota" .ota)"
+              echo "- \`$name.ota\` and \`full_$name.zip\`: the OTA bundle and the full USB flash for the board and chip revision in the name."
+            done
             echo "- \`c6_rcp.bin\`: C6 radio firmware from the same build (Device > Firmware page or \`POST /device/radio/firmware\`)."
             echo "- \`c6_installer.bin\`: one-time first install on a factory C6 (ESP-Hosted): upload it like the radio firmware, then \`c6_rcp.bin\` (see docs/first-install.md)."
-            echo "- \`p4-flash.zip\`: full P4 flash over USB: \`esptool --chip esp32p4 write-flash @flash_args\` inside the unpacked directory."
+            echo "- \`p4-flash.zip\`: the default target's full P4 flash over USB: \`esptool --chip esp32p4 write-flash @flash_args\` inside the unpacked directory."
             echo "- \`c6-updater-flash.zip\`: C6 base images for the no-jumper first install (see docs/first-install.md)."
             echo "- \`third-party-licenses.zip\`: license texts of the code linked into the images."
             echo "- \`SHA256SUMS\`: checksums of the files above."

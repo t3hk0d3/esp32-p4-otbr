@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Collect the release artifacts of a finished release build (make build, never make build-test) into one directory.
+# Collect the release artifacts of a finished release build (make build-release, never make build-test) into one directory.
 # Usage: tools/package_release.sh <out dir> (or make package)
 # Requires an activated ESP-IDF environment (IDF_PATH, for the third-party license texts).
 # Writes:
-#   otbr.bundle                  P4 OTA bundle (web UI and P4 app), POST /device/ota
+#   <board_id>_<chip_id>.ota     P4 OTA bundle (web UI and P4 app) of each firmware target, POST /device/ota
+#   full_<board_id>_<chip_id>.zip full P4 USB flash of each target: images and flash_args (esptool write-flash @flash_args)
+#   otbr.bundle                  copy of the default target's .ota: released firmware downloads it by this name
 #   c6_rcp.bin                   C6 radio firmware, POST /device/radio/firmware
 #   c6_installer.bin             one-time C6 installer for a factory C6 (ESP-Hosted), POST /device/radio/firmware before
 #                                c6_rcp.bin; its version is the c6 base version
-#   p4-flash.zip                 full P4 USB flash: images and flash_args (esptool --chip esp32p4 write-flash @flash_args)
+#   p4-flash.zip                 copy of the default target's full_*.zip
 #   c6-updater-flash.zip         C6 base images for the USB-UART first install (docs/first-install.md, Path 3)
 #   third-party-licenses.zip     license texts of the code linked into the images
 #   versions.txt, SHA256SUMS     versions.txt starts with "release: <tag>" when RELEASE_TAG is set (CI sets it on a v* tag)
@@ -26,33 +28,82 @@ if [[ -n "$release_tag" && ! "$release_tag" =~ ^[A-Za-z0-9._-]{1,32}$ ]]; then
     echo "RELEASE_TAG '$release_tag' is not 1 to 32 characters of [A-Za-z0-9._-]" >&2
     exit 1
 fi
-out="$(mkdir -p "$1" && cd "$1" && pwd)"
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
 
-project_version() {
+# Every firmware target of the registry, one per line: <board_id>/<chip_id>, build dir, sdkconfig, revision range (the
+# ESP-IDF numbers the flasher picks an image by) and whether it is the default target. Paths are relative to the root.
+mapfile -t targets < <(python3 -I - "$root" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1] + "/tools")
+import targets
+
+data = targets.load()
+for pair in targets.pairs(data):
+    board, chip = pair.split("/")
+    files = targets.resolve(data, board, chip)
+    default = int(data["default"] == {"board": board, "chip": chip})
+    print(pair, files["build_dir"], files["sdkconfig"], data["chips"][chip]["min_rev"], data["chips"][chip]["max_rev"],
+          default, sep="\t")
+PY
+)
+[[ ${#targets[@]} -gt 0 ]] || { echo "no firmware targets in the registry" >&2; exit 1; }
+
+project_version() { # <build dir>
     python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["project_version"])' \
-        "$root/$1/build/project_description.json"
+        "$1/project_description.json"
 }
 
-# A test build must never be released (build_all.sh records the choice as the OTBR_TEST_BUILD cache entry).
-for project in p4 c6_rcp c6_updater c6_installer; do
-    if grep -q '^OTBR_TEST_BUILD:[A-Z]*=1$' "$root/$project/build/CMakeCache.txt"; then
-        echo "$project/build is a --test build; rebuild with make build" >&2
+# All checks run before any output is written. A test build must never be released (build_all.sh records the choice as
+# the OTBR_TEST_BUILD cache entry).
+build_dirs=("c6_rcp/build" "c6_updater/build" "c6_installer/build")
+for entry in "${targets[@]}"; do
+    IFS=$'\t' read -r pair build_dir _ <<<"$entry"
+    if [[ ! -f "$root/$build_dir/project_description.json" ]]; then
+        echo "$pair has no build in $build_dir; run make build-release" >&2
+        exit 1
+    fi
+    build_dirs+=("$build_dir")
+done
+for build_dir in "${build_dirs[@]}"; do
+    [[ -f "$root/$build_dir/CMakeCache.txt" ]] || { echo "$build_dir has no build; run make build-release" >&2; exit 1; }
+    if grep -q '^OTBR_TEST_BUILD:[A-Z]*=1$' "$root/$build_dir/CMakeCache.txt"; then
+        echo "$build_dir is a --test build; rebuild with make build-release" >&2
         exit 1
     fi
 done
-# zip adds to an existing archive: the zips are built in the empty $tmp (no stale files on a re-run) and moved to $out
-# together once all three exist, so a failed run leaves the previous ones in place.
 
-# Zip the images named in a project's flash_args, flattened, with a flash_args that uses the flat names.
-flash_zip() {
-    local project="$1" zip_name="$2" dir="$tmp/$2"
+# The flasher picks an image by the chip's revision range in the registry: the sdkconfig must agree. Every P4 build of
+# a release carries one version, else a board would always find the release older or newer than itself.
+p4_version=""
+for entry in "${targets[@]}"; do
+    IFS=$'\t' read -r pair build_dir sdkconfig min_rev max_rev _ <<<"$entry"
+    have_min="$(sed -n 's/^CONFIG_ESP32P4_REV_MIN_FULL=//p' "$root/$sdkconfig" 2>/dev/null)"
+    have_max="$(sed -n 's/^CONFIG_ESP32P4_REV_MAX_FULL=//p' "$root/$sdkconfig" 2>/dev/null)"
+    if [[ "$have_min" != "$min_rev" || "$have_max" != "$max_rev" ]]; then
+        echo "$pair: $sdkconfig has revisions ${have_min:-?} to ${have_max:-?}, the registry says $min_rev to $max_rev" >&2
+        exit 1
+    fi
+    version="$(project_version "$root/$build_dir")"
+    p4_version="${p4_version:-$version}"
+    if [[ "$version" != "$p4_version" ]]; then
+        echo "$pair is version $version, the targets before it $p4_version; rebuild with make build-release" >&2
+        exit 1
+    fi
+done
+
+out="$(mkdir -p "$1" && cd "$1" && pwd)"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+# zip adds to an existing archive: the zips are built in the empty $tmp (no stale files on a re-run) and moved to $out
+# together once all of them exist, so a failed run leaves the previous ones in place.
+
+# Zip the images named in a build directory's flash_args, flattened, with a flash_args that uses the flat names.
+flash_zip() { # <build dir> <zip name>
+    local build="$1" zip_name="$2" dir="$tmp/$2"
     mkdir -p "$dir"
     {
-        head -n 1 "$root/$project/build/flash_args"
-        tail -n +2 "$root/$project/build/flash_args" | while read -r offset image; do
-            cp "$root/$project/build/$image" "$dir/"
+        head -n 1 "$build/flash_args"
+        tail -n +2 "$build/flash_args" | while read -r offset image; do
+            cp "$build/$image" "$dir/"
             echo "$offset $(basename "$image")"
         done
     } >"$dir/flash_args"
@@ -78,10 +129,23 @@ c6_base_zip() {
     (cd "$dir" && zip -q -r "$tmp/c6-updater-flash.zip" .)
 }
 
-python3 "$root/tools/make_bundle.py" --web "$root/p4/build/web_0.bin" --app "$root/p4/build/p4.bin" \
-    --out "$out/otbr.bundle"
+# Each target's bundle goes into $tmp with its zip and moves into $out with them; otbr.bundle and p4-flash.zip are
+# copies of the default target's.
+files=()
+for entry in "${targets[@]}"; do
+    IFS=$'\t' read -r pair build_dir _ _ _ default <<<"$entry"
+    name="${pair/\//_}"
+    python3 "$root/tools/make_bundle.py" --web "$root/$build_dir/web_0.bin" --app "$root/$build_dir/p4.bin" \
+        --out "$tmp/$name.ota"
+    flash_zip "$root/$build_dir" "full_$name"
+    files+=("$name.ota" "full_$name.zip")
+    if [[ "$default" == 1 ]]; then
+        cp "$tmp/$name.ota" "$tmp/otbr.bundle"
+        cp "$tmp/full_$name.zip" "$tmp/p4-flash.zip"
+    fi
+done
+[[ -f "$tmp/otbr.bundle" ]] || { echo "the registry's default target is not a listed target" >&2; exit 1; }
 cp "$root/c6_rcp/build/c6_rcp.bin" "$root/c6_installer/build/c6_installer.bin" "$out/"
-flash_zip p4 p4-flash
 c6_base_zip
 
 licenses="$tmp/third-party-licenses"
@@ -104,16 +168,17 @@ for component in "$root"/p4/managed_components/*/; do
     [[ -n "$license" ]] && cp "$license" "$licenses/$(basename "$component").txt"
 done
 (cd "$licenses" && zip -q -r "$tmp/third-party-licenses.zip" .)
-mv -f "$tmp/p4-flash.zip" "$tmp/c6-updater-flash.zip" "$tmp/third-party-licenses.zip" "$out/"
+for file in "${files[@]}"; do mv -f "$tmp/$file" "$out/"; done
+mv -f "$tmp/otbr.bundle" "$tmp/p4-flash.zip" "$tmp/c6-updater-flash.zip" "$tmp/third-party-licenses.zip" "$out/"
 
 {
     [[ -z "$release_tag" ]] || echo "release:     $release_tag"
-    echo "p4 app:      $(project_version p4)"
-    echo "c6_rcp:      $(project_version c6_rcp)"
-    echo "c6 base:     $(project_version c6_updater)"
+    echo "p4 app:      $p4_version"
+    echo "c6_rcp:      $(project_version "$root/c6_rcp/build")"
+    echo "c6 base:     $(project_version "$root/c6_updater/build")"
     echo "ESP-IDF:     $(cd "$IDF_PATH" && git describe --tags --always 2>/dev/null || echo unknown)"
 } >"$out/versions.txt"
 
-(cd "$out" && sha256sum otbr.bundle c6_rcp.bin c6_installer.bin p4-flash.zip c6-updater-flash.zip third-party-licenses.zip \
-    versions.txt >SHA256SUMS)
+(cd "$out" && sha256sum "${files[@]}" otbr.bundle c6_rcp.bin c6_installer.bin p4-flash.zip c6-updater-flash.zip \
+    third-party-licenses.zip versions.txt >SHA256SUMS)
 cat "$out/versions.txt"
