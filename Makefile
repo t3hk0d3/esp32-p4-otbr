@@ -74,7 +74,7 @@ monitor: ## Open the P4 console (115200 baud)
 	$(IDF) $(IDF_P4) -p $(PORT) monitor
 
 erase: ## Erase the whole P4 flash, including the Thread dataset and network config
-	$(IDF) idf.py -C p4 -p $(PORT) erase-flash
+	$(IDF) esptool --chip esp32p4 -p $(PORT) erase-flash
 
 c6-flash-base: ## USB-UART install: erase the C6 and write its base images over a USB-UART on H7 (C6_PORT)
 	cd c6_updater/build && $(IDF) esptool --chip esp32c6 -p $(C6_PORT) --before no-reset --after no-reset erase-flash

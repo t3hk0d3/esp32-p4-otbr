@@ -40,9 +40,10 @@ jobs:
             echo "firmware=true" >>"$GITHUB_OUTPUT"
             exit 0
           fi
-          # Documentation only: Markdown anywhere, docs/, the site config and its hook, the docs workflow.
-          docs='^(docs/.*|.*\.md|mkdocs\.yml|tools/docs_hooks\.py|\.github/workflows/docs\.yml)$'
-          other="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename' | grep -Ev "$docs" || true)"
+          # Documentation only: Markdown anywhere, docs/, the site config and its hook, the docs workflow. The flasher
+          # page script and template under docs/ are code with tests (tools/tests/test_flash_page.py), so they count.
+          docs='^(?!docs/(assets/flasher\.js|overrides/flash\.html)$)(docs/.*|.*\.md|mkdocs\.yml|tools/docs_hooks\.py|\.github/workflows/docs\.yml)$'
+          other="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename' | grep -Pv "$docs" || true)"
           if [[ -n "$other" ]]; then
             echo "firmware=true" >>"$GITHUB_OUTPUT"
             printf 'non-documentation changes:\n%s\n' "$other"

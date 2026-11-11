@@ -5,9 +5,9 @@ name: docs
 on:
   push:
     branches: [master]
-    paths: [docs/**, README.md, mkdocs.yml, tools/docs_hooks.py, tools/flash_manifest.py, p4/targets/**, .github/workflows/docs.yml]
+    paths: [docs/**, README.md, mkdocs.yml, tools/docs_hooks.py, tools/flash_manifest.py, tools/targets.py, p4/targets/**, .github/workflows/docs.yml]
   pull_request:
-    paths: [docs/**, README.md, mkdocs.yml, tools/docs_hooks.py, tools/flash_manifest.py, p4/targets/**, .github/workflows/docs.yml]
+    paths: [docs/**, README.md, mkdocs.yml, tools/docs_hooks.py, tools/flash_manifest.py, tools/targets.py, p4/targets/**, .github/workflows/docs.yml]
   # build.yml publishes the release with the job token, which starts no `release` workflow; this runs on master instead
   workflow_run:
     workflows: [build]
