@@ -29,8 +29,9 @@
 
 **Firmware target**
 :   A board and a chip the firmware is built for, named `<board_id>_<chip_id>`, for example
-    `ESP32-P4-WIFI6-POE-ETH_ESP32-P4-rev1.3`. Each release has an update file (`.ota`) and a full flash image
-    (`full_....zip`) per target, and a board updates from the file of its own target. See [Updates](updates.md).
+    `ESP32-P4-WIFI6-POE-ETH_ESP32-P4-rev1.3`. From v0.6.0 on, each release has an update file (`.ota`) and a full
+    flash image (`full_....zip`) per target, and a board updates from the file of its own target. Older releases have
+    only `otbr.bundle` and `p4-flash.zip`, for chips below v3. See [Updates](updates.md).
 
 **Leader**
 :   The one router in a Thread network that keeps the network's shared data. Any router can take the role.

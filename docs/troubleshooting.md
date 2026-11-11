@@ -37,8 +37,10 @@ With a dongle running Thread, **No radio** means it is unplugged: plug it back i
   wrong or unreachable; with a static address, Automatic also needs a DNS server to find `pool.ntp.org`). See
   [Time](networking.md#time).
 - **The Dashboard warns that Thread and Zigbee share a channel.** Both networks are on the same 802.15.4 channel: they
-  work, but each slows the other under load. Move one of them, Thread with a new dataset or Zigbee by forming its
-  network again in ZHA. See [Thread and Zigbee together](zigbee.md#thread-and-zigbee-together).
+  work, but each slows the other under load. Move Thread with Home Assistant's **Change channel**, which keeps the
+  same network ([how](home-assistant.md#move-the-board-onto-home-assistants-preferred-network); some devices may need
+  to be re-joined). Don't form a new Thread or Zigbee network for this: devices stay on the old one and must be paired
+  again. See [Thread and Zigbee together](zigbee.md#thread-and-zigbee-together).
 - **Home Assistant can't connect, or doesn't list the board.** See [Home Assistant](home-assistant.md#troubleshooting).
 - **The Thread pages say "radio not available"** (or Home Assistant gets 503): the radio is in fault, see above.
   **"sniffer active"**: a packet capture is running; stop it on the Packet capture page.
