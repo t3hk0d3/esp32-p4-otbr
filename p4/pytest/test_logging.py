@@ -250,11 +250,18 @@ async def wait_viewers(base_url, count, timeout=15):
 
 
 class RawViewer:
-    """A live log client on a plain socket with a tiny receive buffer: it can really stop reading."""
+    """A live log client on a plain socket with a small receive buffer: it can really stop reading.
+
+    The buffer is 32 KB, not smaller: below that (2 KB was tried), the host's kernel drops incoming segments once
+    the buffer fills, and the board's TCP retransmit back-off then holds the socket ~26 s after the viewer reads
+    again, past the board's 30 s "no answer" close, so the "# dropped" notice never arrives.
+    """
+
+    RCVBUF = 32 * 1024
 
     def __init__(self, board_ip, level):
         self.sock = socket.socket()
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2048)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.RCVBUF)
         self.sock.settimeout(5)
         self.sock.connect((board_ip, 80))
         request = (
