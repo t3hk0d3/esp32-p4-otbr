@@ -32,19 +32,53 @@ const PARTS = [
 /*
  * options: targets (the published list, null for no targets.json), revision, chipName, mac, noSerial, noEsptool, noMd5,
  * cancelPicker, failConnect, failErase, failWrite (Error text, thrown half way through the second part),
- * failDownload (a file name), failDisconnect.
+ * failDownload (a file name), failDisconnect, console (chunks the board prints after the install, then the stream
+ * ends), holdConsole (the board stays silent until the read is cancelled), failConsoleOpen.
  */
 function makeFlow(options) {
   const o = Object.assign({targets: TARGETS, revision: 103, chipName: 'ESP32-P4', mac: 'aa:bb:cc:dd:ee:ff'}, options);
-  const t = {events: [], written: null, progress: [], port: {open: false}, warned: null};
+  const t = {events: [], written: null, progress: [], warned: null};
   const log = (e) => t.events.push(e);
+  const chunks = (o.console || []).map((text) => new TextEncoder().encode(text));
+  let cancelRead = null;
+  t.port = {
+    isOpen: false,
+    readable: {
+      getReader: () => ({
+        read() {
+          if (chunks.length)
+            return Promise.resolve({value: chunks.shift(), done: false});
+          if (o.holdConsole)
+            return new Promise((resolve) => { cancelRead = () => resolve({done: true}); });
+          return Promise.resolve({done: true});
+        },
+        cancel() {
+          log('console-cancel');
+          if (cancelRead)
+            cancelRead();
+          return Promise.resolve();
+        },
+        releaseLock() {},
+      }),
+    },
+    async open(args) {
+      log('console-open:' + args.baudRate);
+      if (o.failConsoleOpen)
+        throw new Error('port lost');
+      t.port.isOpen = true;
+    },
+    async close() {
+      log('console-close');
+      t.port.isOpen = false;
+    },
+  };
 
   class Transport {
     constructor(port) { this.port = port; log('transport'); }
     async setRTS(on) { log('rts:' + on); }
     async disconnect() {
       log('disconnect');
-      this.port.open = false;
+      this.port.isOpen = false;
       if (o.failDisconnect)
         throw new Error('port lost');
     }
@@ -62,7 +96,7 @@ function makeFlow(options) {
     }
     async main() {
       log('main');
-      this.transport.port.open = true;
+      this.transport.port.isOpen = true;
       this.terminal.writeLine('Chip is ' + o.chipName);
       if (o.failConnect)
         throw new Error('Failed to connect with the device');
@@ -143,7 +177,12 @@ function makeFlow(options) {
       return {ESPLoader, Transport};
     },
     md5: o.noMd5 ? null : (data) => 'md5-of-' + data.length,
-    sleep: async (ms) => log('sleep:' + ms),
+    sleep: async (ms) => {
+      log('sleep:' + ms);
+      /* the wait for the address: a board with something to say answers before it runs out */
+      if (ms === Flasher.ADDRESS_WAIT_MS && (o.console || o.holdConsole))
+        await new Promise(() => {});
+    },
     addUnloadListener: (fn) => { listeners.beforeunload = fn; },
   });
   t.unloadWarns = () => {
@@ -151,7 +190,7 @@ function makeFlow(options) {
     listeners.beforeunload(event);
     return event.prevented;
   };
-  t.result = () => ({view: t.flow.view(), events: t.events, portOpen: t.port.open, written: t.written, progress: t.progress,
+  t.result = () => ({view: t.flow.view(), events: t.events, portOpen: t.port.isOpen, written: t.written, progress: t.progress,
                      warned: t.warned, viewWhileErasing: t.viewWhileErasing, viewWhilePicking: t.viewWhilePicking});
   return t;
 }

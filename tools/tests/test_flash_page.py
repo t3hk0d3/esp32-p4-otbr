@@ -93,7 +93,10 @@ def released(result):
 
 
 def assert_reset_then_release(events):
-    tail = events[-4:]
+    flashing = [
+        e for e in events if not e.startswith("console-") and e != "sleep:60000"
+    ]
+    tail = flashing[-4:]
     assert tail == ["rts:true", "sleep:100", "after", "disconnect"]
 
 
@@ -315,6 +318,81 @@ class TestInstallSuccess:
 
     def test_survives_a_failing_release(self):
         assert run(INSTALL, failDisconnect=True)["view"]["stage"] == "done"
+
+
+GOT_IP = "\x1b[0;32mI (4210) eth: got ip 192.168.1.50\x1b[0m\r\n"
+UNTIL_DONE = (
+    "while (t.flow.view().stage !== 'done') await new Promise(r => setImmediate(r));"
+    "await new Promise(r => setImmediate(r));"
+)
+
+
+class TestBoardAddress:
+    def test_links_to_the_address_the_board_printed(self):
+        view = run(INSTALL, console=["boot\r\n", GOT_IP])["view"]
+        assert view["hostUrl"] == "http://192.168.1.50/"
+        assert view["openLabel"] == "Open 192.168.1.50"
+        assert view["canOpen"] is True
+        assert view["addressWaiting"] is False
+
+    def test_finds_an_address_split_across_reads(self):
+        view = run(INSTALL, console=["I (1) eth: got i", "p 10.0.0.7\r\n"])["view"]
+        assert view["hostUrl"] == "http://10.0.0.7/"
+
+    def test_ignores_ipv6_addresses(self):
+        view = run(INSTALL, console=["I (1) eth: got ip6 fe80::1 link-local\r\n"])[
+            "view"
+        ]
+        assert view["hostUrl"] == "http://esp-otbr-ddeeff.local/"
+
+    def test_reads_the_console_at_its_own_speed_after_releasing_the_flasher(self):
+        events = run(INSTALL, console=[GOT_IP])["events"]
+        assert events.index("disconnect") < events.index("console-open:115200")
+
+    def test_closes_the_port_once_found(self):
+        result = run(INSTALL, console=[GOT_IP])
+        assert "console-close" in result["events"]
+        assert not result["portOpen"]
+
+    def test_falls_back_to_the_name_when_nothing_is_printed_in_time(self):
+        result = run(INSTALL)
+        assert result["view"]["hostUrl"] == "http://esp-otbr-ddeeff.local/"
+        assert result["view"]["openLabel"] == "Open esp-otbr-ddeeff.local"
+        assert result["view"]["canOpen"] is True
+        assert not result["portOpen"]
+
+    def test_falls_back_to_the_name_when_the_port_will_not_open(self):
+        view = run(INSTALL, failConsoleOpen=True)["view"]
+        assert view["hostUrl"] == "http://esp-otbr-ddeeff.local/"
+        assert view["addressWaiting"] is False
+
+    def test_offers_no_link_while_waiting(self):
+        body = DETECT + "const p = t.flow.install();" + UNTIL_DONE
+        view = run(body, holdConsole=True)["view"]
+        assert view["addressWaiting"] is True
+        assert view["canOpen"] is False
+
+    def test_flash_another_board_stops_waiting_and_frees_the_port(self):
+        body = (
+            DETECT
+            + "const p = t.flow.install();"
+            + UNTIL_DONE
+            + "await t.flow.restart(); await p;"
+        )
+        result = run(body, holdConsole=True)
+        assert result["view"]["stage"] == "idle"
+        assert result["view"]["addressWaiting"] is False
+        assert "console-close" in result["events"]
+        assert not result["portOpen"]
+
+    def test_the_link_opens_in_a_new_tab(self):
+        link = re.search(r'<a [^>]*data-href="hostUrl"[^>]*>', panel("done")).group(0)
+        assert 'target="_blank"' in link
+        assert 'rel="noopener"' in link
+        assert 'data-if="canOpen"' in link
+
+    def test_says_it_is_waiting_for_the_address(self):
+        assert 'data-if="addressWaiting"' in panel("done")
 
 
 class TestInstallErase:

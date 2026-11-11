@@ -117,8 +117,9 @@
       <section data-stage="done" hidden>
         <h1>Installed</h1>
         <p>The board restarted on release <span data-text="version"></span>. Open its page to add the radio firmware.</p>
+        <p class="fl-note" data-if="addressWaiting">Waiting for the board to get its network address.</p>
         <div class="fl-actions">
-          <a class="btn primary" data-href="hostUrl" data-text="openLabel"></a>
+          <a class="btn primary" target="_blank" rel="noopener" data-if="canOpen" data-href="hostUrl" data-text="openLabel"></a>
           <button class="btn ghost" type="button" data-action="restart">Flash another board</button>
         </div>
       </section>

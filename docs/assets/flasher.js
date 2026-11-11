@@ -7,6 +7,9 @@
 (function (root) {
   const P4 = 'ESP32-P4';
   const BAUD = 460800;
+  const CONSOLE_BAUD = 115200;
+  const CONSOLE_KEEP = 4096; /* of the console text: enough for a line split across reads */
+  const ADDRESS_WAIT_MS = 60000; /* boot plus DHCP, with room for a slow server */
   const STEP_OF = {
     loading: 0, unsupported: 0, empty: 0, unavailable: 0, idle: 0, picking: 0, connect_failed: 0, manual: 0,
     reading: 1, no_firmware: 1, wrong_chip: 1,
@@ -35,6 +38,12 @@
     return 'esp-otbr-' + mac.split(':').slice(3).join('').toLowerCase() + '.local';
   }
 
+  /* The IPv4 address in the console text, from the line p4/main/eth.c logs; '' when there is none yet. */
+  function addressIn(text) {
+    const match = /eth: got ip (\d{1,3}(?:\.\d{1,3}){3})/.exec(text);
+    return match ? match[1] : '';
+  }
+
   function distinct(values) {
     return Array.from(new Set(values));
   }
@@ -42,10 +51,11 @@
   function createFlow(deps) {
     const state = {
       stage: 'loading', targets: [], candidates: [], board: null, chip: null, erase: false, revision: null, chipName: '',
-      log: [], percent: 0, part: '', file: '', host: '',
+      log: [], percent: 0, part: '', file: '', host: '', ip: '', addressWaiting: false,
     };
     let esptool = null;
-    let session = null; /* {transport, loader} while the port is open */
+    let session = null; /* {port, transport, loader} while the port is open */
+    let search = null; /* {stopped, stop, done} while reading the console for the address */
     let listener = () => {};
     const emit = (patch) => { Object.assign(state, patch); listener(); };
 
@@ -113,7 +123,7 @@
         },
       };
       const loader = new esptool.ESPLoader({transport, baudrate: BAUD, terminal});
-      session = {transport, loader};
+      session = {port, transport, loader};
       try {
         await loader.main();
         const chipName = loader.chip.CHIP_NAME;
@@ -207,6 +217,39 @@
       });
     }
 
+    /* Reads the board's console until it logs its address; '' when it doesn't in time or the port won't open. */
+    async function findAddress(port, running) {
+      try {
+        await port.open({baudRate: CONSOLE_BAUD});
+      } catch (e) {
+        return '';
+      }
+      const reader = port.readable.getReader();
+      running.stop = () => reader.cancel().catch(() => {});
+      if (running.stopped)
+        running.stop();
+      deps.sleep(ADDRESS_WAIT_MS).then(() => running.stop());
+      const decoder = new TextDecoder();
+      let text = '';
+      try {
+        for (;;) {
+          const {value, done} = await reader.read();
+          if (done)
+            return '';
+          text = (text + decoder.decode(value, {stream: true})).slice(-CONSOLE_KEEP);
+          const address = addressIn(text);
+          if (address)
+            return address;
+        }
+      } catch (e) {
+        return '';
+      } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
+        await port.close().catch(() => {});
+      }
+    }
+
     async function install() {
       const chosen = target();
       if (!chosen)
@@ -233,8 +276,15 @@
         await release();
         return;
       }
+      const {port} = session;
       await resetAndRelease();
-      emit({stage: 'done', percent: 100});
+      emit({stage: 'done', percent: 100, ip: '', addressWaiting: true});
+      const running = {stopped: false, stop() {}};
+      search = running;
+      running.done = findAddress(port, running);
+      const ip = await running.done;
+      search = null;
+      emit({ip, addressWaiting: false});
     }
 
     async function init() {
@@ -287,8 +337,14 @@
         offer(state.targets);
       },
       async restart() {
+        if (search) {
+          const running = search;
+          running.stopped = true;
+          running.stop();
+          await running.done;
+        }
         await resetAndRelease();
-        emit({stage: 'idle', revision: null, candidates: [], board: null, chip: null, erase: false, percent: 0, part: '', file: ''});
+        emit({stage: 'idle', revision: null, candidates: [], board: null, chip: null, erase: false, percent: 0, part: '', file: '', ip: '', addressWaiting: false});
       },
     };
     return flow;
@@ -306,6 +362,7 @@
     const byBoard = (id) => state.candidates.find((t) => t.board === id);
     const byChip = (id) => state.candidates.find((t) => t.chip === id);
     const anyVersion = chosen ? chosen.version : state.targets.length ? state.targets[0].version : '';
+    const address = state.ip || state.host;
 
     let trace = 'trace';
     if (stage === 'reading' || stage === 'downloading' || busy)
@@ -339,8 +396,10 @@
       writingLabel: state.part ? 'Writing ' + state.part : 'Starting to write',
       file: state.file,
       host: state.host,
-      hostUrl: state.host ? 'http://' + state.host + '/' : '',
-      openLabel: 'Open ' + state.host,
+      hostUrl: address ? 'http://' + address + '/' : '',
+      openLabel: 'Open ' + address,
+      addressWaiting: state.addressWaiting,
+      canOpen: stage === 'done' && !state.addressWaiting,
       /* the live board */
       revLabel: known ? revisionLabel(state.revision) : '',
       traceClass: trace,
@@ -418,7 +477,7 @@
     return flow.init();
   }
 
-  const api = {targetsForRevision, hostFromMac, createFlow, view, start, STAGES};
+  const api = {targetsForRevision, hostFromMac, addressIn, createFlow, view, start, STAGES, ADDRESS_WAIT_MS};
   if (typeof module !== 'undefined' && module.exports)
     module.exports = api;
   else

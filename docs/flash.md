@@ -12,7 +12,8 @@ without installing anything. It needs Chrome, Edge or another browser with Web S
 1. Connect the board's P4 USB-C port to this computer.
 2. Press **Detect board** and pick the board's serial port (a CH343, often named "USB Single Serial"). The page reads
    the chip revision and picks the firmware built for it.
-3. Press **Install**. When it is done, continue with the radio firmware:
+3. Press **Install**. The page then waits for the board's network address and links to it. Continue with the radio
+   firmware:
    [2. Put the radio firmware on the C6](first-install.md#2-put-the-radio-firmware-on-the-c6).
 
 If the page can't read the chip, put the board in download mode (hold BOOT, press and release RESET, release BOOT) and
