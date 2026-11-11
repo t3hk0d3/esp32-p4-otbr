@@ -785,6 +785,37 @@ class TestUpdatesCard:
         assert r[2] is True
         assert r[3:] == ["v0.4.0 available", "", False]
 
+    def test_upload_box_names_the_bundle_file_of_the_update_state(self):
+        # With an update state that has `bundle`: the drop zone and the URL placeholder name that file.
+        r = scenario(
+            page("firmware", routes())
+            + f"""
+            t.u = {upd(bundle="ESP32-P4-WIFI6-POE-ETH_ESP32-P4-rev3.0.ota")};
+            t.page.init(); await t.advance(100);
+            return [t.el('otaBundleName').textContent, t.el('otaUrl').getAttribute('placeholder')];
+        """
+        )
+        assert r == [
+            "ESP32-P4-WIFI6-POE-ETH_ESP32-P4-rev3.0.ota",
+            "https://host/ESP32-P4-WIFI6-POE-ETH_ESP32-P4-rev3.0.ota",
+        ]
+
+    def test_upload_box_names_otbr_bundle_while_the_state_has_no_bundle(self):
+        # Before the state loads and with an older board's reply (no `bundle`): the text is otbr.bundle.
+        r = scenario(
+            page("firmware", routes())
+            + f"""
+            t.u = {upd()};
+            t.page.init(); await t.advance(100);
+            return [t.el('otaBundleName').textContent, t.el('otaUrl').getAttribute('placeholder')];
+        """
+        )
+        assert r == ["otbr.bundle", "https://host/otbr.bundle"]
+
+    def test_upload_box_says_otbr_bundle_in_the_markup_before_the_state_loads(self):
+        html = (FRONTEND / "firmware.html").read_text()
+        assert '<code id="otaBundleName">otbr.bundle</code>' in html
+
     def test_running_check_is_followed_while_only_the_updates_card_is_on_screen(self):
         # On the manual cards off screen and the Updates card on it: plain GETs follow the check to its end.
         r = scenario(

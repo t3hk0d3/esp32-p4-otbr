@@ -50,16 +50,21 @@ static const char *or_null(const char *text)
 }
 
 int device_api_update_json(char *buf, size_t cap, const self_update_snapshot_t *snap, const char *base,
-                           const char *running_app, bool rcp_known, const char *rcp_installed)
+                           const char *running_app, bool rcp_known, const char *rcp_installed,
+                           const char *board_id, const char *chip_id)
 {
     const self_update_release_t *rel = &snap->release;
     const char *running_rcp = rcp_known ? or_null(rcp_installed) : NULL;
     const self_update_cmp_t cmp = snap->has_release ? self_update_compare(rel->app, running_app) : SELF_UPDATE_UNKNOWN;
     const bool rcp_differs = snap->has_release && self_update_rcp_differs(rel->rcp, rcp_installed, rcp_known);
     char page_url[PAGE_URL_MAX];
+    char bundle[DEVICE_API_BUNDLE_NAME_MAX];
     json_out_t w;
 
     if (snap->has_release && self_update_release_page_url(base, rel->tag, page_url, sizeof(page_url)) != ESP_OK) {
+        return -1;
+    }
+    if (self_update_bundle_name(board_id, chip_id, bundle, sizeof(bundle)) != ESP_OK) {
         return -1;
     }
     json_out_init(&w, buf, cap);
@@ -89,6 +94,12 @@ int device_api_update_json(char *buf, size_t cap, const self_update_snapshot_t *
     }
     json_out_raw(&w, ",\"repo_url\":");
     json_out_str(&w, SELF_UPDATE_REPO_URL);
+    json_out_raw(&w, ",\"board_id\":");
+    json_out_str(&w, board_id);
+    json_out_raw(&w, ",\"chip_id\":");
+    json_out_str(&w, chip_id);
+    json_out_raw(&w, ",\"bundle\":");
+    json_out_str(&w, bundle);
     json_out_raw(&w, ",\"running\":{\"app\":");
     json_out_str(&w, running_app);
     json_out_raw(&w, ",\"rcp\":");

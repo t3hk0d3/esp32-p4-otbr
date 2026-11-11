@@ -29,8 +29,18 @@ self_update_cmp_t self_update_compare(const char *release_app, const char *runni
 /** Whether the radio firmware must be installed: the release has one and it is not the installed one. */
 bool self_update_rcp_differs(const char *release_rcp, const char *running_rcp, bool running_known);
 
-/** "<base>/download/<tag>/<file>", or "<base>/latest/download/<file>" for an empty tag. */
+/**
+ * "<base>/download/<tag>/<file>", or "<base>/latest/download/<file>" for an empty tag. `file` is 1 to 64 of
+ * [A-Za-z0-9._-].
+ */
 esp_err_t self_update_asset_url(const char *base, const char *tag, const char *file, char *out, size_t cap);
+
+/**
+ * The file name of a target's OTA bundle in a release: "<board_id>_<chip_id>.ota". Ids are of [A-Za-z0-9.-].
+ * ESP_ERR_INVALID_ARG: NULL, empty or unsafe id, or no buffer. ESP_ERR_INVALID_SIZE: it does not fit `cap` (`out` is
+ * empty then, as on every error).
+ */
+esp_err_t self_update_bundle_name(const char *board_id, const char *chip_id, char *out, size_t cap);
 
 /** "<base>/tag/<tag>", or "<base>/latest" for an empty tag. */
 esp_err_t self_update_release_page_url(const char *base, const char *tag, char *out, size_t cap);

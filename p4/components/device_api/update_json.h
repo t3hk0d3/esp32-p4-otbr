@@ -8,6 +8,9 @@
 #include "device_api_priv.h"
 #include "self_update.h"
 
+/** Room for a bundle file name, "<board_id>_<chip_id>.ota". */
+#define DEVICE_API_BUNDLE_NAME_MAX 96
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -25,10 +28,13 @@ device_api_error_t device_api_update_decide(self_update_cmp_t cmp, bool rcp_diff
 /**
  * The GET /device/update body (the endpoint contract) from the cached check `snap`. `base` is the releases base (for
  * the release page link), `running_app` the running P4 version, `rcp_known` / `rcp_installed` the radio firmware
- * installed in the C6 ("" or unknown: null). Returns the length, or -1 when it does not fit `cap`.
+ * installed in the C6 ("" or unknown: null). `board_id` and `chip_id` name the firmware target of this build; the body
+ * carries them and the bundle file name they give. Returns the length, or -1 when it does not fit `cap` or the ids give
+ * no bundle name.
  */
 int device_api_update_json(char *buf, size_t cap, const self_update_snapshot_t *snap, const char *base,
-                           const char *running_app, bool rcp_known, const char *rcp_installed);
+                           const char *running_app, bool rcp_known, const char *rcp_installed,
+                           const char *board_id, const char *chip_id);
 
 /**
  * The 200 body of POST /device/update: `{"status":"ok","app":"installed"|"unchanged","rcp":<rcp_result>,
