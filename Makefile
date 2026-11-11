@@ -10,6 +10,8 @@ IDF_EXPORT ?= $(HOME)/esp/esp-idf-$(IDF_VERSION)/export.sh
 PORT ?= /dev/ttyACM0
 C6_PORT ?= /dev/ttyUSB0
 BOARD ?=
+BOARD_ID ?=
+CHIP_ID ?=
 DIST ?= dist
 PYTEST ?= uvx --with requests --with prometheus_client pytest
 TARGET_PYTEST ?= .venv/bin/pytest
@@ -23,29 +25,41 @@ MKDOCS ?= uvx --with mkdocs-material mkdocs
 SITE ?= site
 
 IDF := $(if $(shell command -v idf.py),,. "$(IDF_EXPORT)" >/dev/null &&)
+# The firmware target (BOARD_ID and CHIP_ID, both or neither for the default one) as key=value words from tools/targets.py.
+# Resolved at its first use and kept, so goals that need no target (help, clean, docs) don't depend on the registry.
+target_info = $(eval target_info := $(shell tools/targets.py resolve $(BOARD_ID) $(CHIP_ID) 2>&1))$(if $(filter 0,$(.SHELLSTATUS)),,$(error $(target_info)))$(target_info)
+target_var = $(patsubst $(1)=%,%,$(filter $(1)=%,$(target_info)))
+target_build_dir = $(CURDIR)/$(call target_var,build_dir)
+target_bundle = $(DIST)/$(if $(filter $(call target_var,build_dir),p4/build),otbr.bundle,$(call target_var,board_id)_$(call target_var,chip_id).ota)
+# Every P4 idf.py call names the target's build dir; its sdkconfig is in that build dir's cache.
+IDF_P4 = idf.py -C p4 -B $(target_build_dir)
+target_option = $(if $(BOARD_ID),--target $(BOARD_ID)/$(CHIP_ID))
 board_url = $(if $(BOARD),http://$(BOARD),$(error set BOARD=<board address>, e.g. make $@ BOARD=192.168.1.50))
 
-.PHONY: help build build-test reconfigure clean flash monitor erase c6-flash-base bundle package sizes sizes-report ota radio recover \
+.PHONY: help build build-test build-release reconfigure clean flash monitor erase c6-flash-base bundle package sizes sizes-report ota radio recover \
 	status zigbee-test-device docs docs-serve docs-firmware test test-host test-vendored test-tools test-target lan-ping-up lan-ping-down lint routing-vectors
 
 help: ## List the targets
 	@awk -F':.*## ' '/^[a-z0-9-]+:.*## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@echo
-	@echo "Variables: PORT=$(PORT) C6_PORT=$(C6_PORT) BOARD=<address> DIST=$(DIST) TEST=<test file> MARK=<marker>"
+	@echo "Variables: PORT=$(PORT) C6_PORT=$(C6_PORT) BOARD=<address> BOARD_ID=<board_id> CHIP_ID=<chip_id> DIST=$(DIST) TEST=<test file> MARK=<marker>"
 
 # --- build ---
 
 build: ## Release build of c6_updater, c6_rcp, c6_installer and p4
-	$(IDF) tools/build_all.sh
+	$(IDF) tools/build_all.sh $(target_option)
+
+build-release: ## Release build of the C6 projects and p4 for every firmware target, with one version stamp
+	$(IDF) tools/build_all.sh --all-targets
 
 build-test: ## Test build (test-only console commands, Debug/Verbose logging compiled in; never ship it)
-	$(IDF) tools/build_all.sh --test
+	$(IDF) tools/build_all.sh --test $(target_option)
 
 reconfigure: ## Refresh the P4 version stamp (the -dirty flag is as of the last configure)
-	$(IDF) idf.py -C p4 reconfigure
+	$(IDF) $(IDF_P4) -DOTBR_BUILD_STAMP= reconfigure
 
 clean: ## Remove all build directories and dist/
-	rm -rf c6_updater/build c6_rcp/build c6_installer/build p4/build tools/zigbee_test_device/build $(DIST) $(SIZES)
+	rm -rf c6_updater/build c6_rcp/build c6_installer/build p4/build p4/build_* tools/zigbee_test_device/build $(DIST) $(SIZES)
 	find . -path ./.venv -prune -o -type d -name build -path '*/test_host/build' -print0 | xargs -0 rm -rf
 
 zigbee-test-device: ## Build the rig's Zigbee test device (on/off light router for the aux C6, tools/zigbee_test_device)
@@ -54,13 +68,13 @@ zigbee-test-device: ## Build the rig's Zigbee test device (on/off light router f
 # --- flash over USB ---
 
 flash: ## Flash the P4 over USB (bootloader, partition table, app, web UI); the C6 is not touched
-	$(IDF) idf.py -C p4 -p $(PORT) flash
+	$(IDF) $(IDF_P4) -p $(PORT) flash
 
 monitor: ## Open the P4 console (115200 baud)
-	$(IDF) idf.py -C p4 -p $(PORT) monitor
+	$(IDF) $(IDF_P4) -p $(PORT) monitor
 
 erase: ## Erase the whole P4 flash, including the Thread dataset and network config
-	$(IDF) idf.py -C p4 -p $(PORT) erase-flash
+	$(IDF) esptool --chip esp32p4 -p $(PORT) erase-flash
 
 c6-flash-base: ## USB-UART install: erase the C6 and write its base images over a USB-UART on H7 (C6_PORT)
 	cd c6_updater/build && $(IDF) esptool --chip esp32c6 -p $(C6_PORT) --before no-reset --after no-reset erase-flash
@@ -70,9 +84,9 @@ c6-flash-base: ## USB-UART install: erase the C6 and write its base images over 
 
 # --- release files and updates over the network ---
 
-bundle: ## Build the P4 OTA bundle dist/otbr.bundle from the current build
+bundle: ## Build the P4 OTA bundle from the target's build: dist/otbr.bundle, or dist/<board_id>_<chip_id>.ota (BOARD_ID, CHIP_ID)
 	mkdir -p $(DIST)
-	tools/make_bundle.py --web p4/build/web_0.bin --app p4/build/p4.bin --out $(DIST)/otbr.bundle
+	tools/make_bundle.py --web $(target_build_dir)/web_0.bin --app $(target_build_dir)/p4.bin --out $(target_bundle)
 
 package: ## Collect all release files into dist/ (what CI publishes; RELEASE_TAG=<tag> adds the release line to versions.txt)
 	$(IDF) tools/package_release.sh $(DIST)
@@ -85,8 +99,8 @@ sizes-report: ## Markdown table of SIZES; SIZES_BASE=<sizes.json of another buil
 	tools/image_sizes.py report $(SIZES) $(if $(SIZES_BASE),--base $(SIZES_BASE)) \
 		$(if $(SIZES_BASE_LABEL),--base-label "$(SIZES_BASE_LABEL)")
 
-ota: bundle ## Update the P4 app and web UI over the network (BOARD)
-	curl --fail-with-body --data-binary @$(DIST)/otbr.bundle $(board_url)/device/ota
+ota: bundle ## Update the P4 app and web UI over the network (BOARD, BOARD_ID, CHIP_ID)
+	curl --fail-with-body --data-binary @$(target_bundle) $(board_url)/device/ota
 	@echo
 
 radio: ## Upload the C6 radio firmware c6_rcp/build/c6_rcp.bin (BOARD)
@@ -111,11 +125,12 @@ docs: ## Build the documentation site into SITE (default site/); MKDOCS=<mkdocs 
 docs-serve: ## Preview the documentation site at http://127.0.0.1:8000 (the browser flasher has no firmware there)
 	$(MKDOCS) serve
 
-docs-firmware: ## Put the latest release's P4 images and the browser flasher manifest into SITE/firmware (needs gh)
+docs-firmware: ## Put the latest release's P4 images of every target and the browser flasher's index into SITE/firmware (needs gh)
+	rm -rf $(SITE)/firmware $(SITE)/.firmware-zips
 	mkdir -p $(SITE)/firmware
-	gh release download --repo t3hk0d3/esp32-p4-otbr --pattern p4-flash.zip --dir $(SITE)/firmware --clobber
-	cd $(SITE)/firmware && unzip -o -q p4-flash.zip && rm -f p4-flash.zip
-	tools/flash_manifest.py $(SITE)/firmware "$$(gh release view --repo t3hk0d3/esp32-p4-otbr --json tagName --jq .tagName)"
+	gh release download --repo t3hk0d3/esp32-p4-otbr --pattern 'full_*.zip' --pattern p4-flash.zip --dir $(SITE)/.firmware-zips
+	tools/flash_manifest.py $(SITE)/.firmware-zips $(SITE)/firmware "$$(gh release view --repo t3hk0d3/esp32-p4-otbr --json tagName --jq .tagName)"
+	rm -rf $(SITE)/.firmware-zips
 
 test: test-host test-tools test-vendored ## All host-side tests (no board)
 

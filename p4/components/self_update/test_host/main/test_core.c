@@ -30,6 +30,20 @@ TEST_CASE("v0.4.0-style file: ESP_OK, tag, app and rcp set, unknown lines ignore
     TEST_ASSERT_EQUAL_STRING(RCP, r.rcp);
 }
 
+TEST_CASE("versions.txt of a release with firmware targets (one p4 app line): same result", "[self_update]")
+{
+    self_update_release_t r;
+    const char *text = "release:     v0.5.0\n"
+                       "p4 app:      " APP "\n"
+                       "c6_rcp:      " RCP "\n"
+                       "c6 base:     base-d0c56989\n"
+                       "ESP-IDF:     v6.1\n";
+    TEST_ASSERT_EQUAL(ESP_OK, parse(text, &r));
+    TEST_ASSERT_EQUAL_STRING("v0.5.0", r.tag);
+    TEST_ASSERT_EQUAL_STRING(APP, r.app);
+    TEST_ASSERT_EQUAL_STRING(RCP, r.rcp);
+}
+
 TEST_CASE("File without a release line: ESP_OK, tag is empty", "[self_update]")
 {
     self_update_release_t r;
@@ -283,6 +297,55 @@ TEST_CASE("Asset URL with a bad tag: ESP_ERR_INVALID_ARG, out is empty", "[self_
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, self_update_asset_url(BASE, "../x", "otbr.bundle", out, sizeof(out)));
     TEST_ASSERT_EQUAL_STRING("", out);
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, self_update_asset_url(BASE, "v1?a", "otbr.bundle", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("", out);
+}
+
+/* ---- self_update_bundle_name ---- */
+
+TEST_CASE("Bundle name with valid ids: <board_id>_<chip_id>.ota, ESP_OK", "[self_update]")
+{
+    char out[64];
+    TEST_ASSERT_EQUAL(ESP_OK, self_update_bundle_name("ESP32-P4-WIFI6-POE-ETH", "ESP32-P4-rev3.0", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("ESP32-P4-WIFI6-POE-ETH_ESP32-P4-rev3.0.ota", out);
+}
+
+TEST_CASE("Bundle name that fits exactly: ESP_OK; with a buffer too small: ESP_ERR_INVALID_SIZE, out is empty",
+          "[self_update]")
+{
+    const char *want = "ESP32-P4-WIFI6-POE-ETH_ESP32-P4-rev1.3.ota";
+    char out[64] = "junk";
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      self_update_bundle_name("ESP32-P4-WIFI6-POE-ETH", "ESP32-P4-rev1.3", out, strlen(want) + 1));
+    TEST_ASSERT_EQUAL_STRING(want, out);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE,
+                      self_update_bundle_name("ESP32-P4-WIFI6-POE-ETH", "ESP32-P4-rev1.3", out, strlen(want)));
+    TEST_ASSERT_EQUAL_STRING("", out);
+}
+
+TEST_CASE("Bundle name with a missing or unsafe id: ESP_ERR_INVALID_ARG, out is empty", "[self_update]")
+{
+    char out[64] = "junk";
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, self_update_bundle_name(NULL, "ESP32-P4-rev1.3", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("", out);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, self_update_bundle_name("board", "", out, sizeof(out)));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, self_update_bundle_name("a/b", "chip", out, sizeof(out)));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, self_update_bundle_name("a_b", "chip", out, sizeof(out)));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, self_update_bundle_name("board", "c?d", out, sizeof(out)));
+}
+
+TEST_CASE("Asset URL of a target bundle name (longer than a tag): <base>/download/<tag>/<file>", "[self_update]")
+{
+    char name[64], out[192];
+    TEST_ASSERT_EQUAL(ESP_OK, self_update_bundle_name("ESP32-P4-WIFI6-POE-ETH", "ESP32-P4-rev3.0", name, sizeof(name)));
+    TEST_ASSERT_EQUAL(ESP_OK, self_update_asset_url(BASE, "v0.5.0", name, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING(BASE "/download/v0.5.0/ESP32-P4-WIFI6-POE-ETH_ESP32-P4-rev3.0.ota", out);
+}
+
+TEST_CASE("Asset URL with a file name that is a dot segment or has a slash: ESP_ERR_INVALID_ARG", "[self_update]")
+{
+    char out[128] = "junk";
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, self_update_asset_url(BASE, "v1", "..", out, sizeof(out)));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, self_update_asset_url(BASE, "v1", "a/b", out, sizeof(out)));
     TEST_ASSERT_EQUAL_STRING("", out);
 }
 

@@ -1,0 +1,14 @@
+{
+    "default": {"board": "ESP32-P4-WIFI6-POE-ETH", "chip": "ESP32-P4-rev1.3"},
+    "boards": {
+        "ESP32-P4-WIFI6-POE-ETH": {"name": "Waveshare ESP32-P4-WIFI6-POE-ETH"}
+    },
+    "chips": {
+        "ESP32-P4-rev1.3": {"name": "ESP32-P4 revision v1.x", "min_rev": 0, "max_rev": 199},
+        "ESP32-P4-rev3.0": {"name": "ESP32-P4 revision v3.1 and later", "min_rev": 301, "max_rev": 399}
+    },
+    "targets": [
+        {"board": "ESP32-P4-WIFI6-POE-ETH", "chip": "ESP32-P4-rev1.3"},
+        {"board": "ESP32-P4-WIFI6-POE-ETH", "chip": "ESP32-P4-rev3.0"}
+    ]
+}

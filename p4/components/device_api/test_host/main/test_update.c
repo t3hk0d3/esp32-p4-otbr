@@ -9,6 +9,8 @@
 #define NEWER "20261106T120000Z-def5678"
 #define RCP_OLD "20261105T120000Z-abc1234"
 #define RCP_NEW "20261106T120000Z-def5678"
+#define BOARD "ESP32-P4-WIFI6-POE-ETH"
+#define CHIP "ESP32-P4-rev3.0"
 
 typedef struct {
     device_api_error_t error;
@@ -41,8 +43,9 @@ static self_update_snapshot_t snapshot(self_update_state_t state, const char *ta
 
 static const char *render(char *buf, size_t cap, const self_update_snapshot_t *s, bool rcp_known, const char *rcp)
 {
-    TEST_ASSERT_GREATER_THAN(0, device_api_update_json(buf, cap, s, BASE, RUNNING, rcp_known, rcp));
-    TEST_ASSERT_EQUAL(strlen(buf), (size_t)device_api_update_json(buf, cap, s, BASE, RUNNING, rcp_known, rcp));
+    TEST_ASSERT_GREATER_THAN(0, device_api_update_json(buf, cap, s, BASE, RUNNING, rcp_known, rcp, BOARD, CHIP));
+    TEST_ASSERT_EQUAL(strlen(buf),
+                      (size_t)device_api_update_json(buf, cap, s, BASE, RUNNING, rcp_known, rcp, BOARD, CHIP));
     return buf;
 }
 
@@ -181,6 +184,8 @@ TEST_CASE("Done, newer release with a tag: release.url <base>/tag/<tag>, app new
                              "\"release\":{\"tag\":\"v0.4.0\",\"app\":\"" NEWER "\",\"rcp\":\"" RCP_OLD "\","
                              "\"url\":\"" BASE "/tag/v0.4.0\"},"
                              "\"repo_url\":\"https://github.com/t3hk0d3/esp32-p4-otbr\","
+                             "\"board_id\":\"" BOARD "\",\"chip_id\":\"" CHIP "\","
+                             "\"bundle\":\"" BOARD "_" CHIP ".ota\","
                              "\"running\":{\"app\":\"" RUNNING "\",\"rcp\":\"" RCP_OLD "\"},"
                              "\"app\":\"newer\",\"rcp_differs\":false,\"available\":true}", buf);
 }
@@ -276,12 +281,31 @@ TEST_CASE("Malformed release version: app unknown, available true", "[device_api
     assert_has(buf, "\"available\":true");
 }
 
+TEST_CASE("Never checked, other target: board_id, chip_id and bundle name that target", "[device_api]")
+{
+    char buf[1024];
+    const self_update_snapshot_t s = snapshot(SELF_UPDATE_NEVER, NULL, NULL, NULL);
+
+    TEST_ASSERT_GREATER_THAN(0, device_api_update_json(buf, sizeof(buf), &s, BASE, RUNNING, true, RCP_OLD, BOARD,
+                                                       "ESP32-P4-rev1.3"));
+    assert_has(buf, "\"board_id\":\"" BOARD "\",\"chip_id\":\"ESP32-P4-rev1.3\","
+               "\"bundle\":\"" BOARD "_ESP32-P4-rev1.3.ota\"");
+}
+
+TEST_CASE("Ids that do not make a bundle name: -1", "[device_api]")
+{
+    char buf[1024];
+    const self_update_snapshot_t s = snapshot(SELF_UPDATE_NEVER, NULL, NULL, NULL);
+
+    TEST_ASSERT_EQUAL(-1, device_api_update_json(buf, sizeof(buf), &s, BASE, RUNNING, true, RCP_OLD, "", CHIP));
+}
+
 TEST_CASE("Buffer too small: -1", "[device_api]")
 {
     char buf[64];
     const self_update_snapshot_t s = snapshot(SELF_UPDATE_DONE, "v0.4.0", NEWER, RCP_OLD);
 
-    TEST_ASSERT_EQUAL(-1, device_api_update_json(buf, sizeof(buf), &s, BASE, RUNNING, true, RCP_OLD));
+    TEST_ASSERT_EQUAL(-1, device_api_update_json(buf, sizeof(buf), &s, BASE, RUNNING, true, RCP_OLD, BOARD, CHIP));
 }
 
 /* ---- device_api_update_reply_json ---- */

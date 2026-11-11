@@ -1325,7 +1325,7 @@ static esp_err_t send_update_state(httpd_req_t *req)
     self_update_get(&snap);
     builtin_rcp_get_status(&rs);
     if (device_api_update_json(body, UPDATE_BODY_MAX, &snap, self_update_base(), esp_app_get_description()->version,
-                               rs.installed_known, rs.installed) < 0) {
+                               rs.installed_known, rs.installed, OTBR_BOARD_ID, OTBR_CHIP_ID) < 0) {
         err = send_error(req, 500, "internal", "update state does not fit its buffer", false);
     } else {
         err = send_json(req, body);
@@ -1414,11 +1414,17 @@ typedef struct {
     char body[UPDATE_REPLY_MAX];
 } update_job_t;
 
-// Bundle step: the release's otbr.bundle through esp_br_http_ota (which follows the redirect). On failure the reply
-// error is in *error and job->detail names the URL.
+// Bundle step: the release's <board_id>_<chip_id>.ota through esp_br_http_ota (which follows the redirect). A release
+// without that file answers 404, which esp_br_http_ota reports as ESP_FAIL: transfer_failed, nothing committed. On
+// failure the reply error is in *error and job->detail names the URL.
 static esp_err_t update_bundle(update_job_t *job, device_api_error_t *error)
 {
-    esp_err_t err = self_update_asset_url(self_update_base(), job->release.tag, "otbr.bundle", job->url, sizeof(job->url));
+    char name[DEVICE_API_BUNDLE_NAME_MAX];
+    esp_err_t err = self_update_bundle_name(OTBR_BOARD_ID, OTBR_CHIP_ID, name, sizeof(name));
+
+    if (err == ESP_OK) {
+        err = self_update_asset_url(self_update_base(), job->release.tag, name, job->url, sizeof(job->url));
+    }
     const bool url_failed = err != ESP_OK;
 
     if (!url_failed) {

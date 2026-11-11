@@ -3,7 +3,7 @@
 The test build's console command `update_source <base>` points the board's releases base at an http.server on the
 host. It serves a `releases/` tree laid out like GitHub's:
   releases/latest/download/versions.txt
-  releases/download/<tag>/versions.txt, otbr.bundle, c6_rcp.bin
+  releases/download/<tag>/versions.txt, <board_id>_<chip_id>.ota (the name the board reports in GET /device/update), c6_rcp.bin
 The files are what `make bundle` / `make package` put into dist/, built here from the running test build: a release
 build (`make package` refuses test builds) would drop the test console commands after the first install. The bundle's
 app is re-stamped with the version versions.txt names, so a successful install boots that version; c6_rcp.bin is the
@@ -52,8 +52,11 @@ class ReleaseServer:
     """http.server over a `releases/` tree. Counts the requests per path; `hold(path)` makes requests for that path
     wait until `release()` (they are answered normally afterwards: 404 when the file does not exist)."""
 
-    def __init__(self, root, host):
+    def __init__(self, root, host, bundle_name):
         self.root = root
+        self.bundle_name = (
+            bundle_name  # the board's own target file, e.g. <board_id>_<chip_id>.ota
+        )
         self.requests = {}
         self.held = threading.Event()  # set when a held request arrived
         self._hold_path = None
@@ -90,12 +93,16 @@ class ReleaseServer:
             directory.mkdir(parents=True, exist_ok=True)
             (directory / "versions.txt").write_text(text)
         assets = self.root / "releases" / "download" / tag
-        for name, data in (("otbr.bundle", bundle), ("c6_rcp.bin", rcp_bin)):
+        for name, data in ((self.bundle_name, bundle), ("c6_rcp.bin", rcp_bin)):
             path = assets / name
             if data is None:
                 path.unlink(missing_ok=True)
             else:
                 path.write_bytes(data)
+
+    @property
+    def bundle_path(self):
+        return f"/releases/download/{TAG}/{self.bundle_name}"
 
     def count(self, name):
         return sum(n for path, n in self.requests.items() if path.endswith(name))
@@ -116,7 +123,6 @@ class ReleaseServer:
 
 
 VERSIONS_PATH = "/releases/latest/download/versions.txt"
-BUNDLE_PATH = f"/releases/download/{TAG}/otbr.bundle"
 
 
 @pytest.fixture
@@ -127,11 +133,22 @@ def base_url(board_ip):
 @pytest.fixture
 def release_server(dut, board_ip, tmp_path):
     """A release server the board's update source points at (the default is restored afterwards)."""
-    server = ReleaseServer(tmp_path, host_address_towards(board_ip))
+    server = ReleaseServer(
+        tmp_path,
+        host_address_towards(board_ip),
+        board_bundle_name(f"http://{board_ip}"),
+    )
     point_board_at(dut, server.base)
     yield server
     server.close()
     point_board_at(dut, DEFAULT_RELEASES)
+
+
+def board_bundle_name(base_url):
+    """The release file this firmware downloads: `bundle` in GET /device/update."""
+    name = requests.get(base_url + ENDPOINT, timeout=10).json()["bundle"]
+    assert name.endswith(".ota"), name
+    return name
 
 
 def point_board_at(dut, base):
@@ -224,7 +241,9 @@ class TestUpdateState:
         reboot()
         address = wait_address(dut)
         base_url = f"http://{address}"
-        server = ReleaseServer(tmp_path, host_address_towards(address))
+        server = ReleaseServer(
+            tmp_path, host_address_towards(address), board_bundle_name(base_url)
+        )
         try:
             point_board_at(dut, server.base)
             response = get_update(base_url)
@@ -309,8 +328,8 @@ class TestUpdateCheck:
         app, rcp = running_versions(base_url)
         release_server.publish(
             later_version(app), rcp
-        )  # no otbr.bundle: 404 once released
-        release_server.hold(BUNDLE_PATH)
+        )  # no bundle file: 404 once released
+        release_server.hold(release_server.bundle_path)
         thread, result = post_in_background(base_url)
         assert release_server.held.wait(CHECK_TIMEOUT_S * 3), (
             "the install never asked for the bundle"
@@ -363,7 +382,7 @@ class TestUpdateInstall:
             assert body["app"] == "unchanged"
             assert body["rcp"] == "installed"
             assert body["rebooting"] is False
-            assert release_server.count("otbr.bundle") == 0
+            assert release_server.count(release_server.bundle_name) == 0
             assert running_versions(base_url)[1] == served
         finally:
             # Put the build's own radio firmware back.
@@ -384,7 +403,7 @@ class TestUpdateInstall:
         assert response.status_code == requests.codes.conflict
         assert_error_body(response)
         assert response.json()["error"] == "up_to_date"
-        assert release_server.count("otbr.bundle") == 0
+        assert release_server.count(release_server.bundle_name) == 0
 
     def test_nothing_to_do_with_force_installs_the_app(
         self, dut, base_url, release_server, make_release_bundle, rcp_image
@@ -406,12 +425,14 @@ class TestUpdateInstall:
         # Bundle URL answers 404: 502 transfer_failed; slot and boot partition unchanged.
         app, rcp = running_versions(base_url)
         before = boot_and_running(dut)
-        release_server.publish(later_version(app), rcp)  # no otbr.bundle
+        release_server.publish(later_version(app), rcp)  # no bundle file
         response = post_update(base_url)
         assert response.status_code == 502
         assert_error_body(response)
         assert response.json()["error"] == "transfer_failed"
-        assert BUNDLE_PATH in response.json()["detail"]  # names the URL asked for
+        assert (
+            release_server.bundle_path in response.json()["detail"]
+        )  # names the URL asked for
         assert boot_and_running(dut) == before
         assert running_versions(base_url)[0] == app
         # the slot was released: a check runs
@@ -430,4 +451,4 @@ class TestUpdateInstall:
         assert response.json()["error"] == "busy"
         release_server.release()
         assert wait_check_done(base_url)["state"] == "done"
-        assert release_server.count("otbr.bundle") == 0
+        assert release_server.count(release_server.bundle_name) == 0

@@ -1,0 +1,2 @@
+# Chip overlay: the image runs on revisions v0.0 to v1.99 (the registry's 0 to 199).
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y

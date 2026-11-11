@@ -527,6 +527,9 @@ function renderUpdate() {
   renderVersion('updRcp', L.versionRow(rel ? rel.rcp : null, runRcp === undefined ? null : runRcp, false));
   setText('updChecked', L.checkedText(u));
   setText('updHint', L.updateHint(u));
+  var bundle = typeof u.bundle === 'string' && u.bundle ? u.bundle : 'otbr.bundle';
+  setText('otaBundleName', bundle);
+  $('otaUrl').setAttribute('placeholder', 'https://host/' + bundle);
   var act = L.updateAction(u), btn = $('updInstall');
   show('updInstall', !!act);
   if (act) {

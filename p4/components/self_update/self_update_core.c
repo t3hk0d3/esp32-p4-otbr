@@ -4,6 +4,7 @@
 #include <string.h>
 
 #define TAG_MAX 32
+#define FILE_MAX 64 // a target bundle name is <board_id>_<chip_id>.ota
 #define VERSION_MAX 31
 #define STAMP_LEN 16
 #define HASH_LEN 7
@@ -18,18 +19,37 @@ static bool is_hex(char c)
     return is_digit(c) || (c >= 'a' && c <= 'f');
 }
 
-static bool tag_valid(const char *tag, size_t len)
+static bool name_valid(const char *text, size_t len, size_t max)
 {
-    if (len < 1 || len > TAG_MAX) {
+    if (len < 1 || len > max) {
         return false;
     }
-    if (tag[0] == '.' && (len == 1 || (len == 2 && tag[1] == '.'))) {
+    if (text[0] == '.' && (len == 1 || (len == 2 && text[1] == '.'))) {
         return false; // "." and ".." are dot segments in the asset path
     }
     for (size_t i = 0; i < len; i++) {
-        char c = tag[i];
+        char c = text[i];
         bool ok = is_digit(c) || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.' || c == '_' || c == '-';
         if (!ok) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool tag_valid(const char *tag, size_t len)
+{
+    return name_valid(tag, len, TAG_MAX);
+}
+
+/** An id of a board or chip: [A-Za-z0-9.-], never '_' (it separates the two in a file name). */
+static bool id_valid(const char *id)
+{
+    if (!id || id[0] == '\0') {
+        return false;
+    }
+    for (const char *c = id; *c; c++) {
+        if (!(is_digit(*c) || (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || *c == '.' || *c == '-')) {
             return false;
         }
     }
@@ -188,7 +208,7 @@ esp_err_t self_update_asset_url(const char *base, const char *tag, const char *f
     if (!base || !tag || !file) {
         return ESP_ERR_INVALID_ARG;
     }
-    if ((tag[0] != '\0' && !tag_valid(tag, strlen(tag))) || !tag_valid(file, strlen(file))) {
+    if ((tag[0] != '\0' && !tag_valid(tag, strlen(tag))) || !name_valid(file, strlen(file), FILE_MAX)) {
         return ESP_ERR_INVALID_ARG;
     }
     int n;
@@ -198,6 +218,18 @@ esp_err_t self_update_asset_url(const char *base, const char *tag, const char *f
         n = snprintf(out, cap, "%s/latest/download/%s", base, file);
     }
     return finish_url(n, out, cap);
+}
+
+esp_err_t self_update_bundle_name(const char *board_id, const char *chip_id, char *out, size_t cap)
+{
+    if (!out || cap == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    out[0] = '\0';
+    if (!id_valid(board_id) || !id_valid(chip_id)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return finish_url(snprintf(out, cap, "%s_%s.ota", board_id, chip_id), out, cap);
 }
 
 esp_err_t self_update_release_page_url(const char *base, const char *tag, char *out, size_t cap)

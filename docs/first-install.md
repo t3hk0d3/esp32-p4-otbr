@@ -31,12 +31,14 @@ The connectors you need:
 
 ## 1. Flash the P4
 
-Connect the board's P4 USB-C port to your computer, then open [Flash in the browser](flash.md) and press **Install**.
-On a new board, let the installer erase the flash first.
+Connect the board's P4 USB-C port to your computer, then open [Flash in the browser](flash.md). Press **Detect board**,
+then **Install**. The page reads the chip revision and picks the firmware built for it. On a new board, tick
+**Erase the flash first**.
 
 ??? note "Other ways to flash"
-    - With `esptool`: unpack `p4-flash.zip` from the release and run, inside it,
-      `esptool --chip esp32p4 -p /dev/ttyACM0 write-flash @flash_args`.
+    - With `esptool`: unpack `full_ESP32-P4-WIFI6-POE-ETH_<chip_id>.zip` from the release and run, inside it,
+      `esptool --chip esp32p4 -p /dev/ttyACM0 write-flash @flash_args`. The `<chip_id>` is `ESP32-P4-rev1.3` for a chip
+      below v3 and `ESP32-P4-rev3.0` for v3.1 and later. Older releases have only `p4-flash.zip`, for chips below v3.
     - From a checkout: `make flash` (see [Building and flashing](building.md)).
 
 The board restarts and gets an address over Ethernet. Open its web page: `http://esp-otbr-<last six hex digits of the
@@ -103,7 +105,7 @@ You write the C6's base images yourself with `esptool`, from `c6-updater-flash.z
 
 1. Wire a 3.3 V USB-UART adapter to H7: adapter RX to H7 pin 1 (C6 TX), adapter TX to H7 pin 2 (C6 RX), adapter GND to
    H7 pin 3. Tie H7 pin 4 (IO9) to GND. 3.3 V logic only.
-2. Erase the P4, so it leaves the C6 alone: in the [browser flasher](flash.md), or
+2. Erase the P4, so it leaves the C6 alone:
    `esptool --chip esp32p4 -p /dev/ttyACM0 erase-flash`. **This deletes the board's firmware and its stored Thread
    network and network settings.** On a board in service, save the network first:
    `curl -f -H 'Accept: text/plain' http://<board>/node/dataset/active > dataset.tlv`, and check that the file holds a

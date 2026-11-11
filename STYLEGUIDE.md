@@ -46,13 +46,25 @@ see `.pre-commit-config.yaml`).
 ## Build mechanisms
 
 - Every project's top-level `CMakeLists.txt` includes, in this order: ESP-IDF's `project.cmake`,
-  `tools/version.cmake`, `tools/test_build.cmake`, then calls `project()`. `p4` also includes
-  `tools/ot_radio_port.cmake` (the generated openthread component) after `tools/test_build.cmake`.
+  `tools/version.cmake`, `tools/test_build.cmake`, then calls `project()`. `p4` also includes `tools/target.cmake`
+  after `tools/test_build.cmake`, and `tools/ot_radio_port.cmake` (the generated openthread component) after that.
 - `tools/version.cmake` sets `PROJECT_VER`. The stamp is taken at CMake configure time, not at
-  every build; the git HEAD files are configure dependencies, so a new commit reconfigures by itself. `-dirty` is as of
+  every build, or is the `OTBR_BUILD_STAMP` passed to CMake when set (so that all targets of a release share one); the
+  git HEAD files are configure dependencies, so a new commit reconfigures by itself. `-dirty` is as of
   the last configure (`make reconfigure` refreshes it).
 - `c6_updater` includes `tools/base_version.cmake` instead of `tools/version.cmake`: its version is content-addressed
   (`base-<8 hex>`, a hash of the sources that define the base image), so it does not change with the build time or git.
+- **Firmware targets:** a target is a `board_id` and a `chip_id` (ids never contain `_`), listed in
+  `p4/targets/targets.json` with the chip's revision range (ESP-IDF numbers: major * 100 + minor). `tools/targets.py`
+  resolves a target to its build dir, sdkconfig and defaults files; nothing else spells those paths. The default target
+  builds into `p4/build` and `p4/sdkconfig`, any other into `p4/build_<board_id>_<chip_id>` and
+  `p4/sdkconfig_<board_id>_<chip_id>` (a `--test` build adds `.test` to the sdkconfig name). Options come from
+  `p4/sdkconfig.defaults`, then the board overlay `p4/targets/boards/<board_id>.defaults`, then the chip overlay
+  `p4/targets/chips/<chip_id>.defaults`. A revision option lives in the chip overlay and must agree with the
+  registry's range. `tools/build_all.sh` and the Makefile (`BOARD_ID`, `CHIP_ID`; `BOARD` stays the network address)
+  pass the ids as `-DOTBR_BOARD_ID` and `-DOTBR_CHIP_ID`; `tools/target.cmake` makes them C string macros of the same
+  names and fails the configure step without them. `make build-release` builds every target with one
+  `OTBR_BUILD_STAMP` (see `tools/version.cmake`).
 - `tools/test_build.cmake` turns the CMake variable `OTBR_TEST_BUILD` into the C macro
   `OTBR_TEST_BUILD=1` for all components. `tools/build_all.sh` passes `-DOTBR_TEST_BUILD=0|1` on
   every run, so the cached value never sticks. Test-only code is guarded by `#ifdef OTBR_TEST_BUILD`.

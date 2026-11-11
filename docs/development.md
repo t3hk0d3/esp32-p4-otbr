@@ -314,10 +314,11 @@ core dump over USB with `idf.py -C p4 coredump-info`.
 ## CI and releases
 
 `.github/workflows/build.yml` runs on every push to `master` and every pull request, in the `espressif/idf` container of
-`IDF_VERSION`: `make test-host`, `make test-tools`, `make build`, `make test-vendored` and `make package`. The workflow keeps
+`IDF_VERSION`: `make test-host`, `make test-tools`, `make build-release`, `make test-vendored` and `make package`. The workflow keeps
 the packaged files as the `firmware` artifact of the run. No board is involved; the on-board tests stay on the bench.
-A pull request that changes only documentation (Markdown files, `docs/`, `mkdocs.yml`, `tools/docs_hooks.py`, the docs
-workflow) skips the tests and the build; the skipped jobs still pass as status checks. Pushes always build.
+A pull request that changes only documentation (Markdown files, `docs/` except `docs/assets/flasher.js` and
+`docs/overrides/flash.html`, `mkdocs.yml`, `tools/docs_hooks.py`, the docs workflow) skips the tests and the build; the
+skipped jobs still pass as status checks. Pushes always build.
 
 `make sizes` (also run by the workflow, into the job summary) lists each image's size, its flash region and the space left
 there. The run keeps the numbers as the `sizes` artifact; on a pull request a follow-up job compares them with the
@@ -334,9 +335,11 @@ git push origin v0.2.0
 
 | File | What |
 | --- | --- |
-| `otbr.bundle` | P4 app and web UI, for an OTA update |
+| `<board_id>_<chip_id>.ota` | P4 app and web UI of a firmware target, for an OTA update |
+| `otbr.bundle` | copy of the default target's `.ota`; released firmware downloads it by this name |
 | `c6_rcp.bin` | C6 radio firmware from the same build |
-| `p4-flash.zip` | full P4 flash over USB: `esptool --chip esp32p4 write-flash @flash_args` in the unpacked directory |
+| `full_<board_id>_<chip_id>.zip` | full P4 flash of a firmware target over USB: `esptool --chip esp32p4 write-flash @flash_args` in the unpacked directory |
+| `p4-flash.zip` | copy of the default target's `full_*.zip` |
 | `c6_installer.bin` | one-time C6 installer for the no-wires first install on a factory C6 (ESP-Hosted) |
 | `c6-updater-flash.zip` | C6 base images for the USB-UART first install |
 | `third-party-licenses.zip` | license texts of the code linked into the images |
@@ -364,7 +367,11 @@ Diagrams and screenshots are made by scripts, so they can be retaken after a UI 
   network trial, Home Assistant's own dialogs) are taken by hand.
 
 `.github/workflows/docs.yml` builds the site on pull requests that touch the docs and publishes it from `master` and
-after every successful `v*` build. Before publishing, `make docs-firmware` puts the P4 images of the latest release and
-an [ESP Web Tools](https://esphome.github.io/esp-web-tools/) manifest (`tools/flash_manifest.py`, from `flash_args`)
-into `site/firmware/`, which [Flash in the browser](flash.md) uses. Repository settings: Pages, source "GitHub
+after every successful `v*` build. Before publishing, `make docs-firmware` unpacks the P4 images of each target of the
+latest release into `site/firmware/<board_id>/<chip_id>/`, each with a `manifest.json` of parts and offsets from its
+own `flash_args`, and lists what it published with the revision ranges in `site/firmware/targets.json`
+(`tools/flash_manifest.py`). A release from before targets has only `p4-flash.zip`, published as the default target.
+[Flash in the browser](flash.md) (`docs/overrides/flash.html`, `docs/assets/flasher.js`, on
+[esptool-js](https://github.com/espressif/esptool-js)) reads that index, matches the chip revision against it and
+writes the images itself. Repository settings: Pages, source "GitHub
 Actions".

@@ -125,3 +125,32 @@ def test_new_commit_with_packed_only_ref_and_no_reflog_gives_a_fresh_stamp(proje
     commit(project, "second")  # only the (new) loose branch ref file changes
     second = build(project)
     assert second is not None and second != first
+
+
+def test_build_stamp_replaces_the_current_time(project):
+    out = run(
+        [
+            "cmake",
+            "-S",
+            ".",
+            "-B",
+            "build",
+            "-G",
+            "Ninja",
+            "-DOTBR_BUILD_STAMP=20260102T030405Z",
+        ],
+        project,
+    )
+    assert STAMP.search(out).group(1).startswith("20260102T030405Z-")
+
+
+def test_empty_build_stamp_uses_the_configure_time(project):
+    out = run(
+        ["cmake", "-S", ".", "-B", "build", "-G", "Ninja", "-DOTBR_BUILD_STAMP="],
+        project,
+    )
+    assert re.match(r"\d{8}T\d{6}Z-", STAMP.search(out).group(1))
+
+
+def test_without_a_build_stamp_the_version_has_the_configure_time(project):
+    assert re.match(r"\d{8}T\d{6}Z-", configure(project))

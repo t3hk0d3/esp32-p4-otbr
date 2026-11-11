@@ -2,7 +2,8 @@
 
 The board runs two pieces of firmware, both updated over the network on **Device > Firmware**:
 
-- **Border Router**: the P4's firmware and the web UI, one file `otbr.bundle`. An update reboots the board.
+- **Border Router**: the P4's firmware and the web UI, one file per board and chip, named
+  `<board_id>_<chip_id>.ota`. An update reboots the board.
 - **Radio Co-Processor**: the C6's radio firmware, `c6_rcp.bin`. An update restarts the radio, not the board.
 
 Keep both from the same release.
@@ -31,8 +32,10 @@ API: `GET /device/update` shows the check, `POST /device/update` installs ([HTTP
 
 ## Board firmware from a file
 
-On the **Border Router** card, choose `otbr.bundle` from a release (or give its download address) and press
-**Install and reboot**. The board writes the new firmware next to the running one and reboots into it about a second
+On the **Border Router** card, choose the file the card names from a release (or give its download address) and press
+**Install and reboot**. It is `<board_id>_<chip_id>.ota`, for example `ESP32-P4-WIFI6-POE-ETH_ESP32-P4-rev1.3.ota`. A
+board on older firmware has no such name on its card and takes `otbr.bundle`. A file for another chip is refused with
+`invalid_bundle` and the running firmware stays. The board writes the new firmware next to the running one and reboots into it about a second
 after the reply.
 
 The new firmware is kept once it has run for 60 s with its web server up. If it crashes or restarts before that,
@@ -41,11 +44,13 @@ power-cycle the board, which then starts the previous one.
 
 ??? note "From the command line"
     ```
-    curl --data-binary @otbr.bundle http://<board>/device/ota
-    curl -X POST -d '{"url": "https://host/otbr.bundle"}' http://<board>/device/ota/url
+    curl --data-binary @<board_id>_<chip_id>.ota http://<board>/device/ota
+    curl -X POST -d '{"url": "https://host/<board_id>_<chip_id>.ota"}' http://<board>/device/ota/url
     ```
 
-    From a checkout: `make ota BOARD=<board>` builds the bundle and uploads it.
+    `GET /device/update` names the file in `bundle`. From a checkout: `make build`, then `make ota BOARD=<board>`
+    packs that build and uploads it. For a board that isn't the default target, pass `BOARD_ID=<board_id> CHIP_ID=<chip_id>`
+    to both.
 
 ## Radio firmware
 

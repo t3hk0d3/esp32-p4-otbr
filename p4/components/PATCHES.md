@@ -417,6 +417,11 @@ reason, spec reference.
    `"usbip": true` (reason with a link to the USB/IP page, mode cards disabled). `pack_web.py` packs the new files
    without a change.
    (docs/superpowers/specs/2026-11-10-usbip-design.md)
+42. Applied (firmware targets, Task 2). Frontend, the Device -> Firmware page: `frontend/firmware.html` wraps the bundle
+   file name of the drop zone in `<code id="otaBundleName">`; `static/firmware.js` (`renderUpdate`) sets that text and the
+   placeholder of `#otaUrl` from the `bundle` field of `GET /device/update` (`otbr.bundle` while the state has not loaded
+   or lacks the field). Reason: a board downloads and expects the bundle of its own target
+   (`<board_id>_<chip_id>.ota`), so the page names that file. Host test: `tools/tests/test_firmware_page.py`.
 
 ### REST guard classification (patches 2 and 9)
 

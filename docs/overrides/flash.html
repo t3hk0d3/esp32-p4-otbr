@@ -1,0 +1,230 @@
+{#- Browser flasher: the live board and the steps, then the guide text of flash.md. Styles in docs/assets/flash.css, logic in docs/assets/flasher.js. -#}
+{% extends "main.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="{{ 'assets/flash.css' | url }}">
+{% endblock %}
+
+{% block tabs %}
+{{ super() }}
+<div class="fl">
+  <div class="fl-wrap">
+    <div class="fl-flow" aria-live="polite">
+      <ol class="steps">
+        <li class="step" data-class="step0"><i>1</i>Connect</li>
+        <li class="step" data-class="step1"><i>2</i>Check the chip</li>
+        <li class="step" data-class="step2"><i>3</i>Install</li>
+      </ol>
+
+      <section data-stage="loading">
+        <h1>Install the firmware from this page</h1>
+        <p>Loading the list of firmware.</p>
+      </section>
+
+      <section data-stage="unsupported" hidden>
+        <h1>This browser can't flash</h1>
+        <p>Open this page over HTTPS in Chrome or Edge on a desktop.</p>
+      </section>
+
+      <section data-stage="empty" hidden>
+        <h1>Nothing to install here</h1>
+        <p>No firmware on this copy of the site. The published site has it.</p>
+        <div class="fl-actions">
+          <a class="btn primary" href="https://t3hk0d3.github.io/esp32-p4-otbr/flash/">Open the published site</a>
+        </div>
+      </section>
+
+      <section data-stage="unavailable" hidden>
+        <h1>The flasher didn't load</h1>
+        <p>This page couldn't load its flashing library. Check your connection and reload the page.</p>
+      </section>
+
+      <section data-stage="idle" hidden>
+        <h1>Install the firmware from this page</h1>
+        <p>Connect the board's USB-C port to this computer. The page reads the chip and picks the firmware that fits it.</p>
+        <div class="fl-actions">
+          <button class="btn primary" type="button" data-action="detect">Detect board</button>
+          <button class="btn ghost" type="button" data-action="chooseByHand">Choose firmware by hand</button>
+        </div>
+        <p class="fl-note">Needs Chrome or Edge on a desktop.</p>
+      </section>
+
+      <section data-stage="picking" hidden>
+        <h1>Pick the board's serial port</h1>
+        <p>Your browser asks which port to use. Look for a CH343, often named USB Single Serial.</p>
+      </section>
+
+      <section data-stage="reading" hidden>
+        <h1>Reading the chip</h1>
+        <div class="mono fl-log" data-list="log"></div>
+      </section>
+
+      <section data-stage="detected" hidden>
+        <h1>Found chip revision <span data-text="rev"></span></h1>
+        <fieldset data-if="showBoardChoices" hidden>
+          <legend>Which board is this?</legend>
+          <div data-list="boardChoices"></div>
+        </fieldset>
+        <dl data-if="hasTarget" hidden>
+          <dt>Board</dt><dd data-text="boardName"></dd>
+          <dt>Chip</dt><dd class="mono" data-text="chipId"></dd>
+          <dt>Firmware</dt><dd data-text="release"></dd>
+        </dl>
+        <label class="fl-erase"><input type="checkbox" data-check="erase"><span>Erase the flash first. Tick this on a new board or one that ran other firmware. It deletes a stored Thread network.</span></label>
+        <div class="fl-actions">
+          <button class="btn primary" type="button" data-action="install" data-if="canInstall" hidden>Install</button>
+          <button class="btn ghost" type="button" data-action="restart">Start over</button>
+        </div>
+      </section>
+
+      <section data-stage="manual" hidden>
+        <h1>Choose the firmware</h1>
+        <fieldset data-if="showBoardChoices" hidden>
+          <legend>Board</legend>
+          <div data-list="boardChoices"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Chip revision</legend>
+          <div data-list="chipChoices"></div>
+        </fieldset>
+        <p class="fl-warn">The wrong choice writes without an error, then the board won't start. Install again with the other one to fix it.</p>
+        <label class="fl-erase"><input type="checkbox" data-check="erase"><span>Erase the flash first. Tick this on a new board or one that ran other firmware. It deletes a stored Thread network.</span></label>
+        <div class="fl-actions">
+          <button class="btn primary" type="button" data-action="install" data-if="canInstall" hidden>Install</button>
+          <button class="btn ghost" type="button" data-action="restart">Back</button>
+        </div>
+      </section>
+
+      <section data-stage="downloading" hidden>
+        <h1>Downloading the firmware</h1>
+        <p>The board is not changed yet.</p>
+      </section>
+
+      <section data-stage="erasing" hidden>
+        <h1>Erasing the flash</h1>
+        <p>Keep the board connected.</p>
+      </section>
+
+      <section data-stage="writing" class="fl-writing" hidden>
+        <div class="fl-percent" aria-live="off" data-text="percentText"></div>
+        <div class="fl-part" data-text="writingLabel"></div>
+        <p>Keep the board connected.</p>
+      </section>
+
+      <section data-stage="done" hidden>
+        <h1>Installed</h1>
+        <p>The board restarted on release <span data-text="version"></span>. Open its page to add the radio firmware.</p>
+        <p class="fl-note fl-waiting" data-if="addressWaiting"><span class="fl-spinner" aria-hidden="true"></span>Waiting for the board to get its network address.</p>
+        <div class="fl-actions">
+          <a class="btn primary" target="_blank" rel="noopener" data-if="canOpen" data-href="hostUrl" data-text="openLabel"></a>
+          <button class="btn ghost" type="button" data-action="restart">Flash another board</button>
+        </div>
+      </section>
+
+      <section data-stage="connect_failed" hidden>
+        <h1>The board didn't answer</h1>
+        <p>Put it in download mode: hold BOOT, press and release RESET, then release BOOT. Then try again, or choose the firmware by hand.</p>
+        <div class="fl-actions">
+          <button class="btn primary" type="button" data-action="detect">Try again</button>
+          <button class="btn ghost" type="button" data-action="chooseByHand">Choose firmware by hand</button>
+        </div>
+      </section>
+
+      <section data-stage="no_firmware" hidden>
+        <h1>No firmware for revision <span data-text="rev"></span> yet</h1>
+        <p><span data-text="release"></span> has no build for this chip. A later release may. The board was not changed.</p>
+        <div class="fl-actions">
+          <a class="btn primary" href="https://github.com/t3hk0d3/esp32-p4-otbr/releases">See all releases</a>
+          <button class="btn ghost" type="button" data-action="restart">Start over</button>
+        </div>
+      </section>
+
+      <section data-stage="wrong_chip" hidden>
+        <h1>This is not an ESP32-P4</h1>
+        <p>The page found <span class="mono" data-text="chipName"></span>. This firmware runs on an ESP32-P4 only. Connect the board's P4 USB-C port and try again. The chip was not changed.</p>
+        <div class="fl-actions">
+          <button class="btn primary" type="button" data-action="detect">Try again</button>
+          <button class="btn ghost" type="button" data-action="restart">Start over</button>
+        </div>
+      </section>
+
+      <section data-stage="download_failed" hidden>
+        <h1>The firmware didn't download</h1>
+        <p>The file <span class="mono" data-text="file"></span> couldn't be fetched. The board was not changed. Check your connection and try again.</p>
+        <div class="fl-actions">
+          <button class="btn primary" type="button" data-action="install">Try again</button>
+          <button class="btn ghost" type="button" data-action="restart">Start over</button>
+        </div>
+      </section>
+
+      <section data-stage="write_failed" hidden>
+        <h1>The install didn't finish</h1>
+        <p>The board may not start now. Check the cable, then install again.</p>
+        <div class="fl-actions">
+          <button class="btn primary" type="button" data-action="install">Install again</button>
+          <button class="btn ghost" type="button" data-action="restart">Start over</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="fl-board">
+      <svg viewBox="0 0 460 540" role="img" aria-label="The board with its USB-C port, ESP32-P4 chip and flash, lit by the current step">
+        <path class="cable" d="M133 470 V540"></path>
+        <rect class="pcb" x="30" y="24" width="400" height="446" rx="16"></rect>
+        <line class="pins" x1="60" y1="46" x2="400" y2="46"></line>
+        <line class="pins" x1="60" y1="62" x2="400" y2="62"></line>
+        <path class="trace" data-class="traceClass" d="M120 392 V190 H140"></path>
+        <path class="trace" data-class="traceClass" d="M133 392 V230 H140"></path>
+        <path class="trace" data-class="traceClass" d="M290 150 H320"></path>
+        <rect class="chip" data-class="chipClass" x="140" y="100" width="150" height="170" rx="6"></rect>
+        <rect class="scan" data-class="scanClass" x="144" y="102" width="142" height="4"></rect>
+        <text class="ink" x="215" y="178">ESP32-P4</text>
+        <text class="rev" x="215" y="202" data-text="revLabel"></text>
+        <rect class="flash-part" data-class="flashClass" x="320" y="118" width="84" height="66" rx="4"></rect>
+        <text class="ink small" x="362" y="148">32 MB</text>
+        <text class="ink small" x="362" y="165">flash</text>
+        <g class="dim">
+          <rect class="chip" x="165" y="292" width="100" height="84" rx="5"></rect>
+          <text class="ink" x="215" y="339">ESP32-C6</text>
+        </g>
+        <rect class="dark-part" x="54" y="388" width="22" height="22" rx="4"></rect>
+        <rect class="dark-part" x="54" y="428" width="22" height="22" rx="4"></rect>
+        <rect class="ring" data-class="buttonRing" x="48" y="382" width="34" height="34" rx="8"></rect>
+        <rect class="ring" data-class="buttonRing" x="48" y="422" width="34" height="34" rx="8"></rect>
+        <text class="silk" x="54" y="382">RST</text>
+        <text class="silk" x="54" y="422">BOOT</text>
+        <rect class="part" x="90" y="392" width="86" height="78" rx="4"></rect>
+        <text class="ink" x="133" y="436">USB-C</text>
+        <rect class="ring" data-class="portRing" x="84" y="386" width="98" height="90" rx="8"></rect>
+        <g class="dim">
+          <rect class="part" x="190" y="396" width="110" height="74" rx="4"></rect>
+          <text class="ink" x="245" y="438">RJ45</text>
+          <rect class="part" x="320" y="396" width="80" height="60" rx="4"></rect>
+          <text class="ink" x="360" y="431">TF</text>
+        </g>
+        <text class="lab" data-class="portLabel" x="160" y="510">Plug the cable in here</text>
+        <text class="lab" data-class="buttonLabel" x="160" y="510">Use RST and BOOT</text>
+      </svg>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+{{ page.content }}
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="https://unpkg.com/spark-md5@3.0.2/spark-md5.min.js"></script>
+<script src="{{ 'assets/flasher.js' | url }}"></script>
+<script>
+  Flasher.start({
+    base: "{{ 'firmware/' | url }}",
+    esptool: "https://unpkg.com/esptool-js@0.7.0/bundle.js",
+  });
+</script>
+{% endblock %}

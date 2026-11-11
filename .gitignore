@@ -1,9 +1,11 @@
 dist/
 build/
+build_*/
 sdkconfig
 sdkconfig.old
 sdkconfig.test
 sdkconfig.test.old
+sdkconfig_*
 managed_components/
 .artifacts/
 .superpowers/
