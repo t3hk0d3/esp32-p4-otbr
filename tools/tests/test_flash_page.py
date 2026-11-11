@@ -96,8 +96,8 @@ def assert_reset_then_release(events):
     flashing = [
         e for e in events if not e.startswith("console-") and e != "sleep:60000"
     ]
-    tail = flashing[-4:]
-    assert tail == ["rts:true", "sleep:100", "after", "disconnect"]
+    tail = flashing[-5:]
+    assert tail == ["dtr:false", "rts:true", "sleep:100", "after", "disconnect"]
 
 
 class TestTargetsForRevision:
@@ -384,6 +384,18 @@ class TestBoardAddress:
         assert result["view"]["addressWaiting"] is False
         assert "console-close" in result["events"]
         assert not result["portOpen"]
+
+    def test_stops_waiting_when_the_port_never_opens(self):
+        body = DETECT + "const p = t.flow.install();" + UNTIL_DONE + UNTIL_DONE
+        view = run(body, hangConsoleOpen=True)["view"]
+        assert view["addressWaiting"] is False
+        assert view["hostUrl"] == "http://esp-otbr-ddeeff.local/"
+
+    def test_shows_the_link_even_if_closing_the_port_hangs(self):
+        body = DETECT + "const p = t.flow.install();" + UNTIL_DONE + UNTIL_DONE
+        view = run(body, console=[GOT_IP], hangConsoleClose=True)["view"]
+        assert view["hostUrl"] == "http://192.168.1.50/"
+        assert view["addressWaiting"] is False
 
     def test_the_link_opens_in_a_new_tab(self):
         link = re.search(r'<a [^>]*data-href="hostUrl"[^>]*>', panel("done")).group(0)

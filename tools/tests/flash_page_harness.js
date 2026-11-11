@@ -33,7 +33,8 @@ const PARTS = [
  * options: targets (the published list, null for no targets.json), revision, chipName, mac, noSerial, noEsptool, noMd5,
  * cancelPicker, failConnect, failErase, failWrite (Error text, thrown half way through the second part),
  * failDownload (a file name), failDisconnect, console (chunks the board prints after the install, then the stream
- * ends), holdConsole (the board stays silent until the read is cancelled), failConsoleOpen.
+ * ends), holdConsole (the board stays silent until the read is cancelled), failConsoleOpen, hangConsoleOpen,
+ * hangConsoleClose.
  */
 function makeFlow(options) {
   const o = Object.assign({targets: TARGETS, revision: 103, chipName: 'ESP32-P4', mac: 'aa:bb:cc:dd:ee:ff'}, options);
@@ -65,10 +66,14 @@ function makeFlow(options) {
       log('console-open:' + args.baudRate);
       if (o.failConsoleOpen)
         throw new Error('port lost');
+      if (o.hangConsoleOpen)
+        await new Promise(() => {});
       t.port.isOpen = true;
     },
     async close() {
       log('console-close');
+      if (o.hangConsoleClose)
+        await new Promise(() => {});
       t.port.isOpen = false;
     },
   };
@@ -76,6 +81,7 @@ function makeFlow(options) {
   class Transport {
     constructor(port) { this.port = port; log('transport'); }
     async setRTS(on) { log('rts:' + on); }
+    async setDTR(on) { log('dtr:' + on); }
     async disconnect() {
       log('disconnect');
       this.port.isOpen = false;
@@ -180,7 +186,7 @@ function makeFlow(options) {
     sleep: async (ms) => {
       log('sleep:' + ms);
       /* the wait for the address: a board with something to say answers before it runs out */
-      if (ms === Flasher.ADDRESS_WAIT_MS && (o.console || o.holdConsole))
+      if ([Flasher.ADDRESS_WAIT_MS, Flasher.CLOSE_WAIT_MS].includes(ms) && (o.console || o.holdConsole))
         await new Promise(() => {});
     },
     addUnloadListener: (fn) => { listeners.beforeunload = fn; },

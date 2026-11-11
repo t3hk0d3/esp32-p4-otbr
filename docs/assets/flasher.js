@@ -10,6 +10,7 @@
   const CONSOLE_BAUD = 115200;
   const CONSOLE_KEEP = 4096; /* of the console text: enough for a line split across reads */
   const ADDRESS_WAIT_MS = 60000; /* boot plus DHCP, with room for a slow server */
+  const CLOSE_WAIT_MS = 2000; /* for the port to close before starting over */
   const STEP_OF = {
     loading: 0, unsupported: 0, empty: 0, unavailable: 0, idle: 0, picking: 0, connect_failed: 0, manual: 0,
     reading: 1, no_firmware: 1, wrong_chip: 1,
@@ -55,7 +56,7 @@
     };
     let esptool = null;
     let session = null; /* {port, transport, loader} while the port is open */
-    let search = null; /* {stopped, stop, done} while reading the console for the address */
+    let search = null; /* {stopped, stop, finish, closed} while reading the console for the address */
     let listener = () => {};
     const emit = (patch) => { Object.assign(state, patch); listener(); };
 
@@ -84,11 +85,15 @@
       }
     }
 
-    /* Starts the firmware the way ESP Web Tools does, then lets go of the port. */
+    /*
+     * Starts the firmware, then lets go of the port. DTR is cleared first: esptool-js's connect sequence leaves its
+     * remembered DTR true, and setRTS resends that, so with both lines asserted the pulse would not reset the chip.
+     */
     async function resetAndRelease() {
       if (!session)
         return;
       try {
+        await session.transport.setDTR(false);
         await session.transport.setRTS(true);
         await deps.sleep(100);
         await session.loader.after();
@@ -217,37 +222,55 @@
       });
     }
 
-    /* Reads the board's console until it logs its address; '' when it doesn't in time or the port won't open. */
-    async function findAddress(port, running) {
+    /* Reads the board's console until it logs its address, gives it to running.finish, then closes the port. */
+    async function readAddress(port, running) {
       try {
         await port.open({baudRate: CONSOLE_BAUD});
       } catch (e) {
-        return '';
+        return;
       }
       const reader = port.readable.getReader();
       running.stop = () => reader.cancel().catch(() => {});
       if (running.stopped)
         running.stop();
-      deps.sleep(ADDRESS_WAIT_MS).then(() => running.stop());
       const decoder = new TextDecoder();
       let text = '';
       try {
         for (;;) {
           const {value, done} = await reader.read();
           if (done)
-            return '';
+            return;
           text = (text + decoder.decode(value, {stream: true})).slice(-CONSOLE_KEEP);
           const address = addressIn(text);
-          if (address)
-            return address;
+          if (address) {
+            running.finish(address);
+            return;
+          }
         }
       } catch (e) {
-        return '';
+        /* the cable is gone: no address */
       } finally {
         await reader.cancel().catch(() => {});
         reader.releaseLock();
         await port.close().catch(() => {});
       }
+    }
+
+    /* The board's address, or '' after ADDRESS_WAIT_MS whatever the port is doing. */
+    async function findAddress(port) {
+      const running = {stopped: false, stop() {}};
+      const answer = new Promise((resolve) => { running.finish = resolve; });
+      search = running;
+      running.closed = readAddress(port, running).finally(() => running.finish(''));
+      deps.sleep(ADDRESS_WAIT_MS).then(() => {
+        running.stopped = true;
+        running.stop();
+        running.finish('');
+      });
+      emit({ip: await answer, addressWaiting: false});
+      await running.closed;
+      if (search === running)
+        search = null;
     }
 
     async function install() {
@@ -279,12 +302,7 @@
       const {port} = session;
       await resetAndRelease();
       emit({stage: 'done', percent: 100, ip: '', addressWaiting: true});
-      const running = {stopped: false, stop() {}};
-      search = running;
-      running.done = findAddress(port, running);
-      const ip = await running.done;
-      search = null;
-      emit({ip, addressWaiting: false});
+      await findAddress(port);
     }
 
     async function init() {
@@ -341,7 +359,8 @@
           const running = search;
           running.stopped = true;
           running.stop();
-          await running.done;
+          running.finish('');
+          await Promise.race([running.closed, deps.sleep(CLOSE_WAIT_MS)]);
         }
         await resetAndRelease();
         emit({stage: 'idle', revision: null, candidates: [], board: null, chip: null, erase: false, percent: 0, part: '', file: '', ip: '', addressWaiting: false});
@@ -477,7 +496,7 @@
     return flow.init();
   }
 
-  const api = {targetsForRevision, hostFromMac, addressIn, createFlow, view, start, STAGES, ADDRESS_WAIT_MS};
+  const api = {targetsForRevision, hostFromMac, addressIn, createFlow, view, start, STAGES, ADDRESS_WAIT_MS, CLOSE_WAIT_MS};
   if (typeof module !== 'undefined' && module.exports)
     module.exports = api;
   else
