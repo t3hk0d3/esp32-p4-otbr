@@ -25,6 +25,7 @@ from p4_case.base import (
     rounded_block,
     side_walls,
     tab_y_centres,
+    top_bevel,
     u_outline,
     x_countersink,
     x_cylinder,
@@ -316,16 +317,15 @@ def build_lid(curtain: bool = True, ears: str = P.EAR_STYLE) -> Part:
 
     With curtain=False it is the lid with all four curtain segments broken out.
     """
-    if ears == "outside":
-        ear_parts, ear_holes = _outside_ears()
-    elif ears == "inside":
-        ear_parts, ear_holes = _inside_ears()
-    else:
-        raise ValueError(f"ears must be 'outside' or 'inside', not {ears!r}")
-    part = _plate() + _lintel() + _tabs() + _header_fill() + ear_parts
+    if ears not in P.EAR_OPTIONS:
+        raise ValueError(f"ears must be one of {P.EAR_OPTIONS}, not {ears!r}")
+    part = _plate() + _lintel() + _tabs() + _header_fill()
     if curtain:
         part += _curtain()
-    return part - _grille(ears) - ear_holes
+    if ears == "none":  # the corner-tab snaps alone hold the lid
+        return part - _grille(ears) - top_bevel()
+    ear_parts, ear_holes = _outside_ears() if ears == "outside" else _inside_ears()
+    return part + ear_parts - _grille(ears) - ear_holes - top_bevel()
 
 
 def opening_widths(lid: Part) -> list[float]:

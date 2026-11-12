@@ -107,8 +107,8 @@ class TestDefaultBase:
             base, P.CABLE_OPENING_X[1] + 0.3, y, 8.0
         )  # above the microSD slot
 
-    def test_has_the_header_slot_open_to_the_top_with_5_mm_clear(self, base):
-        assert P.LID_UNDERSIDE - P.HEADER_SLOT_BOTTOM == pytest.approx(5.0)
+    def test_has_the_header_slot_open_to_the_top_with_10_mm_clear(self, base):
+        assert P.LID_UNDERSIDE - P.HEADER_SLOT_BOTTOM == pytest.approx(10.0)
         y = P.INNER[3] + 0.4  # in the header-end wall, beside the floor groove
         assert not solid(base, 27.5, y, P.HEADER_SLOT_BOTTOM + 0.1)
         assert not solid(base, 27.5, y, P.TOP - 0.1)  # open to the top: no bridge
@@ -433,3 +433,41 @@ class TestInsideEarWallHoles:
     def test_is_otherwise_the_default_base(self, base, base_inside):
         for x, y, z in ((27.5, 71.5, 21.0), (45.0, -1.5, 12.0), (-2.5, 50.0, 28.0)):
             assert solid(base, x, y, z) == solid(base_inside, x, y, z)
+
+
+class TestNoEars:
+    """base.build_base: With no ears (snaps only)"""
+
+    def test_has_no_wall_top_cut_no_pocket_and_no_hole(self, base_none):
+        for side in (-1, 1):
+            face, inward = _wall(side)
+            assert solid(base_none, face + inward * 1.5, P.EAR_Y, P.TOP - 0.1)
+            assert solid(base_none, face + inward * 0.5, P.EAR_Y, P.EAR_SCREW_Z)
+            assert solid(base_none, face + inward * 2.5, P.EAR_Y, P.IN_EAR_SCREW_Z)
+
+    def test_is_otherwise_the_default_base(self, base, base_none):
+        for x, y, z in ((27.5, 72.0, 15.0), (45.0, -1.5, 12.0), (-2.5, 50.0, 28.0)):
+            assert solid(base, x, y, z) == solid(base_none, x, y, z)
+
+    def test_rejects_an_unknown_option(self):
+        from p4_case.base import build_base
+
+        with pytest.raises(ValueError, match="ears"):
+            build_base(ears="sideways")
+
+
+class TestTopBevel:
+    """base.build_base: The outer top edge"""
+
+    def test_bevels_it_0_3_mm_at_45_degrees(self, base):
+        c = P.OUTER_TOP_CHAMFER
+        assert c == pytest.approx(0.3)
+        x0, x1, y0, y1 = P.OUTER
+        for x, y in (
+            (x0 + 0.1, 50.0),
+            (x1 - 0.1, 50.0),
+            (45.0, y0 + 0.1),
+            (x1 - P.OUTER_R, y1 - 0.1),  # header-end wall, past the slot's end
+        ):
+            assert not solid(base, x, y, P.TOP - 0.05), (x, y)  # bevelled
+            assert solid(base, x, y, P.TOP - c - 0.1), (x, y)  # full below it

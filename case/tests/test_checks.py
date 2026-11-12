@@ -310,7 +310,7 @@ class TestOpeningSizeCurtain:
     def test_reports_the_broken_out_passage_height(self, results):
         r = results["no opening wider than 3.5 mm"]
         assert r.ok, r.detail
-        assert "5.0 mm when broken out" in r.detail
+        assert "10.0 mm when broken out" in r.detail
 
 
 class TestEarScrews:
@@ -342,3 +342,22 @@ class TestRunAllInside:
         failed = {n: r.detail for n, r in results_inside.items() if not r.ok}
         assert not failed
         assert "screw ears line up" in results_inside
+
+
+@pytest.fixture(scope="module")
+def results_none(board, base_none, lid_none, lid_none_open):
+    return {
+        r.name: r
+        for r in checks.run_all(board, base_none, lid_none, lid_none_open, ears="none")
+    }
+
+
+class TestRunAllNoEars:
+    """checks.run_all: For the no-ear option"""
+
+    def test_runs_every_check_and_all_pass(self, results_none):
+        failed = {n: r.detail for n, r in results_none.items() if not r.ok}
+        assert not failed
+
+    def test_reports_that_only_the_snaps_hold_the_lid(self, results_none):
+        assert "no screw ears" in results_none["screw ears line up"].detail

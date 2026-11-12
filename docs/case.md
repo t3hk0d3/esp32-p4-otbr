@@ -3,14 +3,15 @@
 A two-part FDM case for the Waveshare ESP32-P4-WIFI6-POE-ETH board:
 
 - **Base:** one part with all four walls.
-- **Lid:** a 3 mm honeycomb grille that clicks onto four corner tabs and is held by two side screws.
+- **Lid:** a 3 mm honeycomb grille that clicks onto four corner tabs and, optionally, is held by two side screws.
 
-The screw ears come in two options, both built by `make case`, until a test print shows which one to keep:
+The lid comes in three options, all built by `make case`, until a test print shows which one to keep:
 
 - **Outside ears (default):** a U-shaped ear on each side of the lid sits flush in a pocket in the wall's outer face.
   The screw goes through the ear and threads into the wall (about 2.4 mm of thread).
 - **Inside ears:** a buttressed block hangs from the lid inside each side wall. The screw goes through the wall and
   threads into the block (about 4.6 mm of thread, but along the lid's printed layers).
+- **No ears:** no screws; the corner tabs' snap bumps alone hold the lid, as in the earlier prints.
 
 It hangs on a wall from two screws, cable end down or SMA side up, or it lies on a table. Everything you need day to day
 is reachable with the lid on: the USB-C, USB-A and RJ45 (PoE) ports, the microSD slot, BOOT and RESET (with a pencil),
@@ -39,7 +40,7 @@ The model is parametric Python (build123d) in `case/`. Its design is
 ```
 make case-board   # once: download and verify the vendor 3D model of the board (.artifacts/board/)
 make case         # write dist/case/, run the fit checks, refresh docs/models/
-make case-test    # the model's tests (about 5 min)
+make case-test    # the model's tests (about 8 min)
 ```
 
 `dist/case/` then holds:
@@ -49,13 +50,13 @@ make case-test    # the model's tests (about 5 min)
 | `p4_case_base.stl` | print: back plate down |
 | `p4_case_lid.stl` | print: top face down (the file is already flipped) |
 | `p4_case_base.step`, `p4_case_lid.step` | CAD, as assembled (Z 0 at the outer back face) |
-| `p4_case_*_inside-ears.{stl,step}` | the same for the inside-ear option |
+| `p4_case_*_inside-ears.{stl,step}`, `p4_case_*_no-ears.{stl,step}` | the same for the other two options |
 | `preview_*.png` | front, back, both ends, button side, exploded (default option) |
 
 `make case` also copies the two STLs to `docs/models/`, which is committed; a test fails when they no longer match a
 fresh build, so commit them with every geometry change.
 
-`make case` runs every check for both ear options, prints one line per check and fails if any check fails. The
+`make case` runs every check for all three lid options, prints one line per check and fails if any check fails. The
 checks are:
 
 - the board facts still match the vendor model;
@@ -69,7 +70,7 @@ checks are:
 - the lid seats on the base without overlap, apart from the bumps' designed preload;
 - the lid's bumps reach past the wall face and press lightly into their dents;
 - the SMA bulkhead's nut has room inside, clear of the board;
-- no opening is wider than 3.5 mm while the curtain is on (the broken-out slot is 5 mm tall);
+- no opening is wider than 3.5 mm while the curtain is on (the broken-out slot is 10 mm tall);
 - both parts are closed solids;
 - both parts print without supports (bridges up to 18 mm);
 - no layer of either part holds a strand thinner than 0.8 mm (two lines), which a slicer would print as one line or
@@ -83,7 +84,7 @@ checks are:
 - No supports, no brim needed.
 - Turn on your slicer's elephant's-foot (first-layer) compensation if it has one. The keyholes and the lid's top edge
   are chamfered on the bed side, so a little squish won't narrow them, and the base's outer bottom edge is chamfered so
-  it won't leave a lip.
+  it won't leave a lip. The outer top edge has a 0.3 mm bevel too, carried on over the lid where it reaches the face.
 - **Base:** back plate on the bed. The only bridges are the top of the microSD slot (12 mm) and the 1 mm ledge above
   it. The SMA hole's round top prints without support.
 - **Lid:** top face on the bed, the tabs, ears, curtain and cable-end lintel pointing up. Give it solid (100 %)
@@ -119,10 +120,11 @@ checks are:
 3. **Header wiring (optional):** the lid closes the 40-pin slot with a curtain of four segments. Break out as many as
    the wiring needs: grip a segment with tweezers or pliers and bend it in and out until it snaps off at the lid.
    Jumper wires need one segment, a 2×20 ribbon all four. Then plug the wiring onto the 40-pin header and lead it out
-   through the slot: the gap is 5 mm tall once a segment is out.
+   through the slot: the gap is 10 mm tall once a segment is out.
 4. **Lid:** set it on so the four corner tabs drop into the corners, and press until it clicks. The bumps then press
    it down onto the rim, so it doesn't rattle. Then drive the two lid screws through the side ears (outside ears) or
-   through the side walls (inside ears). Snug only: they cut their own thread in the plastic.
+   through the side walls (inside ears). Snug only: they cut their own thread in the plastic. The no-ear lid has no
+   screws.
 5. **Opening:** take out the two lid screws, then lever the lid up through the grille with a small flat screwdriver,
    close to a corner.
 
@@ -173,7 +175,7 @@ After a change, run `make case` again. Its checks catch a change that breaks a f
   a design review (keyhole necks and chamfers, the detent's hold face and preload, the SMA hole's flat at the bottom,
   the two-line knock-out, the tab gussets, the full-width header slot). That second print confirmed the bumps, the
   keyhole necks and the standoff blocks. v6 followed from it: a 3 mm lid on a 1 mm taller case, the lid screws (two
-  options), the 40-pin curtain with a 3 mm header-end wall, a bigger microSD scoop without the lip, and the SMA hole's
+  options, plus a snaps-only lid), the 40-pin curtain (10 mm tall) with a 3 mm header-end wall, a 0.3 mm top bevel, a bigger microSD scoop without the lip, and the SMA hole's
   round top again. v6 hasn't been printed yet.
 - The camera and display ribbon sockets, the two 4-pin sockets and the battery socket stay covered.
 - The power LED stays covered by the lid's frame.
