@@ -443,3 +443,28 @@ class TestLidTopBevel:
         ):
             assert not solid(lid, x, y, P.TOP - 0.05), (x, y)
             assert solid(lid, x, y, P.TOP - c - 0.1), (x, y)
+
+
+class TestLidHeaderCorners:
+    """lid.build_lid: At the header-end corners, where the base is square above the slot floor"""
+
+    def test_squares_the_body_into_the_corner(self, lid):
+        c = P.LID_CLEAR
+        for x in (IX0 + c + 0.1, IX1 - c - 0.1):
+            assert solid(lid, x, IY1 - c - 0.1, (P.LID_UNDERSIDE + P.REBATE_FLOOR) / 2)
+
+    def test_squares_the_header_end_tabs_into_the_corner(self, lid):
+        c = P.TAB_CLEAR
+        for x in (IX0 + c + 0.1, IX1 - c - 0.1):
+            assert solid(lid, x, IY1 - c - 0.1, P.LID_UNDERSIDE - 1.0)
+
+    def test_keeps_the_cable_end_corners_round(self, lid):
+        c = P.LID_CLEAR
+        assert not solid(
+            lid, IX0 + c + 0.1, IY0 + c + 0.1, (P.LID_UNDERSIDE + P.REBATE_FLOOR) / 2
+        )
+
+    def test_clears_the_square_base_corner(self, base, lid):
+        from p4_case.checks import lid_seats
+
+        assert lid_seats(base, lid).ok

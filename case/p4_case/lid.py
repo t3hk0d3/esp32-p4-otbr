@@ -59,7 +59,14 @@ def _plate() -> Part:
     top_edges = flange.faces().sort_by(Axis.Z)[-1].outer_wire().edges()
     flange = chamfer(top_edges, P.LID_TOP_CHAMFER)
     body = rounded_block(bx0, bx1, by0, by1, UNDER, FLOOR + EPS, br)
-    return flange + body
+    # at the header end the base is square above the slot floor, so the body's corners are square there
+    return flange + body + _header_corners(UNDER, FLOOR + EPS)
+
+
+def _header_corners(z0: float, z1: float) -> Part:
+    """The body outline's square header-end corners, between z0 and z1 (the 40-pin slot squares the base there)."""
+    bx0, bx1, _, by1, _ = _body_outline()
+    return block(bx0, bx1, by1 - P.INNER_R, by1, z0, z1)
 
 
 def inside_ear_footprints() -> list[tuple[float, float, float, float]]:
@@ -197,6 +204,7 @@ def _tabs() -> Part:
     # clip to the lid body's outline: its rounded corners are concentric with the wall's inner corners, TAB_CLEAR in
     bx0, bx1, by0, by1, br = _body_outline()
     clip = rounded_block(bx0, bx1, by0, by1, TIP - 1, UNDER + EPS, br)
+    clip += _header_corners(TIP - 1, UNDER + EPS)
     corners = [(side, end) for side in (-1, 1) for end in (-1, 1)]
     tabs = (Part() + [_tab(s, e) for s, e in corners]) & clip
     return tabs + [_bump(s, e) for s, e in corners]
