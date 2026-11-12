@@ -43,12 +43,46 @@ def block(x0: float, x1: float, y0: float, y1: float, z0: float, z1: float) -> P
 
 
 def x_cylinder(y: float, z: float, d: float, x0: float, x1: float) -> Part:
-    """Cylinder along X from x0 to x1, axis at (y, z)."""
+    """Cylinder along X between x0 and x1 (either order), axis at (y, z)."""
+    x0, x1 = sorted((x0, x1))
     return (
         Pos(x0, y, z)
         * Rot(0, 90, 0)
         * Cylinder(d / 2, x1 - x0, align=(Align.CENTER, Align.CENTER, Align.MIN))
     )
+
+
+def x_countersink(
+    y: float, z: float, d0: float, d1: float, face: float, inward: int
+) -> Part:
+    """90° countersink at an outer face: Ø d0 at x = face, narrowing to Ø d1 going inward (+1 for +X, -1 for -X)."""
+    h = (d0 - d1) / 2
+    cone = Cone(d0 / 2, d1 / 2, h + EPS, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    return Pos(face - inward * EPS, y, z) * Rot(0, 90 * inward, 0) * cone
+
+
+def x_prism(pts_yz: list[tuple[float, float]], x0: float, x1: float) -> Part:
+    """A YZ outline extruded along X between x0 and x1 (either order).
+
+    The direction is given explicitly: on Plane.YZ an extrusion otherwise follows the outline's winding.
+    """
+    x0, x1 = sorted((x0, x1))
+    face = Plane.YZ * Polygon(*pts_yz, align=None)
+    return Pos(x0, 0, 0) * extrude(face, x1 - x0, dir=(1, 0, 0))
+
+
+def u_outline(yc: float, zc: float, r: float, top: float) -> list[tuple[float, float]]:
+    """A U in YZ: straight sides from top down to zc, then a half-circle bottom of radius r around (yc, zc)."""
+    arc = [
+        (yc + r * math.cos(a), zc + r * math.sin(a))
+        for a in (math.pi + k * math.pi / 48 for k in range(49))
+    ]
+    return [(yc - r, top), *arc, (yc + r, top)]
+
+
+def side_walls() -> tuple[tuple[float, float, int], ...]:
+    """(outer face X, inner face X, inward direction) of the left and right side walls."""
+    return (P.OUTER[0], P.INNER[0], 1), (P.OUTER[1], P.INNER[1], -1)
 
 
 def _shell() -> Part:
@@ -189,33 +223,43 @@ def _cable_wall_openings() -> Part:
         block(cx0, cx1, y0, y1, P.OPENING_BOTTOM, board_z(P.TOP) + 1),
         block(sx0, sx1, y0, y1, sz0, sz1),
     ]
-    # thumb scoop above the slot's top edge, past a SCOOP_LIP lip: a wedge into the outer face (YZ profile, along X)
+    # thumb scoop right at the slot's top edge (no lip): a wedge into the outer face, deepest at the slot
     face = P.OUTER[2]
-    z0 = sz1 + P.SCOOP_LIP
     wedge = [
-        (face - EPS, z0),
-        (face + P.SCOOP_DEPTH, z0),
-        (face - EPS, z0 + P.SCOOP_RISE),
+        (face - EPS, sz1),
+        (face + P.SCOOP_DEPTH, sz1),
+        (face - EPS, sz1 + P.SCOOP_RISE),
     ]
-    sx_a, sx_b = P.SCOOP_X
-    prism = extrude(
-        Plane.YZ * Polygon(*wedge, align=None), (sx_b - sx_a) / 2, both=True
-    )
-    cuts.append(Pos((sx_a + sx_b) / 2, 0, 0) * prism)
+    cuts.append(x_prism(wedge, *P.SCOOP_X))
     return Part() + cuts
+
+
+def _sd_wall() -> Part:
+    """The cable wall thickened SD_WALL_IN inward above the microSD slot, so 0.8 mm stays behind the scoop.
+
+    It starts at the slot's top (a 1 mm ledge over the cavity, printed as a short bridge) and its top slopes back to
+    the wall at 45°.
+    """
+    _, _, _, sz1 = P.SD_SLOT
+    y0, t = P.INNER[2] - EPS, P.SD_WALL_IN
+    z1 = sz1 + P.SCOOP_RISE + 1.0
+    outline = [(y0, sz1), (y0 + t + EPS, sz1), (y0 + t + EPS, z1), (y0, z1 + t + EPS)]
+    return x_prism(outline, *P.SD_WALL_X)
 
 
 def _header_slot() -> Part:
     x0, x1 = P.HEADER_SLOT_X
+    floor = board_z(P.HEADER_SLOT_BOTTOM)
     # starts INNER_R inside the cavity: it takes the cavity's rounded corners too, leaving no sliver against the slot
-    return block(
-        x0,
-        x1,
-        P.INNER[3] - P.INNER_R,
-        P.OUTER[3] + 1,
-        board_z(P.HEADER_SLOT_BOTTOM),
-        board_z(P.TOP) + 1,
+    slot = block(
+        x0, x1, P.INNER[3] - P.INNER_R, P.OUTER[3] + 1, floor, board_z(P.TOP) + 1
     )
+    # the groove along the floor takes the curtain's tongues
+    mid, w = (P.INNER[3] + P.OUTER[3]) / 2, P.SLOT_GROOVE_W
+    groove = block(
+        x0, x1, mid - w / 2, mid + w / 2, floor - P.SLOT_GROOVE_D, floor + EPS
+    )
+    return slot + groove
 
 
 def _buttons() -> Part:
@@ -252,16 +296,8 @@ def _sma() -> Part:
     # the hole stops short of the outer face: a two-line knock-out closes it until an SMA is fitted
     x0, x1 = P.INNER[1] - EPS, P.OUTER[1] - P.SMA_KNOCKOUT_T
     hole = x_cylinder(P.SMA_Y, zc, P.SMA_D, x0, x1)
-    # teardrop top: a 45° roof tangent to the circle, so the top prints without support
-    roof = [
-        (P.SMA_Y - r / math.sqrt(2), zc + r / math.sqrt(2)),
-        (P.SMA_Y, zc + r * math.sqrt(2)),
-        (P.SMA_Y + r / math.sqrt(2), zc + r / math.sqrt(2)),
-        (P.SMA_Y, zc),
-    ]
-    # extrudes toward -X
-    hole += Pos(x1, 0, 0) * extrude(Plane.YZ * Polygon(*roof, align=None), x1 - x0)
-    # the flat is at the bottom, where it prints as a floor; it keeps the bulkhead from turning
+    # round top (it prints fine), flat at the bottom, where it prints as a floor; the flat keeps the bulkhead from
+    # turning
     flat_z = zc - (P.SMA_FLAT - r)
     keep = block(x0, x1, P.SMA_Y - P.SMA_D, P.SMA_Y + P.SMA_D, flat_z, zc + P.SMA_D)
     return hole & keep
@@ -296,9 +332,53 @@ def _dents() -> Part:
     return Part() + cuts
 
 
-def build_base() -> Part:
-    """The base as one solid in the board frame (back face at case Z 0)."""
-    part = _shell() + _wall_root_chamfer() + _standoffs()
+def _ear_cuts(ears: str) -> Part:
+    """Where the lid's screw ears meet the side walls.
+
+    outside: the wall top drops to the lid's underside over the ear, a U pocket in the outer face takes the ear, and a
+    pilot runs through the wall behind it. inside: a clearance hole through the wall, countersunk at the outer face.
+    """
+    cuts = []
+    y = P.EAR_Y
+    for face, inner, inward in side_walls():
+        if ears == "outside":
+            half = P.EAR_W / 2 + P.EAR_GAP
+            cuts.append(
+                block(
+                    *sorted((face - inward, inner + inward * EPS)),
+                    y - half,
+                    y + half,
+                    board_z(P.LID_UNDERSIDE),
+                    board_z(P.TOP) + 1,
+                )
+            )
+            pocket = u_outline(y, board_z(P.EAR_SCREW_Z), half, board_z(P.TOP) + 1)
+            cuts.append(x_prism(pocket, face - inward, face + inward * P.EAR_T))
+            cuts.append(
+                x_cylinder(
+                    y,
+                    board_z(P.EAR_SCREW_Z),
+                    P.EAR_PILOT_D,
+                    face + inward * (P.EAR_T - EPS),
+                    inner + inward,
+                )
+            )
+        elif ears == "inside":
+            z = board_z(P.IN_EAR_SCREW_Z)
+            cuts.append(
+                x_cylinder(y, z, P.IN_EAR_CLEAR_D, face - inward, inner + inward)
+            )
+            cuts.append(
+                x_countersink(y, z, P.IN_EAR_CSK_D, P.IN_EAR_CLEAR_D, face, inward)
+            )
+        else:
+            raise ValueError(f"ears must be 'outside' or 'inside', not {ears!r}")
+    return Part() + cuts
+
+
+def build_base(ears: str = P.EAR_STYLE) -> Part:
+    """The base as one solid in the board frame (back face at case Z 0), for one screw-ear option."""
+    part = _shell() + _wall_root_chamfer() + _standoffs() + _sd_wall()
     part -= _screw_holes()
     part -= _keyholes()
     part -= _cable_wall_openings()
@@ -306,4 +386,5 @@ def build_base() -> Part:
     part -= _buttons()
     part -= _sma()
     part -= _dents()
+    part -= _ear_cuts(ears)
     return part

@@ -15,8 +15,8 @@ def box(x0, x1, y0, y1, z0, z1):
 
 
 @pytest.fixture(scope="module")
-def results(board, base, lid):
-    return {r.name: r for r in checks.run_all(board, base, lid)}
+def results(board, base, lid, lid_open):
+    return {r.name: r for r in checks.run_all(board, base, lid, lid_open)}
 
 
 class TestBoardClearanceDefault:
@@ -50,11 +50,11 @@ class TestOpeningPathsDefault:
 class TestOpeningPathsBlocked:
     """checks.opening_paths: With an opening blocked"""
 
-    def test_fails_naming_the_opening(self, base, lid):
+    def test_fails_naming_the_opening(self, base, lid, lid_open):
         plug = box(
             39.0, 52.0, P.OUTER[2] - 0.5, P.INNER[2], -1.0, 2.5
         )  # fills the microSD slot
-        r = checks.opening_paths(base + plug, lid)
+        r = checks.opening_paths(base + plug, lid, lid_open)
         assert not r.ok
         assert "microSD" in r.detail
 
@@ -125,11 +125,11 @@ class TestOpeningSizeDefault:
 class TestOpeningSizeWideCell:
     """checks.opening_size: With a 4 mm cell"""
 
-    def test_fails_naming_the_widest_opening(self, base, lid):
+    def test_fails_naming_the_widest_opening(self, base, lid, lid_open):
         hole = Pos(2.0, P.RIB_Y, board_z(P.LID_UNDERSIDE) - 1) * Box(
             4.0, 4.0, 5.0, align=(Align.CENTER, Align.CENTER, Align.MIN)
         )
-        r = checks.opening_size(base, lid - hole)
+        r = checks.opening_size(base, lid - hole, lid_open)
         assert not r.ok
         assert "widest lid opening" in r.detail
 
@@ -169,21 +169,16 @@ class TestRunAll:
 
         board_facts = [n for n in results if n.startswith("board fact")]
         assert len(board_facts) == len(F) + 2
-        assert len(results) - len(board_facts) == 18
+        assert len(results) - len(board_facts) == 19
 
 
-class TestOpeningSizeTallSlot:
-    """checks.opening_size: With the header slot floor 1 mm lower"""
+class TestOpeningSizeOpenCurtain:
+    """checks.opening_size: With the curtain broken out of the closed lid"""
 
-    def test_fails_on_the_header_slot_passage(self, base, lid):
-        x0, x1 = P.HEADER_SLOT_X
-        floor = board_z(P.HEADER_SLOT_BOTTOM)
-        deeper = box(
-            x0, x1, P.INNER[3] - 0.01, P.OUTER[3] + 1, floor - 1.0, floor + 0.01
-        )
-        r = checks.opening_size(base - deeper, lid)
+    def test_fails_on_the_open_header_slot(self, base, lid_open):
+        r = checks.opening_size(base, lid_open, lid_open)
         assert not r.ok
-        assert "header-slot passage" in r.detail
+        assert "header slot open" in r.detail
 
 
 class TestLidSeats:
@@ -283,3 +278,67 @@ class TestMinPrintWidthBump:
         part = box(0, 10, 0, 5, 0, 5) + box(3, 7, 5, 5.4, 0, 5)
         r = checks.min_print_width(part, "fixture", top_down=False)
         assert r.ok, r.detail
+
+
+@pytest.fixture(scope="module")
+def results_inside(board, base_inside, lid_inside, lid_inside_open):
+    return {
+        r.name: r
+        for r in checks.run_all(
+            board, base_inside, lid_inside, lid_inside_open, ears="inside"
+        )
+    }
+
+
+class TestOpeningPathsCurtain:
+    """checks.opening_paths: On the default parts"""
+
+    def test_runs_the_header_slot_probe_against_the_broken_out_lid(self, results):
+        r = results["every opening has a clear path"]
+        assert r.ok, r.detail
+        assert "header slot" in r.detail
+
+    def test_reports_the_header_slot_closed_while_the_curtain_is_on(self, results):
+        assert (
+            "closed by the curtain" in results["every opening has a clear path"].detail
+        )
+
+
+class TestOpeningSizeCurtain:
+    """checks.opening_size: On the default parts"""
+
+    def test_reports_the_broken_out_passage_height(self, results):
+        r = results["no opening wider than 3.5 mm"]
+        assert r.ok, r.detail
+        assert "5.0 mm when broken out" in r.detail
+
+
+class TestEarScrews:
+    """checks.ear_screws"""
+
+    def test_passes_on_the_default_outside_ears(self, results):
+        r = results["screw ears line up"]
+        assert r.ok, r.detail
+        assert "2.4 mm" in r.detail
+
+    def test_passes_on_the_inside_ears(self, results_inside):
+        r = results_inside["screw ears line up"]
+        assert r.ok, r.detail
+        assert "4.6 mm" in r.detail
+
+    def test_fails_naming_the_side_when_an_ear_is_shifted_1_mm(self, base, lid):
+        shifted = (lid & box(-20, 27.5, -20, 90, -20, 40)) + Pos(0, 1.0, 0) * (
+            lid & box(27.5, 80, -20, 90, -20, 40)
+        )
+        r = checks.ear_screws(base, shifted)
+        assert not r.ok
+        assert "right" in r.detail
+
+
+class TestRunAllInside:
+    """checks.run_all: For the inside-ear option"""
+
+    def test_runs_every_check_and_all_pass(self, results_inside):
+        failed = {n: r.detail for n, r in results_inside.items() if not r.ok}
+        assert not failed
+        assert "screw ears line up" in results_inside

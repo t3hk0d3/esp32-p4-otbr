@@ -3,7 +3,8 @@
     python -m p4_case.build --board .artifacts/board/board.stp --out dist/case [--check]
 
 STL files are in print pose (base: back plate on the bed; lid: top face on the bed). STEP files are in the case frame
-as assembled (case Z 0 at the outer back face). Exit codes: 0 all checks pass (or --check not given), 1 a check failed
+as assembled (case Z 0 at the outer back face). Both screw-ear options are built and checked: the default
+(params.EAR_STYLE) as p4_case_{base,lid}.*, the other as p4_case_{base,lid}_<option>-ears.*. Exit codes: 0 all checks pass (or --check not given), 1 a check failed
 with --check, 2 bad input.
 """
 
@@ -24,17 +25,24 @@ from p4_case.render import render
 LID_LIFT = 25.0  # exploded preview: how far the lid floats above the base
 
 
-def write_outputs(base: Part, lid: Part, out: Path) -> list[Path]:
-    """Writes the model files and preview PNGs; returns their paths."""
+EAR_OPTIONS = ("outside", "inside")
+
+
+def write_outputs(
+    base: Part, lid: Part, out: Path, suffix: str = "", previews: bool = True
+) -> list[Path]:
+    """Writes the model files (and, for the default option, the preview PNGs); returns their paths."""
     out.mkdir(parents=True, exist_ok=True)
     to_case = Pos(0, 0, P.BOARD_Z_IN_CASE)
     written = []
     for name, part, top_down in (("base", base, False), ("lid", lid, True)):
-        stl = out / f"p4_case_{name}.stl"
+        stl = out / f"p4_case_{name}{suffix}.stl"
         print_pose(part, top_down).export(stl)
-        step = out / f"p4_case_{name}.step"
+        step = out / f"p4_case_{name}{suffix}.step"
         export_step(to_case * part, step)
         written += [stl, step]
+    if not previews:
+        return written
 
     base_m, lid_m = to_mesh(base), to_mesh(lid)
     board_m = trimesh.util.concatenate([to_mesh(b) for b in board_bodies()])
@@ -67,15 +75,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{args.board} not found; {MAKE_HINT}", file=sys.stderr)
         return 2
     board = load_board(args.board)
-    base, lid = build_base(), build_lid()
-    for path in write_outputs(base, lid, args.out):
-        print(f"wrote {path}")
-    results = run_all(board, base, lid)
-    for r in results:
-        print(f"{'PASS' if r.ok else 'FAIL'} {r.name}: {r.detail}")
-    failed = [r for r in results if not r.ok]
-    print(f"{len(results) - len(failed)}/{len(results)} checks pass")
-    return 1 if failed and args.check else 0
+    any_failed = False
+    options = (P.EAR_STYLE, *(o for o in EAR_OPTIONS if o != P.EAR_STYLE))
+    for ears in options:
+        default = ears == P.EAR_STYLE
+        base, lid = build_base(ears), build_lid(True, ears)
+        lid_open = build_lid(False, ears)
+        suffix = "" if default else f"_{ears}-ears"
+        for path in write_outputs(base, lid, args.out, suffix, default):
+            print(f"wrote {path}")
+        results = run_all(board, base, lid, lid_open, ears)
+        tag = f"[{ears} ears]"
+        for r in results:
+            print(f"{tag} {'PASS' if r.ok else 'FAIL'} {r.name}: {r.detail}")
+        failed = [r for r in results if not r.ok]
+        any_failed |= bool(failed)
+        print(f"{tag} {len(results) - len(failed)}/{len(results)} checks pass")
+    return 1 if any_failed and args.check else 0
 
 
 if __name__ == "__main__":

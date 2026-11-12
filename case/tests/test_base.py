@@ -23,28 +23,30 @@ class TestDefaultBase:
         assert len(base.solids()) == 1
         assert base.is_valid
 
-    def test_has_the_outer_size_64_by_75_by_27_6(self, base):
+    def test_has_the_outer_size_64_by_76_by_28_6(self, base):
         bb = base.bounding_box()
         assert bb.size.X == pytest.approx(64.0, abs=0.1)
-        assert bb.size.Y == pytest.approx(75.0, abs=0.1)
-        assert bb.size.Z == pytest.approx(27.6, abs=0.1)
+        assert bb.size.Y == pytest.approx(76.0, abs=0.1)
+        assert bb.size.Z == pytest.approx(28.6, abs=0.1)
         assert bb.min.Z == pytest.approx(board_z(0.0), abs=0.01)
 
-    def test_has_the_rebate_1_mm_deep_and_half_a_wall_wide_on_all_walls(self, base):
+    def test_has_the_rebate_1_mm_deep_and_1_mm_wide_on_all_walls(self, base):
         x0, x1, y0, y1 = P.INNER
+        assert P.REBATE_FLOOR == pytest.approx(27.6)
+        top, below = P.TOP - 0.5, P.REBATE_FLOOR - 0.5
+        # side walls probed at Y 50, clear of the screw ears at Y 32
         for x, y in (
-            (x0 - 0.5, 34),
-            (x1 + 0.5, 34),
+            (x0 - 0.5, 50),
+            (x1 + 0.5, 50),
             (27.5, y0 - 0.5),
             (27.5, y1 + 0.5),
         ):
-            assert not solid(base, x, y, 27.1)  # inner half: rebate
-        for x, y in ((x0 - 0.5, 34), (x1 + 0.5, 34), (45.0, y0 - 0.5)):
-            assert solid(
-                base, x, y, 26.1
-            )  # below the rebate floor: wall (header end has the slot)
-        for x, y in ((x0 - 1.5, 34), (x1 + 1.5, 34), (45.0, y0 - 1.5)):
-            assert solid(base, x, y, 27.1)  # outer half reaches the top
+            assert not solid(base, x, y, top)  # inner 1 mm: rebate
+        for x, y in ((x0 - 0.5, 50), (x1 + 0.5, 50), (45.0, y0 - 0.5)):
+            # below the rebate floor: wall (the header end has the slot)
+            assert solid(base, x, y, below)
+        for x, y in ((x0 - 1.5, 50), (x1 + 1.5, 50), (45.0, y0 - 1.5)):
+            assert solid(base, x, y, top)  # the rest reaches the top
 
     def test_has_the_usb_rj45_and_sd_openings_at_the_spec_positions(self, base):
         y = -1.5  # inside the cable wall
@@ -58,25 +60,41 @@ class TestDefaultBase:
         assert not solid_bz(base, 45.0, y, 1.0)  # microSD slot
         assert solid_bz(base, 45.0, y, 4.0)  # above the slot and its scoop
 
-    def test_has_the_thumb_scoop_above_the_microsd_slot(self, base):
-        _, _, sz0, sz1 = P.SD_SLOT
-        x = sum(P.SCOOP_X) / 2
-        y = P.OUTER[2] + 0.3  # just inside the outer face
-        bottom = sz1 + P.SCOOP_LIP
-        assert not solid_bz(base, x, y, bottom + 0.2)  # scoop above the slot
-        assert solid_bz(base, x, y, sz0 - 0.5)  # nothing below it
-        assert solid_bz(
-            base, x, P.OUTER[2] + P.SCOOP_DEPTH + 0.2, bottom + 0.1
-        )  # only SCOOP_DEPTH deep
-
-    def test_leaves_a_0_4_mm_lip_over_the_slot_under_the_scoop(self, base):
+    def test_leaves_no_lip_between_the_microsd_slot_and_the_scoop(self, base):
         _, _, _, sz1 = P.SD_SLOT
         x = sum(P.SCOOP_X) / 2
-        assert P.SCOOP_LIP == pytest.approx(0.4)
-        assert solid_bz(base, x, P.OUTER[2] + 0.3, sz1 + P.SCOOP_LIP / 2)
+        assert not solid_bz(base, x, P.OUTER[2] + 0.3, sz1 + 0.1)
 
-    def test_keeps_two_printed_lines_of_wall_behind_the_scoop(self, base):
-        assert P.WALL - P.SCOOP_DEPTH >= 0.8 - 1e-6
+    def test_cuts_the_scoop_2_2_deep_10_wide_and_3_tall(self, base):
+        _, _, sz0, sz1 = P.SD_SLOT
+        x0, x1 = P.SCOOP_X
+        assert (P.SCOOP_DEPTH, x1 - x0, P.SCOOP_RISE) == pytest.approx((2.2, 10.0, 3.0))
+        face = P.OUTER[2]
+        x = (x0 + x1) / 2
+        assert not solid_bz(base, x, face + P.SCOOP_DEPTH - 0.2, sz1 + 0.1)  # deep
+        assert solid_bz(base, x, face + P.SCOOP_DEPTH + 0.2, sz1 + 0.1)  # no deeper
+        assert not solid_bz(base, x, face + 0.3, sz1 + 2.3)  # tall
+        assert solid_bz(base, x, face + 0.3, sz1 + 2.9)
+        assert not solid_bz(base, x0 + 0.3, face + 0.5, sz1 + 0.5)  # wide
+        assert solid_bz(base, x0 - 0.3, face + 0.5, sz1 + 0.5)
+        assert solid_bz(base, x1 + 0.3, face + 0.5, sz1 + 0.5)
+        assert solid_bz(base, x, face + 0.3, sz0 - 0.5)  # nothing below the slot
+
+    def test_keeps_0_8_mm_of_wall_behind_the_scoops_deepest_point(self, base):
+        _, _, _, sz1 = P.SD_SLOT
+        x = sum(P.SCOOP_X) / 2
+        inner = P.INNER[2] + P.SD_WALL_IN
+        assert inner - (P.OUTER[2] + P.SCOOP_DEPTH) == pytest.approx(0.8)
+        assert solid_bz(base, x, inner - 0.1, sz1 + 0.1)
+        assert not solid_bz(base, x, inner + 0.1, sz1 + 0.1)
+
+    def test_thickens_the_cable_wall_inward_above_the_microsd_slot_only(self, base):
+        _, _, sz0, sz1 = P.SD_SLOT
+        y = P.INNER[2] + P.SD_WALL_IN / 2
+        assert solid_bz(base, 45.0, y, sz1 + 1.0)  # above the slot
+        assert not solid_bz(base, 45.0, y, (sz0 + sz1) / 2)  # not beside it
+        assert not solid_bz(base, 45.0, y, sz0 - 1.0)  # not below it
+        assert not solid_bz(base, 30.0, y, sz1 + 1.0)  # not along the rest of the wall
 
     def test_has_one_usb_and_rj45_opening_open_to_the_wall_top(self, base):
         y = -1.5
@@ -89,8 +107,9 @@ class TestDefaultBase:
             base, P.CABLE_OPENING_X[1] + 0.3, y, 8.0
         )  # above the microSD slot
 
-    def test_has_the_header_slot_open_to_the_top_with_3_5_clear(self, base):
-        y = P.INNER[3] + 1.5  # outer half of the header-end wall
+    def test_has_the_header_slot_open_to_the_top_with_5_mm_clear(self, base):
+        assert P.LID_UNDERSIDE - P.HEADER_SLOT_BOTTOM == pytest.approx(5.0)
+        y = P.INNER[3] + 0.4  # in the header-end wall, beside the floor groove
         assert not solid(base, 27.5, y, P.HEADER_SLOT_BOTTOM + 0.1)
         assert not solid(base, 27.5, y, P.TOP - 0.1)  # open to the top: no bridge
         assert solid(base, 27.5, y, P.HEADER_SLOT_BOTTOM - 0.1)
@@ -104,6 +123,20 @@ class TestDefaultBase:
         assert not solid(base, P.INNER[0] + 0.3, P.INNER[3] - 0.3, z)
         assert solid(base, P.INNER[0] - 0.3, y, z)  # side walls stay
         assert solid(base, P.INNER[1] + 0.3, y, z)
+
+    def test_cuts_a_groove_along_the_slot_floor_centred_in_the_wall(self, base):
+        mid = (P.INNER[3] + P.OUTER[3]) / 2
+        w, d = P.SLOT_GROOVE_W, P.SLOT_GROOVE_D
+        assert (w, d) == pytest.approx((1.2, 0.8))
+        assert (P.OUTER[3] - P.INNER[3] - w) / 2 == pytest.approx(
+            0.9
+        )  # walls beside it
+        floor = P.HEADER_SLOT_BOTTOM
+        for x in (5.0, 27.5, 50.0):
+            assert not solid(base, x, mid, floor - d + 0.1)  # groove
+            assert solid(base, x, mid, floor - d - 0.1)  # its bottom
+            assert solid(base, x, mid + w / 2 + 0.1, floor - 0.1)  # floor beside it
+            assert solid(base, x, mid - w / 2 - 0.1, floor - 0.1)
 
     def test_has_two_pin_holes_on_the_plunger_axes_and_the_button_recess(self, base):
         x = P.INNER[0] - 1.2  # inside the left wall
@@ -133,13 +166,12 @@ class TestDefaultBase:
         assert solid_bz(base, x, P.SMA_Y, zc - 2.8)  # the flat
         assert solid_bz(base, x, P.SMA_Y + 3.5, zc)
 
-    def test_gives_the_sma_hole_a_45_degree_teardrop_top(self, base):
+    def test_gives_the_sma_hole_a_round_top(self, base):
         x = P.INNER[1] + 1.0
         zc = board_z(P.SMA_CASE_Z)
         r = P.SMA_D / 2
-        assert not solid_bz(base, x, P.SMA_Y, zc + r * 2**0.5 - 0.2)  # the roof's peak
-        assert solid_bz(base, x, P.SMA_Y, zc + r * 2**0.5 + 0.2)
-        assert solid_bz(base, x, P.SMA_Y + 1.5, zc + r * 2**0.5 - 0.2)  # 45° sides
+        assert solid_bz(base, x, P.SMA_Y, zc + r + 0.2)  # no teardrop above the circle
+        assert not solid_bz(base, x, P.SMA_Y + 2.2, zc + 2.2)  # round at 45°
 
     def test_makes_the_whole_button_side_wall_4_mm_thick(self, base):
         x = P.INNER[0] - P.BUTTON_WALL + 0.2
@@ -156,7 +188,7 @@ class TestDefaultBase:
 
     def test_makes_the_whole_sma_side_wall_4_mm_thick(self, base):
         x = P.INNER[1] + P.SMA_WALL - 0.2
-        for y in (5.0, 35.0, 65.0):
+        for y in (5.0, 45.0, 65.0):  # clear of the screw ear's pocket at Y 32
             assert solid_bz(base, x, y, 10.0)
         assert not solid_bz(base, P.INNER[1] + P.SMA_WALL + 0.1, 35.0, 10.0)
 
@@ -321,3 +353,83 @@ class TestDefaultBase:
                     if math.hypot(min(dx, 0), min(dy, 0)) > r:
                         continue
                     assert not solid(base, kx + dx, ky + dy, P.PLATE_T + 1.0)
+
+
+def _wall(side):
+    """(outer face X, inward direction) of the left (-1) or right (+1) side wall."""
+    return (P.OUTER[0], 1) if side < 0 else (P.OUTER[1], -1)
+
+
+class TestOutsideEarPockets:
+    """base.build_base: On default parameters (outside ears)"""
+
+    def test_defaults_to_outside_ears(self):
+        assert P.EAR_STYLE == "outside"
+
+    def test_drops_each_side_wall_top_to_the_lid_underside_over_the_ear(self, base):
+        half = P.EAR_W / 2 + P.EAR_GAP
+        for side in (-1, 1):
+            face, inward = _wall(side)
+            for u in (2.0, 3.7):  # behind the pocket, across the rest of the wall
+                x = face + inward * u
+                assert not solid(base, x, P.EAR_Y, P.LID_UNDERSIDE + 0.1)
+                assert not solid(base, x, P.EAR_Y + half - 0.1, P.LID_UNDERSIDE + 0.1)
+                assert solid(base, x, P.EAR_Y, P.LID_UNDERSIDE - 0.1)
+            assert solid(base, face + inward * 2.0, P.EAR_Y + half + 0.1, P.TOP - 0.1)
+
+    def test_cuts_a_1_6_mm_u_pocket_into_each_outer_face(self, base):
+        r = P.EAR_W / 2 + P.EAR_GAP
+        zc = P.EAR_SCREW_Z
+        assert P.EAR_T == pytest.approx(1.6)
+        for side in (-1, 1):
+            face, inward = _wall(side)
+            x_in = face + inward * (P.EAR_T - 0.1)
+            x_past = face + inward * (P.EAR_T + 0.1)
+            assert not solid(base, x_in, P.EAR_Y + r - 0.1, zc + 2.0)  # straight sides
+            assert solid(base, x_in, P.EAR_Y + r + 0.1, zc + 2.0)
+            assert not solid(base, x_in, P.EAR_Y, zc - r + 0.1)  # half-circle bottom
+            assert solid(base, x_in, P.EAR_Y, zc - r - 0.1)
+            assert solid(base, x_in, P.EAR_Y + r * 0.8, zc - r * 0.8)  # round corners
+            assert solid(base, x_past, P.EAR_Y + 3.0, zc + 2.0)  # only EAR_T deep
+
+    def test_drills_a_2_2_pilot_through_the_wall_behind_each_pocket(self, base):
+        zc = P.EAR_SCREW_Z
+        r = P.EAR_PILOT_D / 2
+        assert P.EAR_PILOT_D == pytest.approx(2.2)
+        for side in (-1, 1):
+            face, inward = _wall(side)
+            for u in (P.EAR_T + 0.2, 3.0, 3.8):
+                x = face + inward * u
+                assert not solid(base, x, P.EAR_Y, zc)
+                assert solid(base, x, P.EAR_Y + r + 0.2, zc)
+
+
+class TestInsideEarWallHoles:
+    """base.build_base: With ears inside"""
+
+    def test_drills_a_3_0_clearance_hole_through_each_side_wall(self, base_inside):
+        zc, r = P.IN_EAR_SCREW_Z, P.IN_EAR_CLEAR_D / 2
+        for side in (-1, 1):
+            face, inward = _wall(side)
+            for u in (1.5, 2.5, 3.8):
+                x = face + inward * u
+                assert not solid(base_inside, x, P.EAR_Y, zc)
+                assert not solid(base_inside, x, P.EAR_Y + r - 0.1, zc)
+                assert solid(base_inside, x, P.EAR_Y + r + 0.2, zc)
+
+    def test_countersinks_each_hole_to_5_0_at_the_outer_face(self, base_inside):
+        zc, r = P.IN_EAR_SCREW_Z, P.IN_EAR_CSK_D / 2
+        for side in (-1, 1):
+            face, inward = _wall(side)
+            assert not solid(base_inside, face + inward * 0.1, P.EAR_Y + r - 0.3, zc)
+            assert solid(base_inside, face + inward * 1.2, P.EAR_Y + r - 0.3, zc)
+
+    def test_has_no_wall_top_cut_and_no_pocket(self, base_inside):
+        for side in (-1, 1):
+            face, inward = _wall(side)
+            assert solid(base_inside, face + inward * 1.5, P.EAR_Y, P.TOP - 0.1)
+            assert solid(base_inside, face + inward * 0.5, P.EAR_Y, P.EAR_SCREW_Z - 4.0)
+
+    def test_is_otherwise_the_default_base(self, base, base_inside):
+        for x, y, z in ((27.5, 71.5, 21.0), (45.0, -1.5, 12.0), (-2.5, 50.0, 28.0)):
+            assert solid(base, x, y, z) == solid(base_inside, x, y, z)
