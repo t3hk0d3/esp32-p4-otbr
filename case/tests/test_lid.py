@@ -400,3 +400,46 @@ class TestLidInsideOnBase:
 
         r = lid_seats(base_inside, lid_inside)
         assert r.ok, r.detail
+
+
+class TestLidNoEars:
+    """lid.build_lid: With no ears (snaps only)"""
+
+    def test_has_neither_ear_nor_wall_top_fill(self, lid_none):
+        face, inward = _wall(-1)
+        assert not solid(lid_none, face + inward * 0.3, P.EAR_Y, P.TOP - 0.5)
+        assert not solid(lid_none, face + inward * 0.8, P.EAR_Y + 3.5, P.EAR_SCREW_Z)
+        assert not solid(lid_none, P.INNER[0] + 2.5, P.EAR_Y, 20.0)  # no inside block
+
+    def test_keeps_the_corner_tabs_bumps_and_curtain(self, lid, lid_none):
+        segment = segment_centres()[0][0]
+        for x, y, z in (
+            (TAB_X[-1] + 0.6, TAB_Y0 + 3.5, P.LID_UNDERSIDE - 1.0),
+            (segment, SLOT_MID, (FLOOR + P.LID_UNDERSIDE) / 2),
+        ):
+            assert solid(lid, x, y, z) and solid(lid_none, x, y, z)
+
+    def test_keeps_the_default_grille(self):
+        from p4_case.lid import cell_centres
+
+        assert cell_centres(ears="none") == cell_centres()
+
+    def test_fits_the_no_ear_base(self, base_none, lid_none):
+        from p4_case.checks import lid_seats
+
+        r = lid_seats(base_none, lid_none)
+        assert r.ok, r.detail
+
+
+class TestLidTopBevel:
+    """lid.build_lid: Where the lid reaches the case's outer face"""
+
+    def test_continues_the_cases_top_bevel(self, lid):
+        c = P.OUTER_TOP_CHAMFER
+        for x, y in (
+            (P.OUTER[0] + 0.1, P.EAR_Y),  # outside ear's fill
+            (12.0, P.OUTER[2] + 0.1),  # cable-end lintel
+            (27.5, P.OUTER[3] - 0.1),  # 40-pin fill
+        ):
+            assert not solid(lid, x, y, P.TOP - 0.05), (x, y)
+            assert solid(lid, x, y, P.TOP - c - 0.1), (x, y)

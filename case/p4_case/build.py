@@ -3,8 +3,8 @@
     python -m p4_case.build --board .artifacts/board/board.stp --out dist/case [--check]
 
 STL files are in print pose (base: back plate on the bed; lid: top face on the bed). STEP files are in the case frame
-as assembled (case Z 0 at the outer back face). Both screw-ear options are built and checked: the default
-(params.EAR_STYLE) as p4_case_{base,lid}.*, the other as p4_case_{base,lid}_<option>-ears.*. Exit codes: 0 all checks pass (or --check not given), 1 a check failed
+as assembled (case Z 0 at the outer back face). Every lid-screw option is built and checked: the default
+(params.EAR_STYLE) as p4_case_{base,lid}.*, the others as p4_case_{base,lid}_inside-ears.* and _no-ears.*. Exit codes: 0 all checks pass (or --check not given), 1 a check failed
 with --check, 2 bad input.
 """
 
@@ -25,7 +25,9 @@ from p4_case.render import render
 LID_LIFT = 25.0  # exploded preview: how far the lid floats above the base
 
 
-EAR_OPTIONS = ("outside", "inside")
+# file suffix and log tag per lid-screw option
+EAR_SUFFIX = {"outside": "_outside-ears", "inside": "_inside-ears", "none": "_no-ears"}
+EAR_TAG = {"outside": "[outside ears]", "inside": "[inside ears]", "none": "[no ears]"}
 
 
 def write_outputs(
@@ -76,16 +78,16 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     board = load_board(args.board)
     any_failed = False
-    options = (P.EAR_STYLE, *(o for o in EAR_OPTIONS if o != P.EAR_STYLE))
+    options = (P.EAR_STYLE, *(o for o in P.EAR_OPTIONS if o != P.EAR_STYLE))
     for ears in options:
         default = ears == P.EAR_STYLE
         base, lid = build_base(ears), build_lid(True, ears)
         lid_open = build_lid(False, ears)
-        suffix = "" if default else f"_{ears}-ears"
+        suffix = "" if default else EAR_SUFFIX[ears]
         for path in write_outputs(base, lid, args.out, suffix, default):
             print(f"wrote {path}")
         results = run_all(board, base, lid, lid_open, ears)
-        tag = f"[{ears} ears]"
+        tag = EAR_TAG[ears]
         for r in results:
             print(f"{tag} {'PASS' if r.ok else 'FAIL'} {r.name}: {r.detail}")
         failed = [r for r in results if not r.ok]

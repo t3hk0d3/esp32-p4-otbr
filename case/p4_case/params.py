@@ -45,6 +45,9 @@ OUTER_R = 2.5  # outer vertical edges
 # 45° on the outer bottom edge, which prints on the bed: no elephant's-foot lip around the case. Small, so the first
 # layer keeps nearly all its area and the 45° face prints without support
 OUTER_BOTTOM_CHAMFER = 0.5
+# the outer top edge gets a bevel too; it runs on over the lid's parts that reach the outer face. 0.3, not 0.5: the
+# cable-end wall's rim beside the rebate is only 1 mm, and 0.5 left a 0.5 mm strand in its top layer
+OUTER_TOP_CHAMFER = 0.3
 PLATE_T = 2.0  # case Z 0-2
 STANDOFF_TOP = 7.0  # case Z (board underside)
 LID_UNDERSIDE = 25.6  # case Z of the lid body's underside
@@ -109,7 +112,7 @@ SD_WALL_X = (SCOOP_X[0] - 1.0, SCOOP_X[1] + 1.0)
 HEADER_SLOT_X = (INNER[0], INNER[1])
 # the slot is open to the wall top; the lid fills it down to its underside and hangs a break-off curtain below that.
 # With the curtain broken out the passage is HEADER_SLOT_CLEAR tall (case Z 20.6-25.6)
-HEADER_SLOT_CLEAR = 5.0
+HEADER_SLOT_CLEAR = 10.0  # case Z 15.6-25.6; the curtain fills it
 HEADER_SLOT_BOTTOM = LID_UNDERSIDE - HEADER_SLOT_CLEAR
 # along the slot floor, centred in the wall: the curtain's tongues sit in it
 SLOT_GROOVE_W = 1.2
@@ -176,7 +179,8 @@ CURTAIN_FLOOR_GAP = 0.2  # segment bottoms to the slot floor
 CURTAIN_TONGUE_W = 0.8  # in the floor groove, 0.2 mm clear each side
 
 # --- lid screw ears (v6): two options, built side by side and printed to compare ---
-EAR_STYLE = "outside"  # the default option: "outside" or "inside"
+EAR_STYLE = "outside"  # the default option: "outside", "inside" or "none" (snaps only, no screws)
+EAR_OPTIONS = ("outside", "inside", "none")
 EAR_Y = 32.0  # both options, one ear per side wall, clear of the buttons and the SMA
 # outside: the ear hangs from the lid's edge into a pocket in the wall's outer face; the screw threads into the wall
 EAR_W = 10.0

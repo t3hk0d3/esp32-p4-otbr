@@ -101,14 +101,37 @@ def _shell() -> Part:
         top + 1,
         P.INNER_R + w,
     )
-    # outer bottom edge: a ring cut away, from OUTER_BOTTOM_CHAMFER in at the bed back to the outline that high
-    c = P.OUTER_BOTTOM_CHAMFER
-    outline = Pos((ox0 + ox1) / 2, (oy0 + oy1) / 2) * RectangleRounded(
-        ox1 - ox0, oy1 - oy0, P.OUTER_R
-    )
+    return outer - cavity - rebate - bottom_bevel() - top_bevel()
+
+
+def _edge_ring(c: float) -> Part:
+    """The ring a 45° bevel of size c removes from the outer outline's edge, c tall, at the origin.
+
+    At z 0 it reaches c into the outline, at z c it reaches the outline itself.
+    """
+    ox0, ox1, oy0, oy1 = P.OUTER
+    outline = RectangleRounded(ox1 - ox0, oy1 - oy0, P.OUTER_R)
     keep = extrude(offset(outline, -c, kind=Kind.ARC), c + EPS, taper=-45)
-    ring = extrude(offset(outline, 1.0, kind=Kind.ARC), c) - keep
-    return outer - cavity - rebate - Pos(0, 0, board_z(0.0)) * ring
+    return extrude(offset(outline, 1.0, kind=Kind.ARC), c) - keep
+
+
+def _outline_centre() -> tuple[float, float]:
+    ox0, ox1, oy0, oy1 = P.OUTER
+    return (ox0 + ox1) / 2, (oy0 + oy1) / 2
+
+
+def bottom_bevel() -> Part:
+    """The outer bottom edge's bevel (it prints on the bed: no elephant's-foot lip)."""
+    cx, cy = _outline_centre()
+    return Pos(cx, cy, board_z(0.0)) * _edge_ring(P.OUTER_BOTTOM_CHAMFER)
+
+
+def top_bevel() -> Part:
+    """The outer top edge's bevel; the lid subtracts it too where it reaches the outer face."""
+    cx, cy = _outline_centre()
+    return (
+        Pos(cx, cy, board_z(P.TOP)) * Rot(180, 0, 0) * _edge_ring(P.OUTER_TOP_CHAMFER)
+    )
 
 
 def standoff_footprint(x: float, y: float) -> Sketch:
@@ -337,8 +360,13 @@ def _ear_cuts(ears: str) -> Part:
 
     outside: the wall top drops to the lid's underside over the ear, a U pocket in the outer face takes the ear, and a
     pilot runs through the wall behind it. inside: a clearance hole through the wall, countersunk at the outer face.
+    none: nothing (the corner-tab snaps alone hold the lid).
     """
+    if ears not in P.EAR_OPTIONS:
+        raise ValueError(f"ears must be one of {P.EAR_OPTIONS}, not {ears!r}")
     cuts = []
+    if ears == "none":
+        return Part()
     y = P.EAR_Y
     for face, inner, inward in side_walls():
         if ears == "outside":
@@ -371,8 +399,6 @@ def _ear_cuts(ears: str) -> Part:
             cuts.append(
                 x_countersink(y, z, P.IN_EAR_CSK_D, P.IN_EAR_CLEAR_D, face, inward)
             )
-        else:
-            raise ValueError(f"ears must be 'outside' or 'inside', not {ears!r}")
     return Part() + cuts
 
 
@@ -386,5 +412,7 @@ def build_base(ears: str = P.EAR_STYLE) -> Part:
     part -= _buttons()
     part -= _sma()
     part -= _dents()
-    part -= _ear_cuts(ears)
+    cuts = _ear_cuts(ears)
+    if cuts.solids():
+        part -= cuts
     return part

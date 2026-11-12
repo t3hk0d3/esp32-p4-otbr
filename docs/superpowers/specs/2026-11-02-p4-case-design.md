@@ -120,7 +120,9 @@ Heights are given in *case Z*. Case Z = 0 is the outer back face, and the board 
 
 In plan view, the inner outline is the PCB outline plus 0.5 mm on three sides and 2.5 mm at the header end (room to
 drop the board in shifted back before sliding its connectors home), and the outer outline adds the walls: 2 mm at the cable end, 3 mm at the header end, 4 mm
-at the sides (outer size 64 × 76 × 28.6 mm). The outer vertical edges are rounded.
+at the sides (outer size 64 × 76 × 28.6 mm). The outer vertical edges are rounded. The outer bottom edge has a
+0.5 mm 45° bevel and the outer top edge a 0.3 mm one (v6; 0.5 left a 0.5 mm strand on the cable-end wall's 1 mm rim
+beside the rebate). The top bevel runs on over the lid where it reaches the outer face.
 
 ### 5.1 Base: back plate and keyholes
 
@@ -191,12 +193,12 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
   - The connector faces end up 0.5–0.8 mm behind the outer face.
   - The shared opening has no top, so it needs no bridge; the microSD slot's top bridges 12.2 mm.
 - **Header-end wall (Y = 68 edge):**
-  - A cable slot the full inner width (X −0.5–55.5), cut from case Z 20.6 up through the top of the wall so it needs
+  - A cable slot the full inner width (X −0.5–55.5), cut from case Z 15.6 up through the top of the wall so it needs
     no bridge. The slot also takes the cavity's rounded corners above its floor, so no thin sliver stays beside it
     (design review).
   - v6: the lid fills the slot above its underside, flush with the outer face, and closes the rest with a break-off
-    curtain (5.3). With the curtain on, the case is closed at this end. With segments broken out, the way in is 5 mm
-    tall (case Z 20.6–25.6): wider than the 3.5 mm rule allows, which only holds while the curtain is on. Ribbon
+    curtain (5.3). With the curtain on, the case is closed at this end. With segments broken out, the way in is 10 mm
+    tall (case Z 15.6–25.6): wider than the 3.5 mm rule allows, which only holds while the curtain is on. Ribbon
     cable (about 1.3 mm) and Dupont housings (2.5 mm) pass.
   - The wall is 3 mm thick (v6), so a 1.2 × 0.8 mm groove along the slot floor, centred in the wall, keeps 0.9 mm
     walls on both sides. The curtain's tongues sit in it.
@@ -285,7 +287,7 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 
 ### 5.3a Lid screws (v6)
 
-Two options are built side by side and printed to compare; `params.EAR_STYLE` picks the default ("outside").
+Three options are built side by side and printed to compare; `params.EAR_STYLE` picks the default ("outside").
 
 - **Outside ears (default):** one per side wall at Y 32.
   - The wall top drops to the lid's underside over the ear (10.4 mm), and the lid runs out over it at full thickness,
@@ -304,7 +306,8 @@ Two options are built side by side and printed to compare; `params.EAR_STYLE` pi
     (4.6 mm).
   - Screw: M2.5 × 10 flat head. The thread is longer, but it runs along the lid's printed layers. The buttress makes
     the layer at the pilot about 1.7× bigger against splitting.
-- **Both:** the ears belong to the lid, which goes on after the board, so the board's drop-in is untouched. Under the
+- **No ears:** no screws at all; the corner tabs' snap bumps alone hold the lid, as in the earlier prints.
+- **Ears:** they belong to the lid, which goes on after the board, so the board's drop-in is untouched. Under the
   inside blocks the board's parts reach case Z 14.3 (left) and 16.4 (right).
 
 ## 6. Assembly (goes into the docs page)
@@ -330,7 +333,8 @@ Two options are built side by side and printed to compare; `params.EAR_STYLE` pi
   (already ignored by git).
 - **Make targets:**
   - `make case`: builds `dist/case/p4_case_base.{stl,step}` and `dist/case/p4_case_lid.{stl,step}`, plus preview PNGs,
-    and the inside-ear option as `*_inside-ears.{stl,step}`; it runs every check for both options.
+    and the other lid options as `*_inside-ears.{stl,step}` and `*_no-ears.{stl,step}`; it runs every check for all
+    three.
   - `make case-test`: runs the checks in section 8.
   - Both get `## ` help comments.
   - Python dependencies run through `uv`/`uvx`, as the other tools do. Nothing is installed globally.
@@ -365,10 +369,10 @@ These are automated checks, run against the vendor STEP:
 - Each board-screw nut circle (Ø6.5 on top of the board around the mounting hole, 2.5 mm tall) is free of board parts.
 - Both keyhole head volumes (the L sweep plus the head radius, 2.5 mm tall) are free of the board and its underside parts.
 - No lid opening is wider than 3.5 mm, and the curtain closes the header-end slot. With the curtain broken out the
-  slot has a clear path for wiring (5 mm tall), reported but not limited (v6).
+  slot has a clear path for wiring (10 mm tall), reported but not limited (v6).
 - Each screw ear's clearance hole and pilot share one axis, and the pilot is at least 2.2 mm long (outside ears, in
   the wall) or 4.5 mm (inside ears, in the lid) (v6).
-- Every check runs for both ear options (v6).
+- Every check runs for all three lid options (v6).
 - With the lid fitted, the lid and the base do not overlap anywhere except where the bumps press into their dents.
 - At each bump's crest height, the bump reaches at least 0.15 mm past the wall face and presses into its dent by more
   than 0 and at most 0.15 mm (measured against the wall, so a bump that misses the wall fails).

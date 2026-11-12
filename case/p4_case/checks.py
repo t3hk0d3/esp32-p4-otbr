@@ -731,6 +731,12 @@ def ear_screws(base: Part, lid: Part, ears: str = P.EAR_STYLE) -> CheckResult:
     outside: the hole is in the lid's ear, the pilot (thread) in the base wall, at least 2.2 mm. inside: the hole is
     in the base wall, the pilot in the lid's block, at least 4.5 mm.
     """
+    if ears == "none":
+        return CheckResult(
+            "screw ears line up",
+            True,
+            "no screw ears: the corner-tab snaps hold the lid",
+        )
     y = P.EAR_Y
     problems, lengths = [], []
     for (face, inner, inward), name in zip(
