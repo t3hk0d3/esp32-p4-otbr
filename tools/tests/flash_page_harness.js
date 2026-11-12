@@ -31,15 +31,17 @@ const PARTS = [
 
 /*
  * options: targets (the published list, null for no targets.json), revision, chipName, mac, noSerial, noEsptool, noMd5,
- * cancelPicker, failConnect, failErase, failWrite (Error text, thrown half way through the second part),
+ * cancelPicker, failConnect, failRevision, failErase, failWrite (Error text, thrown half way through the second part),
  * failDownload (a file name), failDisconnect, console (chunks the board prints after the install, then the stream
  * ends), holdConsole (the board stays silent until the read is cancelled), failConsoleOpen, hangConsoleOpen,
- * hangConsoleClose.
+ * hangConsoleClose, baudRecovery (main() uploads the stub a second time, as esptool-js does when the board resets on
+ * the baud change), noPostConnect (the chip has no postConnect).
  */
 function makeFlow(options) {
   const o = Object.assign({targets: TARGETS, revision: 103, chipName: 'ESP32-P4', mac: 'aa:bb:cc:dd:ee:ff'}, options);
-  const t = {events: [], written: null, progress: [], warned: null};
+  const t = {events: [], written: null, progress: [], warned: null, errors: []};
   const log = (e) => t.events.push(e);
+  console.error = (...args) => t.errors.push(args.map((a) => (a instanceof Error ? a.message : String(a))).join(' '));
   const chunks = (o.console || []).map((text) => new TextEncoder().encode(text));
   let cancelRead = null;
   t.port = {
@@ -96,18 +98,32 @@ function makeFlow(options) {
       this.terminal = args.terminal;
       this.chip = {
         CHIP_NAME: o.chipName,
-        getChipRevision: async () => { log('revision'); return o.revision; },
+        getChipRevision: async () => {
+          log('revision');
+          if (o.failRevision)
+            throw new Error('Read timeout');
+          return o.revision;
+        },
         readMac: async () => o.mac,
       };
+      if (!o.noPostConnect)
+        this.chip.postConnect = async (loader) => { log(loader === this ? 'postConnect' : 'postConnect:other-loader'); };
     }
+    /* as esptool-js 0.7: connect, chip.postConnect, runStub, then changeBaud, whose recovery runs runStub alone */
     async main() {
       log('main');
       this.transport.port.isOpen = true;
       this.terminal.writeLine('Chip is ' + o.chipName);
       if (o.failConnect)
         throw new Error('Failed to connect with the device');
+      if (this.chip.postConnect)
+        await this.chip.postConnect(this);
+      await this.runStub();
+      if (o.baudRecovery)
+        await this.runStub();
       return o.chipName;
     }
+    async runStub() { log('stub'); }
     async eraseFlash() {
       log('erase');
       t.viewWhileErasing = t.flow.view();
@@ -197,7 +213,7 @@ function makeFlow(options) {
     return event.prevented;
   };
   t.result = () => ({view: t.flow.view(), events: t.events, portOpen: t.port.isOpen, written: t.written, progress: t.progress,
-                     warned: t.warned, viewWhileErasing: t.viewWhileErasing, viewWhilePicking: t.viewWhilePicking});
+                     warned: t.warned, errors: t.errors, viewWhileErasing: t.viewWhileErasing, viewWhilePicking: t.viewWhilePicking});
   return t;
 }
 

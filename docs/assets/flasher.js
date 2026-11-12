@@ -128,6 +128,21 @@
         },
       };
       const loader = new esptool.ESPLoader({transport, baudrate: BAUD, terminal});
+      /*
+       * Workaround for an esptool-js bug (0.7.0 and 0.7.1): when the board resets on the switch to BAUD, the recovery
+       * in ESPLoader.changeBaud reconnects and calls runStub() but skips chip.postConnect(). For the ESP32-P4 ECO7
+       * (rev 3.01/3.02) that call holds powerOnFlash(), the fix for a ROM bug that fails the flash attach in a second
+       * download session, so the stub never answers FLASH_DEFL_BEGIN and nothing is written. main() already runs
+       * postConnect before the first upload; this runs it again before every later one. Remove once esptool-js runs
+       * postConnect in that recovery path.
+       */
+      const runStub = loader.runStub.bind(loader);
+      let stubUploads = 0;
+      loader.runStub = async (...args) => {
+        if (stubUploads++ > 0 && loader.chip && typeof loader.chip.postConnect === 'function')
+          await loader.chip.postConnect(loader);
+        return runStub(...args);
+      };
       session = {port, transport, loader};
       try {
         await loader.main();
@@ -140,6 +155,7 @@
         emit({chipName, host: hostFromMac(await loader.chip.readMac(loader))});
         return true;
       } catch (e) {
+        console.error('flasher: connect failed', e);
         emit({stage: 'connect_failed'});
         await release();
         return false;
@@ -154,6 +170,7 @@
       try {
         revision = await session.loader.chip.getChipRevision(session.loader);
       } catch (e) {
+        console.error('flasher: reading the chip revision failed', e);
         emit({stage: 'connect_failed'});
         await release();
         return;
@@ -294,6 +311,7 @@
       try {
         await write(files);
       } catch (e) {
+        console.error('flasher: install failed', e);
         /* shown first: closing a port whose cable is gone may take a while */
         emit({stage: 'write_failed'});
         await release();
