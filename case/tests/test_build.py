@@ -10,6 +10,10 @@ OUTPUTS = (
     "p4_case_base.step",
     "p4_case_lid.stl",
     "p4_case_lid.step",
+    "p4_case_base_inside-ears.stl",
+    "p4_case_base_inside-ears.step",
+    "p4_case_lid_inside-ears.stl",
+    "p4_case_lid_inside-ears.step",
 )
 
 
@@ -41,8 +45,12 @@ class TestMainValid:
 
     def test_prints_one_line_per_check(self, built):
         _, _, text = built
-        lines = [ln for ln in text.splitlines() if ln.startswith(("PASS ", "FAIL "))]
+        lines = [ln for ln in text.splitlines() if " PASS " in ln or " FAIL " in ln]
         assert len(lines) >= 20
+
+    def test_prints_the_check_results_for_both_ear_options(self, built):
+        _, _, text = built
+        assert "[outside ears]" in text and "[inside ears]" in text
 
     def test_exits_0_when_all_checks_pass(self, built):
         _, code, _ = built

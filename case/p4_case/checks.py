@@ -13,7 +13,7 @@ import trimesh
 from build123d import Align, Box, Cylinder, Part, Pos, Rot, Vector
 
 from p4_case import params as P
-from p4_case.base import rounded_block, tab_y_centres
+from p4_case.base import rounded_block, side_walls, tab_y_centres
 from p4_case.board import ENV_RES, FACTS, BoardModel, check_facts
 from p4_case.lid import opening_widths
 from p4_case.params import board_z
@@ -28,7 +28,8 @@ OVERHANG_NZ = (
 )  # facets pointing down more steeply than 45° from vertical
 HORIZONTAL_NZ = -0.99
 BRIDGE_MAX = 18.0  # 8: longest accepted bridge
-DROOP_MAX = 0.5  # small round tops (pin-holes, SMA) sag less than this; accepted
+# small round tops (pin-holes, SMA) sag less than this; accepted (print feedback: the Ø6.5 SMA top prints fine)
+DROOP_MAX = 1.0
 DROOP_SPAN_MAX = 8.0  # ... as long as they are small
 BRIDGE_WIDTH_MAX = 3.0  # bridges here run across a 2 mm wall
 FIT_BACK = 0.2  # connector fronts this far inside the cable wall's inner face while dropping in
@@ -179,20 +180,30 @@ def opening_paths_spec() -> dict[str, Part]:
     return paths
 
 
-def opening_paths(base: Part, lid: Part) -> CheckResult:
-    """Each probe passes through the assembled case (base and lid) without touching it."""
-    case = base + lid
+def opening_paths(base: Part, lid: Part, lid_open: Part) -> CheckResult:
+    """Each probe passes through the assembled case without touching it.
+
+    The header-slot probe runs against the lid with its curtain broken out (lid_open); with the curtain on (lid) the
+    slot must be closed.
+    """
+    case, case_open = base + lid, base + lid_open
+    paths = opening_paths_spec()
+    header = paths.pop("header slot")
     blocked = [
-        name
-        for name, probe in opening_paths_spec().items()
-        if _intersection(probe, case) > BOOL_EPS
+        name for name, probe in paths.items() if _intersection(probe, case) > BOOL_EPS
     ]
+    if _intersection(header, case_open) > BOOL_EPS:
+        blocked.append("header slot (curtain broken out)")
+    closed = _intersection(header, case) > BOOL_EPS
+    if not closed:
+        blocked.append("header slot not closed by the curtain")
     return CheckResult(
         "every opening has a clear path",
         not blocked,
         "blocked: " + ", ".join(blocked)
         if blocked
-        else "USB-C, USB-A, RJ45, microSD, buttons, header slot, SMA",
+        else "USB-C, USB-A, RJ45, microSD, buttons, SMA; header slot once the curtain is broken out "
+        "(closed by the curtain until then)",
     )
 
 
@@ -342,8 +353,13 @@ def sma_room(board: BoardModel, radius: float = SMA_ENVELOPE_R) -> CheckResult:
     )
 
 
-def lid_clearance(board: BoardModel, lid: Part) -> list[CheckResult]:
-    """The lid clears the board, the SMA body, a ribbon plug and the ribbon between the tab roots."""
+def lid_clearance(
+    board: BoardModel, lid: Part, lid_open: Part | None = None
+) -> list[CheckResult]:
+    """The lid clears the board, the SMA body, a ribbon plug and the ribbon between the tab roots.
+
+    The ribbon is checked against lid_open (the curtain broken out, as it is when a ribbon is fitted) when given.
+    """
     results = [board_clearance(board, lid, "lid")]
     others = {
         "SMA body": sma_envelope(),
@@ -359,7 +375,12 @@ def lid_clearance(board: BoardModel, lid: Part) -> list[CheckResult]:
             board_z(P.LID_UNDERSIDE) - 0.05,
         ),
     }
-    hit = [k for k, body in others.items() if _intersection(body, lid) > BOOL_EPS]
+    against = {"ribbon": lid_open if lid_open is not None else lid}
+    hit = [
+        k
+        for k, body in others.items()
+        if _intersection(body, against.get(k, lid)) > BOOL_EPS
+    ]
     results.append(
         CheckResult(
             "lid clears SMA, ribbon plug and ribbon",
@@ -443,32 +464,43 @@ def nut_circles(board: BoardModel) -> CheckResult:
 # --- opening size, watertight, printability ------------------------------------------------------------------------
 
 
-def opening_size(base: Part, lid: Part) -> CheckResult:
-    """No way into the assembled case is wider than CELL: lid cells measured, the header-slot passage probed."""
+def opening_size(base: Part, lid: Part, lid_open: Part) -> CheckResult:
+    """No way into the closed case is wider than CELL: lid cells measured, the header slot closed by the curtain.
+
+    The passage left when the curtain is broken out (lid_open) is measured and reported, not limited.
+    """
     widths = opening_widths(lid)
     widest = max(widths) if widths else 0.0
-    case = base + lid
+    # the curtain spans the slot inside the wall's thickness
+    wall = _box(
+        *SLOT_PROBE_X,
+        P.INNER[3] + 0.1,
+        P.OUTER[3] - 0.1,
+        board_z(P.HEADER_SLOT_BOTTOM) + 0.3,
+        board_z(P.LID_UNDERSIDE) - 0.3,
+    )
+    closed = _intersection(wall, lid) > BOOL_EPS
+    case_open = base + lid_open
 
     # slabs across the wall's inner face, between the tabs
     def slab(z0: float, z1: float) -> Part:
         return _box(*SLOT_PROBE_X, P.INNER[3] - 0.3, P.INNER[3] + 0.3, z0, z1)
 
-    # find the real slot floor: walk down from the lid underside while a thin slab stays clear
+    # the broken-out passage: walk down from the lid underside while a thin slab stays clear
     step = 0.05
-    floor = board_z(P.LID_UNDERSIDE) - step
+    top = board_z(P.LID_UNDERSIDE)
+    floor = top - step
     while (
         floor > board_z(P.STANDOFF_TOP)
-        and _intersection(slab(floor - step, floor), case) <= BOOL_EPS
+        and _intersection(slab(floor - step, floor), case_open) <= BOOL_EPS
     ):
         floor -= step
-    fits = _intersection(slab(floor + 0.01, floor + P.CELL - 0.05), case) <= BOOL_EPS
-    too_big = _intersection(slab(floor + 0.01, floor + P.CELL + 0.1), case) > BOOL_EPS
-    ok = widest <= P.CELL + 1e-6 and fits and too_big
+    ok = widest <= P.CELL + 1e-6 and closed
     return CheckResult(
         "no opening wider than 3.5 mm",
         ok,
-        f"widest lid opening {widest:.2f} mm; header-slot passage {'≥' if fits else '<'} {P.CELL - 0.05:.2f} and "
-        f"{'<' if too_big else '≥'} {P.CELL + 0.1:.2f} mm",
+        f"widest lid opening {widest:.2f} mm; header slot "
+        f"{'closed by the curtain' if closed else 'open'}, {top - floor:.1f} mm when broken out",
     )
 
 
@@ -651,15 +683,110 @@ def min_print_width(part: Part, name: str, top_down: bool) -> CheckResult:
     )
 
 
+EAR_RING = 8  # points round a hole's axis
+
+
+def _ring_ok(part: Part, x: float, y: float, z: float, r: float) -> bool:
+    """The axis point is empty and every point of a ring of radius r around it (in the YZ plane) is solid."""
+    if part.is_inside(Vector(x, y, z)):
+        return False
+    return all(
+        part.is_inside(
+            Vector(
+                x,
+                y + r * math.cos(2 * math.pi * k / EAR_RING),
+                z + r * math.sin(2 * math.pi * k / EAR_RING),
+            )
+        )
+        for k in range(EAR_RING)
+    )
+
+
+def _hole_length(
+    part: Part, x_at, y: float, z: float, r: float, u0: float, u1: float
+) -> float:
+    """Length along the axis (u from u0 to u1, x = x_at(u)) over which part holds a hole of radius < r round it."""
+    us = np.arange(u0, u1 + 1e-9, 0.1)
+    hits = [u for u in us if _ring_ok(part, x_at(u), y, z, r)]
+    if not hits:
+        return 0.0
+
+    def edge(inside: float, outside: float) -> float:
+        while abs(outside - inside) > 0.01:
+            mid = (inside + outside) / 2
+            if _ring_ok(part, x_at(mid), y, z, r):
+                inside = mid
+            else:
+                outside = mid
+        return (inside + outside) / 2
+
+    return edge(hits[-1], min(hits[-1] + 0.1, u1)) - edge(
+        hits[0], max(hits[0] - 0.1, u0)
+    )
+
+
+def ear_screws(base: Part, lid: Part, ears: str = P.EAR_STYLE) -> CheckResult:
+    """Each screw ear's clearance hole and pilot share one axis, and the pilot is long enough.
+
+    outside: the hole is in the lid's ear, the pilot (thread) in the base wall, at least 2.2 mm. inside: the hole is
+    in the base wall, the pilot in the lid's block, at least 4.5 mm.
+    """
+    y = P.EAR_Y
+    problems, lengths = [], []
+    for (face, inner, inward), name in zip(
+        side_walls(), ("left", "right"), strict=True
+    ):
+        if ears == "outside":
+            z, need = board_z(P.EAR_SCREW_Z), 2.2
+            hole_r, pilot_r = P.EAR_CLEAR_D / 2 + 0.25, P.EAR_PILOT_D / 2 + 0.2
+            aligned = all(
+                _ring_ok(lid, face + inward * u, y, z, hole_r) for u in (1.2, 1.4)
+            )
+            length = _hole_length(
+                base, lambda u, f=face, i=inward: f + i * u, y, z, pilot_r, P.EAR_T, 4.0
+            )
+        else:
+            z, need = board_z(P.IN_EAR_SCREW_Z), 4.5
+            hole_r, pilot_r = P.IN_EAR_CLEAR_D / 2 + 0.25, P.IN_EAR_PILOT_D / 2 + 0.2
+            aligned = all(
+                _ring_ok(base, face + inward * u, y, z, hole_r) for u in (1.8, 2.8, 3.8)
+            )
+            length = _hole_length(
+                lid,
+                lambda u, f=inner, i=inward: f + i * u,
+                y,
+                z,
+                pilot_r,
+                P.TAB_CLEAR,
+                P.TAB_CLEAR + P.IN_EAR_T,
+            )
+        lengths.append(f"{name} {length:.1f} mm")
+        if not aligned:
+            problems.append(f"{name}: hole off the screw axis")
+        elif length < need:
+            problems.append(f"{name}: thread {length:.1f} mm (need {need})")
+    return CheckResult(
+        "screw ears line up",
+        not problems,
+        "; ".join(problems)
+        if problems
+        else f"{ears} ears, thread " + ", ".join(lengths),
+    )
+
+
 # --- all ---------------------------------------------------------------------------------------------------------------
 
 
-def run_all(board: BoardModel, base: Part, lid: Part) -> list[CheckResult]:
+def run_all(
+    board: BoardModel, base: Part, lid: Part, lid_open: Part, ears: str = P.EAR_STYLE
+) -> list[CheckResult]:
+    """Every check for one screw-ear option; lid_open is its lid with the curtain broken out."""
     return [
         *check_facts(board),
         board_clearance(board, base, "base"),
-        *lid_clearance(board, lid),
-        opening_paths(base, lid),
+        *lid_clearance(board, lid, lid_open),
+        opening_paths(base, lid, lid_open),
+        ear_screws(base, lid, ears),
         lid_seats(base, lid),
         detent_engagement(base, lid),
         sma_room(board),
@@ -667,7 +794,7 @@ def run_all(board: BoardModel, base: Part, lid: Part) -> list[CheckResult]:
         ribbon_plug_headroom(),
         keyhole_volumes(board),
         nut_circles(board),
-        opening_size(base, lid),
+        opening_size(base, lid, lid_open),
         watertight(base, "base"),
         watertight(lid, "lid"),
         printability(base, "base", top_down=False),
