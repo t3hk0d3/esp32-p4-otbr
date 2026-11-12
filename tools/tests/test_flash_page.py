@@ -236,6 +236,59 @@ class TestDetectConnectionFails:
         assert result["view"]["stage"] == "connect_failed"
 
 
+def stub_steps(events):
+    return [e for e in events if e.startswith("postConnect") or e == "stub"]
+
+
+class TestConnectFirstStubUpload:
+    def test_runs_post_connect_once_from_main_before_the_stub(self):
+        assert stub_steps(run(DETECT)["events"]) == ["postConnect", "stub"]
+
+
+class TestConnectStubReuploadedAfterBaudRecovery:
+    def test_runs_post_connect_again_before_the_second_stub(self):
+        result = run(DETECT, revision=302, baudRecovery=True)
+        assert stub_steps(result["events"]) == [
+            "postConnect",
+            "stub",
+            "postConnect",
+            "stub",
+        ]
+
+    def test_the_install_still_writes_both_parts(self):
+        result = run(INSTALL, revision=302, baudRecovery=True)
+        assert result["view"]["stage"] == "done"
+        assert len(result["written"]["files"]) == 2
+
+
+class TestConnectStubReuploadedChipWithoutPostConnect:
+    def result(self):
+        return run(DETECT, baudRecovery=True, noPostConnect=True)
+
+    def test_detects_without_error(self):
+        result = self.result()
+        assert result["view"]["stage"] == "detected"
+        assert result["errors"] == []
+
+    def test_uploads_the_stub_twice(self):
+        assert stub_steps(self.result()["events"]) == ["stub", "stub"]
+
+
+class TestErrorsAreLogged:
+    def test_a_failed_connect_logs_its_cause(self):
+        errors = run(DETECT, failConnect=True)["errors"]
+        assert any("Failed to connect with the device" in e for e in errors)
+
+    def test_a_failed_revision_read_logs_its_cause(self):
+        result = run(DETECT, failRevision=True)
+        assert result["view"]["stage"] == "connect_failed"
+        assert any("Read timeout" in e for e in result["errors"])
+
+    def test_a_failed_write_logs_its_cause(self):
+        errors = run(INSTALL, failWrite="MD5 of file does not match")["errors"]
+        assert any("MD5 of file does not match" in e for e in errors)
+
+
 class TestChooseByHand:
     def test_the_v3_choice_says_v3_1_and_later(self):
         # the label is the registry's chip name: v3.0 gets no firmware
