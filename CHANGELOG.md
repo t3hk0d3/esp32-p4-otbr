@@ -7,6 +7,12 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+### Added
+
+- 3D-printable case for the board (`case/`, `make case`): a one-piece base with keyholes for two wall screws and a
+  honeycomb lid on snap-in corner tabs, checked against the vendor 3D model for fit and printability. See
+  `docs/case.md`.
+
 ## [0.6.0] - 2026-11-11
 
 ### Added

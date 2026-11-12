@@ -58,6 +58,7 @@ nav:
       - First install: first-install.md
       - Home Assistant: home-assistant.md
       - Your Thread network: thread-network.md
+      - 3D-printed case: case.md
   - Using the board:
       - Web UI tour: web-ui.md
       - Radios and USB dongles: radios.md

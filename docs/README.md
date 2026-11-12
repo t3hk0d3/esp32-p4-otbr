@@ -6,6 +6,7 @@ Get started:
 - [First install](first-install.md): flash the board, put the radio firmware on its C6, give it a Thread network.
 - [Home Assistant](home-assistant.md): add the board, move it onto the preferred network, phones and Matter.
 - [Your Thread network](thread-network.md): form or join a network, more border routers, choosing the leader.
+- [3D-printed case](case.md): printing, parts, assembly and wall mounting of the board's case.
 
 Using the board:
 
