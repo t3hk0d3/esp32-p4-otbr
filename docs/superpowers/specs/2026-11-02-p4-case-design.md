@@ -1,6 +1,7 @@
 # 3D-printable case for the ESP32-P4-WIFI6-POE-ETH board: design
 
-Date: 2026-11-02. Status: implemented; fit tested on a printed case with a real board. The design-review fixes of 2026-11-06 (marked "design review") are not printed yet.
+Date: 2026-11-02. Status: implemented; fit tested on two printed cases with a real board. Revision v6 (2026-11-12,
+marked "v6"; plan `docs/superpowers/plans/2026-11-12-p4-case-v6.md`) is not printed yet.
 
 ## 1. Purpose and scope
 
@@ -86,18 +87,18 @@ the result.
 | --- | --- |
 | Parts | two printed parts: **base** and **lid** |
 | Base | one part: flat back plate, all four walls, four board standoffs |
-| Lid | flat honeycomb grille plate with four tabs; sits flush in a rebate on the wall tops |
-| Lid fixing | four corner tabs hang into the inner corners of the base and guide the lid into place; a bump on each (30° lead-in below, 45° hold face above) clicks into a dent in the side wall that preloads it: push to close, lever up to open |
+| Lid | flat 3 mm honeycomb grille plate with four tabs, two screw ears and a break-off curtain over the 40-pin slot; sits flush in a rebate on the wall tops (v6: 3 mm, the 2 mm lid flexed) |
+| Lid fixing | four corner tabs hang into the inner corners of the base and guide the lid into place; a bump on each (30° lead-in below, 45° hold face above) clicks into a dent in the side wall that preloads it: push to close, lever up to open. v6: two M2.5 screws through side ears hold it too (5.3a) |
 | Opening the lid | lever it up through the grille with a small flat screwdriver; no pry cut-outs in this revision |
 | Board fixing | four M2.5 × 6 pan-head screws from the top, through the board into Ø6 × 5 mm standoffs with Ø2.2 pilot holes, where they cut their own thread (print feedback: the first Ø2.8 hole only gripped thick screws). The countersinks in the back plate stay, so countersunk screws with nuts from the back still work if the pilot is drilled out |
 | Board fitting | the board drops straight in from the open top, about 1.7 mm toward the header end, then slides forward (lifted 0.5 mm) so the USB and RJ45 go into their cable-wall holes, and settles onto the standoffs |
-| SMA | D-hole in the right (X = 55) wall, with its flat at the bottom and a 45° teardrop top (no support), closed on the outside by a 0.8 mm knock-out (two extrusion lines) that is cut out with a knife when an SMA is fitted; fitted after the board: the pigtail clips onto the board, the bulkhead goes out through the wall from inside, nut tightened outside |
-| 40-pin header | wiring (jumpers or a ribbon cable) leaves through a slot along the top of the header-end wall; no opening in the lid over the header |
+| SMA | D-hole in the right (X = 55) wall, with its flat at the bottom and a round top (v6: the teardrop wasn't needed), closed on the outside by a 0.8 mm knock-out (two extrusion lines) that is cut out with a knife when an SMA is fitted; fitted after the board: the pigtail clips onto the board, the bulkhead goes out through the wall from inside, nut tightened outside |
+| 40-pin header | wiring (jumpers or a ribbon cable) leaves through a slot along the top of the header-end wall, closed by a break-off curtain on the lid until wiring is fitted (v6); no opening in the lid over the header |
 | Wall mounting | two L-shaped keyholes in the flat back plate, 32 mm apart, for either orientation |
 | Table | lies on its back; stick-on rubber feet optional, not modelled |
 | Cooling | honeycomb lid (about 60% open over the grille area) plus the header-end slot; no vents in the back plate or side walls |
 | Buttons | Ø2.5 pin-holes in the left wall on the plunger axes, with a 90° funnel (Ø4.5) at the outer face to guide a pencil tip through the 4 mm wall; a finger can't reach the plunger |
-| Wall / plate thickness | 2.0 mm, except both side walls: 4.0 mm, grown outward (print feedback: the antenna levered the SMA wall apart, and thin side walls flexed so the lid's detents slipped); lid plate 2.0 mm |
+| Wall / plate thickness | 2.0 mm, except both side walls: 4.0 mm, grown outward (print feedback: the antenna levered the SMA wall apart, and thin side walls flexed so the lid's detents slipped), and the header-end wall: 3.0 mm (v6, for the curtain's floor groove); lid plate 3.0 mm |
 | Clearance board ↔ inner wall | 0.5 mm, with a local recess at the buttons (see 5.2) |
 | Clearance over the tallest part | 1.0 mm (lid underside at board Z 17.0); the extra 0.5 mm leaves 1 mm of wall above the USB opening |
 | Outer size | about 64 × 75 × 27.6 mm |
@@ -114,12 +115,12 @@ Heights are given in *case Z*. Case Z = 0 is the outer back face, and the board 
 | PCB | 7–8.6 |
 | Tallest part (USB stack) | up to 24.6 |
 | Lid underside (body) | 25.6 |
-| Rebate floor (lid flange rests here) | 26.6 |
-| Wall tops and lid top (flush) | 27.6 |
+| Rebate floor (lid flange rests here) | 27.6 (v6; was 26.6) |
+| Wall tops and lid top (flush) | 28.6 (v6; was 27.6) |
 
 In plan view, the inner outline is the PCB outline plus 0.5 mm on three sides and 2.5 mm at the header end (room to
-drop the board in shifted back before sliding its connectors home), and the outer outline adds the walls: 2 mm at the ends, 4 mm at the sides. The
-outer vertical edges are rounded.
+drop the board in shifted back before sliding its connectors home), and the outer outline adds the walls: 2 mm at the cable end, 3 mm at the header end, 4 mm
+at the sides (outer size 64 × 76 × 28.6 mm). The outer vertical edges are rounded.
 
 ### 5.1 Base: back plate and keyholes
 
@@ -182,20 +183,23 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
       wide) and no strip above them (it would be 1 mm tall): both were too thin to print well.
     - The lid's lintel (5.3) closes the opening above the connectors.
   - **microSD:** the slot runs from 0.6 mm below the board's top face to 2 mm above it, across X 39.2–51.4. It has a
-    thumb scoop in the outer face above it, where the card's grip edge is (print feedback: below it was useless). The
-    scoop starts 0.4 mm above the slot and is 1.2 mm deep, so the slot's top keeps at least two printed lines (design
-    review: a 0.5 mm strand before). Its ceiling slopes back to the face at about 34° from vertical, so it prints
-    without support.
+    thumb scoop in the outer face above it, where the card's grip edge is (print feedback: below it was useless).
+    v6: the scoop starts right at the slot's top edge (a 0.4 mm lip there blocked the fingernail and printed as a
+    stray layer), is 2.2 mm deep, 10 mm wide (X 40.5–50.5) and 3 mm tall. To keep two printed lines (0.8 mm) behind
+    it, the cable wall is 1 mm thicker inward above the slot only (X 39.5–51.5): a ledge over the cavity at the slot's
+    top, its top sloping back to the wall at 45°.
   - The connector faces end up 0.5–0.8 mm behind the outer face.
   - The shared opening has no top, so it needs no bridge; the microSD slot's top bridges 12.2 mm.
 - **Header-end wall (Y = 68 edge):**
-  - A cable slot the full inner width (X −0.5–55.5), cut from case Z 22.1 up through the top of the wall so it needs no bridge.
-    The lid closes it from above. The narrowest point of the path into the case is at the wall's inner face, between
-    the slot floor and the lid body's underside: 3.5 mm (case Z 22.1–25.6). Within the wall's thickness it is taller,
-    up to the flange. The slot also takes the cavity's rounded corners above its floor, so no thin sliver stays
-    beside it (design review).
-  - 3.5 mm keeps to the "nothing wider than 3.5 mm falls in" rule when this end faces up on the wall. Ribbon cable
-    (about 1.3 mm) and Dupont housings (2.5 mm) pass.
+  - A cable slot the full inner width (X −0.5–55.5), cut from case Z 20.6 up through the top of the wall so it needs
+    no bridge. The slot also takes the cavity's rounded corners above its floor, so no thin sliver stays beside it
+    (design review).
+  - v6: the lid fills the slot above its underside, flush with the outer face, and closes the rest with a break-off
+    curtain (5.3). With the curtain on, the case is closed at this end. With segments broken out, the way in is 5 mm
+    tall (case Z 20.6–25.6): wider than the 3.5 mm rule allows, which only holds while the curtain is on. Ribbon
+    cable (about 1.3 mm) and Dupont housings (2.5 mm) pass.
+  - The wall is 3 mm thick (v6), so a 1.2 × 0.8 mm groove along the slot floor, centred in the wall, keeps 0.9 mm
+    walls on both sides. The curtain's tongues sit in it.
   - A 2×20 IDC ribbon plug (about 55.9 × 9 × 9 mm) fits the 56 mm-wide cavity snugly. The walls are not recessed for
     it: the 1 mm-thin recessed sections of the first print were unnecessary (print feedback). The 2.5 mm gap at the
     header end leaves room in that direction.
@@ -207,7 +211,8 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
     There are no guide tubes.
 - **Right wall (X = 55 edge, SMA):**
   - A D-shaped hole, Ø6.5 with a flat at 5.9, at board Y ≈ 52 and case Z ≈ 17.6. The flat is at the bottom and the
-    top is a 45° teardrop, so the hole prints without support; the bulkhead is turned so its flat is down.
+    top is round: it prints without support (print feedback; the teardrop top of the second print wasn't needed). The
+    bulkhead is turned so its flat is down.
   - A long-thread bulkhead (≥ 9.5 mm) is recommended, so enough thread stays outside the 4 mm wall for the antenna. The
     wall is not recessed around the nut: a recess would weaken it again.
   - The builder checks clearance inside: a 5 mm radius around the axis, out to 12 mm from the wall, must miss the board,
@@ -220,7 +225,8 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 
 ### 5.3 Lid
 
-- **Plate:** 2 mm thick, fits the rebate with 0.2 mm clearance per side.
+- **Plate:** 3 mm thick (v6: the 2 mm lid flexed): a 2 mm body inside the walls and a 1 mm flange in the rebate. It
+  fits the rebate with 0.2 mm clearance per side.
 - **Frame:** solid, 5.5 mm wide, all round.
 - **Grille:**
   - Honeycomb inside the frame, holes 3.5 mm across flats, 1 mm walls (about 60% open).
@@ -267,6 +273,39 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
     the flange.
 - **LED:** the power LED (board X 0.3–1.6, Y 17.4–19.1) stays covered by the solid frame. Cells cut into the frame over
   it made the lid edge fragile, and the power LED isn't needed.
+- **40-pin curtain (v6):** the lid fills the header-end slot above its underside, flush with the outer face, with
+  0.2 mm to the slot's ends.
+  - Below that hang four segments, about 13.6 mm each with 0.4 mm slits between them, 2.6 mm thick and centred in
+    the wall.
+  - At the lid's underside (a printed layer boundary) 45° V-notches on both faces leave 0.8 mm, so a segment snaps
+    off there when bent with tweezers.
+  - Each has a 0.8 mm tongue that sits in the floor groove, 0.2 mm clear, and the segment stops 0.2 mm above the
+    floor.
+  - Jumper wires need one segment out, a ribbon all four.
+
+### 5.3a Lid screws (v6)
+
+Two options are built side by side and printed to compare; `params.EAR_STYLE` picks the default ("outside").
+
+- **Outside ears (default):** one per side wall at Y 32.
+  - The wall top drops to the lid's underside over the ear (10.4 mm), and the lid runs out over it at full thickness,
+    flush with the outer face.
+  - A U-shaped ear (10 mm wide, 1.6 mm thick, half-circle bottom of R5 around the screw) hangs from that edge into a
+    matching pocket in the wall's outer face, flush, with a 0.2 mm gap.
+  - The ear has a Ø2.9 clearance hole with a 90° countersink (Ø5.0). The wall behind the pocket has a Ø2.2 pilot
+    through its remaining 2.4 mm, at case Z 22.3.
+  - Screw: M2.5 × 6 flat head (or the board's pan heads, which sit about 1.7 mm proud). Tightening clamps the ear
+    against the wall, and the self-tapping thread is in the base, which is printed upright and solid around it.
+- **Inside ears:** one per side wall at Y 32.
+  - A 12 × 5 mm block hangs from the lid's underside down to case Z 18.5, 0.2 mm off the wall.
+  - A 45° buttress runs from its bottom inner edge up to the underside, with 3 mm 45° gussets at both ends.
+  - Grille cells over a block are left out.
+  - The wall has a Ø3.0 clearance hole and a 90° countersink (Ø5.0) at case Z 22.0. The block has a Ø2.4 blind pilot
+    (4.6 mm).
+  - Screw: M2.5 × 10 flat head. The thread is longer, but it runs along the lid's printed layers. The buttress makes
+    the layer at the pilot about 1.7× bigger against splitting.
+- **Both:** the ears belong to the lid, which goes on after the board, so the board's drop-in is untouched. Under the
+  inside blocks the board's parts reach case Z 14.3 (left) and 16.4 (right).
 
 ## 6. Assembly (goes into the docs page)
 
@@ -274,9 +313,12 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
    holes, and let it settle onto the standoffs. Drive four M2.5 × 6 screws from the top into the standoffs' pilot holes.
 2. If an SMA antenna is used: cut out the knock-out, clip the pigtail onto the antenna socket, push the SMA bulkhead out
    through the right wall from inside with its flat down, and tighten its nut snugly over a washer on the outside.
-3. Optional: plug wiring onto the 40-pin header and lead it out through the header-end slot.
-4. Set the lid on so the corner tabs drop into the corners, and press until the four tabs click.
-5. To open: lever the lid up through the grille with a small flat screwdriver, near a tab.
+3. Optional: break out as many curtain segments as the wiring needs, plug the wiring onto the 40-pin header and lead
+   it out through the header-end slot.
+4. Set the lid on so the corner tabs drop into the corners, and press until the four tabs click. Drive the two lid
+   screws, snug only.
+5. To open: take out the lid screws, then lever the lid up through the grille with a small flat screwdriver, near a
+   tab.
 
 ## 7. Repository layout and tooling
 
@@ -287,7 +329,8 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 - **Board model:** a script under `tools/` downloads the zip, checks its hash and extracts the STEP into `.artifacts/`
   (already ignored by git).
 - **Make targets:**
-  - `make case`: builds `dist/case/p4_case_base.{stl,step}` and `dist/case/p4_case_lid.{stl,step}`, plus preview PNGs.
+  - `make case`: builds `dist/case/p4_case_base.{stl,step}` and `dist/case/p4_case_lid.{stl,step}`, plus preview PNGs,
+    and the inside-ear option as `*_inside-ears.{stl,step}`; it runs every check for both options.
   - `make case-test`: runs the checks in section 8.
   - Both get `## ` help comments.
   - Python dependencies run through `uv`/`uvx`, as the other tools do. Nothing is installed globally.
@@ -321,7 +364,11 @@ These are automated checks, run against the vendor STEP:
   ribbon path (X 2.1–52.9, from the top of the block up into the header slot).
 - Each board-screw nut circle (Ø6.5 on top of the board around the mounting hole, 2.5 mm tall) is free of board parts.
 - Both keyhole head volumes (the L sweep plus the head radius, 2.5 mm tall) are free of the board and its underside parts.
-- No lid opening, and no gap in the header-end slot, is wider than 3.5 mm.
+- No lid opening is wider than 3.5 mm, and the curtain closes the header-end slot. With the curtain broken out the
+  slot has a clear path for wiring (5 mm tall), reported but not limited (v6).
+- Each screw ear's clearance hole and pilot share one axis, and the pilot is at least 2.2 mm long (outside ears, in
+  the wall) or 4.5 mm (inside ears, in the lid) (v6).
+- Every check runs for both ear options (v6).
 - With the lid fitted, the lid and the base do not overlap anywhere except where the bumps press into their dents.
 - At each bump's crest height, the bump reaches at least 0.15 mm past the wall face and presses into its dent by more
   than 0 and at most 0.15 mm (measured against the wall, so a bump that misses the wall fails).
