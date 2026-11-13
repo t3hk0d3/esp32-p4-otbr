@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Publish a release's P4 images for the browser flasher on the documentation site.
 
-Usage: tools/flash_manifest.py <dir of downloaded zips> <firmware dir> <version>
+Usage: tools/flash_manifest.py <dir of downloaded release files> <firmware dir> <version>
 Unpacks each full_<board_id>_<chip_id>.zip of a target in the registry into <firmware dir>/<board_id>/<chip_id>/ and
 writes a manifest.json there, with one part per image line of its flash_args, paths relative to the manifest. A release
 from before targets has only p4-flash.zip, which is published as the default target. Writes <firmware dir>/targets.json,
-the list of what was published.
+the list of what was published. The release's C6 images (c6_rcp.bin, and c6_installer.bin when it has one) go to
+<firmware dir>/c6/ with <firmware dir>/radio.json, which names their versions from their app descriptions.
 """
 
 import json
+import shutil
+import struct
 import sys
 import zipfile
 from pathlib import Path
@@ -54,6 +57,51 @@ def unpack(zip_path: Path, directory: Path, version: str) -> None:
     (directory / "manifest.json").write_text(json.dumps(data, indent=2) + "\n")
 
 
+# esp_app_desc_t inside an app image: after the image header (24 bytes) and the first segment header (8 bytes).
+APP_DESC_OFFSET = 32
+APP_DESC_MAGIC = 0xABCD5432
+IMAGE_MAGIC = 0xE9
+
+
+def app_desc(path: Path) -> tuple:
+    """(project name, version) from the app description of an ESP-IDF app image; ValueError naming a file that is none."""
+    head = path.read_bytes()[: APP_DESC_OFFSET + 80]
+    if (
+        len(head) < APP_DESC_OFFSET + 80
+        or head[0] != IMAGE_MAGIC
+        or struct.unpack_from("<I", head, APP_DESC_OFFSET)[0] != APP_DESC_MAGIC
+    ):
+        raise ValueError(f"{path.name} is not an app image")
+
+    def text(offset: int) -> str:
+        field = head[APP_DESC_OFFSET + offset : APP_DESC_OFFSET + offset + 32]
+        return field.split(b"\0", 1)[0].decode("ascii", "replace")
+
+    return text(48), text(16)
+
+
+def publish_radio(release: Path, firmware: Path, version: str) -> None:
+    """The C6 images of the release and radio.json; nothing when the release has no c6_rcp.bin."""
+    rcp = release / "c6_rcp.bin"
+    if not rcp.is_file():
+        return
+    installer = release / "c6_installer.bin"
+    index = {
+        "version": version,
+        "rcp": {"path": "c6/c6_rcp.bin", "version": app_desc(rcp)[1]},
+    }
+    if installer.is_file():
+        project, base = app_desc(installer)
+        if project != "c6_installer":
+            raise ValueError(f"c6_installer.bin is {project}, not c6_installer")
+        index["installer"] = {"path": "c6/c6_installer.bin", "base_version": base}
+    (firmware / "c6").mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(rcp, firmware / "c6" / "c6_rcp.bin")
+    if installer.is_file():
+        shutil.copyfile(installer, firmware / "c6" / "c6_installer.bin")
+    (firmware / "radio.json").write_text(json.dumps(index, indent=2) + "\n")
+
+
 def publish(zips: Path, firmware: Path, version: str, registry: dict) -> None:
     found = found_zips(zips, registry)
     if not found:
@@ -74,6 +122,7 @@ def publish(zips: Path, firmware: Path, version: str, registry: dict) -> None:
                 "version": version,
             }
         )
+    publish_radio(zips, firmware, version)
     (firmware / "targets.json").write_text(json.dumps(index, indent=2) + "\n")
 
 

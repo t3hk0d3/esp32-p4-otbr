@@ -17,6 +17,7 @@
         <li class="step" data-class="step0"><i>1</i>Connect</li>
         <li class="step" data-class="step1"><i>2</i>Check the chip</li>
         <li class="step" data-class="step2"><i>3</i>Install</li>
+        <li class="step" data-class="step3" data-if="radioAvailable"><i>4</i>Radio</li>
       </ol>
 
       <section data-stage="loading">
@@ -116,7 +117,8 @@
 
       <section data-stage="done" hidden>
         <h1>Installed</h1>
-        <p>The board restarted on release <span data-text="version"></span>. Open its page to add the radio firmware.</p>
+        <p data-if="radioMissing">The board restarted on release <span data-text="version"></span>. Open its page to add the radio firmware.</p>
+        <p data-if="radioAvailable" hidden>The board restarted on release <span data-text="version"></span>. Next, this page checks the C6 radio and offers its firmware.</p>
         <p class="fl-note fl-waiting" data-if="addressWaiting"><span class="fl-spinner" aria-hidden="true"></span>Waiting for the board to get its network address.</p>
         <div class="fl-actions">
           <a class="btn primary" target="_blank" rel="noopener" data-if="canOpen" data-href="hostUrl" data-text="openLabel"></a>
@@ -168,6 +170,102 @@
           <button class="btn ghost" type="button" data-action="restart">Start over</button>
         </div>
       </section>
+
+      <section data-stage="radio_checking" hidden>
+        <h1>Checking the radio</h1>
+        <p>The page asks the board which firmware its C6 radio runs. This can take a minute after a restart.</p>
+      </section>
+
+      <section data-stage="radio_ready" hidden>
+        <h1>Install the radio firmware</h1>
+        <p>The page sends <span class="mono" data-text="radioPlanText"></span> of release <span data-text="version"></span> to the C6 over this cable.</p>
+        <p class="fl-warn" data-if="radioWarnInstaller" hidden>The C6 still runs its factory firmware. The installer replaces it in about 5 minutes. Don't unplug or power off the board until the page says it's done: a power cut while the installer writes leaves a C6 that only the maintenance jumper or a USB-UART adapter can repair.</p>
+        <p class="fl-note" data-if="radioWarnRcp" hidden>Takes about a minute. If the power fails, the C6 keeps its previous firmware; install again.</p>
+        <div class="fl-actions">
+          <button class="btn primary" type="button" data-action="installRadio">Install radio firmware</button>
+          <a class="btn ghost" target="_blank" rel="noopener" data-if="canOpen" data-href="hostUrl" data-text="openLabel"></a>
+        </div>
+      </section>
+
+      <section data-stage="radio_sending" class="fl-writing" hidden>
+        <div class="fl-percent" aria-live="off" data-text="radioPercentText"></div>
+        <div class="fl-part" data-text="radioSendingLabel"></div>
+        <p>Keep the board connected. The C6 is not changed until the whole file is on the board.</p>
+      </section>
+
+      <section data-stage="radio_installing" hidden>
+        <h1>Installing on the C6</h1>
+        <p><span data-text="radioInstalling"></span> <span class="mono" data-text="radioElapsedText"></span></p>
+        <p class="fl-warn" data-if="radioInstallingInstaller" hidden>Don't unplug or power off the board. A power cut now leaves a C6 that only the maintenance jumper or a USB-UART adapter can repair.</p>
+        <p class="fl-note fl-waiting"><span class="fl-spinner" aria-hidden="true"></span>Waiting for the board.</p>
+      </section>
+
+      <section data-stage="radio_done" hidden>
+        <h1>Radio firmware installed</h1>
+        <p>The C6 runs <span class="mono" data-text="radioInstalled"></span>. The board is ready for a Thread network.</p>
+        <div class="fl-actions">
+          <a class="btn primary" target="_blank" rel="noopener" data-if="canOpen" data-href="hostUrl" data-text="openLabel"></a>
+          <button class="btn ghost" type="button" data-action="restart">Flash another board</button>
+        </div>
+      </section>
+
+      <section data-stage="radio_current" hidden>
+        <h1>The radio firmware is up to date</h1>
+        <p>The C6 already runs <span class="mono" data-text="radioInstalled"></span>, the radio firmware of this release.</p>
+        <div class="fl-actions">
+          <a class="btn primary" target="_blank" rel="noopener" data-if="canOpen" data-href="hostUrl" data-text="openLabel"></a>
+          <button class="btn ghost" type="button" data-action="installAnyway">Install it anyway</button>
+          <button class="btn ghost" type="button" data-action="restart">Flash another board</button>
+        </div>
+      </section>
+
+      <section data-stage="radio_no_installer" hidden>
+        <h1>This release has no installer for the C6</h1>
+        <p>The C6 still runs its factory firmware, and release <span data-text="version"></span> has no <span class="mono">c6_installer.bin</span>. Put the radio firmware on with the maintenance jumper or a USB-UART adapter; see the first install guide.</p>
+        <div class="fl-actions">
+          <a class="btn primary" href="{{ 'first-install/' | url }}#2-put-the-radio-firmware-on-the-c6">First install guide</a>
+          <button class="btn ghost" type="button" data-action="restart">Start over</button>
+        </div>
+      </section>
+
+      <section data-stage="radio_wrong_installer" hidden>
+        <h1>The installer doesn't fit this firmware</h1>
+        <p class="mono" data-text="radioDetail"></p>
+        <p>The C6 was not changed. The site's files and the board's firmware come from different releases: reload the page and install again.</p>
+        <div class="fl-actions">
+          <button class="btn ghost" type="button" data-action="restart">Start over</button>
+        </div>
+      </section>
+
+      <section data-stage="radio_fault" hidden>
+        <h1>The C6 doesn't answer</h1>
+        <p>Neither its updater nor its factory firmware answers. Repair it with the maintenance jumper or a USB-UART adapter; see the first install guide.</p>
+        <div class="fl-actions">
+          <a class="btn primary" href="{{ 'first-install/' | url }}#2-put-the-radio-firmware-on-the-c6">First install guide</a>
+          <button class="btn ghost" type="button" data-action="checkRadio">Check again</button>
+        </div>
+      </section>
+
+      <section data-stage="radio_failed" hidden>
+        <h1>The radio firmware didn't install</h1>
+        <p><span class="mono" data-text="radioCode"></span>: <span data-text="radioDetail"></span></p>
+        <p data-if="radioInstallerFailed" hidden>The C6 may still run its factory firmware, or it may already have taken the installer. Wait a minute without powering off the board, then check the radio.</p>
+        <div class="fl-actions">
+          <button class="btn primary" type="button" data-action="checkRadio">Check the radio</button>
+          <a class="btn ghost" target="_blank" rel="noopener" data-if="canOpen" data-href="hostUrl" data-text="openLabel"></a>
+        </div>
+      </section>
+
+      <section data-stage="radio_port_lost" hidden>
+        <h1>The serial port is gone</h1>
+        <p data-if="lostWhileChecking">Nothing was sent to the C6. Plug the cable back in and reconnect.</p>
+        <p data-if="lostWhileSending" hidden>The C6 was not changed: the board drops a file it didn't get whole. Plug the cable back in and reconnect.</p>
+        <p class="fl-warn" data-if="lostWhileInstalling" hidden>The board carries on installing by itself. Don't power it off. Plug the cable back in and reconnect: the page then shows how it ended.</p>
+        <div class="fl-actions">
+          <button class="btn primary" type="button" data-action="reconnectRadio">Reconnect</button>
+          <button class="btn ghost" type="button" data-action="restart">Start over</button>
+        </div>
+      </section>
     </div>
 
     <div class="fl-board">
@@ -186,8 +284,8 @@
         <rect class="flash-part" data-class="flashClass" x="320" y="118" width="84" height="66" rx="4"></rect>
         <text class="ink small" x="362" y="148">32 MB</text>
         <text class="ink small" x="362" y="165">flash</text>
-        <g class="dim">
-          <rect class="chip" x="165" y="292" width="100" height="84" rx="5"></rect>
+        <g class="dim" data-class="radioGroupClass">
+          <rect class="chip" data-class="radioChipClass" x="165" y="292" width="100" height="84" rx="5"></rect>
           <text class="ink" x="215" y="339">ESP32-C6</text>
         </g>
         <rect class="dark-part" x="54" y="388" width="22" height="22" rx="4"></rect>

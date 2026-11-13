@@ -33,7 +33,7 @@ The connectors you need:
 
 Connect the board's P4 USB-C port to your computer, then open [Flash in the browser](flash.md). Press **Detect board**,
 then **Install**. The page reads the chip revision and picks the firmware built for it. On a new board, tick
-**Erase the flash first**.
+**Erase the flash first**. The page then goes on to the radio firmware (step 2) over the same cable.
 
 ??? note "Other ways to flash"
     - With `esptool`: unpack `full_ESP32-P4-WIFI6-POE-ETH_<chip_id>.zip` from the release and run, inside it,
@@ -46,6 +46,9 @@ MAC>.local/`, or the IP address your router lists for `esp-otbr`. The Dashboard 
 the radio firmware.
 
 ## 2. Put the radio firmware on the C6
+
+If you flashed in the browser and it said **Radio firmware installed**, this step is done: go on to
+[3. Give the board a Thread network](#3-give-the-board-a-thread-network).
 
 A new board's C6 runs Espressif's factory firmware ([ESP-Hosted](glossary.md)), which this project replaces. Pick a way:
 
@@ -62,7 +65,7 @@ Every way ends with [uploading the radio firmware](#upload-the-radio-firmware).
 ### A: no wires
 
 The board sends a small installer through the C6's factory firmware; the installer then sets up the C6 for this
-project.
+project. You give the board the files either from [Flash in the browser](flash.md) or from its own web page.
 
 !!! note "Tested on a factory C6"
     This way ran end to end on a new board with the C6 untouched since the factory (2026-11-13, release v0.6.0). If it
@@ -73,6 +76,15 @@ project.
     `C6 runs factory ESP-Hosted: upload c6_installer.bin first`. Upload `c6_installer.bin` by hand as below; after that,
     updates from GitHub work.
 
+**From the browser flasher.** Right after it has flashed the P4, the page asks the board about the C6. On a new board
+it offers `c6_installer.bin`, then `c6_rcp.bin`, both from the same release. Press **Install radio firmware** and keep
+the board powered and connected for about 5 minutes, until the page says **Radio firmware installed**. **Don't power
+off the board meanwhile**: a power cut while the installer writes leaves a C6 that only way B or C can repair. If the
+cable comes out, the board carries on by itself; plug it back in and press **Reconnect**. What the page's other
+messages mean: [Flash in the browser](flash.md#the-radio-firmware).
+
+**From the board's web page:**
+
 1. The Dashboard shows **Radio fault**: the C6 still runs its factory firmware.
 2. Open **Device > Firmware**. On the **Radio Co-Processor** card, choose `c6_installer.bin` and press
    **Install radio firmware**.
@@ -80,7 +92,7 @@ project.
    writes leaves a C6 that only way B or C can repair.
 4. The Dashboard now says the C6 has no radio firmware. Continue with [Upload the radio firmware](#upload-the-radio-firmware).
 
-If the upload is refused: `invalid_image` means the file is not `c6_installer.bin`, or it comes from another release
+If the upload (or the browser flasher) reports an error: `invalid_image` means the file is not `c6_installer.bin`, or it comes from another release
 than the board's firmware. `install_failed` means the transfer failed or got no answer at its end. The C6 may then still run its factory
 firmware, or it may already have taken the installer: wait a minute without powering off, then reload the Dashboard. If
 it still says **esp-hosted firmware**, upload the installer again; if it says the C6 has no radio firmware, the
@@ -128,6 +140,8 @@ You write the C6's base images yourself with `esptool`, from `c6-updater-flash.z
 6. Continue with [Upload the radio firmware](#upload-the-radio-firmware).
 
 ### Upload the radio firmware
+
+The browser flasher does this step by itself after the installer, and for a C6 that already has the updater. Otherwise:
 
 Open **Device > Firmware**. While the C6 has no radio firmware, the **Radio Co-Processor** card is highlighted:
 

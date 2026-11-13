@@ -2,7 +2,8 @@
 
 Get started:
 
-- [Flash in the browser](flash.md): write the board's firmware from the documentation site, no tools needed.
+- [Flash in the browser](flash.md): write the board's firmware and the C6's radio firmware from the documentation site,
+  no tools needed.
 - [First install](first-install.md): flash the board, put the radio firmware on its C6, give it a Thread network.
 - [Home Assistant](home-assistant.md): add the board, move it onto the preferred network, phones and Matter.
 - [Your Thread network](thread-network.md): form or join a network, more border routers, choosing the leader.
@@ -29,6 +30,7 @@ Reference:
 - [HTTP API](api.md): every endpoint, its fields and errors.
 - [Prometheus metrics](metrics.md): the metric list, scrape config and example alerts.
 - [Internals](reference/internals.md): how radios, the C6's maintenance, updates, diagnostics and logging work.
+- [Radio firmware over the console](reference/radio-console.md): the `radio-fw` command the browser flasher uses.
 
 Working on it:
 

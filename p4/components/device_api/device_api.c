@@ -284,6 +284,11 @@ void device_api_set_base_expected(const uint8_t *start, const uint8_t *end)
     s_base_version_end = end;
 }
 
+const char *device_api_push_error_code(esp_err_t err)
+{
+    return device_api_map_push_error(err).code;
+}
+
 // Version text of the embedded C6 base image, NUL-terminated, trailing whitespace removed.
 static void base_expected_version(char *out, size_t cap)
 {
