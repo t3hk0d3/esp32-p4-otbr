@@ -48,6 +48,9 @@ esp_err_t rcp_sync_probe(rcp_sync_probe_result_t *out);
 /** Copy of the result of the most recent rcp_sync_probe (all zero before the first run). Safe from any task. */
 void rcp_sync_get_last_probe(rcp_sync_probe_result_t *out);
 
+/** Version of the embedded C6 base image (what c6_installer.bin must carry), NUL-terminated; "" without an image. */
+const char *rcp_sync_base_image_version(void);
+
 /** rcp_sync_push_firmware result: the C6 refused the complete image at END (verification failed). Not retried. */
 #define RCP_SYNC_ERR_IMAGE_REJECTED 0x7a01
 

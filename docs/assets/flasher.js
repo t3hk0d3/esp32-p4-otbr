@@ -16,7 +16,24 @@
     reading: 1, no_firmware: 1, wrong_chip: 1,
     detected: 2, downloading: 2, download_failed: 2, erasing: 2, writing: 2, write_failed: 2,
     done: 3,
+    radio_checking: 3, radio_ready: 3, radio_no_installer: 3, radio_wrong_installer: 3, radio_fault: 3,
+    radio_sending: 3, radio_installing: 3, radio_failed: 3, radio_port_lost: 3,
+    radio_current: 4, radio_done: 4,
   };
+  /* The radio step: the `radio-fw` console command of the P4 (docs/reference/radio-console.md). */
+  const RADIO_CHUNK = 1024;
+  const RADIO_REPLY = '@radio-fw ';
+  const ACK_WAIT_MS = 2000; /* for each frame's ack; then the frame is sent again */
+  const FRAME_TRIES = 5; /* sends of one frame before giving up */
+  const REPLY_WAIT_MS = 5000; /* for status, ready and received */
+  const STATUS_TRIES = 3;
+  const STATUS_POLL_MS = 2000; /* between status questions while the board is still probing the radio */
+  const STATUS_POLLS = 30;
+  const BUSY_SILENCE_MS = 30000; /* the board prints busy every 5 s while it installs */
+  const RECONNECT_LISTEN_MS = 10000;
+  const INSTALL_CAP_S = {installer: 480, rcp: 120};
+  const LOST = 'lost';
+  const TIMEOUT = 'timeout';
   const STAGES = Object.keys(STEP_OF);
   const PART_NAMES = {
     'bootloader.bin': 'the bootloader',
@@ -45,6 +62,77 @@
     return match ? match[1] : '';
   }
 
+  let crcTable = null;
+
+  /* CRC-32 (IEEE, as zlib's crc32); `crc` continues an earlier result. */
+  function crc32(bytes, crc) {
+    if (!crcTable) {
+      crcTable = new Uint32Array(256);
+      for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++)
+          c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+        crcTable[n] = c >>> 0;
+      }
+    }
+    let c = ~(crc || 0) >>> 0;
+    for (let i = 0; i < bytes.length; i++)
+      c = crcTable[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+    return ~c >>> 0;
+  }
+
+  /* One frame of `radio-fw load`: "RF", offset u32, length u16, payload, CRC-32 of offset, length and payload. */
+  function frame(offset, bytes) {
+    const out = new Uint8Array(8 + bytes.length + 4);
+    const view = new DataView(out.buffer);
+    out[0] = 0x52;
+    out[1] = 0x46;
+    view.setUint32(2, offset, true);
+    view.setUint16(6, bytes.length, true);
+    out.set(bytes, 8);
+    view.setUint32(8 + bytes.length, crc32(out.subarray(2, 8 + bytes.length)), true);
+    return out;
+  }
+
+  /* A reply line of the board's radio-fw command, wherever it starts in the line; null for any other line. */
+  function parseReply(line) {
+    const at = line.indexOf(RADIO_REPLY);
+    if (at < 0)
+      return null;
+    const rest = line.slice(at + RADIO_REPLY.length).replace(/\r$/, '').trim();
+    const space = rest.indexOf(' ');
+    const kind = space < 0 ? rest : rest.slice(0, space);
+    const text = space < 0 ? '' : rest.slice(space + 1);
+    const words = text ? text.split(' ') : [];
+    const fields = {};
+    for (const word of words) {
+      const eq = word.indexOf('=');
+      if (eq > 0)
+        fields[word.slice(0, eq)] = word.slice(eq + 1);
+    }
+    return {kind, text, words, fields};
+  }
+
+  /* Project and version from the app description of an ESP-IDF app image; null for anything else. */
+  function appDesc(bytes) {
+    const DESC = 32;
+    if (!bytes || bytes.length < DESC + 80 || bytes[0] !== 0xE9)
+      return null;
+    if (new DataView(bytes.buffer, bytes.byteOffset).getUint32(DESC, true) !== 0xABCD5432)
+      return null;
+    const text = (from) => {
+      const field = bytes.subarray(DESC + from, DESC + from + 32);
+      const end = field.indexOf(0);
+      return new TextDecoder().decode(end < 0 ? field : field.subarray(0, end));
+    };
+    return {project: text(48), version: text(16)};
+  }
+
+  /* The text the board gives when an installer is from another release (rcp_sync push_installer). */
+  function wrongInstaller(version, base) {
+    return 'wrong c6_installer.bin: ' + version + ', need ' + (base && base !== '-' ? base : 'none');
+  }
+
   function distinct(values) {
     return Array.from(new Set(values));
   }
@@ -53,10 +141,15 @@
     const state = {
       stage: 'loading', targets: [], candidates: [], board: null, chip: null, erase: false, revision: null, chipName: '',
       log: [], percent: 0, part: '', file: '', host: '', ip: '', addressWaiting: false,
+      radio: null, /* radio.json of the release: {version, rcp: {path, version}, installer?: {path, base_version}} */
+      radioStatus: null, radioPlan: [], radioFile: '', radioPercent: 0, radioElapsed: 0, radioInstalled: '',
+      radioCode: '', radioDetail: '', radioPhase: '',
     };
     let esptool = null;
     let session = null; /* {port, transport, loader} while the port is open */
-    let search = null; /* {stopped, stop, finish, closed} while reading the console for the address */
+    let search = null; /* {stopped, finish} while waiting for the address */
+    let link = null; /* the console port after the install: see openLink */
+    let images = {}; /* downloaded radio images by role: {name, data} */
     let listener = () => {};
     const emit = (patch) => { Object.assign(state, patch); listener(); };
 
@@ -239,55 +332,151 @@
       });
     }
 
-    /* Reads the board's console until it logs its address, gives it to running.finish, then closes the port. */
-    async function readAddress(port, running) {
-      try {
-        await port.open({baudRate: CONSOLE_BAUD});
-      } catch (e) {
-        return;
-      }
-      const reader = port.readable.getReader();
-      running.stop = () => reader.cancel().catch(() => {});
-      if (running.stopped)
-        running.stop();
+    /*
+     * The board's console after the install, at its own speed: the text it prints (for the address), the radio-fw reply
+     * lines in it, and a writer. One reader for the whole time: the address search and the radio step share it.
+     */
+    async function openLink(port) {
+      await port.open({baudRate: CONSOLE_BAUD});
+      const l = {
+        port, reader: port.readable.getReader(), writer: port.writable ? port.writable.getWriter() : null,
+        text: '', partial: '', replies: [], waiters: new Set(), ended: false, lost: false, closing: false,
+      };
+      l.notify = () => { for (const w of Array.from(l.waiters)) w(); };
+      l.pumped = pump(l);
+      return l;
+    }
+
+    async function pump(l) {
       const decoder = new TextDecoder();
-      let text = '';
       try {
         for (;;) {
-          const {value, done} = await reader.read();
+          const {value, done} = await l.reader.read();
           if (done)
-            return;
-          text = (text + decoder.decode(value, {stream: true})).slice(-CONSOLE_KEEP);
-          const address = addressIn(text);
-          if (address) {
-            running.finish(address);
-            return;
+            break;
+          const chunk = decoder.decode(value, {stream: true});
+          l.text = (l.text + chunk).slice(-CONSOLE_KEEP);
+          const lines = (l.partial + chunk).split('\n');
+          l.partial = lines.pop().slice(-CONSOLE_KEEP);
+          for (const line of lines) {
+            const reply = parseReply(line);
+            if (reply)
+              l.replies.push(reply);
           }
+          l.notify();
         }
       } catch (e) {
-        /* the cable is gone: no address */
-      } finally {
-        await reader.cancel().catch(() => {});
-        reader.releaseLock();
-        await port.close().catch(() => {});
+        /* the cable is gone */
+      }
+      l.ended = true;
+      l.lost = !l.closing;
+      l.notify();
+    }
+
+    /* check()'s first truthy result; LOST once the port is gone, TIMEOUT after ms (none without ms). */
+    function until(l, check, ms) {
+      return new Promise((resolve) => {
+        let settled = false;
+        const finish = (value) => {
+          if (!settled) {
+            settled = true;
+            l.waiters.delete(attempt);
+            resolve(value);
+          }
+        };
+        const attempt = () => {
+          const value = check();
+          if (value)
+            finish(value);
+          else if (l.ended)
+            finish(LOST);
+        };
+        l.waiters.add(attempt);
+        attempt();
+        if (ms !== undefined)
+          deps.sleep(ms).then(() => finish(TIMEOUT));
+      });
+    }
+
+    /* The next reply of one of these kinds (others are dropped), LOST or TIMEOUT. */
+    function nextReply(l, kinds, ms) {
+      return until(l, () => {
+        while (l.replies.length) {
+          const reply = l.replies.shift();
+          if (kinds.includes(reply.kind))
+            return reply;
+        }
+        return null;
+      }, ms);
+    }
+
+    async function send(l, bytes) {
+      if (!l.writer || l.ended)
+        throw radioLost();
+      try {
+        await l.writer.write(bytes);
+      } catch (e) {
+        l.ended = true;
+        l.lost = true;
+        l.notify();
+        throw radioLost();
       }
     }
 
-    /* The board's address, or '' after ADDRESS_WAIT_MS whatever the port is doing. */
+    function sendLine(l, text) {
+      l.replies = [];
+      return send(l, new TextEncoder().encode(text + '\r'));
+    }
+
+    /* Lets go of a console port (the current one by default); waits at most CLOSE_WAIT_MS for a port that hangs. */
+    async function closeLink(l = link) {
+      if (l === link)
+        link = null;
+      if (!l)
+        return;
+      l.closing = true;
+      const closed = (async () => {
+        await l.reader.cancel().catch(() => {});
+        try {
+          l.reader.releaseLock();
+          if (l.writer)
+            l.writer.releaseLock();
+        } catch (e) {
+          /* already released */
+        }
+        await l.port.close().catch(() => {});
+      })();
+      await Promise.race([closed, deps.sleep(CLOSE_WAIT_MS)]);
+    }
+
+    /* The board's address, or '' after ADDRESS_WAIT_MS whatever the port is doing. Leaves the console open in `link`. */
     async function findAddress(port) {
-      const running = {stopped: false, stop() {}};
+      const running = {stopped: false};
       const answer = new Promise((resolve) => { running.finish = resolve; });
       search = running;
-      running.closed = readAddress(port, running).finally(() => running.finish(''));
-      deps.sleep(ADDRESS_WAIT_MS).then(() => {
-        running.stopped = true;
-        running.stop();
-        running.finish('');
-      });
-      emit({ip: await answer, addressWaiting: false});
-      await running.closed;
+      (async () => {
+        let l;
+        try {
+          l = await openLink(port);
+        } catch (e) {
+          running.finish('');
+          return;
+        }
+        if (running.stopped) {
+          /* opened after the search gave up: let go at once */
+          await closeLink(l);
+          return;
+        }
+        link = l;
+        const found = await until(l, () => addressIn(l.text));
+        running.finish(found === LOST ? '' : found);
+      })();
+      deps.sleep(ADDRESS_WAIT_MS).then(() => running.finish(''));
+      const ip = await answer;
+      running.stopped = true;
       if (search === running)
         search = null;
+      emit({ip, addressWaiting: false});
     }
 
     async function install() {
@@ -321,11 +510,238 @@
       await resetAndRelease();
       emit({stage: 'done', percent: 100, ip: '', addressWaiting: true});
       await findAddress(port);
+      if (state.stage !== 'done')
+        return; /* started over meanwhile */
+      if (state.radio && link && !link.ended)
+        await checkRadio();
+      else
+        await closeLink();
+    }
+
+    /* ---- the radio step ---- */
+
+    function radioLost() {
+      return {lost: true};
+    }
+
+    function radioError(code, detail) {
+      return {code, detail};
+    }
+
+    /* `radio-fw status`, asked again while the board is still probing; the parsed fields. */
+    async function radioStatus(l) {
+      for (let poll = 0; poll < STATUS_POLLS; poll++) {
+        let reply = TIMEOUT;
+        for (let attempt = 0; attempt < STATUS_TRIES && reply === TIMEOUT; attempt++) {
+          await sendLine(l, 'radio-fw status');
+          reply = await nextReply(l, ['status'], REPLY_WAIT_MS);
+        }
+        if (reply === LOST)
+          throw radioLost();
+        if (reply === TIMEOUT)
+          throw radioError('no_answer', 'The board did not answer radio-fw status. Its firmware may be older than this page.');
+        if (reply.fields.state !== 'probing' && reply.fields.state !== 'busy')
+          return reply.fields;
+        await deps.sleep(STATUS_POLL_MS);
+      }
+      throw radioError('no_answer', 'The board is still busy with the radio. Wait a minute, then check again.');
+    }
+
+    async function radioImage(role) {
+      if (!images[role]) {
+        const entry = state.radio[role];
+        const name = entry.path.slice(entry.path.lastIndexOf('/') + 1);
+        let response;
+        try {
+          response = await getOk(name, deps.base + entry.path);
+        } catch (e) {
+          throw radioError('download_failed', 'The file ' + name + ' could not be fetched. Check your connection.');
+        }
+        images[role] = {role, name, data: new Uint8Array(await response.arrayBuffer())};
+      }
+      return images[role];
+    }
+
+    function radioFailed(error) {
+      if (error && error.lost && !link)
+        return Promise.resolve(); /* the page closed the port itself: started over */
+      if (error && error.lost) {
+        emit({stage: 'radio_port_lost'});
+        return closeLink();
+      }
+      if (error && error.code) {
+        emit({stage: 'radio_failed', radioCode: error.code, radioDetail: error.detail || ''});
+        return Promise.resolve();
+      }
+      throw error;
+    }
+
+    /* Reads the radio's state and shows what the page will do about it. */
+    async function checkRadio() {
+      if (!link || link.ended) {
+        emit({stage: 'radio_port_lost', radioPhase: 'checking'});
+        return;
+      }
+      emit({stage: 'radio_checking', radioPhase: 'checking', radioCode: '', radioDetail: ''});
+      try {
+        const status = await radioStatus(link);
+        emit({radioStatus: status});
+        if (status.state === 'esp_hosted') {
+          if (!state.radio.installer) {
+            emit({stage: 'radio_no_installer'});
+            return;
+          }
+          const installer = await radioImage('installer');
+          await radioImage('rcp');
+          const desc = appDesc(installer.data);
+          if (!desc || desc.version !== status.base) {
+            emit({stage: 'radio_wrong_installer', radioDetail: wrongInstaller(desc ? desc.version : '?', status.base)});
+            return;
+          }
+          emit({stage: 'radio_ready', radioPlan: ['installer', 'rcp']});
+        } else if (status.state === 'updater') {
+          if (status.installed === state.radio.rcp.version) {
+            emit({stage: 'radio_current', radioInstalled: status.installed});
+            return;
+          }
+          await radioImage('rcp');
+          emit({stage: 'radio_ready', radioPlan: ['rcp']});
+        } else {
+          emit({stage: 'radio_fault'});
+        }
+      } catch (e) {
+        await radioFailed(e);
+      }
+    }
+
+    /* After `received`: busy lines until done or error. Resolves with the installed version. */
+    async function waitForPush(l, role) {
+      for (;;) {
+        const reply = await nextReply(l, ['busy', 'done', 'error'], BUSY_SILENCE_MS);
+        if (reply === LOST || reply === TIMEOUT)
+          throw radioLost();
+        if (reply.kind === 'error')
+          throw radioError(reply.words[0] || 'push_failed', reply.words.slice(1).join(' '));
+        if (reply.kind === 'done')
+          return reply.fields.installed && reply.fields.installed !== '-' ? reply.fields.installed : '';
+        const elapsed = Number(reply.words[0]) || 0;
+        emit({radioElapsed: elapsed});
+        if (elapsed > INSTALL_CAP_S[role])
+          throw radioError('timeout', 'The board has been installing for ' + elapsed + ' s without an answer.');
+      }
+    }
+
+    /* `radio-fw load`, the frames, then the board's push. Resolves with the installed version. */
+    async function sendImage(l, image) {
+      const {data} = image;
+      emit({stage: 'radio_sending', radioPhase: 'sending', radioFile: image.name, radioPercent: 0, radioElapsed: 0});
+      await sendLine(l, 'radio-fw load ' + data.length + ' ' + crc32(data).toString(16).padStart(8, '0'));
+      let reply = await nextReply(l, ['ready', 'error'], REPLY_WAIT_MS);
+      if (reply === LOST)
+        throw radioLost();
+      if (reply === TIMEOUT)
+        throw radioError('no_answer', 'The board did not answer radio-fw load.');
+      if (reply.kind === 'error')
+        throw radioError(reply.words[0], reply.words.slice(1).join(' '));
+      let offset = 0;
+      let tries = 0;
+      while (offset < data.length) {
+        if (tries >= FRAME_TRIES) {
+          await send(l, frame(offset, new Uint8Array(0))).catch(() => {});
+          throw radioError('transfer_failed', 'The board did not take the image at byte ' + offset + '.');
+        }
+        tries++;
+        await send(l, frame(offset, data.subarray(offset, offset + RADIO_CHUNK)));
+        reply = await nextReply(l, ['ack', 'nak', 'error'], ACK_WAIT_MS);
+        if (reply === LOST)
+          throw radioLost();
+        if (reply === TIMEOUT)
+          continue;
+        if (reply.kind === 'error')
+          throw radioError(reply.words[0], reply.words.slice(1).join(' '));
+        const next = Number(reply.words[0]);
+        if (reply.kind === 'ack' && next > offset)
+          tries = 0;
+        offset = next;
+        emit({radioPercent: Math.floor(100 * offset / data.length)});
+      }
+      reply = await nextReply(l, ['received', 'error'], REPLY_WAIT_MS);
+      if (reply === LOST)
+        throw radioLost();
+      if (reply === TIMEOUT)
+        throw radioError('no_answer', 'The board did not confirm the image.');
+      if (reply.kind === 'error')
+        throw radioError(reply.words[0], reply.words.slice(1).join(' '));
+      emit({stage: 'radio_installing', radioPhase: 'installing', radioPercent: 100});
+      return waitForPush(l, image.role);
+    }
+
+    /* The planned images in order; after the installer, the updater must answer before the RCP goes. */
+    async function installRadio() {
+      if (!link || link.ended) {
+        emit({stage: 'radio_port_lost', radioPhase: 'checking'});
+        return;
+      }
+      try {
+        for (const role of state.radioPlan) {
+          if (role === 'rcp' && state.radioPlan[0] === 'installer') {
+            emit({stage: 'radio_checking', radioPhase: 'checking'});
+            const status = await radioStatus(link);
+            emit({radioStatus: status});
+            if (status.state !== 'updater')
+              throw radioError('install_failed', 'The C6 did not come back with the updater after the installer.');
+          }
+          const installed = await sendImage(link, await radioImage(role));
+          emit({radioInstalled: installed});
+        }
+        emit({stage: 'radio_done'});
+      } catch (e) {
+        await radioFailed(e);
+      }
+    }
+
+    /* After a lost port: pick it again and listen; a push that started keeps running on the board. */
+    async function reconnectRadio() {
+      const port = await pickPort();
+      if (!port)
+        return;
+      await closeLink();
+      try {
+        link = await openLink(port);
+      } catch (e) {
+        emit({stage: 'radio_port_lost'});
+        return;
+      }
+      if (state.radioPhase !== 'installing') {
+        await checkRadio();
+        return;
+      }
+      emit({stage: 'radio_installing'});
+      const heard = await nextReply(link, ['busy', 'done', 'error'], RECONNECT_LISTEN_MS);
+      if (heard === TIMEOUT) {
+        await checkRadio();
+        return;
+      }
+      try {
+        if (heard === LOST)
+          throw radioLost();
+        if (heard.kind === 'error')
+          throw radioError(heard.words[0] || 'push_failed', heard.words.slice(1).join(' '));
+        const installed = heard.kind === 'done' ? (heard.fields.installed || '').replace(/^-$/, '') :
+          await waitForPush(link, state.radioFile === 'c6_installer.bin' ? 'installer' : 'rcp');
+        emit({radioInstalled: installed});
+        if (installed && installed === state.radio.rcp.version)
+          emit({stage: 'radio_done'});
+        else
+          await checkRadio();
+      } catch (e) {
+        await radioFailed(e);
+      }
     }
 
     async function init() {
       deps.addUnloadListener((event) => {
-        if (state.stage === 'erasing' || state.stage === 'writing') {
+        if (['erasing', 'writing', 'radio_sending', 'radio_installing'].includes(state.stage)) {
           event.preventDefault();
           event.returnValue = '';
         }
@@ -342,6 +758,12 @@
       } catch (e) {
         emit({stage: 'empty'});
         return;
+      }
+      try {
+        const response = await deps.fetch(deps.base + 'radio.json');
+        state.radio = response.ok ? await response.json() : null;
+      } catch (e) {
+        state.radio = null; /* the P4 can still be installed */
       }
       if (!deps.md5) {
         /* the checksum library failed to load: found out here, not half way through a write */
@@ -374,14 +796,25 @@
       },
       async restart() {
         if (search) {
-          const running = search;
-          running.stopped = true;
-          running.stop();
-          running.finish('');
-          await Promise.race([running.closed, deps.sleep(CLOSE_WAIT_MS)]);
+          search.stopped = true;
+          search.finish('');
         }
+        await closeLink();
         await resetAndRelease();
-        emit({stage: 'idle', revision: null, candidates: [], board: null, chip: null, erase: false, percent: 0, part: '', file: '', ip: '', addressWaiting: false});
+        images = {};
+        emit({stage: 'idle', revision: null, candidates: [], board: null, chip: null, erase: false, percent: 0, part: '', file: '', ip: '', addressWaiting: false,
+              radioStatus: null, radioPlan: [], radioFile: '', radioPercent: 0, radioElapsed: 0, radioInstalled: '', radioCode: '', radioDetail: '', radioPhase: ''});
+      },
+      checkRadio,
+      installRadio,
+      reconnectRadio,
+      async installAnyway() {
+        try {
+          await radioImage('rcp');
+          emit({stage: 'radio_ready', radioPlan: ['rcp']});
+        } catch (e) {
+          await radioFailed(e);
+        }
       },
     };
     return flow;
@@ -391,7 +824,12 @@
     const stage = state.stage;
     const busy = stage === 'erasing' || stage === 'writing';
     const known = state.revision !== null && ['detected', 'downloading', 'erasing', 'writing', 'done', 'no_firmware'].includes(stage);
-    const stepIndex = STEP_OF[stage];
+    /* without radio files the install is the last step */
+    const stepIndex = stage === 'done' && !state.radio ? 4 : STEP_OF[stage];
+    const radioStage = stage.startsWith('radio_');
+    const radioBusy = stage === 'radio_sending' || stage === 'radio_installing';
+    const plan = state.radioPlan || [];
+    const installerPlanned = plan.includes('installer');
     const stepClass = (i) => 'step' + (i === stepIndex ? ' on' : i < stepIndex ? ' done' : '');
     const failed = stage === 'connect_failed' || stage === 'write_failed';
     const boards = distinct(state.candidates.map((t) => t.board));
@@ -402,18 +840,18 @@
     const address = state.ip || state.host;
 
     let trace = 'trace';
-    if (stage === 'reading' || stage === 'downloading' || busy)
+    if (stage === 'reading' || stage === 'downloading' || busy || radioBusy)
       trace = 'trace live run';
     else if (stage === 'detected' || stage === 'manual' || stage === 'no_firmware')
       trace = 'trace live';
-    else if (stage === 'done')
+    else if (stage === 'done' || stage === 'radio_done' || stage === 'radio_current')
       trace = 'trace good';
-    else if (failed)
+    else if (failed || stage === 'radio_failed' || stage === 'radio_port_lost')
       trace = 'trace bad';
 
     return {
       stage,
-      step0: stepClass(0), step1: stepClass(1), step2: stepClass(2),
+      step0: stepClass(0), step1: stepClass(1), step2: stepClass(2), step3: stepClass(3),
       rev: state.revision === null ? '' : revisionLabel(state.revision),
       chipName: state.chipName,
       log: state.log,
@@ -436,13 +874,36 @@
       hostUrl: address ? 'http://' + address + '/' : '',
       openLabel: 'Open ' + address,
       addressWaiting: state.addressWaiting,
-      canOpen: stage === 'done' && !state.addressWaiting,
+      canOpen: (stage === 'done' || radioStage) && !state.addressWaiting,
+      /* the radio step */
+      radioAvailable: !!state.radio,
+      radioMissing: !state.radio,
+      radioRelease: state.radio ? state.radio.rcp.version : '',
+      radioPlanText: installerPlanned ? 'c6_installer.bin, then c6_rcp.bin' : 'c6_rcp.bin',
+      radioWarnInstaller: installerPlanned,
+      radioWarnRcp: !installerPlanned,
+      radioFile: state.radioFile,
+      radioPercentText: state.radioPercent + '%',
+      radioSendingLabel: 'Sending ' + state.radioFile,
+      radioElapsedText: state.radioElapsed + ' s',
+      radioInstalling: state.radioFile === 'c6_installer.bin' ? 'The C6 is installing the installer, then starts its updater.' :
+        'The C6 is writing the radio firmware.',
+      radioInstallingInstaller: state.radioFile === 'c6_installer.bin',
+      radioInstalled: state.radioInstalled || (state.radioStatus && state.radioStatus.installed !== '-' ? state.radioStatus.installed : ''),
+      radioCode: state.radioCode,
+      radioDetail: state.radioDetail,
+      radioInstallerFailed: state.radioCode === 'install_failed' && state.radioFile === 'c6_installer.bin',
+      lostWhileChecking: state.radioPhase === 'checking' || state.radioPhase === '',
+      lostWhileSending: state.radioPhase === 'sending',
+      lostWhileInstalling: state.radioPhase === 'installing',
       /* the live board */
       revLabel: known ? revisionLabel(state.revision) : '',
       traceClass: trace,
       chipClass: known || stage === 'reading' ? 'chip found' : 'chip',
       scanClass: stage === 'reading' ? 'scan on' : 'scan',
-      flashClass: 'flash-part' + (busy ? ' on' : stage === 'done' ? ' good' : ''),
+      flashClass: 'flash-part' + (busy ? ' on' : stage === 'done' || radioStage ? ' good' : ''),
+      radioGroupClass: radioStage ? 'c6' : 'dim',
+      radioChipClass: radioBusy || stage === 'radio_done' || stage === 'radio_current' ? 'chip found' : 'chip',
       portRing: stage === 'idle' ? 'ring on' : 'ring',
       portLabel: stage === 'idle' ? 'lab on' : 'lab',
       buttonRing: stage === 'connect_failed' ? 'ring on' : 'ring',
@@ -514,7 +975,10 @@
     return flow.init();
   }
 
-  const api = {targetsForRevision, hostFromMac, addressIn, createFlow, view, start, STAGES, ADDRESS_WAIT_MS, CLOSE_WAIT_MS};
+  const api = {
+    targetsForRevision, hostFromMac, addressIn, crc32, frame, parseReply, appDesc, wrongInstaller, createFlow, view, start,
+    STAGES, ADDRESS_WAIT_MS, CLOSE_WAIT_MS, ACK_WAIT_MS, REPLY_WAIT_MS, STATUS_POLL_MS, BUSY_SILENCE_MS, RECONNECT_LISTEN_MS,
+  };
   if (typeof module !== 'undefined' && module.exports)
     module.exports = api;
   else
