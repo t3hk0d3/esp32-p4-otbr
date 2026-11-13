@@ -68,8 +68,7 @@ With a dongle running Thread, **No radio** means it is unplugged: plug it back i
 - **Prefix delegation makes Thread devices reachable from the internet** unless your router's IPv6 firewall blocks it.
 - **Updates interrupt Thread.** A radio firmware update stops this border router for a few seconds, a board update
   reboots it. Other border routers keep the network up meanwhile.
-- **Not yet run on hardware:** way C of the first install, and way A against an untouched factory C6 (it ran against a
-  stand-in). The firmware for P4 chips of revision v3.1 and later is built but not yet run on such a chip. Several
-  boards on one network have not been tested together.
+- **Not yet run on hardware:** way C of the first install. Several boards on one network have not been tested
+  together.
 - **mDNS names:** another device that claims the board's `.local` name can make it rename itself (standard mDNS); see
   [Networking](networking.md#mdns).

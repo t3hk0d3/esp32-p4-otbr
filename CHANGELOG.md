@@ -7,6 +7,18 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Browser flasher on ESP32-P4 chips of revision v3.1 and later: the install stopped with "The install didn't finish"
+  and wrote nothing. esptool-js resets the board when it switches to the faster baud rate and then skips the chip's
+  flash power-on fix for these revisions; the flasher now runs it again
+  ([esptool-js#275](https://github.com/espressif/esptool-js/issues/275)).
+
+### Changed
+
+- Tested on hardware: the firmware for P4 chips of revision v3.1 and later (a v3.2 chip, flashed from the browser),
+  and the no-wires first install of the radio firmware (way A) on a C6 untouched since the factory.
+
 ## [0.6.0] - 2026-11-11
 
 ### Added
