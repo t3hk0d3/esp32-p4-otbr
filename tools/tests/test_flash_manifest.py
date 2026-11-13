@@ -174,7 +174,8 @@ class TestRefusals:
 
 
 FAKE_GH = """#!/usr/bin/env bash
-# Fake gh: serves $FAKE_RELEASE, honouring --pattern and --dir as `gh release download` does.
+# Fake gh: serves $FAKE_RELEASE, honouring --pattern and --dir as `gh release download` does (a pattern that
+# matches nothing is skipped, as gh does while another pattern matches).
 set -euo pipefail
 if [ "$2" = view ]; then echo v1; exit 0; fi
 patterns=()
@@ -188,7 +189,7 @@ done
 mkdir -p "$dir"
 for pattern in "${patterns[@]}"; do
     for file in "$FAKE_RELEASE"/$pattern; do
-        [ -e "$file" ] && cp "$file" "$dir/"
+        if [ -e "$file" ]; then cp "$file" "$dir/"; fi
     done
 done
 """
@@ -232,3 +233,79 @@ class TestMakeDocsFirmware:
     def test_leaves_no_zips_in_the_site(self, release_with_targets, tmp_path):
         site = make_docs_firmware(tmp_path, release_with_targets)
         assert not list(site.rglob("*.zip"))
+
+
+def app_image(project, version):
+    """An ESP-IDF app image head with an app description: enough for flash_manifest.app_desc."""
+    head = bytearray(256)
+    head[0] = 0xE9
+    head[32:36] = (0xABCD5432).to_bytes(4, "little")
+    head[48 : 48 + len(version)] = version.encode()
+    head[80 : 80 + len(project)] = project.encode()
+    return bytes(head)
+
+
+RCP_VERSION = "20261113T000000Z-abcdef0"
+BASE_VERSION = "base-1a2b3c4d"
+
+
+def add_c6(zips, rcp=True, installer=True):
+    if rcp:
+        (zips / "c6_rcp.bin").write_bytes(app_image("c6_rcp", RCP_VERSION))
+    if installer:
+        (zips / "c6_installer.bin").write_bytes(app_image("c6_installer", BASE_VERSION))
+
+
+class TestRadioFiles:
+    def test_copies_both_and_names_their_versions(self, release_with_targets, tmp_path):
+        add_c6(release_with_targets)
+        out = tmp_path / "firmware"
+        assert publish(release_with_targets, out).returncode == 0
+        assert (out / "c6" / "c6_rcp.bin").read_bytes() == app_image(
+            "c6_rcp", RCP_VERSION
+        )
+        assert (out / "c6" / "c6_installer.bin").is_file()
+        assert read_json(out / "radio.json") == {
+            "version": "v1",
+            "rcp": {"path": "c6/c6_rcp.bin", "version": RCP_VERSION},
+            "installer": {"path": "c6/c6_installer.bin", "base_version": BASE_VERSION},
+        }
+
+    def test_without_the_installer_leaves_it_out(self, release_with_targets, tmp_path):
+        add_c6(release_with_targets, installer=False)
+        out = tmp_path / "firmware"
+        assert publish(release_with_targets, out).returncode == 0
+        assert "installer" not in read_json(out / "radio.json")
+        assert not (out / "c6" / "c6_installer.bin").exists()
+
+    def test_without_the_rcp_writes_no_radio_json(self, release_with_targets, tmp_path):
+        add_c6(release_with_targets, rcp=False)
+        out = tmp_path / "firmware"
+        assert publish(release_with_targets, out).returncode == 0
+        assert not (out / "radio.json").exists()
+        assert not (out / "c6").exists()
+
+    def test_a_file_that_is_no_app_image_names_it(self, release_with_targets, tmp_path):
+        (release_with_targets / "c6_rcp.bin").write_bytes(b"\xff" * 300)
+        result = publish(release_with_targets, tmp_path / "firmware")
+        assert result.returncode == 1
+        assert "c6_rcp.bin is not an app image" in result.stderr
+
+    def test_an_installer_of_another_project_is_refused(
+        self, release_with_targets, tmp_path
+    ):
+        add_c6(release_with_targets, installer=False)
+        (release_with_targets / "c6_installer.bin").write_bytes(
+            app_image("c6_rcp", RCP_VERSION)
+        )
+        result = publish(release_with_targets, tmp_path / "firmware")
+        assert result.returncode == 1
+        assert "not c6_installer" in result.stderr
+
+    def test_make_docs_firmware_publishes_them(self, release_with_targets, tmp_path):
+        add_c6(release_with_targets)
+        site = make_docs_firmware(tmp_path, release_with_targets)
+        assert (
+            read_json(site / "firmware" / "radio.json")["rcp"]["version"] == RCP_VERSION
+        )
+        assert (site / "firmware" / "c6" / "c6_installer.bin").is_file()

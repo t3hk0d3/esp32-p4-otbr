@@ -5,6 +5,7 @@
 #include "esp_console.h"
 #include "logging.h"
 #include "netcfg.h"
+#include "radio_console.h"
 #include "routing.h"
 #ifdef OTBR_TEST_BUILD
 #include "test_cmds.h"
@@ -24,6 +25,7 @@ esp_err_t console_start(void)
     ESP_RETURN_ON_ERROR(netcfg_console_register(), TAG, "net command");
     ESP_RETURN_ON_ERROR(routing_console_register(), TAG, "routing command");
     ESP_RETURN_ON_ERROR(logging_console_register(), TAG, "log command");
+    ESP_RETURN_ON_ERROR(radio_console_register(), TAG, "radio-fw command");
 #ifdef OTBR_TEST_BUILD
     ESP_RETURN_ON_ERROR(test_cmds_register(), TAG, "test commands");
 #endif

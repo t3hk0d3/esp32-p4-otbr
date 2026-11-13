@@ -54,6 +54,9 @@ esp_err_t device_api_register(httpd_handle_t server);
  */
 void device_api_set_base_expected(const uint8_t *start, const uint8_t *end);
 
+/** The error code POST /device/radio/firmware answers for a builtin_rcp_push_firmware result, e.g. "invalid_image". */
+const char *device_api_push_error_code(esp_err_t err);
+
 /**
  * True while an OTA, a radio firmware push, a ROM recovery or a move of OpenThread runs (or a committed OTA waits for its own reboot): the
  * predicate of the reboot gate (reboot_gate_set_busy), so that other reboots wait for it. Safe from any task.

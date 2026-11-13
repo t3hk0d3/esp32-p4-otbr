@@ -4,6 +4,7 @@
  * esptool-js and fetch that write what happens to one ordered event list.
  */
 const path = require('path');
+const zlib = require('zlib');
 
 const Flasher = require(path.join(__dirname, '..', '..', 'docs', 'assets', 'flasher.js'));
 
@@ -29,13 +30,234 @@ const PARTS = [
   {path: 'p4.bin', offset: 0x100000, size: 300},
 ];
 
+const RCP_VERSION = '20261113T000000Z-abcdef0';
+const BASE_VERSION = 'base-1a2b3c4d';
+const GOT_IP = 'I (4210) eth: got ip 192.168.1.50\r\n';
+
+/* An ESP-IDF app image of `size` bytes with an app description (project, version). */
+function appImage(project, version, size) {
+  const data = new Uint8Array(size);
+  data[0] = 0xE9;
+  new DataView(data.buffer).setUint32(32, 0xABCD5432, true);
+  data.set(new TextEncoder().encode(version), 48);
+  data.set(new TextEncoder().encode(project), 80);
+  for (let i = 112; i < size; i++)
+    data[i] = (i * 7) & 0xff;
+  return data;
+}
+
+/*
+ * A P4 running the radio-fw console command (docs/reference/radio-console.md), scripted by `b`:
+ *   state ('esp_hosted', 'updater', 'fault'), installed ('-'), base (BASE_VERSION), probing (status answers "probing"
+ *   this many times first), statusSilent, loadError (text after "error " for every load), nakAt / dropAckAt (the
+ *   first frame at this offset is answered nak crc / not at all), silentFrames, lose ('checking': at the status,
+ *   'sending': after the first frame, 'write': the first frame's write throws, 'installing': after received),
+ *   silentAfterReceived, busy (busy lines, default 2),
+ *   installerResult / rcpResult (the line after the busy lines; default done), afterReconnect (lines printed when the
+ *   port opens again), noLogNoise.
+ * Records t.radio: {commands, frames: [{offset, len}], aborts, images: [{project, size, crcOk}]}.
+ */
+function makeBoard(b, t, log) {
+  const board = Object.assign({state: 'esp_hosted', installed: '-', base: BASE_VERSION, probing: 0, busy: 2}, b);
+  const queue = [];
+  let waiting = null;
+  let lost = false;
+  let opened = 0;
+  let line = '';
+  let load = null; /* {size, crc, data, expected, buf} */
+  const dropped = new Set();
+  const naked = new Set();
+  t.radio = {commands: [], frames: [], aborts: 0, images: []};
+
+  const push = (text) => {
+    queue.push(new TextEncoder().encode(text));
+    if (waiting) {
+      const w = waiting;
+      waiting = null;
+      w.resolve({value: queue.shift(), done: false});
+    }
+  };
+  const reply = (text) => push((board.noLogNoise ? '' : 'I (77) rcp_sync: log noise\r\n') + '@radio-fw ' + text + '\r\n');
+  const lose = () => {
+    log('port-lost');
+    lost = true;
+    if (waiting) {
+      const w = waiting;
+      waiting = null;
+      w.reject(new Error('NetworkError: The device has been lost.'));
+    }
+  };
+
+  function finishLoad() {
+    const project = load.data[0] === 0xE9 ? new TextDecoder().decode(load.data.subarray(80, 112)).replace(/\0.*$/, '') : '';
+    const crcOk = (zlib.crc32(load.data) >>> 0) === load.crc;
+    t.radio.images.push({project, size: load.size, crcOk});
+    load = null;
+    if (!crcOk) {
+      reply('error invalid_request image checksum mismatch');
+      return;
+    }
+    reply('received');
+    if (board.lose === 'installing') {
+      lose();
+      return;
+    }
+    if (board.silentAfterReceived)
+      return;
+    for (let i = 1; i <= board.busy; i++)
+      reply('busy ' + i * 5);
+    const installer = project === 'c6_installer';
+    const result = (installer ? board.installerResult : board.rcpResult) || 'done';
+    if (result === 'done') {
+      board.state = 'updater';
+      board.installed = installer ? '-' : RCP_VERSION;
+      reply('done installed=' + board.installed);
+    } else {
+      reply(result);
+    }
+  }
+
+  function takeFrame(bytes) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset);
+    const offset = view.getUint32(2, true);
+    const len = view.getUint16(6, true);
+    const crc = view.getUint32(8 + len, true);
+    const crcOk = (zlib.crc32(bytes.subarray(2, 8 + len)) >>> 0) === crc;
+    if (len === 0) {
+      t.radio.aborts++;
+      load = null;
+      reply('error aborted the sender stopped');
+      return;
+    }
+    t.radio.frames.push({offset, len, crcOk});
+    if (board.lose === 'sending') {
+      lose();
+      return;
+    }
+    if (board.silentFrames || (board.dropAckAt === offset && !dropped.has(offset) && dropped.add(offset)))
+      return;
+    if (board.nakAt === offset && !naked.has(offset)) {
+      naked.add(offset);
+      reply('nak ' + load.expected + ' crc');
+      return;
+    }
+    if (offset === load.expected && crcOk) {
+      load.data.set(bytes.subarray(8, 8 + len), offset);
+      load.expected += len;
+    }
+    reply('ack ' + load.expected);
+    if (load.expected === load.size)
+      finishLoad();
+  }
+
+  function command(text) {
+    t.radio.commands.push(text);
+    if (text === 'radio-fw status') {
+      if (board.lose === 'checking') {
+        lose();
+      } else if (!board.statusSilent) {
+        const state = board.probing-- > 0 ? 'probing' : board.state;
+        reply('status state=' + state + ' installed=' + board.installed + ' base=' + board.base + ' jumper=0');
+      }
+      return;
+    }
+    const m = /^radio-fw load (\d+) ([0-9a-f]{8})$/.exec(text);
+    if (m) {
+      if (board.loadError) {
+        reply('error ' + board.loadError);
+        return;
+      }
+      const size = Number(m[1]);
+      load = {size, crc: parseInt(m[2], 16), data: new Uint8Array(size), expected: 0, buf: new Uint8Array(0)};
+      reply('ready max=1024');
+    }
+  }
+
+  function write(bytes) {
+    if (load) {
+      const buf = new Uint8Array(load.buf.length + bytes.length);
+      buf.set(load.buf);
+      buf.set(bytes, load.buf.length);
+      load.buf = buf;
+      while (load && load.buf.length >= 8) {
+        const len = new DataView(load.buf.buffer).getUint16(6, true);
+        if (load.buf.length < 12 + len)
+          break;
+        const one = load.buf.slice(0, 12 + len);
+        load.buf = load.buf.slice(12 + len);
+        takeFrame(one);
+      }
+      return;
+    }
+    for (const ch of new TextDecoder().decode(bytes)) {
+      if (ch === '\r') {
+        push(line + '\r\n'); /* the console's echo */
+        command(line.trim());
+        line = '';
+      } else {
+        line += ch;
+      }
+    }
+  }
+
+  return {
+    open() {
+      lost = false;
+      queue.length = 0;
+      if (opened++ === 0)
+        push(board.console === undefined ? GOT_IP : board.console);
+      else
+        for (const text of board.afterReconnect || [])
+          push(text + '\r\n');
+    },
+    readable: {
+      getReader: () => ({
+        read() {
+          /* what the board printed before the cable went still arrives */
+          if (queue.length)
+            return Promise.resolve({value: queue.shift(), done: false});
+          if (lost)
+            return Promise.reject(new Error('NetworkError: The device has been lost.'));
+          return new Promise((resolve, reject) => { waiting = {resolve, reject}; });
+        },
+        cancel() {
+          log('console-cancel');
+          if (waiting) {
+            const w = waiting;
+            waiting = null;
+            w.resolve({done: true});
+          }
+          return Promise.resolve();
+        },
+        releaseLock() {},
+      }),
+    },
+    writable: {
+      getWriter: () => ({
+        write(bytes) {
+          if (!lost && board.lose === 'write' && load)
+            lose();
+          if (lost)
+            return Promise.reject(new Error('NetworkError: The device has been lost.'));
+          write(bytes);
+          return Promise.resolve();
+        },
+        releaseLock() {},
+      }),
+    },
+  };
+}
+
 /*
  * options: targets (the published list, null for no targets.json), revision, chipName, mac, noSerial, noEsptool, noMd5,
  * cancelPicker, failConnect, failRevision, failErase, failWrite (Error text, thrown half way through the second part),
  * failDownload (a file name), failDisconnect, console (chunks the board prints after the install, then the stream
  * ends), holdConsole (the board stays silent until the read is cancelled), failConsoleOpen, hangConsoleOpen,
  * hangConsoleClose, baudRecovery (main() uploads the stub a second time, as esptool-js does when the board resets on
- * the baud change), noPostConnect (the chip has no postConnect).
+ * the baud change), noPostConnect (the chip has no postConnect), radio (publish radio.json and the C6 images; an
+ * object overrides radio.json fields, {installer: null} leaves the installer out), installerVersion (of the published
+ * c6_installer.bin), board (the console is a P4 running radio-fw, see makeBoard), addressTimesOut (with board: the
+ * wait for the address runs out).
  */
 function makeFlow(options) {
   const o = Object.assign({targets: TARGETS, revision: 103, chipName: 'ESP32-P4', mac: 'aa:bb:cc:dd:ee:ff'}, options);
@@ -79,6 +301,17 @@ function makeFlow(options) {
       t.port.isOpen = false;
     },
   };
+
+  if (o.board) {
+    const board = makeBoard(o.board, t, log);
+    const open = t.port.open;
+    t.port.readable = board.readable;
+    t.port.writable = board.writable;
+    t.port.open = async (args) => {
+      await open(args);
+      board.open();
+    };
+  }
 
   class Transport {
     constructor(port) { this.port = port; log('transport'); }
@@ -163,6 +396,20 @@ function makeFlow(options) {
       routes[dir + part.path] = {bytes: part.size, file: part.path};
   }
 
+  if (o.radio) {
+    const index = Object.assign({
+      version: 'v9.9.9',
+      rcp: {path: 'c6/c6_rcp.bin', version: RCP_VERSION},
+      installer: {path: 'c6/c6_installer.bin', base_version: o.installerVersion || BASE_VERSION},
+    }, o.radio === true ? {} : o.radio);
+    if (!index.installer)
+      delete index.installer;
+    routes['fw/radio.json'] = {json: index};
+    routes['fw/c6/c6_rcp.bin'] = {data: appImage('c6_rcp', RCP_VERSION, 2100), file: 'c6_rcp.bin'};
+    routes['fw/c6/c6_installer.bin'] = {data: appImage('c6_installer', o.installerVersion || BASE_VERSION, 2500),
+                                        file: 'c6_installer.bin'};
+  }
+
   async function fakeFetch(url) {
     log('fetch:' + url);
     const route = routes[url];
@@ -171,7 +418,7 @@ function makeFlow(options) {
     return {
       ok: true, status: 200,
       json: async () => route.json,
-      arrayBuffer: async () => new ArrayBuffer(route.bytes),
+      arrayBuffer: async () => (route.data ? route.data.slice().buffer : new ArrayBuffer(route.bytes)),
     };
   }
 
@@ -204,6 +451,11 @@ function makeFlow(options) {
       /* the wait for the address: a board with something to say answers before it runs out */
       if ([Flasher.ADDRESS_WAIT_MS, Flasher.CLOSE_WAIT_MS].includes(ms) && (o.console || o.holdConsole))
         await new Promise(() => {});
+      if (ms === Flasher.ADDRESS_WAIT_MS && o.board && !o.addressTimesOut)
+        await new Promise(() => {});
+      /* any other wait of a scripted board runs out only once everything it has queued is read */
+      if (o.board)
+        await new Promise((resolve) => setImmediate(resolve));
     },
     addUnloadListener: (fn) => { listeners.beforeunload = fn; },
   });
@@ -212,9 +464,14 @@ function makeFlow(options) {
     listeners.beforeunload(event);
     return event.prevented;
   };
+  t.untilStage = async (...stages) => {
+    for (let i = 0; i < 10000 && !stages.includes(t.flow.view().stage); i++)
+      await new Promise((resolve) => setImmediate(resolve));
+  };
   t.result = () => ({view: t.flow.view(), events: t.events, portOpen: t.port.isOpen, written: t.written, progress: t.progress,
-                     warned: t.warned, errors: t.errors, viewWhileErasing: t.viewWhileErasing, viewWhilePicking: t.viewWhilePicking});
+                     warned: t.warned, errors: t.errors, viewWhileErasing: t.viewWhileErasing, viewWhilePicking: t.viewWhilePicking,
+                     radio: t.radio || null, state: {radioPlan: t.flow.state.radioPlan, radioPhase: t.flow.state.radioPhase}});
   return t;
 }
 
-module.exports = {Flasher, makeFlow, TARGETS, SEVERAL_BOARDS, BOARD, OTHER_BOARD, V1, V3};
+module.exports = {Flasher, makeFlow, appImage, TARGETS, SEVERAL_BOARDS, BOARD, OTHER_BOARD, V1, V3, RCP_VERSION, BASE_VERSION};

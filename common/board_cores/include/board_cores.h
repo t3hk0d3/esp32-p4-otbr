@@ -15,7 +15,7 @@
 //                  temperature read), which overran a USB dongle's UART.
 //   MGMT_CORE (1)  management: HTTP server (httpd_config_t.core_id, patch 1), thread_rest worker (patch 11),
 //                  device_api workers (pcap_stream, ota_http, radio_fw, rom_recover), C6 log receiver,
-//                  diag sampler, console_repl (main/console.c), the rest of app_main (CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1),
+//                  diag sampler, console_repl (main/console.c) and radio_console (its `radio-fw load` push), the rest of app_main (CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1),
 //                  routing (the BGP and RIPng sockets), the radio channel mux's owner task radio_mux, rcp_proxy (the
 //                  rcp-proxy mode's sockets) and rcp_resolve (its connect targets' name lookups); usbip_net (USB/IP's
 //                  sockets and session engine); br_radio

@@ -149,9 +149,8 @@ Checks beyond the automated tests, and what has not been run on hardware yet. Th
 
 - The USB-UART first install ([First install](first-install.md), Path 3, esptool over H7), and recovery of a truly
   blank C6 (bootloader, partition table and otadata erased).
-- The no-wires first install (Path 1) ran on the board against an ESP-Hosted 0.0.27 stand-in, not yet against an
-  untouched factory C6; nor the case where the installer lands in the slot it must overwrite (a factory C6 updated
-  before) and moves itself first.
+- The case where the no-wires first install (Path 1) lands the installer in the slot it must overwrite (a factory C6
+  updated before) and moves itself first. Path 1 itself ran on an untouched factory C6 (2026-11-13, v0.6.0).
 - The factory C6 through **Install** on the Updates from GitHub card (`c6_installer.bin` from `release.installer_url`,
   then `POST /device/update`): page-tested only. To check: radio only and with an older board firmware; a release
   without `c6_installer.bin`; the installer refused; a lost connection while the installer runs (the page's
@@ -162,6 +161,21 @@ Checks beyond the automated tests, and what has not been run on hardware yet. Th
 - Zigbee mode: built and host-tested; its on-board tests (`p4/pytest/test_zigbee.py`) are written.
 - The CH34x status-packet decoding (`uart_errors`) follows the ch34x driver's own defines
   (`CH34X_UART_STATE_TRANSIENT_MASK`, byte 0) and is not confirmed against a datasheet.
+
+### Radio firmware from the browser flasher
+
+Built and tested on the host (`radio_console` host tests, `tools/tests/test_flash_page.py` against a scripted board),
+never run on a board. To check on the rev3 board with a factory C6 (from the docs preview with a published release, or
+the `radio-fw` commands by hand in a serial terminal):
+
+- Factory C6 end to end from the flasher: installer, the updater answering, then the RCP; `/device/status` afterwards.
+- C6 with the updater: RCP only; the release's RCP already installed (**Install it anyway**).
+- Unplug the cable while sending: `radio-fw load` ends with `error timeout` after 10 s, the C6 unchanged, the console
+  usable again.
+- Unplug the cable while the installer runs: the push finishes; **Reconnect** shows the result.
+- The console after each load: `uart_driver_install` / `uart_driver_delete` on UART0 under the running REPL (the
+  console UART is not reset by the driver); log lines during the transfer don't break it; typing still works after.
+- Transfer time at 115200 baud (about 35 s for `c6_installer.bin`, 25 s for `c6_rcp.bin` expected).
 
 ### Time sync
 
@@ -375,6 +389,9 @@ after every successful `v*` build. Before publishing, `make docs-firmware` unpac
 latest release into `site/firmware/<board_id>/<chip_id>/`, each with a `manifest.json` of parts and offsets from its
 own `flash_args`, and lists what it published with the revision ranges in `site/firmware/targets.json`
 (`tools/flash_manifest.py`). A release from before targets has only `p4-flash.zip`, published as the default target.
+The release's `c6_rcp.bin` and `c6_installer.bin` go to `site/firmware/c6/`, with their versions (from their app
+descriptions) in `site/firmware/radio.json`; the flasher sends them through the `radio-fw` console command
+([Radio firmware over the console](reference/radio-console.md)).
 [Flash in the browser](flash.md) (`docs/overrides/flash.html`, `docs/assets/flasher.js`, on
 [esptool-js](https://github.com/espressif/esptool-js)) reads that index, matches the chip revision against it and
 writes the images itself. Repository settings: Pages, source "GitHub

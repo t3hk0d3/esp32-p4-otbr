@@ -7,5 +7,4 @@
 /** NULL until rcp_sync_set_base_image ran. */
 const rcp_sync_base_image_t *rcp_sync_base_image(void);
 
-/** Version text of the base image, NUL-terminated, trailing whitespace removed; "" without an image. */
-const char *rcp_sync_base_image_version(void);
+// rcp_sync_base_image_version: public, in rcp_sync.h.
