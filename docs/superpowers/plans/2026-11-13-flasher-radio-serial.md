@@ -121,8 +121,10 @@ installer push, 2 min for the RCP.
 - Modify `p4/main/console.c` (register), `p4/main/CMakeLists.txt` (requires), `p4/components/device_api/`
   (new public `device_api_push_error_code`, the code of `device_api_map_push_error`), `p4/components/rcp_sync`
   (`rcp_sync_base_image_version` public), `common/board_cores` (task list), `STYLEGUIDE.md` (prefix list).
-- As built, the command installs the UART0 driver (4 KB RX ring) for the transfer only and deletes it after: the REPL
-  reads UART0 without a driver, whose 128-byte FIFO would overrun under a 1 KB frame.
+- As built (after the PR 61 review): `esp_console_new_repl_uart` already installs the UART0 driver (256-byte RX ring)
+  and linenoise reads through it; the command reads the frames from that driver and flushes its input before `ready`
+  and before returning to the prompt. The page sends frames of at most the `max` in `ready`, takes `received` as the
+  last frame's ack, and counts a lost port from the last frame on as "may be installing" (phase `finishing`).
 - Modify `docs/assets/flasher.js`, `docs/overrides/flash.html`, `docs/assets/flash.css` (fourth step only),
   `tools/tests/flash_page_harness.js`, `tools/tests/test_flash_page.py`.
 - Modify `tools/flash_manifest.py`, `tools/tests/test_flash_manifest.py`, `Makefile` (`docs-firmware`).

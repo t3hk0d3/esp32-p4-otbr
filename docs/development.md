@@ -166,11 +166,14 @@ the `radio-fw` commands by hand in a serial terminal):
 
 - Factory C6 end to end from the flasher: installer, the updater answering, then the RCP; `/device/status` afterwards.
 - C6 with the updater: RCP only; the release's RCP already installed (**Install it anyway**).
+- The cable tests need the board on PoE (or another supply): over USB-C alone, unplugging the cable is a power cut,
+  and during the installer that leaves a C6 for the maintenance jumper or a USB-UART adapter.
 - Unplug the cable while sending: `radio-fw load` ends with `error timeout` after 10 s, the C6 unchanged, the console
   usable again.
-- Unplug the cable while the installer runs: the push finishes; **Reconnect** shows the result.
-- The console after each load: `uart_driver_install` / `uart_driver_delete` on UART0 under the running REPL (the
-  console UART is not reset by the driver); log lines during the transfer don't break it; typing still works after.
+- Unplug the cable right after the last frame and while the installer runs: the push finishes; **Reconnect** shows
+  the result.
+- The console after each load: the frames are read from the REPL's own UART driver (256-byte RX ring); count CRC naks
+  (overruns) in a transfer; log lines during the transfer don't break it; typing still works after.
 - Transfer time at 115200 baud (about 35 s for `c6_installer.bin`, 25 s for `c6_rcp.bin` expected).
 
 ### Time sync

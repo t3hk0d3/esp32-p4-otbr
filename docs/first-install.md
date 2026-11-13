@@ -80,7 +80,8 @@ project. You give the board the files either from [Flash in the browser](flash.m
 it offers `c6_installer.bin`, then `c6_rcp.bin`, both from the same release. Press **Install radio firmware** and keep
 the board powered and connected for about 5 minutes, until the page says **Radio firmware installed**. **Don't power
 off the board meanwhile**: a power cut while the installer writes leaves a C6 that only way B or C can repair. If the
-cable comes out, the board carries on by itself; plug it back in and press **Reconnect**. What the page's other
+board runs on PoE and only the cable comes out, the board carries on by itself; plug it back in and press
+**Reconnect**. Over USB-C alone, the cable is its power. What the page's other
 messages mean: [Flash in the browser](flash.md#the-radio-firmware).
 
 **From the board's web page:**

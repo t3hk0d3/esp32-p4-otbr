@@ -150,6 +150,7 @@
     let search = null; /* {stopped, finish} while waiting for the address */
     let link = null; /* the console port after the install: see openLink */
     let images = {}; /* downloaded radio images by role: {name, data} */
+    let epoch = 0; /* counts restarts: an action that finishes after one is stale */
     let listener = () => {};
     const emit = (patch) => { Object.assign(state, patch); listener(); };
 
@@ -512,8 +513,8 @@
       await findAddress(port);
       if (state.stage !== 'done')
         return; /* started over meanwhile */
-      if (state.radio && link && !link.ended)
-        await checkRadio();
+      if (state.radio)
+        await checkRadio(); /* without a usable port it offers Reconnect */
       else
         await closeLink();
     }
@@ -551,13 +552,14 @@
       if (!images[role]) {
         const entry = state.radio[role];
         const name = entry.path.slice(entry.path.lastIndexOf('/') + 1);
-        let response;
+        let data;
         try {
-          response = await getOk(name, deps.base + entry.path);
+          const response = await getOk(name, deps.base + entry.path);
+          data = new Uint8Array(await response.arrayBuffer());
         } catch (e) {
           throw radioError('download_failed', 'The file ' + name + ' could not be fetched. Check your connection.');
         }
-        images[role] = {role, name, data: new Uint8Array(await response.arrayBuffer())};
+        images[role] = {role, name, data};
       }
       return images[role];
     }
@@ -580,6 +582,7 @@
     async function checkRadio() {
       if (!link || link.ended) {
         emit({stage: 'radio_port_lost', radioPhase: 'checking'});
+        await closeLink();
         return;
       }
       emit({stage: 'radio_checking', radioPhase: 'checking', radioCode: '', radioDetail: ''});
@@ -643,29 +646,39 @@
         throw radioError('no_answer', 'The board did not answer radio-fw load.');
       if (reply.kind === 'error')
         throw radioError(reply.words[0], reply.words.slice(1).join(' '));
+      const chunk = Math.min(RADIO_CHUNK, Number(reply.fields.max) || RADIO_CHUNK);
       let offset = 0;
       let tries = 0;
+      let received = false;
       while (offset < data.length) {
         if (tries >= FRAME_TRIES) {
           await send(l, frame(offset, new Uint8Array(0))).catch(() => {});
           throw radioError('transfer_failed', 'The board did not take the image at byte ' + offset + '.');
         }
         tries++;
-        await send(l, frame(offset, data.subarray(offset, offset + RADIO_CHUNK)));
-        reply = await nextReply(l, ['ack', 'nak', 'error'], ACK_WAIT_MS);
+        if (offset + chunk >= data.length)
+          emit({radioPhase: 'finishing'}); /* once the board has the last frame it may start installing */
+        await send(l, frame(offset, data.subarray(offset, offset + chunk)));
+        /* `received` stands for the last frame's ack when that ack is lost */
+        reply = await nextReply(l, ['ack', 'nak', 'error', 'received'], ACK_WAIT_MS);
         if (reply === LOST)
           throw radioLost();
         if (reply === TIMEOUT)
           continue;
         if (reply.kind === 'error')
           throw radioError(reply.words[0], reply.words.slice(1).join(' '));
+        if (reply.kind === 'received') {
+          received = true;
+          break;
+        }
         const next = Number(reply.words[0]);
         if (reply.kind === 'ack' && next > offset)
           tries = 0;
         offset = next;
         emit({radioPercent: Math.floor(100 * offset / data.length)});
       }
-      reply = await nextReply(l, ['received', 'error'], REPLY_WAIT_MS);
+      if (!received)
+        reply = await nextReply(l, ['received', 'error'], REPLY_WAIT_MS);
       if (reply === LOST)
         throw radioLost();
       if (reply === TIMEOUT)
@@ -712,7 +725,7 @@
         emit({stage: 'radio_port_lost'});
         return;
       }
-      if (state.radioPhase !== 'installing') {
+      if (state.radioPhase !== 'installing' && state.radioPhase !== 'finishing') {
         await checkRadio();
         return;
       }
@@ -799,6 +812,7 @@
           search.stopped = true;
           search.finish('');
         }
+        epoch++;
         await closeLink();
         await resetAndRelease();
         images = {};
@@ -809,11 +823,14 @@
       installRadio,
       reconnectRadio,
       async installAnyway() {
+        const started = epoch;
         try {
           await radioImage('rcp');
-          emit({stage: 'radio_ready', radioPlan: ['rcp']});
+          if (started === epoch)
+            emit({stage: 'radio_ready', radioPlan: ['rcp']});
         } catch (e) {
-          await radioFailed(e);
+          if (started === epoch)
+            await radioFailed(e);
         }
       },
     };
@@ -895,6 +912,7 @@
       radioInstallerFailed: state.radioCode === 'install_failed' && state.radioFile === 'c6_installer.bin',
       lostWhileChecking: state.radioPhase === 'checking' || state.radioPhase === '',
       lostWhileSending: state.radioPhase === 'sending',
+      lostWhileFinishing: state.radioPhase === 'finishing',
       lostWhileInstalling: state.radioPhase === 'installing',
       /* the live board */
       revLabel: known ? revisionLabel(state.revision) : '',

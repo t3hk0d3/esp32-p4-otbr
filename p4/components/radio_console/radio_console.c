@@ -26,7 +26,6 @@
 static const char *TAG = "radio_console";
 
 #define CONSOLE_UART    CONFIG_ESP_CONSOLE_UART_NUM
-#define RX_BUFFER       4096   /* holds several whole frames: one is in flight at a time */
 #define READ_CHUNK      256
 #define READ_WAIT_MS    50
 #define IDLE_LIMIT_MS   10000  /* no frame for this long ends the load */
@@ -271,21 +270,14 @@ static int cmd_load(int argc, char **argv)
         reply_error("no_memory", "no buffer for the image");
         return 1;
     }
-    // The REPL reads UART0 without a driver; the driver's ring buffer holds a whole frame while this task is busy.
-    // The REPL task runs this handler, so nothing else reads the UART meanwhile.
-    esp_err_t err = uart_driver_install(CONSOLE_UART, RX_BUFFER, 0, 0, NULL, 0);
-    if (err != ESP_OK) {
-        free(image);
-        free(r);
-        reply_error("push_failed", "cannot take the console UART");
-        return 1;
-    }
+    // esp_console_new_repl_uart installed the UART driver (256-byte RX ring) and linenoise reads through it. The REPL
+    // task runs this handler, so nothing else reads the UART meanwhile: the frames are read from that same driver. The
+    // loop drains it continuously; an overrun while this task is preempted only costs a CRC nak and a resend.
     uart_flush_input(CONSOLE_UART);
     reply("ready", "max=1024");
     r->image = image;
     r->size = size;
     const receive_end_t end = receive(r);
-    uart_driver_delete(CONSOLE_UART);
     free(r);
 
     int result = 1;
@@ -303,6 +295,8 @@ static int cmd_load(int argc, char **argv)
         result = push_image(image, size);
     }
     free(image);
+    // Bytes the sender sent after the last frame was taken (a resend whose ack it missed) must not reach the line editor.
+    uart_flush_input(CONSOLE_UART);
     return result;
 }
 

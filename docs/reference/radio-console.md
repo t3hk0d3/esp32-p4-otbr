@@ -66,6 +66,10 @@ Each frame gets `@radio-fw ack <next offset>` or `@radio-fw nak <expected offset
 - The board takes a frame only at the offset it expects. A frame before it (a repeat after a lost ack) is acked again
   without being written; a frame after it, or past the image, gets `nak … offset`.
 - Bytes before a magic are skipped. A frame that stalls for 500 ms between two bytes is dropped (`nak … timeout`).
+- Frames are at most the `max` of the `ready` line long.
+- If the last frame's `ack` is lost, `received` (below) stands for it; a host must not send that frame again, since the
+  board has left the frame reader and those bytes would reach the console's line editor (it flushes them, but a host
+  should not rely on that).
 - The host sends from the offset of the last `ack` or `nak`. With no reply in 2 s it sends the same frame again; the
   browser flasher gives up after 5 sends of one frame and sends an abort frame.
 - There is no resume across commands: a new `load` starts at offset 0.
@@ -86,8 +90,9 @@ end is one line:
   `c6_busy`, `busy`, `restart_failed`, `push_failed`, …) with the push's text, e.g.
   `invalid_image wrong c6_installer.bin: base-11111111, need base-22222222`.
 
-A push that has started does not depend on the port: the image is in the P4's memory. If the cable goes, the push runs
-to its end; reconnect and read the `busy` lines and the result, or ask `radio-fw status`.
+A push that has started does not depend on the port: the image is in the P4's memory. If the cable goes while the board
+still has power (PoE), the push runs to its end; reconnect and read the `busy` lines and the result, or ask
+`radio-fw status`. From the last frame on, a host that loses the port can't tell whether the push started.
 
 ## Order for a factory C6
 

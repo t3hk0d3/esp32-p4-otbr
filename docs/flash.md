@@ -50,7 +50,9 @@ When it can't:
   C6 may still run its factory firmware or may already have taken the installer: wait a minute without powering off,
   then press **Check the radio**. The codes are those of the Firmware page (see [First install](first-install.md#a-no-wires)).
 - **The serial port is gone** (cable pulled, computer asleep): while the page was sending, the C6 was not changed; the
-  board drops a file it didn't get whole. After the page had sent the file, the board carries on by itself: don't power
-  it off. Plug the cable back in and press **Reconnect**; the page then shows how the install ended.
+  board drops a file it didn't get whole. Once the page has sent the last part of the file, the board may already be
+  installing, and it carries on by itself as long as it has power. Plug the cable back in and press **Reconnect**; the
+  page then shows how the install ended. If the board runs on this cable alone (no PoE), pulling it is a power cut:
+  keep the cable in while the radio firmware installs.
 
 How the page talks to the board: [Radio firmware over the console](reference/radio-console.md).
