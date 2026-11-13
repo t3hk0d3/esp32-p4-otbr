@@ -169,7 +169,7 @@ class TestRunAll:
 
         board_facts = [n for n in results if n.startswith("board fact")]
         assert len(board_facts) == len(F) + 2
-        assert len(results) - len(board_facts) == 19
+        assert len(results) - len(board_facts) == 18
 
 
 class TestOpeningSizeOpenCurtain:
@@ -280,16 +280,6 @@ class TestMinPrintWidthBump:
         assert r.ok, r.detail
 
 
-@pytest.fixture(scope="module")
-def results_inside(board, base_inside, lid_inside, lid_inside_open):
-    return {
-        r.name: r
-        for r in checks.run_all(
-            board, base_inside, lid_inside, lid_inside_open, ears="inside"
-        )
-    }
-
-
 class TestOpeningPathsCurtain:
     """checks.opening_paths: On the default parts"""
 
@@ -311,53 +301,3 @@ class TestOpeningSizeCurtain:
         r = results["no opening wider than 3.5 mm"]
         assert r.ok, r.detail
         assert "10.0 mm when broken out" in r.detail
-
-
-class TestEarScrews:
-    """checks.ear_screws"""
-
-    def test_passes_on_the_default_outside_ears(self, results):
-        r = results["screw ears line up"]
-        assert r.ok, r.detail
-        assert "2.4 mm" in r.detail
-
-    def test_passes_on_the_inside_ears(self, results_inside):
-        r = results_inside["screw ears line up"]
-        assert r.ok, r.detail
-        assert "4.6 mm" in r.detail
-
-    def test_fails_naming_the_side_when_an_ear_is_shifted_1_mm(self, base, lid):
-        shifted = (lid & box(-20, 27.5, -20, 90, -20, 40)) + Pos(0, 1.0, 0) * (
-            lid & box(27.5, 80, -20, 90, -20, 40)
-        )
-        r = checks.ear_screws(base, shifted)
-        assert not r.ok
-        assert "right" in r.detail
-
-
-class TestRunAllInside:
-    """checks.run_all: For the inside-ear option"""
-
-    def test_runs_every_check_and_all_pass(self, results_inside):
-        failed = {n: r.detail for n, r in results_inside.items() if not r.ok}
-        assert not failed
-        assert "screw ears line up" in results_inside
-
-
-@pytest.fixture(scope="module")
-def results_none(board, base_none, lid_none, lid_none_open):
-    return {
-        r.name: r
-        for r in checks.run_all(board, base_none, lid_none, lid_none_open, ears="none")
-    }
-
-
-class TestRunAllNoEars:
-    """checks.run_all: For the no-ear option"""
-
-    def test_runs_every_check_and_all_pass(self, results_none):
-        failed = {n: r.detail for n, r in results_none.items() if not r.ok}
-        assert not failed
-
-    def test_reports_that_only_the_snaps_hold_the_lid(self, results_none):
-        assert "no screw ears" in results_none["screw ears line up"].detail

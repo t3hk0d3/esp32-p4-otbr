@@ -360,102 +360,6 @@ def _wall(side):
     return (P.OUTER[0], 1) if side < 0 else (P.OUTER[1], -1)
 
 
-class TestOutsideEarPockets:
-    """base.build_base: On default parameters (outside ears)"""
-
-    def test_defaults_to_outside_ears(self):
-        assert P.EAR_STYLE == "outside"
-
-    def test_drops_each_side_wall_top_to_the_lid_underside_over_the_ear(self, base):
-        half = P.EAR_W / 2 + P.EAR_GAP
-        for side in (-1, 1):
-            face, inward = _wall(side)
-            for u in (2.0, 3.7):  # behind the pocket, across the rest of the wall
-                x = face + inward * u
-                assert not solid(base, x, P.EAR_Y, P.LID_UNDERSIDE + 0.1)
-                assert not solid(base, x, P.EAR_Y + half - 0.1, P.LID_UNDERSIDE + 0.1)
-                assert solid(base, x, P.EAR_Y, P.LID_UNDERSIDE - 0.1)
-            assert solid(base, face + inward * 2.0, P.EAR_Y + half + 0.1, P.TOP - 0.1)
-
-    def test_cuts_a_1_6_mm_u_pocket_into_each_outer_face(self, base):
-        r = P.EAR_W / 2 + P.EAR_GAP
-        zc = P.EAR_SCREW_Z
-        assert P.EAR_T == pytest.approx(1.6)
-        for side in (-1, 1):
-            face, inward = _wall(side)
-            x_in = face + inward * (P.EAR_T - 0.1)
-            x_past = face + inward * (P.EAR_T + 0.1)
-            assert not solid(base, x_in, P.EAR_Y + r - 0.1, zc + 2.0)  # straight sides
-            assert solid(base, x_in, P.EAR_Y + r + 0.1, zc + 2.0)
-            assert not solid(base, x_in, P.EAR_Y, zc - r + 0.1)  # half-circle bottom
-            assert solid(base, x_in, P.EAR_Y, zc - r - 0.1)
-            assert solid(base, x_in, P.EAR_Y + r * 0.8, zc - r * 0.8)  # round corners
-            assert solid(base, x_past, P.EAR_Y + 3.0, zc + 2.0)  # only EAR_T deep
-
-    def test_drills_a_2_2_pilot_through_the_wall_behind_each_pocket(self, base):
-        zc = P.EAR_SCREW_Z
-        r = P.EAR_PILOT_D / 2
-        assert P.EAR_PILOT_D == pytest.approx(2.2)
-        for side in (-1, 1):
-            face, inward = _wall(side)
-            for u in (P.EAR_T + 0.2, 3.0, 3.8):
-                x = face + inward * u
-                assert not solid(base, x, P.EAR_Y, zc)
-                assert solid(base, x, P.EAR_Y + r + 0.2, zc)
-
-
-class TestInsideEarWallHoles:
-    """base.build_base: With ears inside"""
-
-    def test_drills_a_3_0_clearance_hole_through_each_side_wall(self, base_inside):
-        zc, r = P.IN_EAR_SCREW_Z, P.IN_EAR_CLEAR_D / 2
-        for side in (-1, 1):
-            face, inward = _wall(side)
-            for u in (1.5, 2.5, 3.8):
-                x = face + inward * u
-                assert not solid(base_inside, x, P.EAR_Y, zc)
-                assert not solid(base_inside, x, P.EAR_Y + r - 0.1, zc)
-                assert solid(base_inside, x, P.EAR_Y + r + 0.2, zc)
-
-    def test_countersinks_each_hole_to_5_0_at_the_outer_face(self, base_inside):
-        zc, r = P.IN_EAR_SCREW_Z, P.IN_EAR_CSK_D / 2
-        for side in (-1, 1):
-            face, inward = _wall(side)
-            assert not solid(base_inside, face + inward * 0.1, P.EAR_Y + r - 0.3, zc)
-            assert solid(base_inside, face + inward * 1.2, P.EAR_Y + r - 0.3, zc)
-
-    def test_has_no_wall_top_cut_and_no_pocket(self, base_inside):
-        for side in (-1, 1):
-            face, inward = _wall(side)
-            assert solid(base_inside, face + inward * 1.5, P.EAR_Y, P.TOP - 0.1)
-            assert solid(base_inside, face + inward * 0.5, P.EAR_Y, P.EAR_SCREW_Z - 4.0)
-
-    def test_is_otherwise_the_default_base(self, base, base_inside):
-        for x, y, z in ((27.5, 71.5, 21.0), (45.0, -1.5, 12.0), (-2.5, 50.0, 28.0)):
-            assert solid(base, x, y, z) == solid(base_inside, x, y, z)
-
-
-class TestNoEars:
-    """base.build_base: With no ears (snaps only)"""
-
-    def test_has_no_wall_top_cut_no_pocket_and_no_hole(self, base_none):
-        for side in (-1, 1):
-            face, inward = _wall(side)
-            assert solid(base_none, face + inward * 1.5, P.EAR_Y, P.TOP - 0.1)
-            assert solid(base_none, face + inward * 0.5, P.EAR_Y, P.EAR_SCREW_Z)
-            assert solid(base_none, face + inward * 2.5, P.EAR_Y, P.IN_EAR_SCREW_Z)
-
-    def test_is_otherwise_the_default_base(self, base, base_none):
-        for x, y, z in ((27.5, 72.0, 15.0), (45.0, -1.5, 12.0), (-2.5, 50.0, 28.0)):
-            assert solid(base, x, y, z) == solid(base_none, x, y, z)
-
-    def test_rejects_an_unknown_option(self):
-        from p4_case.base import build_base
-
-        with pytest.raises(ValueError, match="ears"):
-            build_base(ears="sideways")
-
-
 class TestTopBevel:
     """base.build_base: The outer top edge"""
 
@@ -471,3 +375,44 @@ class TestTopBevel:
         ):
             assert not solid(base, x, y, P.TOP - 0.05), (x, y)  # bevelled
             assert solid(base, x, y, P.TOP - c - 0.1), (x, y)  # full below it
+
+
+class TestTeeth:
+    """base.build_base: The notches that take the lid's teeth"""
+
+    def test_cuts_two_notches_in_each_side_wall_top_above_the_snap_tabs(self, base):
+        from p4_case.base import tab_y_centres
+
+        half = P.TOOTH_LEN / 2 + P.TOOTH_GAP
+        floor = P.TOP - P.TOOTH_DEPTH - P.TOOTH_GAP
+        assert (P.TOOTH_LEN, P.TOOTH_DEPTH, P.TOOTH_GAP) == pytest.approx(
+            (6.0, 2.0, 0.2)
+        )
+        for yc in tab_y_centres():
+            for side in (-1, 1):
+                face, inward = _wall(side)
+                for u in (0.3, 2.0, 3.7):  # the full wall thickness
+                    x = face + inward * u
+                    assert not solid(base, x, yc, floor + 0.1)
+                    assert solid(base, x, yc, floor - 0.1)
+                    assert not solid(base, x, yc + half - 0.1, P.TOP - 0.3)
+                    if u < 3.0:  # the inner 1 mm is the lid's rebate anyway
+                        assert solid(base, x, yc + half + 0.3, P.TOP - 0.5)
+
+    def test_gives_each_notch_45_degree_lower_corners(self, base):
+        from p4_case.base import tab_y_centres
+
+        half = P.TOOTH_LEN / 2 + P.TOOTH_GAP
+        floor = P.TOP - P.TOOTH_DEPTH - P.TOOTH_GAP
+        x = P.OUTER[0] + 2.0
+        yc = tab_y_centres()[0]
+        # 0.2 up from the floor and 0.1 in from the end: inside the 45° corner, so still wall
+        assert solid(base, x, yc + half - 0.1, floor + 0.2)
+        assert not solid(base, x, yc + half - 0.1, floor + P.TOOTH_LEAD + 0.1)
+
+    def test_has_no_other_cut_in_the_side_walls(self, base):
+        for side in (-1, 1):
+            face, inward = _wall(side)
+            for y in (20.0, 32.0, 45.0):
+                assert solid(base, face + inward * 2.0, y, P.TOP - 0.5)
+                assert solid(base, face + inward * 0.5, y, 22.0)

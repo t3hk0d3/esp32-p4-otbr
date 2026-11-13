@@ -204,57 +204,6 @@ class TestLidV6Thickness:
         assert P.TOP - P.LID_UNDERSIDE == pytest.approx(3.0)
 
 
-class TestLidOutsideEars:
-    """lid.build_lid: On default parameters (outside ears)"""
-
-    def test_fills_each_wall_top_cut_flush_with_the_outer_face(self, lid):
-        half = P.EAR_W / 2
-        for side in (-1, 1):
-            face, inward = _wall(side)
-            assert solid(lid, face + inward * 0.2, P.EAR_Y, P.TOP - 0.5)
-            assert solid(lid, face + inward * 2.0, P.EAR_Y, P.LID_UNDERSIDE + 0.2)
-            assert solid(lid, face + inward * 2.0, P.EAR_Y + half - 0.1, P.TOP - 0.5)
-            # 0.2 mm clear of the cut's ends
-            assert not solid(
-                lid, face + inward * 2.0, P.EAR_Y + half + 0.1, P.TOP - 0.5
-            )
-
-    def test_hangs_a_1_6_mm_u_shaped_ear_flush_with_each_outer_face(self, lid):
-        r = P.EAR_W / 2
-        zc = P.EAR_SCREW_Z
-        for side in (-1, 1):
-            face, inward = _wall(side)
-            x = face + inward * 0.8
-            assert solid(lid, x, P.EAR_Y + 3.5, zc + 1.0)
-            assert not solid(
-                lid, face + inward * (P.EAR_T + 0.1), P.EAR_Y + 3.5, zc + 1.0
-            )
-            assert solid(lid, x, P.EAR_Y, zc - r + 0.2)  # half-circle bottom, R5
-            assert not solid(lid, x, P.EAR_Y, zc - r - 0.2)
-            assert not solid(lid, x, P.EAR_Y + r * 0.8, zc - r * 0.8)  # round
-            assert not solid(lid, x, P.EAR_Y + r + 0.1, zc + 1.0)
-
-    def test_gives_each_ear_a_2_9_hole_and_a_90_degree_countersink_to_5_0(self, lid):
-        zc = P.EAR_SCREW_Z
-        assert (P.EAR_CLEAR_D, P.EAR_CSK_D) == pytest.approx((2.9, 5.0))
-        for side in (-1, 1):
-            face, inward = _wall(side)
-            x = face + inward * 1.4  # past the countersink
-            assert not solid(lid, x, P.EAR_Y + P.EAR_CLEAR_D / 2 - 0.15, zc)
-            assert solid(lid, x, P.EAR_Y + P.EAR_CLEAR_D / 2 + 0.2, zc)
-            assert not solid(
-                lid, face + inward * 0.1, P.EAR_Y + P.EAR_CSK_D / 2 - 0.2, zc
-            )
-
-    def test_puts_the_ear_hole_on_the_wall_pilots_axis(self, base, lid):
-        for side in (-1, 1):
-            face, inward = _wall(side)
-            for u in (0.5, 1.2, 2.5, 3.5):
-                x = face + inward * u
-                assert not solid(lid, x, P.EAR_Y, P.EAR_SCREW_Z)
-                assert not solid(base, x, P.EAR_Y, P.EAR_SCREW_Z)
-
-
 class TestLidCurtain:
     """lid.build_lid: On default parameters (curtain on)"""
 
@@ -310,125 +259,13 @@ class TestLidCurtainBrokenOut:
         assert solid(lid_open, 27.5, SLOT_MID, P.LID_UNDERSIDE + 0.2)
 
     def test_is_otherwise_the_default_lid(self, lid, lid_open):
+        from p4_case.base import tab_y_centres
+
         for x, y, z in (
-            (P.OUTER[0] + 0.8, P.EAR_Y + 3.5, P.EAR_SCREW_Z + 1),
+            (P.OUTER[0] + 2.0, tab_y_centres()[0], P.TOP - 1.0),  # a tooth
             (1.0, 50.0, 27.0),
         ):
             assert solid(lid, x, y, z) == solid(lid_open, x, y, z)
-
-
-class TestLidInsideEars:
-    """lid.build_lid: With ears inside"""
-
-    EX = P.INNER[0] + P.TAB_CLEAR  # the left block's wall-facing face
-
-    def test_hangs_a_12_by_5_block_0_2_off_each_wall_down_to_18_5(self, lid_inside):
-        half = P.IN_EAR_LEN / 2
-        assert (P.IN_EAR_LEN, P.IN_EAR_T, P.IN_EAR_BOTTOM) == pytest.approx(
-            (12.0, 5.0, 18.5)
-        )
-        for side in (-1, 1):
-            face = P.INNER[0] if side < 0 else P.INNER[1]
-            inward = -side
-            x = face + inward * (P.TAB_CLEAR + 2.5)
-            assert solid(lid_inside, x, P.EAR_Y, 20.0)
-            assert solid(lid_inside, x, P.EAR_Y + half - 0.2, 20.0)
-            assert not solid(lid_inside, x, P.EAR_Y + half + 0.2, 20.0)
-            assert solid(lid_inside, x, P.EAR_Y + 3.0, P.IN_EAR_BOTTOM + 0.1)
-            assert not solid(lid_inside, x, P.EAR_Y + 3.0, P.IN_EAR_BOTTOM - 0.1)
-            assert not solid(lid_inside, face + inward * 0.1, P.EAR_Y + 3.0, 20.0)
-            assert solid(lid_inside, face + inward * 0.3, P.EAR_Y + 3.0, 20.0)
-
-    def test_buttresses_each_block_at_45_degrees_up_to_the_underside(self, lid_inside):
-        for side in (-1, 1):
-            face = P.INNER[0] if side < 0 else P.INNER[1]
-            inward = -side
-            back = face + inward * (P.TAB_CLEAR + P.IN_EAR_T)
-            rise = 22.0 - P.IN_EAR_BOTTOM  # 3.5 up, so 3.5 in
-            assert solid(lid_inside, back + inward * (rise - 0.3), P.EAR_Y + 3.0, 22.0)
-            assert not solid(
-                lid_inside, back + inward * (rise + 0.3), P.EAR_Y + 3.0, 22.0
-            )
-
-    def test_has_3_mm_45_degree_gussets_at_both_ends(self, lid_inside):
-        half, g = P.IN_EAR_LEN / 2, P.IN_EAR_GUSSET
-        assert g == pytest.approx(3.0)
-        x = self.EX + 2.5
-        for out in (-1, 1):
-            y = P.EAR_Y + out * (half + g / 2)
-            assert solid(lid_inside, x, y, P.LID_UNDERSIDE - g / 2 + 0.2)
-            assert not solid(lid_inside, x, y, P.LID_UNDERSIDE - g / 2 - 0.2)
-
-    def test_drills_a_2_4_blind_pilot_on_the_wall_holes_axis(
-        self, base_inside, lid_inside
-    ):
-        zc, r = P.IN_EAR_SCREW_Z, P.IN_EAR_PILOT_D / 2
-        stop = P.TAB_CLEAR + P.IN_EAR_T - P.IN_EAR_PILOT_STOP
-        for side in (-1, 1):
-            face = P.INNER[0] if side < 0 else P.INNER[1]
-            inward = -side
-            for u in (P.TAB_CLEAR + 0.3, stop - 0.2):
-                assert not solid(lid_inside, face + inward * u, P.EAR_Y, zc)
-                assert solid(lid_inside, face + inward * u, P.EAR_Y + r + 0.2, zc)
-            assert solid(lid_inside, face + inward * (stop + 0.2), P.EAR_Y, zc)  # blind
-            assert not solid(base_inside, face - inward * 1.0, P.EAR_Y, zc)  # wall hole
-
-    def test_leaves_out_every_grille_cell_over_a_block(self, lid_inside):
-        from p4_case.lid import CELL_R, cell_centres
-
-        half = P.IN_EAR_LEN / 2 + P.IN_EAR_GUSSET
-        reach = P.TAB_CLEAR + P.IN_EAR_T + (P.LID_UNDERSIDE - P.IN_EAR_BOTTOM)
-        for cx, cy in cell_centres(ears="inside"):
-            near_y = abs(cy - P.EAR_Y) < half + CELL_R
-            near_x = (
-                cx < P.INNER[0] + reach + CELL_R or cx > P.INNER[1] - reach - CELL_R
-            )
-            assert not (near_y and near_x), (cx, cy)
-        assert solid(lid_inside, self.EX + P.IN_EAR_T + 2.0, P.EAR_Y, P.TOP - 0.1)
-
-    def test_has_no_wall_top_fill_and_no_outside_ear(self, lid_inside):
-        face, inward = _wall(-1)
-        assert not solid(lid_inside, face + inward * 0.3, P.EAR_Y, P.TOP - 0.5)
-        assert not solid(lid_inside, face + inward * 0.8, P.EAR_Y + 3.5, P.EAR_SCREW_Z)
-
-
-class TestLidInsideOnBase:
-    """lid.build_lid: With ears inside, fitted on the inside-ear base"""
-
-    def test_does_not_overlap_the_base(self, base_inside, lid_inside):
-        from p4_case.checks import lid_seats
-
-        r = lid_seats(base_inside, lid_inside)
-        assert r.ok, r.detail
-
-
-class TestLidNoEars:
-    """lid.build_lid: With no ears (snaps only)"""
-
-    def test_has_neither_ear_nor_wall_top_fill(self, lid_none):
-        face, inward = _wall(-1)
-        assert not solid(lid_none, face + inward * 0.3, P.EAR_Y, P.TOP - 0.5)
-        assert not solid(lid_none, face + inward * 0.8, P.EAR_Y + 3.5, P.EAR_SCREW_Z)
-        assert not solid(lid_none, P.INNER[0] + 2.5, P.EAR_Y, 20.0)  # no inside block
-
-    def test_keeps_the_corner_tabs_bumps_and_curtain(self, lid, lid_none):
-        segment = segment_centres()[0][0]
-        for x, y, z in (
-            (TAB_X[-1] + 0.6, TAB_Y0 + 3.5, P.LID_UNDERSIDE - 1.0),
-            (segment, SLOT_MID, (FLOOR + P.LID_UNDERSIDE) / 2),
-        ):
-            assert solid(lid, x, y, z) and solid(lid_none, x, y, z)
-
-    def test_keeps_the_default_grille(self):
-        from p4_case.lid import cell_centres
-
-        assert cell_centres(ears="none") == cell_centres()
-
-    def test_fits_the_no_ear_base(self, base_none, lid_none):
-        from p4_case.checks import lid_seats
-
-        r = lid_seats(base_none, lid_none)
-        assert r.ok, r.detail
 
 
 class TestLidTopBevel:
@@ -437,7 +274,7 @@ class TestLidTopBevel:
     def test_continues_the_cases_top_bevel(self, lid):
         c = P.OUTER_TOP_CHAMFER
         for x, y in (
-            (P.OUTER[0] + 0.1, P.EAR_Y),  # outside ear's fill
+            (P.OUTER[0] + 0.1, 4.7),  # a tooth
             (12.0, P.OUTER[2] + 0.1),  # cable-end lintel
             (27.5, P.OUTER[3] - 0.1),  # 40-pin fill
         ):
@@ -468,3 +305,39 @@ class TestLidHeaderCorners:
         from p4_case.checks import lid_seats
 
         assert lid_seats(base, lid).ok
+
+
+class TestLidTeeth:
+    """lid.build_lid: The keying teeth"""
+
+    def test_has_two_teeth_over_each_side_wall_above_the_snap_tabs(self, lid):
+        from p4_case.base import tab_y_centres
+
+        half = P.TOOTH_LEN / 2
+        bottom = P.TOP - P.TOOTH_DEPTH
+        for yc in tab_y_centres():
+            for side in (-1, 1):
+                face, inward = _wall(side)
+                for u in (0.4, 2.0, 3.7):  # flush with the outer face, across the wall
+                    x = face + inward * u
+                    assert solid(lid, x, yc, bottom + 0.1)
+                    assert not solid(lid, x, yc, bottom - 0.1)
+                    assert solid(lid, x, yc + half - 0.1, P.TOP - 0.3)
+                    if u < 3.0:  # the inner 1 mm is the lid's flange anyway
+                        assert not solid(lid, x, yc + half + 0.1, P.TOP - 0.3)
+
+    def test_gives_each_tooth_a_45_degree_lead_in(self, lid):
+        from p4_case.base import tab_y_centres
+
+        half = P.TOOTH_LEN / 2
+        bottom = P.TOP - P.TOOTH_DEPTH
+        x = P.OUTER[0] + 2.0
+        yc = tab_y_centres()[0]
+        assert P.TOOTH_LEAD == pytest.approx(0.5)
+        assert not solid(lid, x, yc + half - 0.1, bottom + 0.1)  # corner cut away
+        assert solid(lid, x, yc + half - 0.1, bottom + P.TOOTH_LEAD + 0.1)
+
+    def test_has_no_screw_ears(self, lid):
+        face, inward = _wall(-1)
+        assert not solid(lid, face + inward * 0.8, 32.0, 22.3)
+        assert not solid(lid, P.INNER[0] + 2.5, 32.0, 20.0)

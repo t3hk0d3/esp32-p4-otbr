@@ -3,15 +3,8 @@
 A two-part FDM case for the Waveshare ESP32-P4-WIFI6-POE-ETH board:
 
 - **Base:** one part with all four walls.
-- **Lid:** a 3 mm honeycomb grille that clicks onto four corner tabs and, optionally, is held by two side screws.
-
-The lid comes in three options, all built by `make case`, until a test print shows which one to keep:
-
-- **Outside ears (default):** a U-shaped ear on each side of the lid sits flush in a pocket in the wall's outer face.
-  The screw goes through the ear and threads into the wall (about 2.4 mm of thread).
-- **Inside ears:** a buttressed block hangs from the lid inside each side wall. The screw goes through the wall and
-  threads into the block (about 4.6 mm of thread, but along the lid's printed layers).
-- **No ears:** no screws; the corner tabs' snap bumps alone hold the lid, as in the earlier prints.
+- **Lid:** a 3 mm honeycomb grille that clicks onto four corner tabs. Four teeth on its edge, one above each tab, drop
+  into notches in the side walls' tops and key it in place; no screws.
 
 It hangs on a wall from two screws, cable end down or SMA side up, or it lies on a table. Everything you need day to day
 is reachable with the lid on: the USB-C, USB-A and RJ45 (PoE) ports, the microSD slot, BOOT and RESET (with a pencil),
@@ -29,7 +22,7 @@ an SMA antenna, and wiring on the 40-pin header.
 
 `make case` renders all of these into `dist/case/`.
 
-Ready-to-print STLs of the current design (outside ears) are in the repository: [base](models/p4_case_base.stl) and
+Ready-to-print STLs of the current design are in the repository: [base](models/p4_case_base.stl) and
 [lid](models/p4_case_lid.stl). On GitHub, opening either one shows an interactive 3D view.
 
 The model is parametric Python (build123d) in `case/`. Its design is
@@ -40,7 +33,7 @@ The model is parametric Python (build123d) in `case/`. Its design is
 ```
 make case-board   # once: download and verify the vendor 3D model of the board (.artifacts/board/)
 make case         # write dist/case/, run the fit checks, refresh docs/models/
-make case-test    # the model's tests (about 8 min)
+make case-test    # the model's tests (about 4 min)
 ```
 
 `dist/case/` then holds:
@@ -50,20 +43,18 @@ make case-test    # the model's tests (about 8 min)
 | `p4_case_base.stl` | print: back plate down |
 | `p4_case_lid.stl` | print: top face down (the file is already flipped) |
 | `p4_case_base.step`, `p4_case_lid.step` | CAD, as assembled (Z 0 at the outer back face) |
-| `p4_case_*_inside-ears.{stl,step}`, `p4_case_*_no-ears.{stl,step}` | the same for the other two options |
-| `preview_*.png` | front, back, both ends, button side, exploded (default option) |
+| `preview_*.png` | front, back, both ends, button side, exploded |
 
 `make case` also copies the two STLs to `docs/models/`, which is committed; a test fails when they no longer match a
 fresh build, so commit them with every geometry change.
 
-`make case` runs every check for all three lid options, prints one line per check and fails if any check fails. The
+`make case` prints one line per check and fails if any check fails. The
 checks are:
 
 - the board facts still match the vendor model;
 - clearance to the board is at least 0.3 mm;
 - every opening has a clear path to its part; the 40-pin slot is closed by the lid's curtain and clear once it's
   broken out;
-- each screw ear's hole lines up with its pilot, and the pilot is long enough;
 - the board can be fitted (drop in, slide forward, settle);
 - the lid clears the SMA, a ribbon plug and its ribbon, and a ribbon plug has headroom under the lid;
 - the screw heads have room behind the keyholes, and the board screws' heads have room on top;
@@ -87,7 +78,7 @@ checks are:
   it won't leave a lip. The outer top edge has a 0.3 mm bevel too, carried on over the lid where it reaches the face.
 - **Base:** back plate on the bed. The only bridges are the top of the microSD slot (12 mm) and the 1 mm ledge above
   it. The SMA hole's round top prints without support.
-- **Lid:** top face on the bed, the tabs, ears, curtain and cable-end lintel pointing up. Give it solid (100 %)
+- **Lid:** top face on the bed, the tabs, teeth, curtain and cable-end lintel pointing up. Give it solid (100 %)
   infill, or at least 4 perimeters. The tabs grow layer by layer along their length, so bending them when the lid
   clicks in pulls across the layer bonds, the weakest direction. That's why they're thick and have a 45° gusset at the
   root. The curtain's break line is one of those layer bonds, on purpose.
@@ -98,8 +89,6 @@ checks are:
 | --- | --- | --- |
 | M2.5 × 6 pan-head screw | 4 | board to standoffs, from the top; it cuts its own thread in the standoff's Ø2.2 pilot hole |
 | SMA female bulkhead with u.FL/IPEX pigtail, about 8 cm | 1 | D-flat thread, Ø6.35; a long-thread one (≥ 9.5 mm) leaves enough thread outside the 4 mm wall for the antenna |
-| Lid screws, outside ears: M2.5 × 6 flat head, self-tapping | 2 | through each ear into the side wall; the board's M2.5 × 6 pan heads also work (they sit about 1.7 mm proud) |
-| Lid screws, inside ears: M2.5 × 10 flat head, self-tapping | 2 | through each side wall into the lid's block |
 | Wall screws, 3.5 mm, pan head ≤ Ø7.5 × 2.5 mm | 2 | with wall plugs to suit; the shank clicks past a 3.3 mm neck in each keyhole arm |
 | Stick-on rubber feet | optional | for the table |
 
@@ -122,11 +111,9 @@ checks are:
    Jumper wires need one segment, a 2×20 ribbon all four. Then plug the wiring onto the 40-pin header and lead it out
    through the slot: the gap is 10 mm tall once a segment is out.
 4. **Lid:** set it on so the four corner tabs drop into the corners, and press until it clicks. The bumps then press
-   it down onto the rim, so it doesn't rattle. Then drive the two lid screws through the side ears (outside ears) or
-   through the side walls (inside ears). Snug only: they cut their own thread in the plastic. The no-ear lid has no
-   screws.
-5. **Opening:** take out the two lid screws, then lever the lid up through the grille with a small flat screwdriver,
-   close to a corner.
+   it down onto the rim, so it doesn't rattle. The four teeth on its edge drop into the notches in the side walls'
+   tops; they key it in place.
+5. **Opening:** lever the lid up through the grille with a small flat screwdriver, close to a corner.
 
 BOOT and RESET sit behind the two pin-holes on the left wall, near the cable end. Press them with a pencil or a small
 screwdriver; a small funnel at each hole's mouth guides the tip in.
@@ -160,8 +147,7 @@ Every dimension is a named constant in `case/p4_case/params.py`. The ones most l
 | `SCREW_HOLE_D` | 2.2 mm | M2.5 screws are too hard to drive (raise) or don't grip (lower; about 1.7 for M2) |
 | `KEY_ARM_W` | 4.3 mm | the wall screws' shanks do not slide in the keyhole arms |
 | `KEY_NECK_W` | 3.3 mm | the shank won't pass the neck (raise) or doesn't click (lower) |
-| `EAR_PILOT_D` | 2.2 mm | outside ears: the lid screws are too hard to drive (raise) or don't grip (lower) |
-| `IN_EAR_PILOT_D` | 2.4 mm | inside ears: the screw splits the lid's block (raise) or doesn't grip (lower) |
+| `TOOTH_GAP` | 0.2 mm | the lid's teeth bind in their notches (raise) or the lid shifts (lower) |
 | `CURTAIN_NECK` | 0.8 mm | curtain segments break off by themselves (raise) or won't snap off (lower) |
 
 After a change, run `make case` again. Its checks catch a change that breaks a fit.
@@ -174,8 +160,10 @@ After a change, run `make case` again. Its checks catch a change that breaks a f
   the knock-out, the scoop above the card slot, the walls at the 40-pin end, larger bumps, the button funnels) and from
   a design review (keyhole necks and chamfers, the detent's hold face and preload, the SMA hole's flat at the bottom,
   the two-line knock-out, the tab gussets, the full-width header slot). That second print confirmed the bumps, the
-  keyhole necks and the standoff blocks. v6 followed from it: a 3 mm lid on a 1 mm taller case, the lid screws (two
-  options, plus a snaps-only lid), the 40-pin curtain (10 mm tall) with a 3 mm header-end wall, a 0.3 mm top bevel, a bigger microSD scoop without the lip, and the SMA hole's
-  round top again. v6 hasn't been printed yet.
+  keyhole necks and the standoff blocks. v6 followed from it: a 3 mm lid on a 1 mm taller case, the 40-pin curtain (10 mm tall)
+  with a 3 mm header-end wall, a 0.3 mm top bevel, a bigger microSD scoop without the lip, and the SMA hole's round top
+  again. Its screw ears were printed: the outside ears broke easily and made the lid hard to take off, and the inside
+  ears worked but were overkill. So v7 drops the screws and keeps what the broken ears showed works: teeth keying the
+  lid into the wall tops. v7 hasn't been printed yet.
 - The camera and display ribbon sockets, the two 4-pin sockets and the battery socket stay covered.
 - The power LED stays covered by the lid's frame.

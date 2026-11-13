@@ -1,7 +1,8 @@
 # 3D-printable case for the ESP32-P4-WIFI6-POE-ETH board: design
 
 Date: 2026-11-02. Status: implemented; fit tested on two printed cases with a real board. Revision v6 (2026-11-12,
-marked "v6"; plan `docs/superpowers/plans/2026-11-12-p4-case-v6.md`) is not printed yet.
+marked "v6"; plan `docs/superpowers/plans/2026-11-12-p4-case-v6.md`) was printed; v7 (2026-11-13, the keying teeth that
+replace its screw ears) is not printed yet.
 
 ## 1. Purpose and scope
 
@@ -87,8 +88,8 @@ the result.
 | --- | --- |
 | Parts | two printed parts: **base** and **lid** |
 | Base | one part: flat back plate, all four walls, four board standoffs |
-| Lid | flat 3 mm honeycomb grille plate with four tabs, two screw ears and a break-off curtain over the 40-pin slot; sits flush in a rebate on the wall tops (v6: 3 mm, the 2 mm lid flexed) |
-| Lid fixing | four corner tabs hang into the inner corners of the base and guide the lid into place; a bump on each (30° lead-in below, 45° hold face above) clicks into a dent in the side wall that preloads it: push to close, lever up to open. v6: two M2.5 screws through side ears hold it too (5.3a) |
+| Lid | flat 3 mm honeycomb grille plate with four tabs, four keying teeth and a break-off curtain over the 40-pin slot; sits flush in a rebate on the wall tops (v6: 3 mm, the 2 mm lid flexed) |
+| Lid fixing | four corner tabs hang into the inner corners of the base and guide the lid into place; a bump on each (30° lead-in below, 45° hold face above) clicks into a dent in the side wall that preloads it: push to close, lever up to open. v7: four teeth key it into notches in the side walls' tops (5.3a); no screws |
 | Opening the lid | lever it up through the grille with a small flat screwdriver; no pry cut-outs in this revision |
 | Board fixing | four M2.5 × 6 pan-head screws from the top, through the board into Ø6 × 5 mm standoffs with Ø2.2 pilot holes, where they cut their own thread (print feedback: the first Ø2.8 hole only gripped thick screws). The countersinks in the back plate stay, so countersunk screws with nuts from the back still work if the pilot is drilled out |
 | Board fitting | the board drops straight in from the open top, about 1.7 mm toward the header end, then slides forward (lifted 0.5 mm) so the USB and RJ45 go into their cable-wall holes, and settles onto the standoffs |
@@ -285,30 +286,19 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
     floor.
   - Jumper wires need one segment out, a ribbon all four.
 
-### 5.3a Lid screws (v6)
+### 5.3a Keying teeth (v7)
 
-Three options are built side by side and printed to compare; `params.EAR_STYLE` picks the default ("outside").
-
-- **Outside ears (default):** one per side wall at Y 32.
-  - The wall top drops to the lid's underside over the ear (10.4 mm), and the lid runs out over it at full thickness,
-    flush with the outer face.
-  - A U-shaped ear (10 mm wide, 1.6 mm thick, half-circle bottom of R5 around the screw) hangs from that edge into a
-    matching pocket in the wall's outer face, flush, with a 0.2 mm gap.
-  - The ear has a Ø2.9 clearance hole with a 90° countersink (Ø5.0). The wall behind the pocket has a Ø2.2 pilot
-    through its remaining 2.4 mm, at case Z 22.3.
-  - Screw: M2.5 × 6 flat head (or the board's pan heads, which sit about 1.7 mm proud). Tightening clamps the ear
-    against the wall, and the self-tapping thread is in the base, which is printed upright and solid around it.
-- **Inside ears:** one per side wall at Y 32.
-  - A 12 × 5 mm block hangs from the lid's underside down to case Z 18.5, 0.2 mm off the wall.
-  - A 45° buttress runs from its bottom inner edge up to the underside, with 3 mm 45° gussets at both ends.
-  - Grille cells over a block are left out.
-  - The wall has a Ø3.0 clearance hole and a 90° countersink (Ø5.0) at case Z 22.0. The block has a Ø2.4 blind pilot
-    (4.6 mm).
-  - Screw: M2.5 × 10 flat head. The thread is longer, but it runs along the lid's printed layers. The buttress makes
-    the layer at the pilot about 1.7× bigger against splitting.
-- **No ears:** no screws at all; the corner tabs' snap bumps alone hold the lid, as in the earlier prints.
-- **Ears:** they belong to the lid, which goes on after the board, so the board's drop-in is untouched. Under the
-  inside blocks the board's parts reach case Z 14.3 (left) and 16.4 (right).
+- **Teeth:** four, two per side wall, each straight above a corner snap tab (Y 4.7 and 65.3).
+  - Each is 6 mm long and 2 mm deep (case Z 26.6–28.6), as thick as the wall.
+  - It sits flush with the wall's outer face and the top.
+  - It has a 0.5 mm 45° lead-in on its lower corners.
+- **Notches:** each tooth drops into a notch in the wall top that follows it with 0.2 mm all round. The wall between a
+  tab's dent (top about case Z 25.0) and the notch's floor (26.4) stays 1.4 mm.
+- **Why:** v6 tried two M2.5 screws through side ears, in two options.
+  - The outside ears (in a wall pocket) broke easily and made the lid hard to take off without destructive prying.
+  - The inside ears (a buttressed block, screw through the wall) worked but were overkill.
+  - Once the outside ears broke off, the block left in each wall-top cut keyed the lid and made it snugger (print
+    feedback). The teeth keep that and drop the screws; the snaps hold the lid as before.
 
 ## 6. Assembly (goes into the docs page)
 
@@ -318,9 +308,9 @@ Three options are built side by side and printed to compare; `params.EAR_STYLE` 
    through the right wall from inside with its flat down, and tighten its nut snugly over a washer on the outside.
 3. Optional: break out as many curtain segments as the wiring needs, plug the wiring onto the 40-pin header and lead
    it out through the header-end slot.
-4. Set the lid on so the corner tabs drop into the corners, and press until the four tabs click. Drive the two lid
-   screws, snug only.
-5. To open: take out the lid screws, then lever the lid up through the grille with a small flat screwdriver, near a
+4. Set the lid on so the corner tabs drop into the corners and the teeth into their notches, and press until the four
+   tabs click.
+5. To open: lever the lid up through the grille with a small flat screwdriver, near a
    tab.
 
 ## 7. Repository layout and tooling
@@ -333,8 +323,7 @@ Three options are built side by side and printed to compare; `params.EAR_STYLE` 
   (already ignored by git).
 - **Make targets:**
   - `make case`: builds `dist/case/p4_case_base.{stl,step}` and `dist/case/p4_case_lid.{stl,step}`, plus preview PNGs,
-    and the other lid options as `*_inside-ears.{stl,step}` and `*_no-ears.{stl,step}`; it runs every check for all
-    three.
+    and runs every check.
   - `make case-test`: runs the checks in section 8.
   - Both get `## ` help comments.
   - Python dependencies run through `uv`/`uvx`, as the other tools do. Nothing is installed globally.
@@ -370,9 +359,6 @@ These are automated checks, run against the vendor STEP:
 - Both keyhole head volumes (the L sweep plus the head radius, 2.5 mm tall) are free of the board and its underside parts.
 - No lid opening is wider than 3.5 mm, and the curtain closes the header-end slot. With the curtain broken out the
   slot has a clear path for wiring (10 mm tall), reported but not limited (v6).
-- Each screw ear's clearance hole and pilot share one axis, and the pilot is at least 2.2 mm long (outside ears, in
-  the wall) or 4.5 mm (inside ears, in the lid) (v6).
-- Every check runs for all three lid options (v6).
 - With the lid fitted, the lid and the base do not overlap anywhere except where the bumps press into their dents.
 - At each bump's crest height, the bump reaches at least 0.15 mm past the wall face and presses into its dent by more
   than 0 and at most 0.15 mm (measured against the wall, so a bump that misses the wall fails).

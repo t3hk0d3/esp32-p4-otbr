@@ -178,25 +178,11 @@ CURTAIN_SLIT = 0.4
 CURTAIN_FLOOR_GAP = 0.2  # segment bottoms to the slot floor
 CURTAIN_TONGUE_W = 0.8  # in the floor groove, 0.2 mm clear each side
 
-# --- lid screw ears (v6): two options, built side by side and printed to compare ---
-EAR_STYLE = "outside"  # the default option: "outside", "inside" or "none" (snaps only, no screws)
-EAR_OPTIONS = ("outside", "inside", "none")
-EAR_Y = 32.0  # both options, one ear per side wall, clear of the buttons and the SMA
-# outside: the ear hangs from the lid's edge into a pocket in the wall's outer face; the screw threads into the wall
-EAR_W = 10.0
-EAR_T = 1.6  # ear thickness = pocket depth; leaves 2.4 mm of 4 mm wall for the thread
-EAR_GAP = 0.2  # pocket and wall-top cut around the ear and the lid's fill
-EAR_SCREW_Z = 22.3  # case Z; the ear's half-circle bottom (R EAR_W / 2) is centred here
-EAR_CLEAR_D = 2.9
-EAR_CSK_D = 5.0  # 90° countersink for an M2.5 flat head
-EAR_PILOT_D = 2.2  # in the wall, as the standoffs
-# inside: a buttressed block hangs from the lid's underside; the screw goes through the wall into a pilot in the block
-IN_EAR_LEN = 12.0
-IN_EAR_T = 5.0
-IN_EAR_BOTTOM = 18.5  # case Z
-IN_EAR_GUSSET = 3.0  # 45° gussets at both ends, under the lid
-IN_EAR_SCREW_Z = 22.0
-IN_EAR_PILOT_D = 2.4  # along the lid's layers: opened up a little against splitting
-IN_EAR_PILOT_STOP = 0.4  # blind: stops this short of the block's inner face
-IN_EAR_CLEAR_D = 3.0
-IN_EAR_CSK_D = 5.0
+# --- keying teeth (v7) ---
+# two per side wall, straight above the corner snap tabs: the lid's tooth drops into a notch in the wall top, flush
+# outside and on top, and keys the lid both ways (print feedback: the outside ears broke, but the block they left in
+# the wall-top cut made the fit snug). They replace the screw ears; the snaps hold the lid
+TOOTH_LEN = 6.0  # along the wall
+TOOTH_DEPTH = 2.0  # down from the top
+TOOTH_LEAD = 0.5  # 45° lead-in on the tooth's lower corners (the notch follows it)
+TOOTH_GAP = 0.2  # notch to tooth, all round
