@@ -900,11 +900,25 @@ class TestRadioInstallFactoryC6:
         assert offsets(result)[:4] == [0, 1024, 1024, 2048]
         assert result["view"]["stage"] == "radio_done"
 
-    def test_resends_a_frame_whose_ack_is_lost(self):
+    def test_resends_a_frame_whose_ack_is_lost_and_moves_on(self):
         result = radio_run(INSTALL_RADIO, dropAckAt=1024)
         assert offsets(result)[:4] == [0, 1024, 1024, 2048]
         assert "sleep:2000" in result["events"]
+        assert all(i["crcOk"] for i in result["radio"]["images"])
         assert result["view"]["stage"] == "radio_done"
+
+    def test_a_lost_last_ack_is_covered_by_received(self):
+        result = radio_run(INSTALL_RADIO, dropAckAt=2048)
+        assert offsets(result) == [0, 1024, 2048, 0, 1024, 2048]
+        assert result["radio"]["strayFrames"] == 0
+        assert result["view"]["stage"] == "radio_done"
+
+    def test_keeps_frames_within_the_boards_max(self):
+        body = INSTALL + "t.flow.state.radioPlan = ['rcp'];"
+        result = radio_run(
+            body + "await t.flow.installRadio();", state="updater", readyMax=512
+        )
+        assert offsets(result) == [0, 512, 1024, 1536, 2048]
 
     def test_gives_up_after_five_tries_and_aborts(self):
         result = radio_run(INSTALL_RADIO, silentFrames=True)
@@ -984,10 +998,26 @@ class TestRadioLostPort:
         assert result["view"]["stage"] == "radio_port_lost"
         assert result["view"]["lostWhileSending"] is True
 
+    def test_lost_after_the_last_frame_may_be_installing(self):
+        result = radio_run(INSTALL_RADIO, loseAfterFrames=3)
+        assert result["view"]["stage"] == "radio_port_lost"
+        assert result["view"]["lostWhileFinishing"] is True
+        assert result["view"]["lostWhileSending"] is False
+        assert "may already be installing" in text_of("radio_port_lost")
+
+    def test_reconnect_after_the_last_frame_listens_for_the_install(self):
+        result = radio_run(
+            LOSE_THEN_RECONNECT,
+            state="updater",
+            loseAfterFrames=3,
+            afterReconnect=["@radio-fw busy 5", f"@radio-fw done installed={RCP}"],
+        )
+        assert result["view"]["stage"] == "radio_done"
+
     def test_lost_while_installing_says_not_to_power_off(self):
         result = radio_run(INSTALL_RADIO, lose="installing")
         assert result["view"]["lostWhileInstalling"] is True
-        assert "Don't power it off" in text_of("radio_port_lost")
+        assert "Keep it powered" in text_of("radio_port_lost")
 
     def test_lost_while_checking_says_nothing_was_sent(self):
         result = radio_run(lose="checking")
@@ -1018,6 +1048,26 @@ class TestRadioLostPort:
 
     def test_reconnect_is_offered(self):
         assert "reconnectRadio" in actions("radio_port_lost")
+
+
+class TestRadioReviewFollowUps:
+    def test_a_port_that_will_not_open_offers_reconnect(self):
+        result = run(INSTALL, radio=True, failConsoleOpen=True)
+        assert result["view"]["stage"] == "radio_port_lost"
+        assert result["view"]["lostWhileChecking"] is True
+
+    def test_a_download_whose_body_fails_is_a_download_failure(self):
+        result = run(INSTALL, radio=True, board={}, failBody="c6_installer.bin")
+        assert result["view"]["stage"] == "radio_failed"
+        assert result["view"]["radioCode"] == "download_failed"
+
+    def test_install_anyway_after_start_over_does_nothing(self):
+        body = (
+            INSTALL
+            + "const p = t.flow.installAnyway(); await t.flow.restart(); await p;"
+        )
+        result = radio_run(body, state="updater", installed=RCP)
+        assert result["view"]["stage"] == "idle"
 
 
 class TestRadioStartOver:

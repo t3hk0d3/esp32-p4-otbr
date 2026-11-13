@@ -53,7 +53,7 @@ function appImage(project, version, size) {
  *   first frame at this offset is answered nak crc / not at all), silentFrames, lose ('checking': at the status,
  *   'sending': after the first frame, 'write': the first frame's write throws, 'installing': after received),
  *   silentAfterReceived, busy (busy lines, default 2),
- *   installerResult / rcpResult (the line after the busy lines; default done), afterReconnect (lines printed when the
+ *   readyMax (the max in its ready line), installerResult / rcpResult (the line after the busy lines; default done), afterReconnect (lines printed when the
  *   port opens again), noLogNoise.
  * Records t.radio: {commands, frames: [{offset, len}], aborts, images: [{project, size, crcOk}]}.
  */
@@ -67,7 +67,7 @@ function makeBoard(b, t, log) {
   let load = null; /* {size, crc, data, expected, buf} */
   const dropped = new Set();
   const naked = new Set();
-  t.radio = {commands: [], frames: [], aborts: 0, images: []};
+  t.radio = {commands: [], frames: [], aborts: 0, images: [], strayFrames: 0};
 
   const push = (text) => {
     queue.push(new TextEncoder().encode(text));
@@ -130,11 +130,11 @@ function makeBoard(b, t, log) {
       return;
     }
     t.radio.frames.push({offset, len, crcOk});
-    if (board.lose === 'sending') {
+    if (board.lose === 'sending' || (board.loseAfterFrames && t.radio.frames.length === board.loseAfterFrames)) {
       lose();
       return;
     }
-    if (board.silentFrames || (board.dropAckAt === offset && !dropped.has(offset) && dropped.add(offset)))
+    if (board.silentFrames)
       return;
     if (board.nakAt === offset && !naked.has(offset)) {
       naked.add(offset);
@@ -145,7 +145,9 @@ function makeBoard(b, t, log) {
       load.data.set(bytes.subarray(8, 8 + len), offset);
       load.expected += len;
     }
-    reply('ack ' + load.expected);
+    /* a lost ack: the frame is taken, only its answer goes missing */
+    if (!(board.dropAckAt === offset && !dropped.has(offset) && dropped.add(offset)))
+      reply('ack ' + load.expected);
     if (load.expected === load.size)
       finishLoad();
   }
@@ -169,11 +171,15 @@ function makeBoard(b, t, log) {
       }
       const size = Number(m[1]);
       load = {size, crc: parseInt(m[2], 16), data: new Uint8Array(size), expected: 0, buf: new Uint8Array(0)};
-      reply('ready max=1024');
+      reply('ready max=' + (board.readyMax || 1024));
     }
   }
 
   function write(bytes) {
+    if (!load && bytes[0] === 0x52 && bytes[1] === 0x46) {
+      t.radio.strayFrames = (t.radio.strayFrames || 0) + 1;
+      return;
+    }
     if (load) {
       const buf = new Uint8Array(load.buf.length + bytes.length);
       buf.set(load.buf);
@@ -257,7 +263,7 @@ function makeBoard(b, t, log) {
  * the baud change), noPostConnect (the chip has no postConnect), radio (publish radio.json and the C6 images; an
  * object overrides radio.json fields, {installer: null} leaves the installer out), installerVersion (of the published
  * c6_installer.bin), board (the console is a P4 running radio-fw, see makeBoard), addressTimesOut (with board: the
- * wait for the address runs out).
+ * wait for the address runs out), failBody (a file name: its body fails after the headers).
  */
 function makeFlow(options) {
   const o = Object.assign({targets: TARGETS, revision: 103, chipName: 'ESP32-P4', mac: 'aa:bb:cc:dd:ee:ff'}, options);
@@ -418,7 +424,11 @@ function makeFlow(options) {
     return {
       ok: true, status: 200,
       json: async () => route.json,
-      arrayBuffer: async () => (route.data ? route.data.slice().buffer : new ArrayBuffer(route.bytes)),
+      arrayBuffer: async () => {
+        if (o.failBody && route.file === o.failBody)
+          throw new TypeError('network error');
+        return route.data ? route.data.slice().buffer : new ArrayBuffer(route.bytes);
+      },
     };
   }
 

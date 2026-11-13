@@ -260,7 +260,8 @@
         <h1>The serial port is gone</h1>
         <p data-if="lostWhileChecking">Nothing was sent to the C6. Plug the cable back in and reconnect.</p>
         <p data-if="lostWhileSending" hidden>The C6 was not changed: the board drops a file it didn't get whole. Plug the cable back in and reconnect.</p>
-        <p class="fl-warn" data-if="lostWhileInstalling" hidden>The board carries on installing by itself. Don't power it off. Plug the cable back in and reconnect: the page then shows how it ended.</p>
+        <p class="fl-warn" data-if="lostWhileFinishing" hidden>The page had sent the last part of the file, so the board may already be installing. Keep it powered (if this cable was its only power, it has restarted: check the radio after reconnecting). Plug the cable back in and reconnect: the page then shows how it ended.</p>
+        <p class="fl-warn" data-if="lostWhileInstalling" hidden>The board carries on installing by itself when it has other power (PoE). Keep it powered. Plug the cable back in and reconnect: the page then shows how it ended. If this cable was its only power, the install was cut off: reconnect and check the radio.</p>
         <div class="fl-actions">
           <button class="btn primary" type="button" data-action="reconnectRadio">Reconnect</button>
           <button class="btn ghost" type="button" data-action="restart">Start over</button>
