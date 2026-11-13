@@ -149,9 +149,8 @@ Checks beyond the automated tests, and what has not been run on hardware yet. Th
 
 - The USB-UART first install ([First install](first-install.md), Path 3, esptool over H7), and recovery of a truly
   blank C6 (bootloader, partition table and otadata erased).
-- The no-wires first install (Path 1) ran on the board against an ESP-Hosted 0.0.27 stand-in, not yet against an
-  untouched factory C6; nor the case where the installer lands in the slot it must overwrite (a factory C6 updated
-  before) and moves itself first.
+- The case where the no-wires first install (Path 1) lands the installer in the slot it must overwrite (a factory C6
+  updated before) and moves itself first. Path 1 itself ran on an untouched factory C6 (2026-11-13, v0.6.0).
 - The `br_core` give-up path after repeated radio failures, and the fall-back to the default network config when the
   stored config cannot be applied (host-tested only).
 - Several boards on one Thread network.

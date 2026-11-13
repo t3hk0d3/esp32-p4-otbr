@@ -64,10 +64,14 @@ Every way ends with [uploading the radio firmware](#upload-the-radio-firmware).
 The board sends a small installer through the C6's factory firmware; the installer then sets up the C6 for this
 project.
 
-!!! note "Tested with a stand-in"
-    This way ran end to end on the board with ESP-Hosted 0.0.27 on the C6, the version the factory image points to,
-    but not yet on an untouched factory C6. If it fails, the C6 still runs its factory firmware or the installer, and
-    way B or C still works.
+!!! note "Tested on a factory C6"
+    This way ran end to end on a new board with the C6 untouched since the factory (2026-11-13, release v0.6.0). If it
+    fails, the C6 still runs its factory firmware or the installer, and way B or C still works.
+
+!!! note "Updates from GitHub don't do this step yet"
+    On a C6 that still runs its factory firmware, **Install from GitHub** refuses the radio firmware with
+    `C6 runs factory ESP-Hosted: upload c6_installer.bin first`. Upload `c6_installer.bin` by hand as below; after that,
+    updates from GitHub work.
 
 1. The Dashboard shows **Radio fault**: the C6 still runs its factory firmware.
 2. Open **Device > Firmware**. On the **Radio Co-Processor** card, choose `c6_installer.bin` and press
