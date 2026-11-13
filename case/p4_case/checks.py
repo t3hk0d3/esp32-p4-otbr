@@ -13,7 +13,7 @@ import trimesh
 from build123d import Align, Box, Cylinder, Part, Pos, Rot, Vector
 
 from p4_case import params as P
-from p4_case.base import rounded_block, side_walls, tab_y_centres
+from p4_case.base import rounded_block, tab_y_centres
 from p4_case.board import ENV_RES, FACTS, BoardModel, check_facts
 from p4_case.lid import opening_widths
 from p4_case.params import board_z
@@ -683,116 +683,18 @@ def min_print_width(part: Part, name: str, top_down: bool) -> CheckResult:
     )
 
 
-EAR_RING = 8  # points round a hole's axis
-
-
-def _ring_ok(part: Part, x: float, y: float, z: float, r: float) -> bool:
-    """The axis point is empty and every point of a ring of radius r around it (in the YZ plane) is solid."""
-    if part.is_inside(Vector(x, y, z)):
-        return False
-    return all(
-        part.is_inside(
-            Vector(
-                x,
-                y + r * math.cos(2 * math.pi * k / EAR_RING),
-                z + r * math.sin(2 * math.pi * k / EAR_RING),
-            )
-        )
-        for k in range(EAR_RING)
-    )
-
-
-def _hole_length(
-    part: Part, x_at, y: float, z: float, r: float, u0: float, u1: float
-) -> float:
-    """Length along the axis (u from u0 to u1, x = x_at(u)) over which part holds a hole of radius < r round it."""
-    us = np.arange(u0, u1 + 1e-9, 0.1)
-    hits = [u for u in us if _ring_ok(part, x_at(u), y, z, r)]
-    if not hits:
-        return 0.0
-
-    def edge(inside: float, outside: float) -> float:
-        while abs(outside - inside) > 0.01:
-            mid = (inside + outside) / 2
-            if _ring_ok(part, x_at(mid), y, z, r):
-                inside = mid
-            else:
-                outside = mid
-        return (inside + outside) / 2
-
-    return edge(hits[-1], min(hits[-1] + 0.1, u1)) - edge(
-        hits[0], max(hits[0] - 0.1, u0)
-    )
-
-
-def ear_screws(base: Part, lid: Part, ears: str = P.EAR_STYLE) -> CheckResult:
-    """Each screw ear's clearance hole and pilot share one axis, and the pilot is long enough.
-
-    outside: the hole is in the lid's ear, the pilot (thread) in the base wall, at least 2.2 mm. inside: the hole is
-    in the base wall, the pilot in the lid's block, at least 4.5 mm.
-    """
-    if ears == "none":
-        return CheckResult(
-            "screw ears line up",
-            True,
-            "no screw ears: the corner-tab snaps hold the lid",
-        )
-    y = P.EAR_Y
-    problems, lengths = [], []
-    for (face, inner, inward), name in zip(
-        side_walls(), ("left", "right"), strict=True
-    ):
-        if ears == "outside":
-            z, need = board_z(P.EAR_SCREW_Z), 2.2
-            hole_r, pilot_r = P.EAR_CLEAR_D / 2 + 0.25, P.EAR_PILOT_D / 2 + 0.2
-            aligned = all(
-                _ring_ok(lid, face + inward * u, y, z, hole_r) for u in (1.2, 1.4)
-            )
-            length = _hole_length(
-                base, lambda u, f=face, i=inward: f + i * u, y, z, pilot_r, P.EAR_T, 4.0
-            )
-        else:
-            z, need = board_z(P.IN_EAR_SCREW_Z), 4.5
-            hole_r, pilot_r = P.IN_EAR_CLEAR_D / 2 + 0.25, P.IN_EAR_PILOT_D / 2 + 0.2
-            aligned = all(
-                _ring_ok(base, face + inward * u, y, z, hole_r) for u in (1.8, 2.8, 3.8)
-            )
-            length = _hole_length(
-                lid,
-                lambda u, f=inner, i=inward: f + i * u,
-                y,
-                z,
-                pilot_r,
-                P.TAB_CLEAR,
-                P.TAB_CLEAR + P.IN_EAR_T,
-            )
-        lengths.append(f"{name} {length:.1f} mm")
-        if not aligned:
-            problems.append(f"{name}: hole off the screw axis")
-        elif length < need:
-            problems.append(f"{name}: thread {length:.1f} mm (need {need})")
-    return CheckResult(
-        "screw ears line up",
-        not problems,
-        "; ".join(problems)
-        if problems
-        else f"{ears} ears, thread " + ", ".join(lengths),
-    )
-
-
 # --- all ---------------------------------------------------------------------------------------------------------------
 
 
 def run_all(
-    board: BoardModel, base: Part, lid: Part, lid_open: Part, ears: str = P.EAR_STYLE
+    board: BoardModel, base: Part, lid: Part, lid_open: Part
 ) -> list[CheckResult]:
-    """Every check for one screw-ear option; lid_open is its lid with the curtain broken out."""
+    """Every check; lid_open is the lid with the curtain broken out."""
     return [
         *check_facts(board),
         board_clearance(board, base, "base"),
         *lid_clearance(board, lid, lid_open),
         opening_paths(base, lid, lid_open),
-        ear_screws(base, lid, ears),
         lid_seats(base, lid),
         detent_engagement(base, lid),
         sma_room(board),

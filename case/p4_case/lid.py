@@ -1,4 +1,4 @@
-"""The lid: stepped grille plate, four wedged corner tabs, the 40-pin curtain and two screw ears (spec section 5.3).
+"""The lid: stepped grille plate, four wedged corner tabs, four keying teeth and the 40-pin curtain (spec section 5.3).
 
 Board frame, as fitted on the base.
 """
@@ -25,10 +25,8 @@ from p4_case.base import (
     rounded_block,
     side_walls,
     tab_y_centres,
+    tooth_outline,
     top_bevel,
-    u_outline,
-    x_countersink,
-    x_cylinder,
     x_prism,
 )
 from p4_case.params import board_z
@@ -69,28 +67,8 @@ def _header_corners(z0: float, z1: float) -> Part:
     return block(bx0, bx1, by1 - P.INNER_R, by1, z0, z1)
 
 
-def inside_ear_footprints() -> list[tuple[float, float, float, float]]:
-    """(x0, x1, y0, y1) of each inside ear on the lid's underside: block, buttress and end gussets."""
-    reach = P.TAB_CLEAR + P.IN_EAR_T + (P.LID_UNDERSIDE - P.IN_EAR_BOTTOM)
-    half = P.IN_EAR_LEN / 2 + P.IN_EAR_GUSSET
-    y0, y1 = P.EAR_Y - half, P.EAR_Y + half
-    return [(IX0, IX0 + reach, y0, y1), (IX1 - reach, IX1, y0, y1)]
-
-
-def _over_footprint(x: float, y: float) -> bool:
-    for x0, x1, y0, y1 in inside_ear_footprints():
-        dx = max(x0 - x, 0.0, x - x1)
-        dy = max(y0 - y, 0.0, y - y1)
-        if math.hypot(dx, dy) < CELL_R:
-            return True
-    return False
-
-
-def cell_centres(ears: str = P.EAR_STYLE) -> list[tuple[float, float]]:
-    """Honeycomb cell centres, centred on the lid and symmetric about the cross rib, all inside the solid frame.
-
-    With inside ears, cells over an ear's footprint are left out, so the grille doesn't cut into the ears.
-    """
+def cell_centres() -> list[tuple[float, float]]:
+    """Honeycomb cell centres, centred on the lid and symmetric about the cross rib, all inside the solid frame."""
     fx0, fx1, fy0, fy1, _ = _flange_outline()
     gx0, gx1 = fx0 + P.FRAME_W, fx1 - P.FRAME_W
     gy0, gy1 = fy0 + P.FRAME_W, fy1 - P.FRAME_W
@@ -115,13 +93,11 @@ def cell_centres(ears: str = P.EAR_STYLE) -> list[tuple[float, float]]:
                 break
             out += [(x, y) for y in inside if abs(y - P.RIB_Y) >= rib_keep]
             k += 1
-    if ears == "inside":
-        out = [(x, y) for x, y in out if not _over_footprint(x, y)]
     return sorted(set(out))
 
 
-def _grille(ears: str) -> Part:
-    cells = [Pos(x, y) * RegularPolygon(CELL_R, 6) for x, y in cell_centres(ears)]
+def _grille() -> Part:
+    cells = [Pos(x, y) * RegularPolygon(CELL_R, 6) for x, y in cell_centres()]
     sketch = cells[0]
     for c in cells[1:]:
         sketch += c
@@ -268,72 +244,26 @@ def _curtain() -> Part:
     return Part() + [x_prism(outline, x0, x1) for x0, x1 in curtain_segments()]
 
 
-def _outside_ears() -> tuple[Part, Part]:
-    """(material, holes) of the outside ears: the fill over each wall-top cut and a U ear in the wall's pocket."""
-    parts, holes = [], []
-    y, z = P.EAR_Y, board_z(P.EAR_SCREW_Z)
-    half = P.EAR_W / 2
+def _teeth() -> Part:
+    """Keying teeth over the side walls, above the corner snap tabs: flush with the outer face and the top, joined to
+    the lid's body; each drops into its notch in the wall top."""
+    parts = []
     for face, inner, inward in side_walls():
         body_edge = inner + inward * (P.LID_CLEAR + EPS)
-        parts.append(block(*sorted((face, body_edge)), y - half, y + half, UNDER, TOP))
-        ear = u_outline(y, z, half, UNDER + EPS)
-        parts.append(x_prism(ear, face, face + inward * P.EAR_T))
-        holes.append(
-            x_cylinder(
-                y, z, P.EAR_CLEAR_D, face - inward, face + inward * (P.EAR_T + 1)
-            )
-        )
-        holes.append(x_countersink(y, z, P.EAR_CSK_D, P.EAR_CLEAR_D, face, inward))
-    return Part() + parts, Part() + holes
+        for yc in tab_y_centres():
+            parts.append(x_prism(tooth_outline(yc), face, body_edge))
+    return (Part() + parts) - block(-50, 110, -50, 130, TOP, TOP + 2)
 
 
-def _inside_ears() -> tuple[Part, Part]:
-    """(material, holes) of the inside ears: a block 0.2 off each wall with a 45° buttress, 45° end gussets and a blind
-    pilot on the wall hole's axis."""
-    parts, holes = [], []
-    y, z = P.EAR_Y, board_z(P.IN_EAR_SCREW_Z)
-    half, g = P.IN_EAR_LEN / 2, P.IN_EAR_GUSSET
-    bottom = board_z(P.IN_EAR_BOTTOM)
-    for _, inner, inward in side_walls():
-        ex = inner + inward * P.TAB_CLEAR
-        back = ex + inward * P.IN_EAR_T
-        buttress = back + inward * (UNDER - bottom)
-        section = [
-            (ex, UNDER + EPS),
-            (buttress, UNDER + EPS),
-            (back, bottom),
-            (ex, bottom),
-        ]
-        parts.append(
-            Pos(0, y, 0)
-            * extrude(Plane.XZ * Polygon(*section, align=None), half, both=True)
-        )
-        for y_end, out in ((y - half, -1), (y + half, 1)):
-            tri = [
-                (y_end, UNDER + EPS),
-                (y_end + out * g, UNDER + EPS),
-                (y_end, UNDER - g),
-            ]
-            parts.append(x_prism(tri, ex, back))
-        stop = back - inward * P.IN_EAR_PILOT_STOP
-        holes.append(x_cylinder(y, z, P.IN_EAR_PILOT_D, ex - inward, stop))
-    return Part() + parts, Part() + holes
-
-
-def build_lid(curtain: bool = True, ears: str = P.EAR_STYLE) -> Part:
-    """The lid as one solid, in the board frame as fitted (top face flush at case Z 28.6), for one screw-ear option.
+def build_lid(curtain: bool = True) -> Part:
+    """The lid as one solid, in the board frame as fitted (top face flush at case Z 28.6).
 
     With curtain=False it is the lid with all four curtain segments broken out.
     """
-    if ears not in P.EAR_OPTIONS:
-        raise ValueError(f"ears must be one of {P.EAR_OPTIONS}, not {ears!r}")
-    part = _plate() + _lintel() + _tabs() + _header_fill()
+    part = _plate() + _lintel() + _tabs() + _header_fill() + _teeth()
     if curtain:
         part += _curtain()
-    if ears == "none":  # the corner-tab snaps alone hold the lid
-        return part - _grille(ears) - top_bevel()
-    ear_parts, ear_holes = _outside_ears() if ears == "outside" else _inside_ears()
-    return part + ear_parts - _grille(ears) - ear_holes - top_bevel()
+    return part - _grille() - top_bevel()
 
 
 def opening_widths(lid: Part) -> list[float]:
