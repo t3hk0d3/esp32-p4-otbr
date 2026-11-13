@@ -182,7 +182,8 @@ TEST_CASE("Done, newer release with a tag: release.url <base>/tag/<tag>, app new
     render(buf, sizeof(buf), &s, true, RCP_OLD);
     TEST_ASSERT_EQUAL_STRING("{\"state\":\"done\",\"checked_age_s\":42,\"error\":null,"
                              "\"release\":{\"tag\":\"v0.4.0\",\"app\":\"" NEWER "\",\"rcp\":\"" RCP_OLD "\","
-                             "\"url\":\"" BASE "/tag/v0.4.0\"},"
+                             "\"url\":\"" BASE "/tag/v0.4.0\","
+                             "\"installer_url\":\"" BASE "/download/v0.4.0/c6_installer.bin\"},"
                              "\"repo_url\":\"https://github.com/t3hk0d3/esp32-p4-otbr\","
                              "\"board_id\":\"" BOARD "\",\"chip_id\":\"" CHIP "\","
                              "\"bundle\":\"" BOARD "_" CHIP ".ota\","
@@ -237,13 +238,14 @@ TEST_CASE("Checking: state checking", "[device_api]")
     assert_has(buf, "\"state\":\"checking\"");
 }
 
-TEST_CASE("Release without a tag: release.tag null, release.url <base>/latest", "[device_api]")
+TEST_CASE("Release without a tag: release.tag null, release.url <base>/latest, installer_url <base>/latest/download", "[device_api]")
 {
     char buf[1024];
     const self_update_snapshot_t s = snapshot(SELF_UPDATE_DONE, "", NEWER, "");
 
     render(buf, sizeof(buf), &s, true, RCP_OLD);
-    assert_has(buf, "\"release\":{\"tag\":null,\"app\":\"" NEWER "\",\"rcp\":null,\"url\":\"" BASE "/latest\"}");
+    assert_has(buf, "\"release\":{\"tag\":null,\"app\":\"" NEWER "\",\"rcp\":null,\"url\":\"" BASE "/latest\","
+               "\"installer_url\":\"" BASE "/latest/download/c6_installer.bin\"}");
     assert_has(buf, "\"rcp_differs\":false"); // no c6_rcp line: nothing to compare
 }
 

@@ -151,6 +151,10 @@ Checks beyond the automated tests, and what has not been run on hardware yet. Th
   blank C6 (bootloader, partition table and otadata erased).
 - The case where the no-wires first install (Path 1) lands the installer in the slot it must overwrite (a factory C6
   updated before) and moves itself first. Path 1 itself ran on an untouched factory C6 (2026-11-13, v0.6.0).
+- The factory C6 through **Install** on the Updates from GitHub card (`c6_installer.bin` from `release.installer_url`,
+  then `POST /device/update`): page-tested only. To check: radio only and with an older board firmware; a release
+  without `c6_installer.bin`; the installer refused; a lost connection while the installer runs (the page's
+  wait-and-reload text); the reply texts.
 - The `br_core` give-up path after repeated radio failures, and the fall-back to the default network config when the
   stored config cannot be applied (host-tested only).
 - Several boards on one Thread network.

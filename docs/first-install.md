@@ -71,11 +71,6 @@ project. You give the board the files either from [Flash in the browser](flash.m
     This way ran end to end on a new board with the C6 untouched since the factory (2026-11-13, release v0.6.0). If it
     fails, the C6 still runs its factory firmware or the installer, and way B or C still works.
 
-!!! note "Updates from GitHub don't do this step yet"
-    On a C6 that still runs its factory firmware, **Install from GitHub** refuses the radio firmware with
-    `C6 runs factory ESP-Hosted: upload c6_installer.bin first`. Upload `c6_installer.bin` by hand as below; after that,
-    updates from GitHub work.
-
 **From the browser flasher.** Right after it has flashed the P4, the page asks the board about the C6. On a new board
 it offers `c6_installer.bin`, then `c6_rcp.bin`, both from the same release. Press **Install radio firmware** and keep
 the board powered and connected for about 5 minutes, until the page says **Radio firmware installed**. **Don't power
@@ -86,11 +81,24 @@ messages mean: [Flash in the browser](flash.md#the-radio-firmware).
 **From the board's web page:**
 
 1. The Dashboard shows **Radio fault**: the C6 still runs its factory firmware.
-2. Open **Device > Firmware**. On the **Radio Co-Processor** card, choose `c6_installer.bin` and press
-   **Install radio firmware**.
-3. Wait about a minute until the page answers. **Don't power off the board meanwhile**: a power cut while the installer
+2. Open **Device > Firmware**. On the **Updates from GitHub** card, press **Install**. The board downloads
+   `c6_installer.bin` from the latest release, installs it through the C6's factory firmware, then installs `c6_rcp.bin`
+   (and the latest board firmware, with a reboot, when yours is older).
+3. Wait about 5 minutes until the page answers. **Don't power off the board meanwhile**: a power cut while the installer
    writes leaves a C6 that only way B or C can repair.
-4. The Dashboard now says the C6 has no radio firmware. Continue with [Upload the radio firmware](#upload-the-radio-firmware).
+4. The Dashboard shows the border router running. You are done with this step; go on with
+   [Give the board a Thread network](#3-give-the-board-a-thread-network).
+
+The board needs internet access for this. Without it, or to use the files of another release, install the two files by
+hand:
+
+1. On the **Radio Co-Processor** card, choose `c6_installer.bin` and press **Install radio firmware**.
+2. Wait about 4 minutes until the page answers, again without powering off the board.
+3. The Dashboard now says the C6 has no radio firmware. Continue with [Upload the radio firmware](#upload-the-radio-firmware).
+
+If the card says the release has no `c6_installer.bin`, the release is older than this way: install the files by hand.
+If the page says the installer did not finish, the C6 may still be installing: wait about 5 minutes without powering
+off, reload, and press **Install** again if the Dashboard still says **esp-hosted firmware**.
 
 If the upload (or the browser flasher) reports an error: `invalid_image` means the file is not `c6_installer.bin`, or it comes from another release
 than the board's firmware. `install_failed` means the transfer failed or got no answer at its end. The C6 may then still run its factory
@@ -191,8 +199,8 @@ dimension lines removed and wiring drawn on.
 
 See [Troubleshooting](troubleshooting.md). The common first-install problems:
 
-- **Radio fault "esp-hosted firmware"** after way A: the installer was not uploaded yet, or the upload failed. Upload
-  `c6_installer.bin` again.
+- **Radio fault "esp-hosted firmware"** after way A: the installer was not installed yet, or it failed. Press
+  **Install** on the Updates from GitHub card again, or upload `c6_installer.bin` again.
 - **Radio fault "rcp incompatible"**: `c6_rcp.bin` comes from another release than the board's firmware. Upload the
   one from the same release.
 - **The jumper is not detected** (the Firmware page offers no **Recover radio**): the IO9 wire is loose, or TXD and RXD
