@@ -7,6 +7,13 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+### Added
+
+- Updates from GitHub on a C6 that still runs its factory ESP-Hosted firmware: **Install** first installs the
+  release's `c6_installer.bin` (about 5 minutes; the page warns not to power off the board), then the update as before.
+  `GET /device/update` names the file in `release.installer_url`. Before, the install was refused with "C6 runs factory
+  ESP-Hosted: upload c6_installer.bin first". Not yet run on a factory C6.
+
 ## [0.6.0] - 2026-11-11
 
 ### Added

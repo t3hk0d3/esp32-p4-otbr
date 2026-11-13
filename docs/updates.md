@@ -27,6 +27,12 @@ it differs, and reboots once. It takes a minute or two.
   firmware, without a reboot.
 - A board that runs a newer development build is offered **Install the latest release anyway** to go back to the
   release.
+- On a C6 that still runs its factory firmware (radio fault **esp-hosted firmware**), the page first installs the
+  release's `c6_installer.bin` through that firmware, then goes on as above. This takes about 5 minutes more. Don't
+  power off the board meanwhile: a power cut while the installer writes leaves a C6 that only the
+  [maintenance jumper or a USB-UART adapter](first-install.md#2-put-the-radio-firmware-on-the-c6) can repair. If the
+  board firmware is updated in the same go and the installer does not fit the running firmware, the board firmware is
+  installed alone: press **Install** again after the reboot.
 
 API: `GET /device/update` shows the check, `POST /device/update` installs ([HTTP API](api.md#device-api)).
 

@@ -152,6 +152,10 @@ Checks beyond the automated tests, and what has not been run on hardware yet. Th
 - The no-wires first install (Path 1) ran on the board against an ESP-Hosted 0.0.27 stand-in, not yet against an
   untouched factory C6; nor the case where the installer lands in the slot it must overwrite (a factory C6 updated
   before) and moves itself first.
+- The factory C6 through **Install** on the Updates from GitHub card (`c6_installer.bin` from `release.installer_url`,
+  then `POST /device/update`): page-tested only. To check: radio only and with an older board firmware; a release
+  without `c6_installer.bin`; the installer refused; a lost connection while the installer runs (the page's
+  wait-and-reload text); the reply texts.
 - The `br_core` give-up path after repeated radio failures, and the fall-back to the default network config when the
   stored config cannot be applied (host-tested only).
 - Several boards on one Thread network.

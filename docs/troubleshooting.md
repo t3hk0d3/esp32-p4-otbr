@@ -15,7 +15,7 @@ The Dashboard names the reason (`fault_reason` in `GET /device/status`):
 | Reason | What it means | What to do |
 | --- | --- | --- |
 | **no rcp firmware** | The C6 has no radio firmware (new board, or after a repair). | Upload `c6_rcp.bin` on the Firmware page. |
-| **esp-hosted firmware** | The C6 still runs its factory firmware. | Upload `c6_installer.bin`, then `c6_rcp.bin`, both from the board's release ([First install](first-install.md#a-no-wires)). |
+| **esp-hosted firmware** | The C6 still runs its factory firmware. | Press **Install** on the Updates from GitHub card, or upload `c6_installer.bin`, then `c6_rcp.bin`, both from the board's release ([First install](first-install.md#a-no-wires)). |
 | **rcp incompatible** | The radio firmware doesn't match the board's firmware, or the radio doesn't answer. | Upload `c6_rcp.bin` from the same release as the board's firmware. |
 | **rom recovery failed** | The C6 didn't answer and the repair over the maintenance jumper failed. | Check the jumper wires, then **Recover radio** on the Firmware page. Without a jumper: [First install](first-install.md#c-usb-uart-adapter), way C. |
 | **resetting the RCP failed** | The radio stopped answering and the board's automatic recovery failed. It tries up to three times in 10 minutes, then waits. | Check the antenna. Reboot the board, or upload `c6_rcp.bin` again. |

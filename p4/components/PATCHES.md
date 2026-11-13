@@ -422,6 +422,13 @@ reason, spec reference.
    placeholder of `#otaUrl` from the `bundle` field of `GET /device/update` (`otbr.bundle` while the state has not loaded
    or lacks the field). Reason: a board downloads and expects the bundle of its own target
    (`<board_id>_<chip_id>.ota`), so the page names that file. Host test: `tools/tests/test_firmware_page.py`.
+43. Applied (factory C6 update, 2026-11-13). Frontend, the Device -> Firmware page, `static/firmware.js`: while
+   `fault_reason` is `esp-hosted firmware` and the release has radio firmware, **Install** on the Updates card first
+   posts `/device/radio/firmware?from_url=<release.installer_url>`, then `POST /device/update` (`installFactory`,
+   `postUpdate`); new `FirmwareLogic` helpers `factoryInstall`, `installerProgressText`, `installerFailureText`,
+   `updateAfterWrongInstaller`; `updateHint` / `updateQuestion` take the fault reason and warn about power loss;
+   `faultHint` and `installQuestion` texts of the factory C6 updated. Reason: the firmware's update refuses a factory C6
+   ("upload c6_installer.bin first"). Host test: `tools/tests/test_firmware_page.py` (`TestFactoryInstall`).
 
 ### REST guard classification (patches 2 and 9)
 

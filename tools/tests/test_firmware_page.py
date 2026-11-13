@@ -681,7 +681,7 @@ class TestInstallConfirms:
 
     def test_page_passes_the_fault_reason_and_skips_the_note_while_waiting(self):
         js = (FRONTEND / "static" / "firmware.js").read_text()
-        assert js.count("running, faultReason)))") == 2
+        assert js.count("running, faultReason)))") == 3
         assert "kit.isWaiting() ? null : L.afterUpdateText(" in js
 
     def test_after_update_text(self):
@@ -1112,3 +1112,252 @@ class TestUpdatesCard:
     def test_card_sits_above_the_cards_it_does_not_replace(self):
         html = (FRONTEND / "firmware.html").read_text()
         assert html.index('id="updCard"') < html.index('id="firmwareSection"')
+
+
+INSTALLER_URL = (
+    "https://github.com/t3hk0d3/esp32-p4-otbr/releases/download/v0.4.0/c6_installer.bin"
+)
+FACTORY = "'esp-hosted firmware'"
+
+
+def frel(**patch):
+    return rel(installer_url=INSTALLER_URL, **patch)
+
+
+def fupd(**patch):
+    """GET /device/update body on a factory C6: running.rcp unknown, the release names its installer."""
+    patch.setdefault("release", frel())
+    patch.setdefault("running", {"app": "1.0", "rcp": None})
+    return upd(**patch)
+
+
+FACTORY_STATUS = status_with("s.fault_reason = 'esp-hosted firmware'")
+
+
+def factory_page(installer_reply, update_reply=None):
+    """The page on a factory C6; `installer_reply` answers POST /device/radio/firmware (JS, or 'lost')."""
+    radio = (
+        "(() => { throw new Error('gone'); })()"
+        if installer_reply == "lost"
+        else "(" + installer_reply + ")"
+    )
+    other = "{status: 200, body: {status: 'ok'}}"
+    r = routes(FACTORY_STATUS, other)
+    r = r.replace(
+        "(u, o) => u === '/device/status'",
+        "(u, o) => u.startsWith('/device/radio/firmware') ? "
+        + radio
+        + " : u === '/device/status'",
+        1,
+    )
+    return page("firmware", r) + (
+        f"t.upd = (u, o) => o.method === 'POST' ? ({{status: 200, body: {update_reply or POST_OK}}})"
+        f" : ({{status: 200, body: t.u}});\n"
+    )
+
+
+@needs_node
+class TestFactoryInstall:
+    """Updates from GitHub on a C6 that still runs its factory ESP-Hosted firmware: installer first, then the update"""
+
+    def test_factory_install_needs_the_fault_radio_firmware_and_an_installer_url(self):
+        assert fw(f"L.factoryInstall({fupd(app='same')}, {FACTORY})") is True
+        assert fw(f"L.factoryInstall({fupd(app='same')}, 'no rcp firmware')") is False
+        assert fw(f"L.factoryInstall({fupd(app='same')}, null)") is False
+        assert fw(f"L.factoryInstall({upd(app='same')}, {FACTORY})") is False
+        assert (
+            fw(f"L.factoryInstall({fupd(app='same', release=frel(rcp=''))}, {FACTORY})")
+            is False
+        )
+
+    def test_hint_names_the_installer_then_the_radio_firmware(self):
+        h = fw(f"L.updateHint({fupd(app='same')}, {FACTORY})")
+        assert h.index("c6_installer.bin") < h.index("c6_rcp.bin")
+        assert "about 5 minutes" in h and "factory firmware" in h
+
+    def test_hint_without_the_fault_is_unchanged(self):
+        assert fw(f"L.updateHint({fupd(app='same')}, null)") == fw(
+            f"L.updateHint({fupd(app='same')})"
+        )
+
+    def test_question_for_the_radio_only_names_both_files_time_and_the_power_warning(
+        self,
+    ):
+        q = fw(f"L.updateQuestion({fupd(app='same')}, 'X', {FACTORY})")
+        for part in (
+            "v0.4.0",
+            "c6_installer.bin",
+            "c6_rcp.bin",
+            "about 5 minutes",
+            "power off",
+            "maintenance jumper",
+            "USB-UART adapter",
+        ):
+            assert part in q
+        assert "reboot" not in q
+
+    def test_question_with_a_newer_app_adds_the_reboot_and_the_running_version(self):
+        q = fw(f"L.updateQuestion({fupd()}, '20261103T185311Z-e41c14c', {FACTORY})")
+        assert "reboot" in q and "20261103T185311Z-e41c14c" in q and "power off" in q
+
+    def test_question_without_the_fault_is_unchanged(self):
+        assert (
+            fw(f"L.updateQuestion({upd(app='same')}, 'X', null)")
+            == "Install the radio firmware of v0.4.0 from GitHub? The Thread network stops for about half a minute."
+        )
+
+    def test_failure_text_for_a_missing_installer(self):
+        t = fw(
+            "L.installerFailureText({status: 502, body: {error: 'fetch_failed', detail: 'the URL did not answer 200'}},"
+            " 'the URL did not answer 200')"
+        )
+        assert "no c6_installer.bin" in t and "Nothing was changed" in t
+
+    def test_failure_text_for_a_wrong_installer_names_both_versions(self):
+        t = fw(
+            "L.installerFailureText({status: 400, body: {error: 'invalid_image', detail: 'wrong c6_installer.bin: base-1, need base-2'}},"
+            " 'wrong c6_installer.bin: base-1, need base-2')"
+        )
+        assert "base-1" in t and "base-2" in t and "Nothing was sent" in t
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            "{status: 502, body: {error: 'install_failed', detail: 'OTA end timed out'}}",
+            "null",
+        ],
+    )
+    def test_failure_text_for_a_refused_timed_out_or_lost_installer_says_wait_and_reload(
+        self, reply
+    ):
+        t = fw(f"L.installerFailureText({reply}, 'OTA end timed out')")
+        for part in ("about 5 minutes", "powering off", "reload", "Install again"):
+            assert part in t
+
+    def test_failure_text_for_a_busy_refusal_is_the_reply(self):
+        assert (
+            fw(
+                "L.installerFailureText({status: 409, body: {error: 'busy'}}, 'busy: x')"
+            )
+            == "busy: x"
+        )
+
+    def test_fault_hint_points_to_the_updates_card(self):
+        assert "Install from GitHub" in fw(f"L.faultHint({FACTORY}, '').text")
+
+    def test_installer_then_update_are_posted_in_order(self):
+        r = scenario(
+            factory_page(
+                "{status: 200, body: {installed: null}}",
+                "{status: 'ok', app: 'unchanged', rcp: 'installed', detail: '', rebooting: false}",
+            )
+            + f"""
+            t.u = {fupd(app="same")};
+            t.page.init(); await t.advance(100);
+            const p = t.page.installUpdate();
+            const during = t.el('updMsg').textContent;
+            await p;
+            const posts = t.calls.filter((c) => c.method === 'POST').map((c) => c.url);
+            return [posts, during, t.el('updMsg').textContent];
+        """
+        )
+        assert r[0] == [
+            "/device/radio/firmware?from_url="
+            + INSTALLER_URL.replace(":", "%3A").replace("/", "%2F"),
+            "/device/update",
+        ]
+        assert "about 5 minutes" in r[1] and "power off" in r[1]
+        assert r[2].startswith("c6_installer.bin installed. Radio firmware installed")
+
+    def test_missing_installer_stops_before_the_update(self):
+        r = scenario(
+            factory_page(
+                "{status: 502, body: {error: 'fetch_failed', detail: 'the URL did not answer 200'}}"
+            )
+            + f"""
+            t.u = {fupd(app="same")};
+            t.page.init(); await t.advance(100);
+            await t.page.installUpdate();
+            return [t.calls.filter((c) => c.method === 'POST').length, t.el('updMsg').textContent,
+                    t.el('updMsg').style.color, t.page.kit.isBusy()];
+        """
+        )
+        assert r[0] == 1
+        assert "no c6_installer.bin" in r[1]
+        assert r[2:] == ["var(--danger)", False]
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            "{status: 502, body: {error: 'install_failed', detail: 'OTA end timed out'}}",
+            "lost",
+        ],
+    )
+    def test_refused_timed_out_or_lost_installer_stops_and_says_wait_and_reload(
+        self, reply
+    ):
+        r = scenario(
+            factory_page(reply)
+            + f"""
+            t.u = {fupd(app="same")};
+            t.page.init(); await t.advance(100);
+            await t.page.installUpdate();
+            return [t.calls.filter((c) => c.method === 'POST').length, t.el('updMsg').textContent];
+        """
+        )
+        assert r[0] == 1
+        assert "about 5 minutes" in r[1] and "reload" in r[1]
+
+    def test_wrong_installer_with_a_newer_app_still_installs_the_update(self):
+        r = scenario(
+            factory_page(
+                "{status: 400, body: {error: 'invalid_image', detail: 'wrong c6_installer.bin: base-1, need base-2'}}"
+            )
+            + f"""
+            t.u = {fupd()};
+            t.page.init(); await t.advance(100);
+            await t.page.installUpdate();
+            return t.calls.filter((c) => c.method === 'POST').map((c) => c.url);
+        """
+        )
+        assert r[1] == "/device/update"
+
+    def test_wrong_installer_without_a_new_app_stops_with_both_versions(self):
+        r = scenario(
+            factory_page(
+                "{status: 400, body: {error: 'invalid_image', detail: 'wrong c6_installer.bin: base-1, need base-2'}}"
+            )
+            + f"""
+            t.u = {fupd(app="same")};
+            t.page.init(); await t.advance(100);
+            await t.page.installUpdate();
+            return [t.calls.filter((c) => c.method === 'POST').length, t.el('updMsg').textContent];
+        """
+        )
+        assert r[0] == 1
+        assert "base-1" in r[1] and "base-2" in r[1]
+
+    def test_declined_confirm_posts_nothing(self):
+        r = scenario(
+            factory_page("{status: 200, body: {installed: null}}")
+            + f"""
+            t.u = {fupd(app="same")};
+            t.page.init(); await t.advance(100);
+            t.env.confirm = () => false;
+            await t.page.installUpdate();
+            return [t.calls.filter((c) => c.method === 'POST').length, t.confirms().length];
+        """
+        )
+        assert r[0] == 0
+
+    def test_c6_with_its_updater_posts_only_the_update(self):
+        r = scenario(
+            page("firmware", routes())
+            + f"""
+            t.u = {fupd(app="same")};
+            t.page.init(); await t.advance(100);
+            await t.page.installUpdate();
+            return t.calls.filter((c) => c.method === 'POST').map((c) => c.url);
+        """
+        )
+        assert r == ["/device/update"]
