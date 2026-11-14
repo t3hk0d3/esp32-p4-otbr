@@ -40,7 +40,8 @@ function faultHint(reason, otbrChannel) {
   if (reason === 'esp-hosted firmware')
     return {
       highlight : true,
-      text : 'The radio co-processor still runs its factory ESP-Hosted firmware. Install c6_installer.bin below first (once), then c6_rcp.bin.'
+      text : 'The radio co-processor still runs its factory ESP-Hosted firmware. Install from GitHub above does both ' +
+             'steps; or install c6_installer.bin below first (once), then c6_rcp.bin.'
     };
   if (reason === 'rcp incompatible')
     return {
@@ -62,10 +63,9 @@ function installQuestion(card, what, running, faultReason) {
   if (card === 'ota')
     return 'Install ' + what + ' and reboot? The board now runs ' + (running || 'an unknown version') +
            '; Thread and the web UI are gone for about a minute.';
-  if (faultReason === 'esp-hosted firmware')
+  if (faultReason === FACTORY_FAULT)
     return 'Install the radio firmware ' + what + '? This replaces the factory ESP-Hosted firmware and takes ' +
-           'about a minute. Do not power off or reset the board until it is done, or the radio may need the ' +
-           'maintenance jumper to recover.';
+           'about 5 minutes. ' + POWER_WARNING;
   return 'Install the radio firmware ' + what + '? The Thread network stops for about half a minute.';
 }
 
@@ -85,6 +85,11 @@ function rcpInstalledText(installed) {
 }
 
 /* ---- the Updates card (GET /device/update) ---- */
+
+/** The status' fault_reason of a C6 that still runs its factory ESP-Hosted firmware. */
+var FACTORY_FAULT = 'esp-hosted firmware';
+var POWER_WARNING = 'Do not power off or reset the board until it is done: a power cut while the installer writes ' +
+                    'leaves a radio co-processor that only the maintenance jumper or a USB-UART adapter can repair.';
 
 var UPDATE_CHECK_MAX_AGE_S = 3600; // a check older than this is repeated when the page opens
 
@@ -157,11 +162,33 @@ function updateAction(u) {
 /** The release carries radio firmware: "Install anyway" (force) rewrites the radio even when it matches. */
 function releaseHasRcp(u) { return !!(u.release && u.release.rcp); }
 
-/** Description under the card's legend. */
-function updateHint(u) {
+/*
+ * Whether Install first puts c6_installer.bin on the C6 (POST /device/radio/firmware?from_url=), before
+ * POST /device/update: the C6 runs its factory firmware (`faultReason`) and the release has radio firmware and names
+ * its installer.
+ */
+function factoryInstall(u, faultReason) {
+  return faultReason === FACTORY_FAULT && !!(u && u.release && u.release.installer_url) && releaseHasRcp(u);
+}
+
+/** What follows the installer in the texts of a factory install. */
+function afterInstaller(u) {
+  var name = releaseName(u);
+  if (u.app === 'older')
+    return 'then installs ' + name + ' anyway (the bundle and c6_rcp.bin) and reboots';
+  if (appDiffers(u))
+    return 'then installs ' + name + ' (the bundle and c6_rcp.bin) and reboots';
+  return 'then installs c6_rcp.bin';
+}
+
+/** Description under the card's legend; `faultReason` status.fault_reason. */
+function updateHint(u, faultReason) {
   if (u.state === 'checking' || !u.release)
     return 'The board downloads the bundle and, when it differs, the radio firmware from the same release, then reboots.';
   var name = releaseName(u);
+  if (factoryInstall(u, faultReason))
+    return 'The radio co-processor still runs its factory firmware. The board first downloads c6_installer.bin from ' +
+           name + ' and installs it through that firmware (about 5 minutes), ' + afterInstaller(u) + '.';
   if (u.app === 'older')
     return 'This board runs a build that is newer than ' + name + '. Installing goes back to the release' +
            (releaseHasRcp(u) ? ' and rewrites the radio firmware (the Thread network stops for about half a minute).'
@@ -179,9 +206,13 @@ function updateHint(u) {
 }
 
 /** Confirm text before the install; `running` is the Border Router version of the last status. */
-function updateQuestion(u, running) {
+function updateQuestion(u, running, faultReason) {
   var name = releaseName(u);
   var now = running || (u.running && u.running.app) || 'an unknown version';
+  if (factoryInstall(u, faultReason))
+    return 'Install the radio firmware of ' + name + ' from GitHub? The radio co-processor still runs its factory ' +
+           'firmware: the board first installs c6_installer.bin through it (about 5 minutes), ' + afterInstaller(u) +
+           (u.app === 'older' || appDiffers(u) ? ' (it now runs ' + now + ')' : '') + '. ' + POWER_WARNING;
   var radio = 'the radio firmware is rewritten too, so the Thread network stops for about half a minute';
   var gone = 'Thread and the web UI are gone for about a minute';
   if (u.app === 'older')
@@ -192,6 +223,41 @@ function updateQuestion(u, running) {
     return 'Install ' + name + ' from GitHub and reboot? The board now runs ' + now + '; ' +
            (u.rcp_differs ? radio + ', and ' : '') + gone + ' during the reboot.';
   return 'Install the radio firmware of ' + name + ' from GitHub? The Thread network stops for about half a minute.';
+}
+
+/** Progress line while c6_installer.bin is installed. */
+function installerProgressText(u) {
+  return 'The device is downloading c6_installer.bin of ' + releaseName(u) + ' and installing it through the factory ' +
+         'firmware. This takes about 5 minutes. ' + POWER_WARNING;
+}
+
+/*
+ * Red line when the installer step of a factory install failed: `r` the reply ({status, body}; null when the
+ * connection was lost), `failure` its text as the page words it.
+ */
+function installerFailureText(r, failure) {
+  var b = (r && r.body) || {};
+  if (r && r.status === 502 && b.error === 'fetch_failed')
+    return 'The release has no c6_installer.bin, or it could not be downloaded: ' + failure + '. Nothing was changed.';
+  if (r && r.status === 400 && b.error === 'invalid_image')
+    return 'The c6_installer.bin of the release does not fit the firmware the board runs: ' + failure +
+           '. Nothing was sent to the radio co-processor.';
+  if (r && r.status !== 502)
+    return failure; // refused before anything was sent (busy, ...)
+  return 'The installer did not finish: ' + failure + '. The radio co-processor may still be installing: wait about ' +
+         '5 minutes without powering off the board, then reload this page. If the radio fault still says ' +
+         'esp-hosted firmware, press Install again.';
+}
+
+/*
+ * Whether a refused installer still lets POST /device/update run: c6_installer.bin was made for another base version
+ * ("wrong c6_installer.bin"), and the update installs a new bundle, whose base version it then fits (Install again
+ * after the reboot).
+ */
+function updateAfterWrongInstaller(u, r) {
+  var b = (r && r.body) || {};
+  return !!r && r.status === 400 && b.error === 'invalid_image' && /wrong c6_installer\.bin/.test(String(b.detail)) &&
+         (appDiffers(u) || u.app === 'older');
 }
 
 /** Red status line of a failed check. */
@@ -224,6 +290,9 @@ function rcpFailedText(detail, appChanged) {
          '. Install again to update the radio firmware only.';
 }
 
+/** Line before a POST /device/update reply's own text, once the installer step worked. */
+var INSTALLER_DONE_TEXT = 'c6_installer.bin installed.';
+
 /** "owner/name" of a repository URL; the URL itself when it has no path. */
 function repoLabel(url) {
   var m = /^[a-z]+:\/\/[^\/]+\/(.+?)\/*$/i.exec(String(url));
@@ -249,6 +318,11 @@ return {
   updateAction : updateAction,
   updateHint : updateHint,
   updateQuestion : updateQuestion,
+  factoryInstall : factoryInstall,
+  installerProgressText : installerProgressText,
+  installerFailureText : installerFailureText,
+  updateAfterWrongInstaller : updateAfterWrongInstaller,
+  INSTALLER_DONE_TEXT : INSTALLER_DONE_TEXT,
   checkFailedText : checkFailedText,
   updateReplyText : updateReplyText,
   rcpFailedText : rcpFailedText,
@@ -526,7 +600,7 @@ function renderUpdate() {
   renderVersion('updApp', L.versionRow(rel ? rel.app : null, runApp === undefined ? null : runApp, u.app === 'older'));
   renderVersion('updRcp', L.versionRow(rel ? rel.rcp : null, runRcp === undefined ? null : runRcp, false));
   setText('updChecked', L.checkedText(u));
-  setText('updHint', L.updateHint(u));
+  setText('updHint', L.updateHint(u, faultReason));
   var bundle = typeof u.bundle === 'string' && u.bundle ? u.bundle : 'otbr.bundle';
   setText('otaBundleName', bundle);
   $('otaUrl').setAttribute('placeholder', 'https://host/' + bundle);
@@ -599,37 +673,71 @@ function checkUpdate() {
   return startCheck();
 }
 
-function finishUpdate(r) {
+/* `prefix`: a line that goes before the reply's own text (the installer step of a factory install), or ''. */
+function finishUpdate(r, prefix) {
   var reply = L.updateReplyText(r, upd && upd.release ? upd.release.rcp : null);
+  var lead = prefix ? prefix + ' ' : '';
   if (!reply) {
-    note('updMsg', kit.failure(r), true);
+    note('updMsg', lead + kit.failure(r), true);
     return null;
   }
   if (reply.rebooting) {
     stored(OTA_KEY, running || '');
     stored(UPDATE_KEY, JSON.stringify({rcpFailed : reply.rcpFailed}));
-    note('updMsg', reply.text, false);
+    note('updMsg', lead + reply.text, false);
     kit.waitForBoard('updMsg');
     return {handoff : true};
   }
-  note('updMsg', reply.text, false);
+  note('updMsg', lead + reply.text, false);
   refreshStatus();
   sticky = true;
   startCheck();
   return r;
 }
 
+/* POST /device/update; `prefix` as for finishUpdate. */
+function postUpdate(act, prefix) {
+  note('updMsg', (prefix ? prefix + ' ' : '') + 'The device is downloading ' + L.releaseName(upd) +
+                     ' from GitHub and installing it ...', false);
+  return kit.request('POST', '/device/update' + (act.force ? '?force=1' : '')).then(function(r) {
+    return finishUpdate(r, prefix);
+  }, function(e) {
+    note('updMsg', (prefix ? prefix + ' ' : '') + e.message, true);
+    return null;
+  });
+}
+
+/*
+ * A factory C6: c6_installer.bin of the release through POST /device/radio/firmware?from_url= first (the board sends
+ * it through the factory firmware and waits for the C6 updater), then the update as usual.
+ */
+function installFactory(act) {
+  var u = upd;
+  note('updMsg', L.installerProgressText(u), false);
+  return kit.request('POST', L.radioFirmwareUrl(u.release.installer_url)).then(function(r) {
+    if (r.status === 200) {
+      refreshStatus();
+      return postUpdate(act, L.INSTALLER_DONE_TEXT);
+    }
+    if (L.updateAfterWrongInstaller(u, r))
+      return postUpdate(act, ''); // the radio step fails as before; Install again after the reboot
+    note('updMsg', L.installerFailureText(r, kit.failure(r)), true);
+    refreshStatus();
+    return null;
+  }, function(e) {
+    note('updMsg', L.installerFailureText(null, e.message), true);
+    return null;
+  });
+}
+
 function installUpdate() {
   var act = upd ? L.updateAction(upd) : null;
-  if (kit.isBusy() || !act || !env.confirm(L.updateQuestion(upd, running)))
+  if (kit.isBusy() || !act || !env.confirm(L.updateQuestion(upd, running, faultReason)))
     return Promise.resolve(null);
+  var factory = L.factoryInstall(upd, faultReason);
   return kit.runOp(function() {
     sticky = true;
-    note('updMsg', 'The device is downloading ' + L.releaseName(upd) + ' from GitHub and installing it ...', false);
-    return kit.request('POST', '/device/update' + (act.force ? '?force=1' : '')).then(finishUpdate, function(e) {
-      note('updMsg', e.message, true);
-      return null;
-    });
+    return factory ? installFactory(act) : postUpdate(act, '');
   });
 }
 

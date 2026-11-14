@@ -3,6 +3,10 @@
 #include "self_update_priv.h"
 
 #define PAGE_URL_MAX 192
+#define ASSET_URL_MAX 256
+
+/** The release file a factory C6 needs before c6_rcp.bin (the page installs it through POST /device/radio/firmware). */
+#define INSTALLER_FILE "c6_installer.bin"
 
 device_api_error_t device_api_update_decide(self_update_cmp_t cmp, bool rcp_differs, bool has_rcp, bool force,
                                             bool *install_app, bool *install_rcp)
@@ -58,10 +62,13 @@ int device_api_update_json(char *buf, size_t cap, const self_update_snapshot_t *
     const self_update_cmp_t cmp = snap->has_release ? self_update_compare(rel->app, running_app) : SELF_UPDATE_UNKNOWN;
     const bool rcp_differs = snap->has_release && self_update_rcp_differs(rel->rcp, rcp_installed, rcp_known);
     char page_url[PAGE_URL_MAX];
+    char installer_url[ASSET_URL_MAX];
     char bundle[DEVICE_API_BUNDLE_NAME_MAX];
     json_out_t w;
 
-    if (snap->has_release && self_update_release_page_url(base, rel->tag, page_url, sizeof(page_url)) != ESP_OK) {
+    if (snap->has_release && (self_update_release_page_url(base, rel->tag, page_url, sizeof(page_url)) != ESP_OK ||
+                              self_update_asset_url(base, rel->tag, INSTALLER_FILE, installer_url,
+                                                    sizeof(installer_url)) != ESP_OK)) {
         return -1;
     }
     if (self_update_bundle_name(board_id, chip_id, bundle, sizeof(bundle)) != ESP_OK) {
@@ -88,6 +95,8 @@ int device_api_update_json(char *buf, size_t cap, const self_update_snapshot_t *
         json_out_str(&w, or_null(rel->rcp));
         json_out_raw(&w, ",\"url\":");
         json_out_str(&w, page_url);
+        json_out_raw(&w, ",\"installer_url\":");
+        json_out_str(&w, installer_url);
         json_out_raw(&w, "}");
     } else {
         json_out_raw(&w, "null");
