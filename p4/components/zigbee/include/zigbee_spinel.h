@@ -101,7 +101,7 @@ typedef struct {
 typedef struct {
     /** Attach finished. `compatible` false with `reason` (owned by the client) when the RCP cannot serve; NULL else. */
     void (*ready)(void *ctx, bool compatible, const char *reason);
-    /** A received frame: PSDU without FCS, with the mux's receive time. */
+    /** A received frame: PSDU without FCS, with the RCP's receive timestamp (radio time, the base of a timed transmit). */
     void (*rx)(void *ctx, const uint8_t *psdu, size_t len, uint8_t channel, int8_t rssi, uint8_t lqi,
                uint64_t time_us);
     void (*tx_done)(void *ctx, zigbee_tx_result_t r);
@@ -215,11 +215,14 @@ int zigbee_spinel_src_match_add_short(zigbee_spinel_t *s, uint16_t address);
 int zigbee_spinel_src_match_add_ext(zigbee_spinel_t *s, const uint8_t ext[8]);
 
 /**
- * Sends one frame (PSDU without FCS; the client appends it). Nonzero without sending when not attached, with a
- * transmit in flight, or when the frame with its FCS exceeds 127 bytes. The answer comes through sink.tx_done.
+ * Sends one frame (PSDU without FCS; the client appends it) on `channel`; the receiver goes to `rx_channel` after it.
+ * A nonzero `tx_delay` sends it `tx_delay` us after `tx_delay_base` (the low 32 bits of a radio time, such as a
+ * received frame's timestamp); 0 sends it now. Nonzero without sending when not attached, with a transmit in flight,
+ * when the frame with its FCS exceeds 127 bytes, or for a timed frame when the RCP lacks transmit timing. The answer
+ * comes through sink.tx_done.
  */
-int zigbee_spinel_transmit(zigbee_spinel_t *s, const uint8_t *psdu, size_t len, uint8_t channel, bool csma,
-                           uint8_t retries, uint8_t backoffs);
+int zigbee_spinel_transmit(zigbee_spinel_t *s, const uint8_t *psdu, size_t len, uint8_t channel, uint8_t rx_channel,
+                           bool csma, uint8_t retries, uint8_t backoffs, uint32_t tx_delay, uint32_t tx_delay_base);
 
 /**
  * Starts an energy scan of one channel for `ms`: the scan's three property requests run synchronously, so a refusal
@@ -227,8 +230,8 @@ int zigbee_spinel_transmit(zigbee_spinel_t *s, const uint8_t *psdu, size_t len, 
  */
 int zigbee_spinel_energy_scan(zigbee_spinel_t *s, uint8_t channel, uint16_t ms);
 
-/** One spinel frame from the channel, received at `rx_us` (the mux's time). The frame is not kept. */
-void zigbee_spinel_on_frame(zigbee_spinel_t *s, const uint8_t *frame, size_t len, int64_t rx_us);
+/** One spinel frame from the channel. The frame is not kept. */
+void zigbee_spinel_on_frame(zigbee_spinel_t *s, const uint8_t *frame, size_t len);
 
 /**
  * Checks the transmit, re-arm and energy-scan deadlines; a missed one requests a channel reset. A timed-out transmit or

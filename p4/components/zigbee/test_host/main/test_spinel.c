@@ -281,7 +281,7 @@ static int fake_wait(void *ctx, int64_t until_us)
     }
     frame_t f = rcp.queue[rcp.q_head++ % MAX_QUEUE];
     rcp.now += rcp.step_us;
-    zigbee_spinel_on_frame(&client, f.buf, f.len, rcp.now);
+    zigbee_spinel_on_frame(&client, f.buf, f.len);
     if (rcp.event_after_frame && rcp.q_head == rcp.q_tail) {
         rcp.event_after_frame = false;
         rcp.event_pending = rcp.event;
@@ -421,7 +421,7 @@ static size_t count_sent(unsigned cmd, unsigned key)
 
 static void deliver(const uint8_t *buf, size_t len)
 {
-    zigbee_spinel_on_frame(&client, buf, len, rcp.now);
+    zigbee_spinel_on_frame(&client, buf, len);
 }
 
 /* ---- attach ---- */
@@ -485,6 +485,14 @@ TEST_CASE("attach on the CC2652P (radio caps 0x7f): reports ready as compatible"
     TEST_ASSERT_TRUE(got.compatible);
 }
 
+TEST_CASE("attach on an RCP without transmit timing: reports ready as compatible", "[zigbee]")
+{
+    setup(FRAMES_C6_RADIO_CAPS & ~FRAMES_CAPS_TRANSMIT_TIMING);
+    zigbee_spinel_attach(&client);
+    TEST_ASSERT_EQUAL(1, got.ready_count);
+    TEST_ASSERT_TRUE(got.compatible);
+}
+
 TEST_CASE("attach with protocol 4.2: the minor version is not checked", "[zigbee]")
 {
     setup(FRAMES_C6_RADIO_CAPS);
@@ -541,7 +549,7 @@ TEST_CASE("attach with protocol major version 3: sends nothing more", "[zigbee]"
     rcp.major = 3;
     zigbee_spinel_attach(&client);
     TEST_ASSERT_EQUAL(2, rcp.sent_count);
-    TEST_ASSERT_NOT_EQUAL(0, zigbee_spinel_transmit(&client, (const uint8_t *)"\x41\x88", 2, 15, true, 3, 4));
+    TEST_ASSERT_NOT_EQUAL(0, zigbee_spinel_transmit(&client, (const uint8_t *)"\x41\x88", 2, 15, 15, true, 3, 4, 0, 0));
     TEST_ASSERT_EQUAL(2, rcp.sent_count);
 }
 
@@ -1008,7 +1016,7 @@ static void answer_tx(unsigned status)
 TEST_CASE("transmit: sends one STREAM_RAW frame with the PSDU and channel, CSMA, retries and backoffs", "[zigbee]")
 {
     attached(FRAMES_C6_RADIO_CAPS);
-    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
     TEST_ASSERT_EQUAL(1, rcp.sent_count);
     raw_tx_t t = sent_raw(0);
     TEST_ASSERT_EQUAL(sizeof(PSDU) + 2, t.frame_len);
@@ -1025,7 +1033,7 @@ TEST_CASE("transmit: marks the frame secured and final, not a retransmission, un
           "[zigbee]")
 {
     attached(FRAMES_C6_RADIO_CAPS);
-    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 20, false, 0, 0);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 20, 20, false, 0, 0, 0, 0);
     raw_tx_t t = sent_raw(0);
     TEST_ASSERT_TRUE(t.header_updated);
     TEST_ASSERT_TRUE(t.security_processed);
@@ -1040,17 +1048,53 @@ TEST_CASE("transmit: appends the 802.15.4 FCS", "[zigbee]")
 {
     attached(FRAMES_C6_RADIO_CAPS);
     // CRC-16/KERMIT (the 802.15.4 FCS) of "123456789" is 0x2189, sent little-endian.
-    zigbee_spinel_transmit(&client, (const uint8_t *)"123456789", 9, 15, true, 3, 4);
+    zigbee_spinel_transmit(&client, (const uint8_t *)"123456789", 9, 15, 15, true, 3, 4, 0, 0);
     raw_tx_t t = sent_raw(0);
     TEST_ASSERT_EQUAL(11, t.frame_len);
     TEST_ASSERT_EQUAL_HEX8(0x89, t.frame[9]);
     TEST_ASSERT_EQUAL_HEX8(0x21, t.frame[10]);
 }
 
+TEST_CASE("transmit: sends the receive channel for after the frame", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 20, true, 3, 4, 0, 0));
+    raw_tx_t t = sent_raw(0);
+    TEST_ASSERT_EQUAL(15, t.channel);
+    TEST_ASSERT_EQUAL(20, t.rx_channel);
+}
+
+TEST_CASE("timed transmit: sends the delay and its base time", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS);
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, false, 0, 0, 20000, 0xDEADBEEF));
+    TEST_ASSERT_EQUAL(1, rcp.sent_count);
+    raw_tx_t t = sent_raw(0);
+    TEST_ASSERT_EQUAL_UINT32(20000, t.delay);
+    TEST_ASSERT_EQUAL_HEX32(0xDEADBEEF, t.delay_base);
+    TEST_ASSERT_TRUE(client.tx_in_flight);
+}
+
+TEST_CASE("timed transmit on an RCP without transmit timing: refused, nothing sent", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS & ~FRAMES_CAPS_TRANSMIT_TIMING);
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_LOCAL,
+                      zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, false, 0, 0, 20000, 1));
+    TEST_ASSERT_EQUAL(0, rcp.sent_count);
+    TEST_ASSERT_FALSE(client.tx_in_flight);
+}
+
+TEST_CASE("immediate transmit on an RCP without transmit timing: sent", "[zigbee]")
+{
+    attached(FRAMES_C6_RADIO_CAPS & ~FRAMES_CAPS_TRANSMIT_TIMING);
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
+    TEST_ASSERT_EQUAL(1, rcp.sent_count);
+}
+
 TEST_CASE("transmit answered OK: reports acked", "[zigbee]")
 {
     attached(FRAMES_C6_RADIO_CAPS);
-    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0);
     answer_tx(SPINEL_STATUS_OK);
     TEST_ASSERT_EQUAL(1, got.tx_count);
     TEST_ASSERT_EQUAL(ZIGBEE_TX_ACKED, got.tx);
@@ -1059,7 +1103,7 @@ TEST_CASE("transmit answered OK: reports acked", "[zigbee]")
 TEST_CASE("transmit answered NO_ACK: reports no ack", "[zigbee]")
 {
     attached(FRAMES_C6_RADIO_CAPS);
-    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0);
     answer_tx(SPINEL_STATUS_NO_ACK);
     TEST_ASSERT_EQUAL(ZIGBEE_TX_NO_ACK, got.tx);
 }
@@ -1067,7 +1111,7 @@ TEST_CASE("transmit answered NO_ACK: reports no ack", "[zigbee]")
 TEST_CASE("transmit answered CCA_FAILURE: reports channel access failure", "[zigbee]")
 {
     attached(FRAMES_C6_RADIO_CAPS);
-    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0);
     answer_tx(SPINEL_STATUS_CCA_FAILURE);
     TEST_ASSERT_EQUAL(ZIGBEE_TX_CCA, got.tx);
 }
@@ -1075,7 +1119,7 @@ TEST_CASE("transmit answered CCA_FAILURE: reports channel access failure", "[zig
 TEST_CASE("transmit answered with OpenThread's ABORT: reports aborted", "[zigbee]")
 {
     attached(FRAMES_C6_RADIO_CAPS);
-    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0);
     answer_tx(FRAMES_STATUS_ABORT);
     TEST_ASSERT_EQUAL(ZIGBEE_TX_ABORTED, got.tx);
 }
@@ -1083,7 +1127,7 @@ TEST_CASE("transmit answered with OpenThread's ABORT: reports aborted", "[zigbee
 TEST_CASE("transmit answered FAILURE: reports failed", "[zigbee]")
 {
     attached(FRAMES_C6_RADIO_CAPS);
-    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0);
     answer_tx(SPINEL_STATUS_FAILURE);
     TEST_ASSERT_EQUAL(ZIGBEE_TX_FAILED, got.tx);
 }
@@ -1093,7 +1137,7 @@ TEST_CASE("transmit refused by the RCP at once: reports failed", "[zigbee]")
     uint8_t buf[32];
 
     attached(FRAMES_C6_RADIO_CAPS);
-    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0);
     deliver(buf, frames_tx_refused(buf, sizeof(buf), sent_tid(0), SPINEL_STATUS_INVALID_STATE));
     TEST_ASSERT_EQUAL(1, got.tx_count);
     TEST_ASSERT_EQUAL(ZIGBEE_TX_FAILED, got.tx);
@@ -1102,17 +1146,17 @@ TEST_CASE("transmit refused by the RCP at once: reports failed", "[zigbee]")
 TEST_CASE("transmit with a frame in flight: returns nonzero without sending", "[zigbee]")
 {
     attached(FRAMES_C6_RADIO_CAPS);
-    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
-    TEST_ASSERT_NOT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
+    TEST_ASSERT_NOT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
     TEST_ASSERT_EQUAL(1, rcp.sent_count);
 }
 
 TEST_CASE("transmit after the answer: the next frame is sent", "[zigbee]")
 {
     attached(FRAMES_C6_RADIO_CAPS);
-    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0);
     answer_tx(SPINEL_STATUS_OK);
-    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
     TEST_ASSERT_EQUAL(2, rcp.sent_count);
 }
 
@@ -1121,16 +1165,16 @@ TEST_CASE("transmit longer than 127 bytes with FCS: returns nonzero without send
     uint8_t big[126] = {0x41, 0x88};
 
     attached(FRAMES_C6_RADIO_CAPS);
-    TEST_ASSERT_NOT_EQUAL(0, zigbee_spinel_transmit(&client, big, 126, 15, true, 3, 4));
+    TEST_ASSERT_NOT_EQUAL(0, zigbee_spinel_transmit(&client, big, 126, 15, 15, true, 3, 4, 0, 0));
     TEST_ASSERT_EQUAL(0, rcp.sent_count);
-    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, big, 125, 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, big, 125, 15, 15, true, 3, 4, 0, 0));
     TEST_ASSERT_EQUAL(127, sent_raw(0).frame_len);
 }
 
 TEST_CASE("transmit before attach: returns nonzero without sending", "[zigbee]")
 {
     setup(FRAMES_C6_RADIO_CAPS);
-    TEST_ASSERT_NOT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_NOT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
     TEST_ASSERT_EQUAL(0, rcp.sent_count);
 }
 
@@ -1138,16 +1182,16 @@ TEST_CASE("transmit the channel refuses to send: returns nonzero and the next tr
 {
     attached(FRAMES_C6_RADIO_CAPS);
     rcp.send_result = -1;
-    TEST_ASSERT_NOT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_NOT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
     rcp.send_result = 0;
-    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
 }
 
 TEST_CASE("transmit on an RCP without rx-on-when-idle: puts the radio back to receive after the answer",
           "[zigbee]")
 {
     attached(FRAMES_CC2652P_RADIO_CAPS);
-    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0);
     TEST_ASSERT_EQUAL(1, rcp.sent_count);
     answer_tx(SPINEL_STATUS_NO_ACK);
     TEST_ASSERT_EQUAL(2, rcp.sent_count);
@@ -1159,7 +1203,7 @@ TEST_CASE("transmit on an RCP without rx-on-when-idle: puts the radio back to re
 TEST_CASE("transmit on an RCP with rx-on-when-idle: sends nothing after the answer", "[zigbee]")
 {
     attached(FRAMES_C6_RADIO_CAPS);
-    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0);
     answer_tx(SPINEL_STATUS_OK);
     TEST_ASSERT_EQUAL(1, rcp.sent_count);
 }
@@ -1167,7 +1211,7 @@ TEST_CASE("transmit on an RCP with rx-on-when-idle: sends nothing after the answ
 TEST_CASE("transmit with no answer for 5 s: asks for a channel reset once", "[zigbee]")
 {
     attached(FRAMES_C6_RADIO_CAPS);
-    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0);
     rcp.now += ZIGBEE_SPINEL_TX_TIMEOUT_US - 1;
     zigbee_spinel_on_tick(&client);
     TEST_ASSERT_EQUAL(0, rcp.resets_requested);
@@ -1183,9 +1227,9 @@ TEST_CASE("transmit the board refuses to send: returns ZIGBEE_SPINEL_ERR_LOCAL a
 {
     attached(FRAMES_C6_RADIO_CAPS);
     rcp.send_result = -1; // the radio is gone under the board (C6 held in reset: hardware pass 2026-11-07)
-    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_LOCAL, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_LOCAL, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
     TEST_ASSERT_EQUAL(1, rcp.resets_requested);
-    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_LOCAL, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_LOCAL, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
     TEST_ASSERT_EQUAL(1, rcp.resets_requested);
 }
 
@@ -1194,7 +1238,7 @@ TEST_CASE("requested reset with no RESET for ZIGBEE_SPINEL_RESET_RETRY_US: asks 
 {
     attached(FRAMES_C6_RADIO_CAPS);
     rcp.send_result = -1;
-    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0);
     TEST_ASSERT_EQUAL(1, rcp.resets_requested);
     rcp.now += ZIGBEE_SPINEL_RESET_RETRY_US - 1;
     zigbee_spinel_on_tick(&client);
@@ -1213,7 +1257,7 @@ TEST_CASE("timed-out transmit whose reset brings no RESET: the reset is asked ag
           "[zigbee]")
 {
     attached(FRAMES_C6_RADIO_CAPS);
-    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0);
     rcp.now += ZIGBEE_SPINEL_TX_TIMEOUT_US;
     zigbee_spinel_on_tick(&client);
     TEST_ASSERT_EQUAL(1, rcp.resets_requested);
@@ -1226,7 +1270,7 @@ TEST_CASE("RESET after a requested reset: no further reset is asked", "[zigbee]"
 {
     attached(FRAMES_C6_RADIO_CAPS);
     rcp.send_result = -1;
-    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0);
     TEST_ASSERT_EQUAL(1, rcp.resets_requested);
     rcp.send_result = 0;
     zigbee_spinel_on_reset(&client);
@@ -1239,7 +1283,7 @@ TEST_CASE("transmit re-arm with no reply for 2000 ms: asks for a channel reset",
 {
     attached(FRAMES_CC2652P_RADIO_CAPS);
     rcp.silent_key = SPINEL_PROP_MAC_RAW_STREAM_ENABLED;
-    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4);
+    zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0);
     answer_tx(SPINEL_STATUS_OK);
     rcp.now += ZIGBEE_SPINEL_REQUEST_TIMEOUT_US;
     zigbee_spinel_on_tick(&client);
@@ -1252,7 +1296,7 @@ TEST_CASE("transmit answered while a property request waits: the answer reaches 
     uint8_t buf[96];
 
     attached(FRAMES_C6_RADIO_CAPS);
-    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
     rcp.inject[0].len = frames_tx_done(rcp.inject[0].buf, sizeof(rcp.inject[0].buf), sent_tid(0), SPINEL_STATUS_OK);
     rcp.inject_count = 1;
     (void)buf;
@@ -1338,7 +1382,7 @@ static void deliver_rx(uint8_t iid, const uint8_t *psdu, size_t len, unsigned rx
 {
     uint8_t buf[200];
     zigbee_spinel_on_frame(&client, buf, frames_stream_raw_rx(buf, sizeof(buf), iid, psdu, len, -55, 15, 180, 999,
-                                                              rx_error), 4242);
+                                                              rx_error));
 }
 
 TEST_CASE("received STREAM_RAW frame: delivers the PSDU without FCS", "[zigbee]")
@@ -1359,11 +1403,11 @@ TEST_CASE("received STREAM_RAW frame: delivers channel, RSSI and LQI", "[zigbee]
     TEST_ASSERT_EQUAL(180, got.lqi);
 }
 
-TEST_CASE("received STREAM_RAW frame: delivers the mux's receive time", "[zigbee]")
+TEST_CASE("received STREAM_RAW frame: delivers the RCP's timestamp", "[zigbee]")
 {
     attached(FRAMES_C6_RADIO_CAPS);
     deliver_rx(0, RX_PSDU, sizeof(RX_PSDU), 0);
-    TEST_ASSERT_EQUAL_UINT64(4242, got.time_us); // not the RCP's own timestamp (999)
+    TEST_ASSERT_EQUAL_UINT64(999, got.time_us); // the radio's clock, which timed transmits use
 }
 
 TEST_CASE("received STREAM_RAW frame with a receive error: dropped", "[zigbee]")
@@ -1386,7 +1430,7 @@ TEST_CASE("received STREAM_RAW frame truncated: dropped", "[zigbee]")
 
     attached(FRAMES_C6_RADIO_CAPS);
     size_t n = frames_stream_raw_rx(buf, sizeof(buf), 0, RX_PSDU, sizeof(RX_PSDU), -55, 15, 180, 999, 0);
-    zigbee_spinel_on_frame(&client, buf, 3 + 2 + 6, 1); // header, command, key, length and half the PSDU
+    zigbee_spinel_on_frame(&client, buf, 3 + 2 + 6); // header, command, key, length and half the PSDU
     (void)n;
     TEST_ASSERT_EQUAL(0, got.rx_count);
 }
@@ -1421,8 +1465,8 @@ TEST_CASE("received garbage: ignored", "[zigbee]")
     static const uint8_t junk[] = {0x00, 0x06, 0x71};
 
     attached(FRAMES_C6_RADIO_CAPS);
-    zigbee_spinel_on_frame(&client, junk, sizeof(junk), 1); // no header flag
-    zigbee_spinel_on_frame(&client, junk, 0, 1);
+    zigbee_spinel_on_frame(&client, junk, sizeof(junk)); // no header flag
+    zigbee_spinel_on_frame(&client, junk, 0);
     TEST_ASSERT_EQUAL(0, got.rx_count);
     TEST_ASSERT_EQUAL(0, zigbee_spinel_set_channel(&client, 20));
 }
@@ -1621,7 +1665,7 @@ static void forget(void)
 
 static void transmitting(void)
 {
-    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
 }
 
 static void scanning(void)
@@ -1838,7 +1882,7 @@ TEST_CASE("src_match_clear with no radio: empties the stored copy and sends noth
 TEST_CASE("transmit with no radio: returns nonzero at once", "[zigbee]")
 {
     no_radio();
-    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_LOCAL, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(ZIGBEE_SPINEL_ERR_LOCAL, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
     TEST_ASSERT_EQUAL(0, rcp.sent_count);
     TEST_ASSERT_EQUAL(0, got.tx_count);
 }
@@ -1901,7 +1945,7 @@ TEST_CASE("reattach: a transmit after replay is accepted", "[zigbee]")
     zigbee_spinel_on_gone(&client);
     zigbee_spinel_attach(&client);
     forget();
-    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
     TEST_ASSERT_EQUAL(1, rcp.sent_count);
     assert_sent(0, SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_STREAM_RAW);
 }
@@ -1926,7 +1970,7 @@ TEST_CASE("attach with a transmit that timed out: the transmit fails once and th
     zigbee_spinel_attach(&client);
     TEST_ASSERT_EQUAL(1, got.tx_count);
     TEST_ASSERT_EQUAL(ZIGBEE_TX_FAILED, got.tx);
-    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
 }
 
 TEST_CASE("attach with an energy scan that timed out: the scan fails once and the next one is accepted", "[zigbee]")
@@ -2013,7 +2057,7 @@ TEST_CASE("reset: a transmit after replay is accepted", "[zigbee]")
     attached(FRAMES_C6_RADIO_CAPS);
     transmitting();
     zigbee_spinel_on_reset(&client);
-    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
 }
 
 TEST_CASE("reset after a transmit timed out: the transmit fails once", "[zigbee]")
@@ -2382,7 +2426,7 @@ TEST_CASE("transmit timed out and the reset request refused: the next transmit i
     rcp.reset_result = 1;
     rcp.now += ZIGBEE_SPINEL_TX_TIMEOUT_US;
     zigbee_spinel_on_tick(&client);
-    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
     TEST_ASSERT_EQUAL(2, rcp.sent_count);
 }
 
@@ -2409,7 +2453,7 @@ TEST_CASE("transmit timed out and the reset request accepted: the transmit stays
     rcp.now += ZIGBEE_SPINEL_TX_TIMEOUT_US;
     zigbee_spinel_on_tick(&client);
     TEST_ASSERT_EQUAL(0, got.tx_count);
-    TEST_ASSERT_NOT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, true, 3, 4));
+    TEST_ASSERT_NOT_EQUAL(0, zigbee_spinel_transmit(&client, PSDU, sizeof(PSDU), 15, 15, true, 3, 4, 0, 0));
 }
 
 TEST_CASE("energy scan timed out and the reset request refused: the scan fails at once and the next one is accepted",

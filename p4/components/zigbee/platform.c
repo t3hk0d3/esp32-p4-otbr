@@ -195,11 +195,13 @@ int32_t ziggurat_platform_radio_src_match_add_ext(const uint8_t *address)
     return zigbee_spinel_src_match_add_ext(g_zigbee.spinel, address);
 }
 
-int32_t ziggurat_platform_radio_transmit(const uint8_t *psdu, size_t len, uint8_t channel, bool csma_ca,
-                                         uint8_t max_frame_retries, uint8_t max_csma_backoffs)
+// A nonzero tx_delay is a timed transmit (a Green Power answer); its base is a received frame's RCP timestamp.
+int32_t ziggurat_platform_radio_transmit(const uint8_t *psdu, size_t len, uint8_t channel, uint8_t rx_channel,
+                                         bool csma_ca, uint8_t max_frame_retries, uint8_t max_csma_backoffs,
+                                         uint32_t tx_delay, uint32_t tx_delay_base_time)
 {
-    const int rc = zigbee_spinel_transmit(g_zigbee.spinel, psdu, len, channel, csma_ca, max_frame_retries,
-                                          max_csma_backoffs);
+    const int rc = zigbee_spinel_transmit(g_zigbee.spinel, psdu, len, channel, rx_channel, csma_ca, max_frame_retries,
+                                          max_csma_backoffs, tx_delay, tx_delay_base_time);
 
     if (rc == 0) {
         ZIGBEE_STATUS(g_zigbee_status.counters.tx++);

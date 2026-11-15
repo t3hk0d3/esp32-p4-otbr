@@ -7,6 +7,14 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+### Changed
+
+- Zigbee stack (Ziggurat) updated to upstream `6c35405`. Router devices (bulbs, plugs) pair in about 10 s, without
+  the 20 to 60 s leave-and-rejoin loop ([zigpy/ziggurat#88](https://github.com/zigpy/ziggurat/issues/88)); routing,
+  broadcast and leave/rejoin fixes; quieter logs; lower heap use. Green Power devices that listen after they send now
+  get their answers at the time they expect (not yet tried with a Green Power device). The stack's firmware version
+  now carries its git revision.
+
 ## [0.7.0] - 2026-11-15
 
 ### Added

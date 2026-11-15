@@ -383,7 +383,7 @@ static bool handle_event(const radio_mux_ev_t *ev)
     case RADIO_MUX_EV_RX_FRAME:
         // The client parses the slot in place and copies what it keeps; the slot goes back before the next item of
         // this loop (an RCP reset seen in this frame runs the attach sequence first, holding this one slot).
-        zigbee_spinel_on_frame(sp, ev->slot, ev->len, ev->rx_us);
+        zigbee_spinel_on_frame(sp, ev->slot, ev->len);
         radio_mux_release(atomic_load(&z->ch), ev->slot);
         break;
     case RADIO_MUX_EV_RESET:
