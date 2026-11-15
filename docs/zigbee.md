@@ -85,8 +85,3 @@ Thread and the Zigbee coordinator can run at the same time on separate radios: o
 - No settings on the board: the network (Zigbee channel, PAN ID, keys) is ZHA's. Resetting the board forgets the network, so
   keep ZHA's backups.
 - Mode changes into and out of Zigbee reboot the board.
-- Slow pairing of router devices (mains-powered bulbs, plugs, switches): a device that joins as a router often fails
-  the key exchange, leaves and joins again every few seconds, so pairing takes 20 to 60 s and sometimes fails. End
-  devices pair normally. Tracked upstream in
-  [zigpy/ziggurat#88](https://github.com/zigpy/ziggurat/issues/88). Keep
-  permit-join open and retry the pairing if it fails.

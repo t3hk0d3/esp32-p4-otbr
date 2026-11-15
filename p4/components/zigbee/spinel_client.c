@@ -26,6 +26,7 @@
 #define CAPS_ENERGY_SCAN (1u << 1)
 #define CAPS_TRANSMIT_RETRIES (1u << 2)
 #define CAPS_CSMA_BACKOFF (1u << 3)
+#define CAPS_TRANSMIT_TIMING (1u << 4) // optional: only timed transmits (Green Power answers) need it
 #define CAPS_RX_ON_WHEN_IDLE (1u << 8)
 /* The RCP does ACKs, CSMA and retries for ziggurat, and the energy scan. */
 #define CAPS_REQUIRED (CAPS_ACK_TIMEOUT | CAPS_ENERGY_SCAN | CAPS_TRANSMIT_RETRIES | CAPS_CSMA_BACKOFF)
@@ -705,10 +706,14 @@ int zigbee_spinel_src_match_add_ext(zigbee_spinel_t *s, const uint8_t ext[8])
  * channel after the transmit, per-frame power). Ziggurat's frames are secured and final (the spike's glue set
  * mIsSecurityProcessed and mIsHeaderUpdated). Not waited for: the answer is the LAST_STATUS on its TID.
  */
-int zigbee_spinel_transmit(zigbee_spinel_t *s, const uint8_t *psdu, size_t len, uint8_t channel, bool csma,
-                           uint8_t retries, uint8_t backoffs)
+int zigbee_spinel_transmit(zigbee_spinel_t *s, const uint8_t *psdu, size_t len, uint8_t channel, uint8_t rx_channel,
+                           bool csma, uint8_t retries, uint8_t backoffs, uint32_t tx_delay, uint32_t tx_delay_base)
 {
     if (!s->attached || s->tx_in_flight || psdu == NULL || len + FCS_LEN > ZIGBEE_SPINEL_PSDU_MAX) {
+        return ZIGBEE_SPINEL_ERR_LOCAL;
+    }
+    // Without transmit timing the RCP would send a timed frame at once, outside the window it is meant for.
+    if (tx_delay != 0 && !(s->radio_caps & CAPS_TRANSMIT_TIMING)) {
         return ZIGBEE_SPINEL_ERR_LOCAL;
     }
     uint8_t tid = take_tid(s);
@@ -721,8 +726,8 @@ int zigbee_spinel_transmit(zigbee_spinel_t *s, const uint8_t *psdu, size_t len, 
     s->psdu[len] = (uint8_t)(crc & 0xff);
     s->psdu[len + 1] = (uint8_t)(crc >> 8);
     if (send_prop(s, tid, SPINEL_CMD_PROP_VALUE_SET, SPINEL_PROP_STREAM_RAW, "dCCCbbbbLLCc", s->psdu,
-                  (uint32_t)(len + FCS_LEN), channel, backoffs, retries, csma, true, false, true, (uint32_t)0,
-                  (uint32_t)0, channel, RADIO_POWER_INVALID) != 0) {
+                  (uint32_t)(len + FCS_LEN), channel, backoffs, retries, csma, true, false, true, tx_delay, tx_delay_base,
+                  rx_channel, RADIO_POWER_INVALID) != 0) {
         free_tid(s, tid);
         return ZIGBEE_SPINEL_ERR_LOCAL;
     }
@@ -839,8 +844,9 @@ static void handle_tx_answer(zigbee_spinel_t *s, unsigned cmd, unsigned key, con
 }
 
 /* RadioSpinel::ParseRadioFrame: "d c c S t(C C X) t(i)" (frame with its FCS, RSSI, noise floor, flags, channel, LQI,
- * RCP timestamp, receive error). The PSDU goes up without its FCS and with the mux's receive time. */
-static void handle_stream_raw(zigbee_spinel_t *s, const uint8_t *data, size_t len, int64_t rx_us)
+ * RCP timestamp, receive error). The PSDU goes up without its FCS and with the RCP's timestamp: ziggurat times a Green
+ * Power answer from it, and the RCP schedules that transmit on the same clock. */
+static void handle_stream_raw(zigbee_spinel_t *s, const uint8_t *data, size_t len)
 {
     const uint8_t *psdu = NULL;
     unsigned psdu_len = 0, rx_error = 0;
@@ -855,18 +861,17 @@ static void handle_stream_raw(zigbee_spinel_t *s, const uint8_t *data, size_t le
             rx_error != 0 || psdu_len < FCS_LEN || psdu_len > ZIGBEE_SPINEL_PSDU_MAX) {
         return;
     }
-    s->sink.rx(s->sink.ctx, psdu, psdu_len - FCS_LEN, channel, rssi, lqi, (uint64_t)rx_us);
+    s->sink.rx(s->sink.ctx, psdu, psdu_len - FCS_LEN, channel, rssi, lqi, timestamp);
 }
 
 /* RadioSpinel::HandleNotification / HandleValueIs for TID 0. */
-static void handle_notification(zigbee_spinel_t *s, unsigned cmd, unsigned key, const uint8_t *data, size_t len,
-                                int64_t rx_us)
+static void handle_notification(zigbee_spinel_t *s, unsigned cmd, unsigned key, const uint8_t *data, size_t len)
 {
     if (cmd != SPINEL_CMD_PROP_VALUE_IS) {
         return;
     }
     if (key == SPINEL_PROP_STREAM_RAW) {
-        handle_stream_raw(s, data, len, rx_us);
+        handle_stream_raw(s, data, len);
     } else if (key == SPINEL_PROP_LAST_STATUS) {
         unsigned status = 0;
 
@@ -892,7 +897,7 @@ static void handle_notification(zigbee_spinel_t *s, unsigned cmd, unsigned key, 
 }
 
 /* SpinelDriver::HandleReceivedFrame + RadioSpinel::HandleReceivedFrame / HandleResponse. */
-void zigbee_spinel_on_frame(zigbee_spinel_t *s, const uint8_t *frame, size_t len, int64_t rx_us)
+void zigbee_spinel_on_frame(zigbee_spinel_t *s, const uint8_t *frame, size_t len)
 {
     uint8_t header = 0;
     unsigned cmd = 0, key = 0;
@@ -908,7 +913,7 @@ void zigbee_spinel_on_frame(zigbee_spinel_t *s, const uint8_t *frame, size_t len
     uint8_t tid = HEADER_TID(header);
 
     if (tid == 0) {
-        handle_notification(s, cmd, key, data, data_len, rx_us);
+        handle_notification(s, cmd, key, data, data_len);
     } else if (cmd < SPINEL_CMD_PROP_VALUE_IS || cmd > SPINEL_CMD_PROP_VALUE_REMOVED) {
         return; // HandleResponse's command range
     } else if (s->wait_state == ZIGBEE_SPINEL_WAIT_PENDING && !s->wait_for_reset && tid == s->wait_tid) {

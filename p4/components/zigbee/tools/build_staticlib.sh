@@ -15,6 +15,9 @@
 #   - The esp-idf feature allocates through heap_caps_aligned_alloc / heap_caps_realloc / heap_caps_free; they are
 #     renamed to zigbee_heap_* (implemented by the zigbee component, which owns the placement policy).
 #   - The build fails if the archive still imports any other heap_caps_* or malloc, calloc, realloc, free.
+#   - ziggurat's version string (GetFirmwareInfo) comes from the submodule: ZIGGURAT_GIT_VERSION is its `git describe
+#     --always` (-dirty with local edits) and SOURCE_DATE_EPOCH its last commit's time, because the build-script git calls
+#     would otherwise run in the copy and describe esp32-otbr (and watch every file of it).
 #   - Every patches/*.patch (sorted) is applied to the source copy with patch -p1 --forward; the build fails if one does
 #     not apply. patches/ziggurat-ot-log.patch adds the tracing subscriber: the archive then imports
 #     ziggurat_platform_log and exports ziggurat_log_set_level, both checked.
@@ -86,16 +89,25 @@ for patch_file in "$component"/patches/*.patch; do
 done
 shopt -u nullglob
 
+# ziggurat-protocol's build.rs takes both from the environment instead of running git (see the header).
+git_version="$(git -C "$src" describe --always 2>/dev/null)" || git_version=unknown
+if [[ "$git_version" != unknown && -n "$(git -C "$src" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+    git_version="$git_version-dirty"
+fi
+source_date_epoch="$(git -C "$src" log -1 --format=%ct 2>/dev/null)" || source_date_epoch="$(date +%s)"
+echo "ziggurat version $git_version"
+
 cd "$component" # rust-toolchain.toml applies here
 if command -v rustup >/dev/null && rustup target list --installed 2>/dev/null | grep -qx "$target"; then
     echo "cargo on the host (toolchain $channel)"
     WORK="$work" CARGO_HOME="$out/cargo-home" CARGO_TARGET_DIR="$out/target" TARGET="$target" CARGO_TOOLCHAIN="+$channel" \
-        bash -c "set -euo pipefail; $(declare -f build_crate); build_crate"
+        ZIGGURAT_GIT_VERSION="$git_version" SOURCE_DATE_EPOCH="$source_date_epoch" bash -c "set -euo pipefail; $(declare -f build_crate); build_crate"
 else
     echo "cargo in Docker (rust:$channel-slim)"
     command -v docker >/dev/null || die "neither rustup with the $target target nor docker is available"
     docker run --rm -v "$out:/out" -e WORK=/out/work -e CARGO_HOME=/out/cargo-home -e CARGO_TARGET_DIR=/out/target \
-        -e TARGET="$target" "rust:$channel-slim" \
+        -e TARGET="$target" -e ZIGGURAT_GIT_VERSION="$git_version" -e SOURCE_DATE_EPOCH="$source_date_epoch" \
+        "rust:$channel-slim" \
         bash -c "set -euo pipefail; trap 'chown -R $(id -u):$(id -g) /out' EXIT; rustup target add $target >/dev/null; $(declare -f build_crate); build_crate"
 fi
 
