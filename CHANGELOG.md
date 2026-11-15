@@ -7,12 +7,18 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-15
+
 ### Added
 
 - Updates from GitHub on a C6 that still runs its factory ESP-Hosted firmware: **Install** first installs the
   release's `c6_installer.bin` (about 5 minutes; the page warns not to power off the board), then the update as before.
   `GET /device/update` names the file in `release.installer_url`. Before, the install was refused with "C6 runs factory
   ESP-Hosted: upload c6_installer.bin first". Not yet run on a factory C6.
+- Browser flasher: after the P4 it installs the radio firmware of the same release on the C6, through the serial port
+  it already holds. On a C6 that still runs its factory ESP-Hosted firmware it first sends `c6_installer.bin`. New
+  console command `radio-fw` (`status`, `load <size> <crc32>`), see `docs/reference/radio-console.md`; the docs site
+  publishes the release's C6 files and `firmware/radio.json`. Not yet run on a board.
 
 ### Fixed
 
@@ -299,7 +305,8 @@ on-board ESP32-C6 as the radio co-processor over SPI.
 
 See `docs/troubleshooting.md` for the full list.
 
-[Unreleased]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/t3hk0d3/esp32-p4-otbr/compare/v0.3.0...v0.4.0
