@@ -179,6 +179,11 @@ This runs after review and fixes. Lease each board through clerk, and re-read `a
   - USB flash the image and watch the first boot on the console (`stty -hupcl`). Expected: no panic.
   - Run two OTAs in a row, with builds that have different stamps. After each, watch the first boot, then check the
     running slot and `app.version`. Expected: no panic, and the update is kept.
+  - The path the known-issues page promises, from an affected release. USB flash the 0.7.0 release's
+    `full_ESP32-P4-WIFI6-POE-ETH_ESP32-P4-rev3.0.zip`. Upload a different 0.7.0-era image and check that it panics and
+    is rolled back. Then update to the patched build, once by file upload and once through GitHub self-update if a
+    release with the fix exists by then. Expected: the patched image's first boot does not panic, and the update is
+    kept.
 - [ ] **Rev1.3 board `p4-otbr-a`:** OTA the rev1.3 image. Expected: it boots, `/device/status` answers, and it reports
   the new version.
 - [ ] **Record the results** in the memory note `p4-rev3-first-boot-panic` and in the PR description.

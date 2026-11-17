@@ -24,8 +24,9 @@ second core waits in a tight loop that starves the first core's memory accesses.
 **Fixed in:** the next release after 0.7.0. The fix is part of the new firmware itself, so updating an affected board
 to a fixed release works: the new firmware's own first boot no longer panics.
 
-**On an affected version:** flash the board over USB ([Building and flashing](building.md), or the
-[browser flasher](flash.md)), or try the update again; every attempt that panics is rolled back and leaves the board
+**On an affected version:** update to a fixed release; that works from an affected version. Or flash the board over
+USB ([Building and flashing](building.md), or the [browser flasher](flash.md)): it works after its automatic restart.
+Trying an update to 0.6.0 or 0.7.0 again does not help: it panics and is rolled back each time, and the board keeps
 working on its old version.
 
 **When this entry can go:** when ESP-IDF fixes the loop. The firmware's patch is `tools/freertos_startup_patch.cmake`
