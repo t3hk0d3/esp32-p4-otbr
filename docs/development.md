@@ -34,6 +34,12 @@ filter), together with the REST guard table (which endpoint answers 409 or 503 i
 patch it; `override_path` in `p4/components/radio_mux/idf_component.yml` makes every user of the component (the CH34x
 and CP210x drivers, esp-serial-flasher) build this copy. Its changes are in the same `PATCHES.md`.
 
+Two ESP-IDF components are patched without a copy in the repository: CMake scripts generate them in the build directory
+at configure time (symlinks to IDF's files plus patched copies), listed under "Generated ESP-IDF copies" in
+`PATCHES.md`. `tools/ot_radio_port.cmake` makes `openthread` reach its radio through the radio mux;
+`tools/freertos_startup_patch.cmake` adds a pause in CPU1's FreeRTOS start wait (the P4 v3.x first-boot panic,
+[known issues](known-issues.md)).
+
 ## sdkconfig
 
 `p4/sdkconfig` (like the C6 projects' `sdkconfig`) is generated from `sdkconfig.defaults` and not tracked.

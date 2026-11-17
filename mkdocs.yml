@@ -72,6 +72,7 @@ nav:
       - Logging: logging.md
       - Maintenance jumper: maintenance-jumper.md
       - Troubleshooting: troubleshooting.md
+      - Known issues: known-issues.md
       - Glossary: glossary.md
   - Reference:
       - HTTP API: api.md

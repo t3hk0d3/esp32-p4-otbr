@@ -7,6 +7,13 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Boards with a P4 of chip revision v3.x no longer panic on the first boot after an update or a USB flash. Before, an
+  update on these boards was rolled back by the bootloader and the board stayed on its old version. The cause is an
+  ESP-IDF bug ([esp-idf#19369](https://github.com/espressif/esp-idf/issues/19369)); the firmware carries a patch for
+  it. See [Known issues](docs/known-issues.md).
+
 ### Changed
 
 - Zigbee stack (Ziggurat) updated to upstream `6c35405`. Router devices (bulbs, plugs) pair in about 10 s, without
