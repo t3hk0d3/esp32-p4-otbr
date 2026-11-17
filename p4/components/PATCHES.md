@@ -492,6 +492,24 @@ not touched. Upstream path: a runtime "custom spinel interface" radio mode with 
   instead of `${CMAKE_CURRENT_SOURCE_DIR}` (the generated directory lies in this repository, so the package version
   would show this repository's commit).
 
+`tools/freertos_startup_patch.cmake` (P4 v3.x first-boot panic, 2026-11-18) generates
+`p4/build/idf_patch_components/freertos` at every configure in the same way, and that component overrides ESP-IDF's
+`freertos` (`EXTRA_COMPONENT_DIRS`). It holds symlinks to every entry of IDF's `components/freertos` (v6.1) and one
+patched copy. It applies to every P4 target; the C6 projects run FreeRTOS on one core, where this code is not built.
+
+- `app_startup.c`:
+  1. After `#include "esp_chip_info.h"` (the last include outside an `#if`): `#include "esp_rom_sys.h"`.
+  2. In `esp_startup_start_app_other_cores`, the body of CPU1's wait for CPU0's scheduler,
+     `while (port_xSchedulerRunning[0] == 0) { ; }`, becomes `esp_rom_delay_us(10);`. On a P4 v3.2 the empty spin
+     starves CPU0's cache accesses: on the first boot after a flash write (OTA, USB flash, even of the same image)
+     CPU0's stack `memset` in `prvInitialiseNewTask` (idle and timer task creation in `vTaskStartScheduler`) took a
+     Store access fault (MCAUSE 7, MEPC 0x4fc1a572 in ROM `memset`), and after an OTA the bootloader rolled the update
+     back. On the NANO-DB 4 of 4 such first boots panicked before the patch and 0 of 3 after it; plain reboots never
+     panicked. Upstream: [esp-idf#19369](https://github.com/espressif/esp-idf/issues/19369) (open; our data in a
+     comment there), related [esp-idf#19171](https://github.com/espressif/esp-idf/issues/19171). Drop the script once
+     ESP-IDF fixes the loop; the configure step fails when the loop text changes. Known issue:
+     `docs/known-issues.md`.
+
 ## usb_host_cdc_acm
 
 Vendored from:
