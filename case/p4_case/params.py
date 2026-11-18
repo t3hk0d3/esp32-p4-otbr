@@ -133,8 +133,14 @@ SMA_CASE_Z = 17.6
 SMA_D = 6.5
 # across the flat; the flat is at the bottom, the top is round (print feedback: it needs no teardrop)
 SMA_FLAT = 5.9
-# two extrusion lines left over the hole at the outer face; cut it out to fit the SMA
-SMA_KNOCKOUT_T = 0.8
+# v8: the 4 mm wall left the bulkhead too little thread (print feedback), so an inside hex pocket takes the nut and
+# leaves a SMA_PANEL panel at the hole; flat side up, so its roof is a short bridge. The rest of the wall stays 4 mm
+SMA_PANEL = 2.0
+SMA_HEX_AF = 8.2  # an 8 mm (5/16") SMA nut + 0.2
+# a break-off plug closes the hole until an SMA is fitted (the cut-out skin was too hard to remove): SMA_PLUG_GAP round
+# its top and sides, joined along the flat by a V-notched neck; bend it with tweezers and it snaps off
+SMA_PLUG_GAP = 0.4
+SMA_PLUG_NECK = 0.8
 
 # --- lid and tabs (5.3) ---
 # 3.0: 2 mm body inside the walls + 1 mm flange in the rebate

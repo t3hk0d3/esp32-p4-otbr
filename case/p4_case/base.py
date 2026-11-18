@@ -295,17 +295,60 @@ def _buttons() -> Part:
     return Part() + cuts
 
 
-def _sma() -> Part:
+def _sma_d(x0: float, x1: float, r: float, flat: float) -> Part:
+    """The SMA's D outline (round top, flat at the bottom at z = flat), radius r, along X from x0 to x1."""
     zc = board_z(P.SMA_CASE_Z)
-    r = P.SMA_D / 2
-    # the hole stops short of the outer face: a two-line knock-out closes it until an SMA is fitted
-    x0, x1 = P.INNER[1] - EPS, P.OUTER[1] - P.SMA_KNOCKOUT_T
-    hole = x_cylinder(P.SMA_Y, zc, P.SMA_D, x0, x1)
+    rod = x_cylinder(P.SMA_Y, zc, 2 * r, x0, x1)
+    return rod & block(x0, x1, P.SMA_Y - P.SMA_D, P.SMA_Y + P.SMA_D, flat, zc + P.SMA_D)
+
+
+def _sma() -> Part:
+    """The inside hex pocket and the D-hole through the panel left in front of it."""
+    zc = board_z(P.SMA_CASE_Z)
+    panel_in = P.OUTER[1] - P.SMA_PANEL
+    # flat side up: the roof is a short bridge (one side, 4.7 mm) and the other faces are 30° from vertical; a corner
+    # up would give two 30°-from-horizontal roof faces that need support
+    ac = P.SMA_HEX_AF * 2 / math.sqrt(3)  # across corners, horizontal
+    hexagon = [
+        (
+            P.SMA_Y + ac / 2 * math.cos(k * math.pi / 3),
+            zc + ac / 2 * math.sin(k * math.pi / 3),
+        )
+        for k in range(6)
+    ]
+    pocket = x_prism(hexagon, P.INNER[1] - EPS, panel_in)
+    flat = zc - (P.SMA_FLAT - P.SMA_D / 2)
     # round top (it prints fine), flat at the bottom, where it prints as a floor; the flat keeps the bulkhead from
     # turning
-    flat_z = zc - (P.SMA_FLAT - r)
-    keep = block(x0, x1, P.SMA_Y - P.SMA_D, P.SMA_Y + P.SMA_D, flat_z, zc + P.SMA_D)
-    return hole & keep
+    hole = _sma_d(panel_in - EPS, P.OUTER[1] + 1, P.SMA_D / 2, flat)
+    return pocket + hole
+
+
+def _sma_plug() -> Part:
+    """The break-off plug in the D-hole: SMA_PLUG_GAP clear of its top and sides, standing on the flat through a
+    45° V-notched neck SMA_PLUG_NECK thick, so bending it snaps it off along the flat (a printed layer)."""
+    zc = board_z(P.SMA_CASE_Z)
+    x0, x1 = P.OUTER[1] - P.SMA_PANEL, P.OUTER[1]
+    flat = zc - (P.SMA_FLAT - P.SMA_D / 2)
+    r, g = P.SMA_D / 2, P.SMA_PLUG_GAP
+    # the hole's half-width at the flat, less the gap: the neck runs along nearly the whole flat
+    half = math.sqrt(r * r - (zc - flat) ** 2) - g
+    body = _sma_d(x0, x1, r - g, flat) + block(
+        x0, x1, P.SMA_Y - half, P.SMA_Y + half, flat - EPS, zc
+    )
+    notch = (P.SMA_PANEL - P.SMA_PLUG_NECK) / 2
+    cuts = []
+    for face, inward in ((x0, 1), (x1, -1)):
+        tri = [
+            (face - inward * EPS, flat - EPS),
+            (face + inward * notch, flat - EPS),
+            (face - inward * EPS, flat + notch + EPS),
+        ]
+        cuts.append(
+            Pos(0, P.SMA_Y, 0)
+            * extrude(Plane.XZ * Polygon(*tri, align=None), half + 1, both=True)
+        )
+    return body - cuts
 
 
 def tab_y_centres() -> tuple[float, float]:
@@ -376,6 +419,7 @@ def build_base() -> Part:
     part -= _header_slot()
     part -= _buttons()
     part -= _sma()
+    part += _sma_plug()
     part -= _dents()
     part -= _tooth_notches()
     return part

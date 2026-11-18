@@ -156,23 +156,6 @@ class TestDefaultBase:
         assert solid_bz(base, -0.9, y, ceiling + 0.2)  # above it
         assert solid_bz(base, -0.6, y, ceiling + 0.6)  # the slope ends at the face
 
-    def test_has_the_sma_d_hole_at_y_52_with_the_flat_at_the_bottom(self, base):
-        x = P.INNER[1] + 1.0  # inside the wall, behind the knock-out
-        zc = board_z(P.SMA_CASE_Z)
-        assert not solid_bz(base, x, P.SMA_Y, zc)
-        # round top: an arch, no support
-        assert not solid_bz(base, x, P.SMA_Y, zc + 3.1)
-        assert not solid_bz(base, x, P.SMA_Y, zc - 2.5)
-        assert solid_bz(base, x, P.SMA_Y, zc - 2.8)  # the flat
-        assert solid_bz(base, x, P.SMA_Y + 3.5, zc)
-
-    def test_gives_the_sma_hole_a_round_top(self, base):
-        x = P.INNER[1] + 1.0
-        zc = board_z(P.SMA_CASE_Z)
-        r = P.SMA_D / 2
-        assert solid_bz(base, x, P.SMA_Y, zc + r + 0.2)  # no teardrop above the circle
-        assert not solid_bz(base, x, P.SMA_Y + 2.2, zc + 2.2)  # round at 45°
-
     def test_makes_the_whole_button_side_wall_4_mm_thick(self, base):
         x = P.INNER[0] - P.BUTTON_WALL + 0.2
         for y in (25.0, 45.0, 65.0):
@@ -191,12 +174,6 @@ class TestDefaultBase:
         for y in (5.0, 45.0, 65.0):  # clear of the screw ear's pocket at Y 32
             assert solid_bz(base, x, y, 10.0)
         assert not solid_bz(base, P.INNER[1] + P.SMA_WALL + 0.1, 35.0, 10.0)
-
-    def test_closes_the_sma_hole_with_a_two_line_knock_out(self, base):
-        zc = board_z(P.SMA_CASE_Z)
-        assert P.SMA_KNOCKOUT_T == pytest.approx(0.8)
-        assert solid_bz(base, P.OUTER[1] - P.SMA_KNOCKOUT_T / 2, P.SMA_Y, zc)
-        assert not solid_bz(base, P.OUTER[1] - P.SMA_KNOCKOUT_T - 0.1, P.SMA_Y, zc)
 
     def test_keeps_the_side_walls_full_thickness_at_the_header_end(self, base):
         for x in (P.INNER[0] - 0.5, P.INNER[1] + 0.5):
@@ -416,3 +393,60 @@ class TestTeeth:
             for y in (20.0, 32.0, 45.0):
                 assert solid(base, face + inward * 2.0, y, P.TOP - 0.5)
                 assert solid(base, face + inward * 0.5, y, 22.0)
+
+
+class TestSma:
+    """base.build_base: The SMA hole in the right wall"""
+
+    ZC = board_z(P.SMA_CASE_Z)
+    R = P.SMA_D / 2
+    FLAT = board_z(P.SMA_CASE_Z) - (P.SMA_FLAT - P.SMA_D / 2)
+    PANEL_IN = P.OUTER[1] - P.SMA_PANEL  # the panel's inner face
+
+    def test_cuts_an_8_2_mm_hex_pocket_flat_side_up_inside(self, base):
+        af = P.SMA_HEX_AF
+        ac = af * 2 / 3**0.5
+        x = P.INNER[1] + 1.0
+        assert af == pytest.approx(8.2)
+        assert not solid_bz(base, x, P.SMA_Y, self.ZC + af / 2 - 0.2)  # flat roof
+        assert solid_bz(base, x, P.SMA_Y, self.ZC + af / 2 + 0.2)
+        assert not solid_bz(
+            base, x, P.SMA_Y + ac / 2 - 0.3, self.ZC
+        )  # corners at the sides
+        assert solid_bz(base, x, P.SMA_Y + ac / 2 + 0.2, self.ZC)
+
+    def test_leaves_a_2_mm_panel_at_the_hole(self, base):
+        assert P.SMA_PANEL == pytest.approx(2.0)
+        y = P.SMA_Y + 3.6  # beside the D-hole, inside the hex
+        assert not solid_bz(base, self.PANEL_IN - 0.1, y, self.ZC)
+        assert solid_bz(base, self.PANEL_IN + 0.1, y, self.ZC)
+
+    def test_keeps_the_rest_of_the_wall_4_mm(self, base):
+        assert solid_bz(base, P.INNER[1] + 0.2, P.SMA_Y + 6.0, self.ZC)
+
+    def test_cuts_the_d_hole_through_the_panel_flat_at_the_bottom(self, base):
+        x = P.OUTER[1] - 1.0
+        assert not solid_bz(
+            base, x, P.SMA_Y, self.ZC + self.R - 0.2
+        )  # gap above the plug
+        assert solid_bz(base, x, P.SMA_Y, self.ZC + self.R + 0.2)  # round top
+        assert not solid_bz(base, x, P.SMA_Y + self.R - 0.2, self.ZC)  # gap at the side
+        assert solid_bz(base, x, P.SMA_Y, self.FLAT - 0.2)  # the flat
+
+    def test_closes_the_hole_with_a_plug_0_4_mm_clear_of_its_top_and_sides(self, base):
+        g = P.SMA_PLUG_GAP
+        x = P.OUTER[1] - 1.0
+        assert g == pytest.approx(0.4)
+        assert solid_bz(base, x, P.SMA_Y, self.ZC)
+        assert solid_bz(base, x, P.SMA_Y, self.ZC + self.R - g - 0.1)
+        assert solid_bz(base, P.OUTER[1] - 0.1, P.SMA_Y, self.ZC)  # flush outside
+
+    def test_holds_the_plug_by_a_0_8_mm_v_notched_neck_along_the_flat(self, base):
+        assert P.SMA_PLUG_NECK == pytest.approx(0.8)
+        mid = P.OUTER[1] - P.SMA_PANEL / 2
+        z = self.FLAT + 0.05
+        assert solid_bz(base, mid, P.SMA_Y, z)  # the neck
+        assert solid_bz(base, mid + 0.3, P.SMA_Y, z)
+        assert not solid_bz(base, mid + 0.6, P.SMA_Y, z)  # notched from both faces
+        assert not solid_bz(base, mid - 0.6, P.SMA_Y, z)
+        assert solid_bz(base, mid, P.SMA_Y + 1.2, z)  # about 3 mm along the flat

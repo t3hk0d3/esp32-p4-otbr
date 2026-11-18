@@ -88,7 +88,7 @@ checks are:
 | Part | Count | Notes |
 | --- | --- | --- |
 | M2.5 × 6 pan-head screw | 4 | board to standoffs, from the top; it cuts its own thread in the standoff's Ø2.2 pilot hole |
-| SMA female bulkhead with u.FL/IPEX pigtail, about 8 cm | 1 | D-flat thread, Ø6.35; a long-thread one (≥ 9.5 mm) leaves enough thread outside the 4 mm wall for the antenna |
+| SMA female bulkhead with u.FL/IPEX pigtail, about 8 cm | 1 | D-flat thread, Ø6.35, with an 8 mm (5/16") hex; it goes through a 2 mm panel |
 | Wall screws, 3.5 mm, pan head ≤ Ø7.5 × 2.5 mm | 2 | with wall plugs to suit; the shank clicks past a 3.3 mm neck in each keyhole arm |
 | Stick-on rubber feet | optional | for the table |
 
@@ -101,11 +101,13 @@ checks are:
    keep turning. If one does strip, use a slightly bigger self-tapping screw: a 2.9 mm sheet-metal screw (ST2.9)
    still fits the board's Ø3 hole. Or drill the pilot out and use a countersunk M2.5 from the back, with a nut on top
    of the board; the back plate keeps a countersink under each standoff for that.
-2. **SMA (optional):** the D-hole in the right wall is closed on the outside by a thin knock-out skin, so the case
-   stays closed when you use an in-case antenna. To fit an SMA antenna, cut the skin (two lines thick) out along the
-   hole's edge with a craft knife. Clip the pigtail onto the board's antenna socket, turn the bulkhead so its flat is
-   at the bottom, push it out through the hole from inside, and tighten its nut on the outside over a washer: snug,
-   not hard. The wall is 4 mm thick on this side, so the antenna can't lever it apart.
+2. **SMA (optional):** a break-off plug closes the D-hole in the right wall, so the case stays closed when you use an
+   in-case antenna. To fit an SMA antenna, grip the plug with tweezers and bend it in and out until it snaps off along
+   the hole's flat bottom. Clip the pigtail onto the board's antenna socket, turn the bulkhead so its flat is at the
+   bottom, and push it out through the hole from inside: its hex sits in the 8.2 mm hex pocket on the inside, which
+   keeps it from turning. Tighten the nut on the outside over a washer: snug, not hard. The pocket leaves a 2 mm
+   panel at the hole, so the bulkhead has thread to spare; the rest of the wall stays 4 mm, so the antenna can't lever
+   it apart.
 3. **Header wiring (optional):** the lid closes the 40-pin slot with a curtain of four segments. Break out as many as
    the wiring needs: grip a segment with tweezers or pliers and bend it in and out until it snaps off at the lid.
    Jumper wires need one segment, a 2×20 ribbon all four. Then plug the wiring onto the 40-pin header and lead it out
@@ -147,6 +149,8 @@ Every dimension is a named constant in `case/p4_case/params.py`. The ones most l
 | `SCREW_HOLE_D` | 2.2 mm | M2.5 screws are too hard to drive (raise) or don't grip (lower; about 1.7 for M2) |
 | `KEY_ARM_W` | 4.3 mm | the wall screws' shanks do not slide in the keyhole arms |
 | `KEY_NECK_W` | 3.3 mm | the shank won't pass the neck (raise) or doesn't click (lower) |
+| `SMA_HEX_AF` | 8.2 mm | the bulkhead's hex doesn't fit the pocket (raise; 9.2 for a 9 mm hex) or turns in it (lower) |
+| `SMA_PLUG_NECK` | 0.8 mm | the SMA plug breaks out by itself (raise) or won't snap off (lower) |
 | `TOOTH_GAP` | 0.2 mm | the lid's teeth bind in their notches (raise) or the lid shifts (lower) |
 | `CURTAIN_NECK` | 0.8 mm | curtain segments break off by themselves (raise) or won't snap off (lower) |
 
@@ -164,6 +168,8 @@ After a change, run `make case` again. Its checks catch a change that breaks a f
   with a 3 mm header-end wall, a 0.3 mm top bevel, a bigger microSD scoop without the lip, and the SMA hole's round top
   again. Its screw ears were printed: the outside ears broke easily and made the lid hard to take off, and the inside
   ears worked but were overkill. So v7 drops the screws and keeps what the broken ears showed works: teeth keying the
-  lid into the wall tops. v7 hasn't been printed yet.
+  lid into the wall tops. v7 was printed: the 4 mm SMA wall left the bulkhead too little thread, and its knock-out
+  skin was too hard to cut out. v8 thins the wall to 2 mm at the hole with an inside hex pocket and swaps the skin for a
+  break-off plug. v8 hasn't been printed yet.
 - The camera and display ribbon sockets, the two 4-pin sockets and the battery socket stay covered.
 - The power LED stays covered by the lid's frame.

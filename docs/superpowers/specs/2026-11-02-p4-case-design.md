@@ -93,7 +93,7 @@ the result.
 | Opening the lid | lever it up through the grille with a small flat screwdriver; no pry cut-outs in this revision |
 | Board fixing | four M2.5 × 6 pan-head screws from the top, through the board into Ø6 × 5 mm standoffs with Ø2.2 pilot holes, where they cut their own thread (print feedback: the first Ø2.8 hole only gripped thick screws). The countersinks in the back plate stay, so countersunk screws with nuts from the back still work if the pilot is drilled out |
 | Board fitting | the board drops straight in from the open top, about 1.7 mm toward the header end, then slides forward (lifted 0.5 mm) so the USB and RJ45 go into their cable-wall holes, and settles onto the standoffs |
-| SMA | D-hole in the right (X = 55) wall, with its flat at the bottom and a round top (v6: the teardrop wasn't needed), closed on the outside by a 0.8 mm knock-out (two extrusion lines) that is cut out with a knife when an SMA is fitted; fitted after the board: the pigtail clips onto the board, the bulkhead goes out through the wall from inside, nut tightened outside |
+| SMA | D-hole in the right (X = 55) wall, with its flat at the bottom and a round top (v6: the teardrop wasn't needed), with an inside 8.2 mm hex pocket that leaves a 2 mm panel (v8), closed by a break-off plug that snaps off along the flat when an SMA is fitted (v8); fitted after the board: the pigtail clips onto the board, the bulkhead goes out through the wall from inside, nut tightened outside |
 | 40-pin header | wiring (jumpers or a ribbon cable) leaves through a slot along the top of the header-end wall, closed by a break-off curtain on the lid until wiring is fitted (v6); no opening in the lid over the header |
 | Wall mounting | two L-shaped keyholes in the flat back plate, 32 mm apart, for either orientation |
 | Table | lies on its back; stick-on rubber feet optional, not modelled |
@@ -216,8 +216,12 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
   - A D-shaped hole, Ø6.5 with a flat at 5.9, at board Y ≈ 52 and case Z ≈ 17.6. The flat is at the bottom and the
     top is round: it prints without support (print feedback; the teardrop top of the second print wasn't needed). The
     bulkhead is turned so its flat is down.
-  - A long-thread bulkhead (≥ 9.5 mm) is recommended, so enough thread stays outside the 4 mm wall for the antenna. The
-    wall is not recessed around the nut: a recess would weaken it again.
+  - v8: the 4 mm wall left the bulkhead too little thread for the antenna (print feedback). An inside hex pocket, 8.2 mm
+    across flats, flat side up (its roof is a 4.7 mm bridge; a corner up would need support), takes the bulkhead's
+    hex and keeps it from turning, and leaves a 2 mm panel at the hole. The rest of the wall stays 4 mm.
+  - v8: a break-off plug closes the hole until an SMA is fitted (the cut-out skin of v6/v7 was too hard to remove). It
+    is 2 mm thick, 0.4 mm clear of the hole's top and sides, and stands on the flat through a 0.8 mm V-notched neck
+    about 3 mm long, so bending it with tweezers snaps it off there.
   - The builder checks clearance inside: a 5 mm radius around the axis, out to 12 mm from the wall, must miss the board,
     the capacitors and the lid tabs.
 - **Tab dents:** each side wall has two dents in its inner face, one near each end, on the axis of the corner tabs' side
@@ -304,8 +308,9 @@ sits inside the walls (2 mm total), so its underside is at case Z 25.6.
 
 1. Lower the board flat, pushed toward the header end, slide it forward so the USB and RJ45 go into their cable-wall
    holes, and let it settle onto the standoffs. Drive four M2.5 × 6 screws from the top into the standoffs' pilot holes.
-2. If an SMA antenna is used: cut out the knock-out, clip the pigtail onto the antenna socket, push the SMA bulkhead out
-   through the right wall from inside with its flat down, and tighten its nut snugly over a washer on the outside.
+2. If an SMA antenna is used: snap off the plug, clip the pigtail onto the antenna socket, push the SMA bulkhead out
+   through the right wall from inside with its flat down and its hex in the pocket, and tighten its nut snugly over a
+   washer on the outside.
 3. Optional: break out as many curtain segments as the wiring needs, plug the wiring onto the 40-pin header and lead
    it out through the header-end slot.
 4. Set the lid on so the corner tabs drop into the corners and the teeth into their notches, and press until the four
