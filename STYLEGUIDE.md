@@ -69,6 +69,23 @@ see `.pre-commit-config.yaml`).
   `OTBR_TEST_BUILD=1` for all components. `tools/build_all.sh` passes `-DOTBR_TEST_BUILD=0|1` on
   every run, so the cached value never sticks. Test-only code is guarded by `#ifdef OTBR_TEST_BUILD`.
 
+## Case model (`case/`)
+
+- **Layout:** the model is the Python package `case/p4_case/`; its tests are `case/tests/test_<module>.py`.
+  `case/sketches/` holds throwaway sketch scripts and is never imported by the model.
+- **Coordinates:** everything is in the *board frame* of the vendor STEP: X 0–55 (button edge at 0), Y 0–68 (cable edge
+  at 0), Z 0 at the PCB's top face. Case heights come from `params.case_z(board_z)`, never from a second offset.
+- **Constants:** every case dimension is a named upper-case constant in `p4_case/params.py`, with the spec section in a
+  comment; board facts are constants in `p4_case/board.py`, checked against the STEP at test time. Geometry code has
+  no magic numbers.
+- **Functions:** geometry builders are pure (`build_*() -> Part`); only `build.py` and `board.load_board` touch files.
+  Checks return `CheckResult(name, ok, detail)` and do not raise for a failed check, only for bad input.
+- **Tests:** a pytest class per scenario with the docstring `"<module>.<function>: <scenario>"`, one `test_<effect>`
+  method per effect (as in `tools/tests/`).
+- **Committed outputs:** the print STLs in `docs/models/` are the only generated files in git. `make case` refreshes
+  them, and `case/tests/test_build.py` fails while they differ from a fresh build.
+- **Dependencies:** pinned once, in the Makefile's `CASE_PY` (`uv run`); nothing is installed globally.
+
 ## Commands and docs
 
 - The `Makefile` is the entry point for every routine task (build, flash, updates, packaging, tests, lint); its targets
