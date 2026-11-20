@@ -25,6 +25,9 @@ an SMA antenna, and wiring on the 40-pin header.
 Ready-to-print STLs of the current design are in the repository: [base](models/p4_case_base.stl) and
 [lid](models/p4_case_lid.stl). On GitHub, opening either one shows an interactive 3D view.
 
+It's also on MakerWorld, ready to print:
+[Waveshare ESP32-P4-WIFI6-POE-ETH case](https://makerworld.com/en/models/3645555-waveshare-esp32-p4-wifi6-poe-eth-case#profileId-4182161).
+
 The model is parametric Python (build123d) in `case/`. Its design is
 `docs/superpowers/specs/2026-11-02-p4-case-design.md`.
 
