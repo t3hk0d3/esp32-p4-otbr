@@ -48,7 +48,7 @@ see `.pre-commit-config.yaml`).
 - Every project's top-level `CMakeLists.txt` includes, in this order: ESP-IDF's `project.cmake`,
   `tools/version.cmake`, `tools/test_build.cmake`, then calls `project()`. `p4` also includes `tools/target.cmake`
   after `tools/test_build.cmake`, `tools/ot_radio_port.cmake` (the generated openthread component) after that, and
-  `tools/freertos_startup_patch.cmake` (the generated freertos component) after that.
+  `tools/cache_arbitration_patch.cmake` (the generated hal component) after that.
 - `tools/version.cmake` sets `PROJECT_VER`. The stamp is taken at CMake configure time, not at
   every build, or is the `OTBR_BUILD_STAMP` passed to CMake when set (so that all targets of a release share one); the
   git HEAD files are configure dependencies, so a new commit reconfigures by itself. `-dirty` is as of
