@@ -9,10 +9,12 @@ release's `versions.txt`.
 
 ### Fixed
 
-- Boards with a P4 of chip revision v3.x no longer panic on the first boot after an update or a USB flash. Before, an
-  update on these boards was rolled back by the bootloader and the board stayed on its old version. The cause is an
-  ESP-IDF bug ([esp-idf#19369](https://github.com/espressif/esp-idf/issues/19369)); the firmware carries a patch for
-  it. See [Known issues](docs/known-issues.md).
+- Boards with a P4 of chip revision v3.1 and later no longer panic on the first boot after an update or a USB flash,
+  and no longer risk the rare crash while running that has the same cause. Before, an update on these boards was
+  rolled back by the bootloader and the board stayed on its old version. The cause is a chip flaw Espressif confirmed
+  ([esp-idf#19369](https://github.com/espressif/esp-idf/issues/19369)): the data cache's random arbitration between
+  the cores; the firmware now sets round-robin arbitration, as Espressif recommends. See
+  [Known issues](docs/known-issues.md).
 
 ### Changed
 
