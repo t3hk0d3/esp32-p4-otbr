@@ -58,6 +58,13 @@ function(cache_patch_write path text)
     file(WRITE "${path}" "${text}")
 endfunction()
 
+# The whole idf_patch_components directory is a component directory, so anything else in it would override ESP-IDF
+# too: remove what an earlier patch generated there (revision 1's freertos copy in an old build directory).
+file(GLOB cache_patch_stale LIST_DIRECTORIES true "${CMAKE_BINARY_DIR}/idf_patch_components/*")
+list(REMOVE_ITEM cache_patch_stale "${cache_patch_shadow}")
+if(cache_patch_stale)
+    file(REMOVE_RECURSE ${cache_patch_stale})
+endif()
 cache_patch_link_all("${cache_patch_idf}" "${cache_patch_shadow}" cache_hal.c)
 
 # --- cache_hal.c ---

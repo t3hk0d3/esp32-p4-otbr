@@ -100,6 +100,8 @@ p4 firmware (on board, Task 3, NANO-DB P4 v3.2)
         - panics (reproduces the bug on this board; if it does not, the pass cannot prove the fix: stop and report)
     patched build, first boot after a USB flash, 3 times
         - no panic; reaches the app
+    control build running, OTA to the patched build
+        - no panic; the update is kept (running slot and app.version are the patched ones)
     patched build, OTA to a second patched build, twice
         - no panic; the update is kept (running slot and app.version are the new ones)
 ```
@@ -184,11 +186,16 @@ throwaway branch:
   - The control is the same tree with the include commented out, built with `make build-test` for target
     `ESP32-P4-NANO-WIFI6-DB`/`ESP32-P4-rev3.0`.
   - The patched images are that tree with the include, built twice with different stamps.
+  - Build every image in a fresh build directory (`rm -rf` it first), so no generated component of an earlier build
+    is left in it.
 - [ ] **Lease and check the board.** Lease `p4-nano-db/nano-db-a` through clerk, and read `app.version` before every
   step.
 - [ ] **Control, one USB flash.** Run `usbflash_boot.sh` with a 40 s console capture. Expected: a panic. If the board
   boots cleanly, stop and report.
 - [ ] **Patched build, three USB flashes.** Expected: no panic, and the board reaches the OpenThread main loop.
+- [ ] **Affected to fixed, one OTA.** With the control build running (after its automatic restart), OTA the first
+  patched image. This is the path `docs/known-issues.md` promises users on 0.6.0/0.7.0. Expected: no panic on the
+  patched image's first boot, and the update is kept (running slot and `app.version` are the patched ones).
 - [ ] **Patched build, two OTAs** of the other patched stamp and back. After each, watch the first boot, then check
   the running slot and `app.version`. Expected: no panic, and the update is kept.
 - [ ] **Leave the board as the next user expects.** Put the NANO-DB back on a feature-branch build. Release the lease

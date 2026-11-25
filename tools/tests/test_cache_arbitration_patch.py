@@ -156,6 +156,15 @@ def test_removed_idf_file_drops_the_dangling_symlink(project, idf):
     assert not os.path.lexists(generated(project) / "linker.lf")
 
 
+def test_stale_generated_component_is_removed(project, idf):
+    stale = project / "build" / "idf_patch_components" / "freertos"
+    stale.mkdir(parents=True)
+    (stale / "app_startup.c").write_text("/* old patch */\n")
+    configured(project, idf)
+    assert not os.path.lexists(stale)
+    assert generated(project).is_dir()
+
+
 def test_added_idf_file_is_linked(project, idf):
     configured(project, idf)
     (idf / "components" / "hal" / "new_hal.c").write_text("/* new */\n")
