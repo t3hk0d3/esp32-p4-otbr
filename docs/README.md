@@ -24,6 +24,7 @@ Using the board:
 - [Logging](logging.md): log levels per component, syslog, the live log in the browser, the `log` console command.
 - [Maintenance jumper](maintenance-jumper.md): radio repair and its console.
 - [Troubleshooting](troubleshooting.md): what the Dashboard's faults mean, common problems, limitations.
+- [Known issues](known-issues.md): problems caused outside this project, which versions they affect, what to do.
 - [Glossary](glossary.md).
 
 Reference:

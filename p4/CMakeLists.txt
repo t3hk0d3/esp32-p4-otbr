@@ -12,6 +12,8 @@ include(${CMAKE_CURRENT_LIST_DIR}/../tools/test_build.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/../tools/target.cmake)
 # OpenThread reaches its radio through the radio mux: a generated copy of IDF's openthread component (EXTRA_COMPONENT_DIRS).
 include(${CMAKE_CURRENT_LIST_DIR}/../tools/ot_radio_port.cmake)
+# P4 v3.x L1 D-cache livelock (ESP-IDF issue 19369): a generated copy of IDF's hal with round-robin L1 D-cache arbitration.
+include(${CMAKE_CURRENT_LIST_DIR}/../tools/cache_arbitration_patch.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/../tools/c6_updater_images.cmake)
 # Trim the build to main and what it depends on; later tasks add components to main's REQUIRES.
 idf_build_set_property(MINIMAL_BUILD ON)

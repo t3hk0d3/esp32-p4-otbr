@@ -62,6 +62,9 @@ With a dongle running Thread, **No radio** means it is unplugged: plug it back i
 
 ## Known limitations
 
+Problems caused outside this project (ESP-IDF, chips, other firmware) are on [Known issues](known-issues.md), for
+example the failed updates of firmware 0.6.0 and 0.7.0 on boards with a P4 of revision v3.1 and later.
+
 - **No login and no encryption.** Anyone on the network can reconfigure the board, read the Thread network key or update
   its firmware. The [USB/IP server](usbip.md), when on, hands the USB device to whoever attaches first. Put the board
   on a network you trust; in [split mode](networking.md) keep the management VLAN private.

@@ -21,6 +21,15 @@ release's `versions.txt`.
   get their answers at the time they expect (not yet tried with a Green Power device). The stack's firmware version
   now carries its git revision.
 
+### Fixed
+
+- Boards with a P4 of chip revision v3.1 and later no longer panic on the first boot after an update or a USB flash,
+  and no longer risk the rare crash while running that has the same cause. Before, an update on these boards was
+  rolled back by the bootloader and the board stayed on its old version. The cause is a chip flaw Espressif confirmed
+  ([esp-idf#19369](https://github.com/espressif/esp-idf/issues/19369)): the data cache's random arbitration between
+  the cores; the firmware now sets round-robin arbitration, as Espressif recommends. See
+  [Known issues](docs/known-issues.md).
+
 ## [0.7.0] - 2026-11-15
 
 ### Added
