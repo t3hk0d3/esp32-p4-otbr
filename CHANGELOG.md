@@ -7,14 +7,11 @@ release's `versions.txt`.
 
 ## [Unreleased]
 
-### Fixed
+### Added
 
-- Boards with a P4 of chip revision v3.1 and later no longer panic on the first boot after an update or a USB flash,
-  and no longer risk the rare crash while running that has the same cause. Before, an update on these boards was
-  rolled back by the bootloader and the board stayed on its old version. The cause is a chip flaw Espressif confirmed
-  ([esp-idf#19369](https://github.com/espressif/esp-idf/issues/19369)): the data cache's random arbitration between
-  the cores; the firmware now sets round-robin arbitration, as Espressif recommends. See
-  [Known issues](docs/known-issues.md).
+- 3D-printable case for the board (`case/`, `make case`): a one-piece base with keyholes for two wall screws and a
+  honeycomb lid on snap-in corner tabs, checked against the vendor 3D model for fit and printability. See
+  `docs/case.md`.
 
 ### Changed
 
@@ -23,6 +20,15 @@ release's `versions.txt`.
   broadcast and leave/rejoin fixes; quieter logs; lower heap use. Green Power devices that listen after they send now
   get their answers at the time they expect (not yet tried with a Green Power device). The stack's firmware version
   now carries its git revision.
+
+### Fixed
+
+- Boards with a P4 of chip revision v3.1 and later no longer panic on the first boot after an update or a USB flash,
+  and no longer risk the rare crash while running that has the same cause. Before, an update on these boards was
+  rolled back by the bootloader and the board stayed on its old version. The cause is a chip flaw Espressif confirmed
+  ([esp-idf#19369](https://github.com/espressif/esp-idf/issues/19369)): the data cache's random arbitration between
+  the cores; the firmware now sets round-robin arbitration, as Espressif recommends. See
+  [Known issues](docs/known-issues.md).
 
 ## [0.7.0] - 2026-11-15
 
